@@ -55,8 +55,9 @@ class TestSeerflowEventCreation:
             category_uid=4,
             class_uid=4001,
             type_uid=400100,
+            activity_id=1,
             message="Connection refused",
-            body=msgspec.json.encode({"raw": "data"}),
+            body=msgspec.Raw(msgspec.json.encode({"raw": "data"})),
             source_type="syslog",
             source_id="server-01",
             log_source_category="firewall",
@@ -69,6 +70,7 @@ class TestSeerflowEventCreation:
             related_ips=("192.168.1.1",),
             related_users=("admin",),
             related_hosts=("server-01",),
+            related_hashes=("sha256:abc123",),
             mitre_tactics=("TA0001",),
             mitre_techniques=("T1190",),
             risk_score=0.85,
@@ -87,6 +89,8 @@ class TestSeerflowEventCreation:
         assert event.template_id == 42
         assert event.template_params == ("refused", "192.168.1.1")
         assert event.entity_refs == ("uuid-1", "uuid-2")
+        assert event.activity_id == 1
+        assert event.related_hashes == ("sha256:abc123",)
         assert event.mitre_tactics == ("TA0001",)
         assert event.risk_score == 0.85
         assert event.attributes == {"custom": "value"}
@@ -110,6 +114,7 @@ class TestSeerflowEventDefaults:
         assert event.category_uid == 0
         assert event.class_uid == 0
         assert event.type_uid == 0
+        assert event.activity_id == 0
         assert event.message == ""
         assert event.body is None
         assert event.source_type == ""
@@ -124,6 +129,7 @@ class TestSeerflowEventDefaults:
         assert event.related_ips == ()
         assert event.related_users == ()
         assert event.related_hosts == ()
+        assert event.related_hashes == ()
         assert event.mitre_tactics == ()
         assert event.mitre_techniques == ()
         assert event.risk_score == 0.0
@@ -190,6 +196,22 @@ class TestSeerflowEventSerialization:
 
         assert decoded == event
         assert isinstance(encoded, bytes)
+
+    def test_new_fields_roundtrip(self) -> None:
+        event = _make_event(
+            activity_id=5,
+            related_hashes=("md5:aaa", "sha256:bbb"),
+        )
+        # msgpack
+        mp_decoded = msgspec.msgpack.decode(msgspec.msgpack.encode(event), type=SeerflowEvent)
+        assert mp_decoded == event
+        assert mp_decoded.activity_id == 5
+        assert mp_decoded.related_hashes == ("md5:aaa", "sha256:bbb")
+        # JSON
+        js_decoded = msgspec.json.decode(msgspec.json.encode(event), type=SeerflowEvent)
+        assert js_decoded == event
+        assert js_decoded.activity_id == 5
+        assert js_decoded.related_hashes == ("md5:aaa", "sha256:bbb")
 
     def test_json_includes_type_tag(self) -> None:
         event = _make_event()

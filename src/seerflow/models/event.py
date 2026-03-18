@@ -51,6 +51,13 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
 
     Note: ``frozen=True`` prevents field re-binding but does not deep-freeze
     dict contents. Consumers should treat dict fields as read-only.
+
+    OCSF invariant: ``type_uid = class_uid * 100 + activity_id``. Callers
+    setting any of these three fields must set all three consistently.
+
+    ``related_hashes`` format: ``"<algo>:<lowercase-hex-digest>"``, e.g.
+    ``"sha256:e3b0c44298fc1c14..."``  Validation is enforced at the
+    ingestion boundary, not in this struct.
     """
 
     # Identity
@@ -77,6 +84,7 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
     category_uid: int = 0
     class_uid: int = 0
     type_uid: int = 0
+    activity_id: int = 0  # OCSF activity; type_uid = class_uid * 100 + activity_id
 
     # Content
     message: str = ""
@@ -99,6 +107,7 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
     related_ips: tuple[str, ...] = ()
     related_users: tuple[str, ...] = ()
     related_hosts: tuple[str, ...] = ()
+    related_hashes: tuple[str, ...] = ()  # File/process hashes for IoC matching
 
     # MITRE ATT&CK
     mitre_tactics: tuple[str, ...] = ()
