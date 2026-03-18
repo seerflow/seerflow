@@ -51,6 +51,13 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
 
     Note: ``frozen=True`` prevents field re-binding but does not deep-freeze
     dict contents. Consumers should treat dict fields as read-only.
+
+    OCSF invariant: ``type_uid = class_uid * 100 + activity_id``. Callers
+    setting any of these three fields must set all three consistently.
+
+    ``related_hashes`` format: ``"<algo>:<lowercase-hex-digest>"``, e.g.
+    ``"sha256:e3b0c44298fc1c14..."``  Validation is enforced at the
+    ingestion boundary, not in this struct.
     """
 
     # Identity

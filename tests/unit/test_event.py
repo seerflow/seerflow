@@ -57,7 +57,7 @@ class TestSeerflowEventCreation:
             type_uid=400100,
             activity_id=1,
             message="Connection refused",
-            body=msgspec.json.encode({"raw": "data"}),
+            body=msgspec.Raw(msgspec.json.encode({"raw": "data"})),
             source_type="syslog",
             source_id="server-01",
             log_source_category="firewall",
@@ -210,6 +210,8 @@ class TestSeerflowEventSerialization:
         # JSON
         js_decoded = msgspec.json.decode(msgspec.json.encode(event), type=SeerflowEvent)
         assert js_decoded == event
+        assert js_decoded.activity_id == 5
+        assert js_decoded.related_hashes == ("md5:aaa", "sha256:bbb")
 
     def test_json_includes_type_tag(self) -> None:
         event = _make_event()
