@@ -184,6 +184,52 @@ class TestCorrelationRule:
         assert decoded == rule
 
 
+class TestCorrelationRuleValidation:
+    def test_negative_window_rejected(self) -> None:
+        with pytest.raises(ValueError, match="window_seconds must be positive"):
+            CorrelationRule(
+                name="bad",
+                entity_type="ip",
+                window_seconds=-1,
+                sources=(SourceCondition(source_type="x", conditions={}),),
+                min_sources=1,
+                alert_severity=SeverityLevel.WARNING,
+            )
+
+    def test_zero_window_rejected(self) -> None:
+        with pytest.raises(ValueError, match="window_seconds must be positive"):
+            CorrelationRule(
+                name="bad",
+                entity_type="ip",
+                window_seconds=0,
+                sources=(SourceCondition(source_type="x", conditions={}),),
+                min_sources=1,
+                alert_severity=SeverityLevel.WARNING,
+            )
+
+    def test_min_sources_exceeds_sources_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"min_sources.*cannot exceed"):
+            CorrelationRule(
+                name="bad",
+                entity_type="ip",
+                window_seconds=60,
+                sources=(SourceCondition(source_type="x", conditions={}),),
+                min_sources=5,
+                alert_severity=SeverityLevel.WARNING,
+            )
+
+    def test_min_sources_zero_rejected(self) -> None:
+        with pytest.raises(ValueError, match="min_sources must be >= 1"):
+            CorrelationRule(
+                name="bad",
+                entity_type="ip",
+                window_seconds=60,
+                sources=(SourceCondition(source_type="x", conditions={}),),
+                min_sources=0,
+                alert_severity=SeverityLevel.WARNING,
+            )
+
+
 class TestSourceCondition:
     def test_create_with_defaults(self) -> None:
         cond = SourceCondition(

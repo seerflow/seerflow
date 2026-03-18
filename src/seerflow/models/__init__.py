@@ -4,6 +4,7 @@ from seerflow.models.alert import (
     Alert,
     AlertType,
     CorrelationRule,
+    EntityType,
     FeedbackType,
     SourceCondition,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "AttrValue",
     "CorrelationRule",
     "EntityRelation",
+    "EntityType",
     "EventQuery",
     "FeedbackType",
     "Page",

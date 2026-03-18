@@ -2,11 +2,20 @@
 
 These are plain dataclasses (not msgspec Structs) because they are ephemeral
 request objects never serialized to storage or wire format.
+
+Storage contract: ``text_query`` MUST be passed to the FTS engine via a
+parameterised interface (e.g., ``plainto_tsquery``, match query body).
+String interpolation into SQL or query DSL strings is forbidden.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+# Re-export AlertType for use in AlertQuery without circular import.
+AlertType = Literal["ml", "sigma", "correlation", "ueba", "ioc"]
+EntityType = Literal["user", "ip", "host", "process", "file", "domain"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +24,11 @@ class TimeRange:
 
     start_ns: int
     end_ns: int
+
+    def __post_init__(self) -> None:
+        if self.start_ns > self.end_ns:
+            msg = f"start_ns ({self.start_ns}) must be <= end_ns ({self.end_ns})"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -30,24 +44,36 @@ class EventQuery:
     page: int = 1
     limit: int = 100
 
+    def __post_init__(self) -> None:
+        if self.page < 1:
+            raise ValueError(f"page must be >= 1, got {self.page}")
+        if not (1 <= self.limit <= 1000):
+            raise ValueError(f"limit must be between 1 and 1000, got {self.limit}")
+
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class AlertQuery:
     """Composable filter for alert queries. None fields are not applied."""
 
     time_range: TimeRange | None = None
-    alert_type: str | None = None
+    alert_type: AlertType | None = None
     severity_min: int | None = None
     entity_uuid: str | None = None
     page: int = 1
     limit: int = 100
+
+    def __post_init__(self) -> None:
+        if self.page < 1:
+            raise ValueError(f"page must be >= 1, got {self.page}")
+        if not (1 <= self.limit <= 1000):
+            raise ValueError(f"limit must be between 1 and 1000, got {self.limit}")
 
 
 @dataclass(frozen=True, slots=True)
 class Page[T]:
     """Paginated result wrapper returned by storage queries."""
 
-    items: list[T]
+    items: tuple[T, ...]
     total: int
     page: int
     limit: int
@@ -55,10 +81,10 @@ class Page[T]:
     @property
     def has_next(self) -> bool:
         """True if there are more pages after the current one."""
-        return self.page * self.limit < self.total
+        return (self.page - 1) * self.limit + len(self.items) < self.total
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, kw_only=True, slots=True)
 class EntityRelation:
     """A relationship between two entities in the entity graph."""
 
