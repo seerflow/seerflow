@@ -77,6 +77,7 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
     category_uid: int = 0
     class_uid: int = 0
     type_uid: int = 0
+    activity_id: int = 0  # OCSF activity; type_uid = class_uid * 100 + activity_id
 
     # Content
     message: str = ""
@@ -99,6 +100,7 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
     related_ips: tuple[str, ...] = ()
     related_users: tuple[str, ...] = ()
     related_hosts: tuple[str, ...] = ()
+    related_hashes: tuple[str, ...] = ()  # File/process hashes for IoC matching
 
     # MITRE ATT&CK
     mitre_tactics: tuple[str, ...] = ()
