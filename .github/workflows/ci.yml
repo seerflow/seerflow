@@ -37,6 +37,15 @@ jobs:
       - name: Tests with coverage
         run: uv run pytest --cov=src/seerflow --cov-branch --cov-report=xml --cov-report=term-missing -v
 
+      - name: Coverage summary
+        if: success()
+        run: |
+          echo "## Test Coverage Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          uv run coverage report --show-missing --skip-covered >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
