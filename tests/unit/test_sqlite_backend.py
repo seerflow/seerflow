@@ -11,7 +11,7 @@ import msgspec
 import pytest
 
 from seerflow.config import ConfigError, StorageConfig
-from seerflow.models.alert import Alert, FeedbackType
+from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.models.query import AlertQuery, EventQuery, TimeRange
 from seerflow.storage.protocols import LogStore
@@ -824,9 +824,7 @@ class TestWriteAlert:
 
 
 class TestQueryAlerts:
-    async def _make_backend_with_alerts(
-        self, alerts: list[Alert] | None = None
-    ) -> SqliteBackend:
+    async def _make_backend_with_alerts(self, alerts: list[Alert] | None = None) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
         if alerts is not None:
@@ -947,5 +945,68 @@ class TestUpdateFeedback:
         backend = await SqliteBackend.connect(config)
         try:
             await backend.update_feedback("nonexistent-id", "tp")
+        finally:
+            await backend.close()
+
+
+class TestModelStore:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_save_and_load(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("hst:global", b"model-data-bytes")
+            result = await backend.load_state("hst:global")
+            assert result == b"model-data-bytes"
+        finally:
+            await backend.close()
+
+    async def test_load_nonexistent_returns_none(self) -> None:
+        backend = await self._make_backend()
+        try:
+            result = await backend.load_state("nonexistent-key")
+            assert result is None
+        finally:
+            await backend.close()
+
+    async def test_save_overwrites_existing(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("hst:global", b"v1")
+            await backend.save_state("hst:global", b"v2")
+            result = await backend.load_state("hst:global")
+            assert result == b"v2"
+        finally:
+            await backend.close()
+
+    async def test_updated_at_set(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("key", b"data")
+            async with await backend._conn.execute(
+                "SELECT updated_at FROM model_state WHERE key = 'key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] > 0
+        finally:
+            await backend.close()
+
+    async def test_isinstance_alert_store(self) -> None:
+        from seerflow.storage.protocols import AlertStore
+
+        backend = await self._make_backend()
+        try:
+            assert isinstance(backend, AlertStore)
+        finally:
+            await backend.close()
+
+    async def test_isinstance_model_store(self) -> None:
+        from seerflow.storage.protocols import ModelStore as ModelStoreProto
+
+        backend = await self._make_backend()
+        try:
+            assert isinstance(backend, ModelStoreProto)
         finally:
             await backend.close()

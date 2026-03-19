@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -221,6 +222,7 @@ _INSERT_ENTITY_EVENT_SQL = """\
 INSERT OR IGNORE INTO entity_events (entity_uuid, event_id, timestamp_ns)
 VALUES (?, ?, ?)"""
 
+
 def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
     """Build WHERE clause and params from AlertQuery."""
     clauses: list[str] = []
@@ -242,6 +244,9 @@ def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
     where = " AND ".join(clauses) if clauses else "1=1"
     return where, params
 
+
+_SAVE_STATE_SQL = "INSERT OR REPLACE INTO model_state (key, data, updated_at) VALUES (?, ?, ?)"
+_LOAD_STATE_SQL = "SELECT data FROM model_state WHERE key = ?"
 
 _INSERT_ALERT_SQL = """\
 INSERT INTO alerts (
@@ -469,9 +474,7 @@ class SqliteBackend:
             f"SELECT a.data FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
             f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
         )
-        async with await self._conn.execute(
-            data_sql, [*params, filters.limit, offset]
-        ) as cursor:
+        async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
             rows = await cursor.fetchall()
 
         items = tuple(msgspec.msgpack.decode(row[0], type=Alert) for row in rows)
@@ -493,6 +496,18 @@ class SqliteBackend:
             [feedback, data, alert_id],
         )
         await self._conn.commit()
+
+    async def save_state(self, key: str, data: bytes) -> None:
+        """Persist serialized model state (upsert by key)."""
+        updated_at = time.time_ns()
+        await self._conn.execute(_SAVE_STATE_SQL, [key, data, updated_at])
+        await self._conn.commit()
+
+    async def load_state(self, key: str) -> bytes | None:
+        """Load serialized model state, or None if not found."""
+        async with await self._conn.execute(_LOAD_STATE_SQL, [key]) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else None
 
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""
