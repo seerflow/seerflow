@@ -6,6 +6,11 @@ implement these Protocols. All methods are async. All Protocols are
 
 v1 Protocols: LogStore, AlertStore, ModelStore, EntityStore.
 GraphStore and CheckpointStore are deferred (see architecture Appendix D).
+
+Note: Type annotations use ``TYPE_CHECKING`` guards for zero-cost imports.
+``typing.get_type_hints()`` will fail at runtime on these Protocol classes;
+use ``inspect.signature()`` instead if you need runtime introspection of
+method signatures.
 """
 
 from __future__ import annotations
@@ -19,18 +24,28 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class LogStore(Protocol):
+class LogStore(Protocol):  # pragma: no cover
     """Event persistence and query interface."""
 
     async def write_events(self, events: list[SeerflowEvent]) -> None: ...
 
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]: ...
 
-    async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]: ...
+    async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]:
+        """Full-text search across stored events.
+
+        Args:
+            query: Search string. Backends should treat this as a plain-text
+                substring or FTS match — no SQL/regex interpretation.
+            limit: Maximum number of results to return. Must be >= 1.
+                Backends should clamp to an internal ceiling (e.g. 10 000)
+                to prevent unbounded result sets.
+        """
+        ...
 
 
 @runtime_checkable
-class AlertStore(Protocol):
+class AlertStore(Protocol):  # pragma: no cover
     """Alert CRUD interface."""
 
     async def write_alert(self, alert: Alert) -> None: ...
@@ -41,16 +56,30 @@ class AlertStore(Protocol):
 
 
 @runtime_checkable
-class ModelStore(Protocol):
-    """ML model state key-value persistence."""
+class ModelStore(Protocol):  # pragma: no cover
+    """ML model state key-value persistence.
+
+    Keys must be non-empty, ASCII-only, and <= 256 characters.
+    Convention: ``<model_type>:<entity_or_scope>`` (e.g.
+    ``"hst:host:web-01"``, ``"cusum:global"``).
+    """
 
     async def save_state(self, key: str, data: bytes) -> None: ...
 
-    async def load_state(self, key: str) -> bytes | None: ...
+    async def load_state(self, key: str) -> bytes | None:
+        """Load serialized model state.
+
+        Returns:
+            Raw bytes previously stored via ``save_state``, or ``None``
+            if no state exists for the given key (first run or after a
+            key rotation). Callers must handle ``None`` by initializing
+            a fresh model.
+        """
+        ...
 
 
 @runtime_checkable
-class EntityStore(Protocol):
+class EntityStore(Protocol):  # pragma: no cover
     """Entity timeline and relationship queries."""
 
     async def get_timeline(
