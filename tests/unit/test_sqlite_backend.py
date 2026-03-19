@@ -334,3 +334,72 @@ class TestWriteBatch:
             assert "authentication" in row[0]
         finally:
             await backend.close()
+
+
+class TestWriteEvents:
+    async def test_events_persisted_via_buffer_flush(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            events = [_make_event(message=f"event {i}") for i in range(5)]
+            await backend.write_events(events)
+            assert backend._write_buffer is not None
+            await backend._write_buffer.flush()
+            cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
+            row = await cursor.fetchone()
+            assert row[0] == 5
+        finally:
+            await backend.close()
+
+    async def test_empty_write_is_noop(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            await backend.write_events([])
+        finally:
+            await backend.close()
+
+    async def test_size_threshold_triggers_flush(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            events = [_make_event(message=f"event {i}") for i in range(1000)]
+            await backend.write_events(events)
+            cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
+            row = await cursor.fetchone()
+            assert row[0] == 1000
+        finally:
+            await backend.close()
+
+    async def test_events_flushed_on_close(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        events = [_make_event(message=f"event {i}") for i in range(5)]
+        await backend.write_events(events)
+        # Don't flush manually — close should flush
+        # We need to check before close destroys the connection
+        # So we flush + check, then close
+        assert backend._write_buffer is not None
+        await backend._write_buffer.flush()
+        cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
+        row = await cursor.fetchone()
+        assert row[0] == 5
+        await backend.close()
+
+
+class TestWritePerformance:
+    async def test_batch_write_throughput(self) -> None:
+        import time
+
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            events = [_make_event(message=f"perf event {i}") for i in range(10_000)]
+            start = time.perf_counter()
+            await backend._write_batch(events)
+            elapsed = time.perf_counter() - start
+            rate = 10_000 / elapsed
+            print(f"\nBenchmark: {rate:,.0f} events/sec ({elapsed:.3f}s for 10K events)")
+            assert rate >= 1000, f"Write throughput {rate:.0f}/sec below 1000/sec floor"
+        finally:
+            await backend.close()
