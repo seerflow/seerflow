@@ -44,6 +44,28 @@ def _validate_path(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# FTS5 input sanitisation
+# ---------------------------------------------------------------------------
+
+_MAX_FTS_QUERY_LENGTH = 256
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Convert user input to a safe FTS5 phrase query.
+
+    Strips double quotes, removes control characters, caps length at 256,
+    and wraps in phrase quotes to prevent FTS5 operator injection.
+    """
+    cleaned = "".join(c for c in query if c.isprintable())
+    cleaned = cleaned.replace('"', "")
+    cleaned = cleaned[:_MAX_FTS_QUERY_LENGTH]
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return '""'
+    return f'"{cleaned}"'
+
+
+# ---------------------------------------------------------------------------
 # Schema DDL
 # ---------------------------------------------------------------------------
 

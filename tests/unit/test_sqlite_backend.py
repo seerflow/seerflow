@@ -13,7 +13,38 @@ import pytest
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.storage.protocols import LogStore
-from seerflow.storage.sqlite import SqliteBackend, _init_schema, _validate_path
+from seerflow.storage.sqlite import (
+    SqliteBackend,
+    _init_schema,
+    _sanitize_fts_query,
+    _validate_path,
+)
+
+
+class TestFtsSanitization:
+    def test_normal_text_wrapped_in_quotes(self) -> None:
+        assert _sanitize_fts_query("hello world") == '"hello world"'
+
+    def test_double_quotes_stripped(self) -> None:
+        assert _sanitize_fts_query('say "hello"') == '"say hello"'
+
+    def test_control_characters_removed(self) -> None:
+        assert _sanitize_fts_query("hello\x00world\x01test") == '"helloworldtest"'
+
+    def test_length_capped_at_256(self) -> None:
+        long_query = "a" * 300
+        result = _sanitize_fts_query(long_query)
+        assert len(result) == 258  # 256 chars + 2 quotes
+
+    def test_empty_string_returns_empty_phrase(self) -> None:
+        assert _sanitize_fts_query("") == '""'
+
+    def test_whitespace_only_returns_empty_phrase(self) -> None:
+        assert _sanitize_fts_query("   ") == '""'
+
+    def test_fts5_operators_neutralized(self) -> None:
+        result = _sanitize_fts_query("error OR warning NOT info")
+        assert result == '"error OR warning NOT info"'
 
 
 class TestPathValidation:
