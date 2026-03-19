@@ -13,7 +13,7 @@ import pytest
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.storage.protocols import LogStore
-from seerflow.models.query import EventQuery, TimeRange
+from seerflow.models.query import EventQuery, Page, TimeRange
 from seerflow.storage.sqlite import (
     SqliteBackend,
     _build_query,
@@ -448,21 +448,122 @@ class TestWritePerformance:
 
 
 class TestNotImplementedStubs:
-    async def test_query_events_raises(self) -> None:
-        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
-        backend = await SqliteBackend.connect(config)
-        try:
-            with pytest.raises(NotImplementedError):
-                await backend.query_events(None)  # type: ignore[arg-type]
-        finally:
-            await backend.close()
-
     async def test_search_text_raises(self) -> None:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
         try:
             with pytest.raises(NotImplementedError):
                 await backend.search_text("test", 10)
+        finally:
+            await backend.close()
+
+
+class TestQueryEvents:
+    async def _make_backend_with_events(
+        self, events: list[SeerflowEvent] | None = None
+    ) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        if events:
+            await backend._write_batch(events)
+        return backend
+
+    async def test_empty_result(self) -> None:
+        backend = await self._make_backend_with_events()
+        try:
+            result = await backend.query_events(EventQuery())
+            assert result.items == ()
+            assert result.total == 0
+            assert result.page == 1
+        finally:
+            await backend.close()
+
+    async def test_returns_all_events_no_filter(self) -> None:
+        events = [_make_event(message=f"event {i}") for i in range(3)]
+        backend = await self._make_backend_with_events(events)
+        try:
+            result = await backend.query_events(EventQuery())
+            assert result.total == 3
+            assert len(result.items) == 3
+        finally:
+            await backend.close()
+
+    async def test_filter_by_time_range(self) -> None:
+        import msgspec as ms
+
+        e_base = _make_event()
+        e1 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="old")
+        e2 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="new")
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(
+                EventQuery(time_range=TimeRange(start_ns=200, end_ns=400))
+            )
+            assert result.total == 1
+            assert result.items[0].message == "new"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_source_type(self) -> None:
+        e1 = _make_event(source_type="syslog", message="sys event")
+        e2 = _make_event(source_type="otlp", message="otlp event")
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(source_type="syslog"))
+            assert result.total == 1
+            assert result.items[0].message == "sys event"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_severity_min(self) -> None:
+        e1 = _make_event(severity=SeverityLevel.INFORMATIONAL)
+        e2 = _make_event(severity=SeverityLevel.CRITICAL)
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(severity_min=4))
+            assert result.total == 1
+            assert result.items[0].severity_id == SeverityLevel.CRITICAL
+        finally:
+            await backend.close()
+
+    async def test_filter_by_entity_uuid(self) -> None:
+        e1 = _make_event(entity_refs=("entity-aaa",), message="with entity")
+        e2 = _make_event(entity_refs=(), message="no entity")
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(entity_uuid="entity-aaa"))
+            assert result.total == 1
+            assert result.items[0].message == "with entity"
+        finally:
+            await backend.close()
+
+    async def test_pagination(self) -> None:
+        events = [_make_event(message=f"event {i}") for i in range(5)]
+        backend = await self._make_backend_with_events(events)
+        try:
+            page1 = await backend.query_events(EventQuery(limit=2, page=1))
+            assert len(page1.items) == 2
+            assert page1.total == 5
+            assert page1.has_next is True
+
+            page3 = await backend.query_events(EventQuery(limit=2, page=3))
+            assert len(page3.items) == 1
+            assert page3.has_next is False
+        finally:
+            await backend.close()
+
+    async def test_events_sorted_desc(self) -> None:
+        import msgspec as ms
+
+        e_base = _make_event()
+        e1 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="oldest")
+        e2 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="newest")
+        e3 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=200, message="middle")
+        backend = await self._make_backend_with_events([e1, e2, e3])
+        try:
+            result = await backend.query_events(EventQuery())
+            messages = [e.message for e in result.items]
+            assert messages == ["newest", "middle", "oldest"]
         finally:
             await backend.close()
 

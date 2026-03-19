@@ -21,15 +21,13 @@ import aiosqlite
 import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
-from seerflow.models.query import EventQuery
+from seerflow.models.event import SeerflowEvent
+from seerflow.models.query import EventQuery, Page
 
 _log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-
-    from seerflow.models.event import SeerflowEvent
-    from seerflow.models.query import Page
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +352,29 @@ class SqliteBackend:
             await self._write_buffer.append(events)
 
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]:
-        """Query stored events (not yet implemented)."""
-        msg = "query_events is implemented in S-007"
-        raise NotImplementedError(msg)
+        """Query events with composable filters and pagination."""
+        where, join_str, params = _build_query(filters)
+
+        # Count query
+        count_sql = f"SELECT COUNT(*) FROM events e {join_str} WHERE {where}"  # noqa: S608
+        cursor = await self._conn.execute(count_sql, params)
+        row = await cursor.fetchone()
+        total = row[0] if row else 0
+
+        # Data query
+        offset = (filters.page - 1) * filters.limit
+        data_sql = (
+            f"SELECT e.data FROM events e {join_str} "  # noqa: S608
+            f"WHERE {where} ORDER BY e.timestamp_ns DESC LIMIT ? OFFSET ?"
+        )
+        cursor = await self._conn.execute(data_sql, [*params, filters.limit, offset])
+        rows = await cursor.fetchall()
+
+        items = tuple(
+            msgspec.msgpack.decode(row[0], type=SeerflowEvent)
+            for row in rows
+        )
+        return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
     async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]:
         """Full-text search across stored events (not yet implemented)."""
