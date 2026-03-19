@@ -14,8 +14,22 @@ import contextlib
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
+from seerflow.config import ConfigError
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+
+
+# ---------------------------------------------------------------------------
+# Path validation
+# ---------------------------------------------------------------------------
+
+
+def _validate_path(path: str) -> None:
+    """Reject paths containing null bytes."""
+    if "\x00" in path:
+        msg = f"Path contains null byte: {path!r}"
+        raise ConfigError(msg)
 
 
 class WriteBuffer:
