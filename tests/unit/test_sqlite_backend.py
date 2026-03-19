@@ -821,3 +821,75 @@ class TestWriteAlert:
             assert decoded.description == "second"
         finally:
             await backend.close()
+
+
+class TestQueryAlerts:
+    async def _make_backend_with_alerts(
+        self, alerts: list[Alert] | None = None
+    ) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        if alerts is not None:
+            for alert in alerts:
+                await backend.write_alert(alert)
+        return backend
+
+    async def test_empty_result(self) -> None:
+        backend = await self._make_backend_with_alerts()
+        try:
+            result = await backend.query_alerts(AlertQuery())
+            assert result.items == ()
+            assert result.total == 0
+        finally:
+            await backend.close()
+
+    async def test_returns_all_alerts(self) -> None:
+        alerts = [_make_alert(message=f"alert {i}") for i in range(3)]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            result = await backend.query_alerts(AlertQuery())
+            assert result.total == 3
+        finally:
+            await backend.close()
+
+    async def test_filter_by_alert_type(self) -> None:
+        a1 = _make_alert(alert_type="ml")
+        a2 = _make_alert(alert_type="sigma")
+        backend = await self._make_backend_with_alerts([a1, a2])
+        try:
+            result = await backend.query_alerts(AlertQuery(alert_type="sigma"))
+            assert result.total == 1
+            assert result.items[0].alert_type == "sigma"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_severity_min(self) -> None:
+        a1 = _make_alert(severity=SeverityLevel.INFORMATIONAL)
+        a2 = _make_alert(severity=SeverityLevel.CRITICAL)
+        backend = await self._make_backend_with_alerts([a1, a2])
+        try:
+            result = await backend.query_alerts(AlertQuery(severity_min=4))
+            assert result.total == 1
+        finally:
+            await backend.close()
+
+    async def test_filter_by_entity_uuid(self) -> None:
+        a1 = _make_alert(entity_uuid="entity-aaa")
+        a2 = _make_alert(entity_uuid="entity-bbb")
+        backend = await self._make_backend_with_alerts([a1, a2])
+        try:
+            result = await backend.query_alerts(AlertQuery(entity_uuid="entity-aaa"))
+            assert result.total == 1
+        finally:
+            await backend.close()
+
+    async def test_pagination(self) -> None:
+        alerts = [_make_alert(message=f"alert {i}") for i in range(5)]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page1 = await backend.query_alerts(AlertQuery(limit=2, page=1))
+            assert len(page1.items) == 2
+            assert page1.total == 5
+            assert page1.has_next is True
+        finally:
+            await backend.close()

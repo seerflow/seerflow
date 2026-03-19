@@ -221,6 +221,28 @@ _INSERT_ENTITY_EVENT_SQL = """\
 INSERT OR IGNORE INTO entity_events (entity_uuid, event_id, timestamp_ns)
 VALUES (?, ?, ?)"""
 
+def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
+    """Build WHERE clause and params from AlertQuery."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if filters.time_range is not None:
+        clauses.append("a.timestamp_ns >= ?")
+        params.append(filters.time_range.start_ns)
+        clauses.append("a.timestamp_ns <= ?")
+        params.append(filters.time_range.end_ns)
+    if filters.alert_type is not None:
+        clauses.append("a.alert_type = ?")
+        params.append(filters.alert_type)
+    if filters.severity_min is not None:
+        clauses.append("a.severity_id >= ?")
+        params.append(filters.severity_min)
+    if filters.entity_uuid is not None:
+        clauses.append("a.entity_uuid = ?")
+        params.append(filters.entity_uuid)
+    where = " AND ".join(clauses) if clauses else "1=1"
+    return where, params
+
+
 _INSERT_ALERT_SQL = """\
 INSERT INTO alerts (
     alert_id, alert_type, timestamp_ns, severity_id, rule_name,
@@ -431,6 +453,29 @@ class SqliteBackend:
         )
         await self._conn.execute(_INSERT_ALERT_SQL, params)
         await self._conn.commit()
+
+    async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
+        """Query alerts with composable filters and pagination."""
+        where, params = _build_alert_query(filters)
+
+        # Hardcoded SQL fragments only — user values in params
+        count_sql = f"SELECT COUNT(*) FROM alerts a WHERE {where}"  # noqa: S608  # nosec B608
+        async with await self._conn.execute(count_sql, params) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+
+        offset = (filters.page - 1) * filters.limit
+        data_sql = (
+            f"SELECT a.data FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
+            f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
+        )
+        async with await self._conn.execute(
+            data_sql, [*params, filters.limit, offset]
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        items = tuple(msgspec.msgpack.decode(row[0], type=Alert) for row in rows)
+        return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""
