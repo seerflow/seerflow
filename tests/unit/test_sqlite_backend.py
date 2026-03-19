@@ -11,8 +11,9 @@ import msgspec
 import pytest
 
 from seerflow.config import ConfigError, StorageConfig
+from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
-from seerflow.models.query import EventQuery, TimeRange
+from seerflow.models.query import AlertQuery, EventQuery, TimeRange
 from seerflow.storage.protocols import LogStore
 from seerflow.storage.sqlite import (
     SqliteBackend,
@@ -720,3 +721,352 @@ class TestBuildQuery:
         where, _joins, params = _build_query(filters)
         assert " AND " in where
         assert len(params) == 4
+
+
+# ---------------------------------------------------------------------------
+# Alert helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_alert(
+    *,
+    alert_type: str = "ml",
+    message: str = "test alert",
+    entity_uuid: str = "entity-aaa",
+    dedup_key: str = "",
+    severity: SeverityLevel = SeverityLevel.WARNING,
+) -> Alert:
+    return Alert(
+        alert_id=str(uuid.uuid4()),
+        alert_type=alert_type,
+        timestamp_ns=1_710_000_000_000_000_000,
+        severity_id=severity,
+        rule_name="test-rule",
+        description=message,
+        entity_uuid=entity_uuid,
+        entity_value="192.168.1.1",
+        entity_type="ip",
+        contributing_events=(uuid.uuid4(),),
+        dedup_key=dedup_key or str(uuid.uuid4()),
+    )
+
+
+class TestWriteAlert:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_single_alert_persisted(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert()
+            await backend.write_alert(alert)
+            async with await backend._conn.execute("SELECT COUNT(*) FROM alerts") as cur:
+                row = await cur.fetchone()
+            assert row[0] == 1
+        finally:
+            await backend.close()
+
+    async def test_alert_msgpack_roundtrip(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(message="roundtrip", severity=SeverityLevel.CRITICAL)
+            await backend.write_alert(alert)
+            async with await backend._conn.execute("SELECT data FROM alerts") as cur:
+                row = await cur.fetchone()
+            decoded = msgspec.msgpack.decode(row[0], type=Alert)
+            assert decoded.description == "roundtrip"
+            assert decoded.severity_id == SeverityLevel.CRITICAL
+        finally:
+            await backend.close()
+
+    async def test_severity_stored_as_int(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(severity=SeverityLevel.CRITICAL)
+            await backend.write_alert(alert)
+            async with await backend._conn.execute("SELECT severity_id FROM alerts") as cur:
+                row = await cur.fetchone()
+            assert row[0] == SeverityLevel.CRITICAL.value
+        finally:
+            await backend.close()
+
+    async def test_dedup_increments_count(self) -> None:
+        backend = await self._make_backend()
+        try:
+            a1 = _make_alert(dedup_key="same-key", message="first")
+            a2 = _make_alert(dedup_key="same-key", message="second")
+            await backend.write_alert(a1)
+            await backend.write_alert(a2)
+            async with await backend._conn.execute(
+                "SELECT dedup_count FROM alerts WHERE dedup_key = 'same-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == 2
+        finally:
+            await backend.close()
+
+    async def test_dedup_updates_alert_id(self) -> None:
+        backend = await self._make_backend()
+        try:
+            a1 = _make_alert(dedup_key="same-key")
+            a2 = _make_alert(dedup_key="same-key")
+            await backend.write_alert(a1)
+            await backend.write_alert(a2)
+            async with await backend._conn.execute(
+                "SELECT alert_id, data FROM alerts WHERE dedup_key = 'same-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            decoded = msgspec.msgpack.decode(row[1], type=Alert)
+            assert row[0] == decoded.alert_id  # column matches BLOB
+        finally:
+            await backend.close()
+
+    async def test_dedup_updates_data_blob(self) -> None:
+        backend = await self._make_backend()
+        try:
+            a1 = _make_alert(dedup_key="same-key", message="first")
+            a2 = _make_alert(dedup_key="same-key", message="second")
+            await backend.write_alert(a1)
+            await backend.write_alert(a2)
+            async with await backend._conn.execute(
+                "SELECT data FROM alerts WHERE dedup_key = 'same-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            decoded = msgspec.msgpack.decode(row[0], type=Alert)
+            assert decoded.description == "second"
+        finally:
+            await backend.close()
+
+
+class TestQueryAlerts:
+    async def _make_backend_with_alerts(self, alerts: list[Alert] | None = None) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        if alerts is not None:
+            for alert in alerts:
+                await backend.write_alert(alert)
+        return backend
+
+    async def test_empty_result(self) -> None:
+        backend = await self._make_backend_with_alerts()
+        try:
+            result = await backend.query_alerts(AlertQuery())
+            assert result.items == ()
+            assert result.total == 0
+        finally:
+            await backend.close()
+
+    async def test_returns_all_alerts(self) -> None:
+        alerts = [_make_alert(message=f"alert {i}") for i in range(3)]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            result = await backend.query_alerts(AlertQuery())
+            assert result.total == 3
+        finally:
+            await backend.close()
+
+    async def test_filter_by_time_range(self) -> None:
+        a1 = _make_alert()  # timestamp_ns = 1_710_000_000_000_000_000
+        backend = await self._make_backend_with_alerts([a1])
+        try:
+            tr = TimeRange(start_ns=1_700_000_000_000_000_000, end_ns=1_720_000_000_000_000_000)
+            result = await backend.query_alerts(AlertQuery(time_range=tr))
+            assert result.total == 1
+
+            tr_miss = TimeRange(start_ns=1, end_ns=2)
+            result2 = await backend.query_alerts(AlertQuery(time_range=tr_miss))
+            assert result2.total == 0
+        finally:
+            await backend.close()
+
+    async def test_filter_by_alert_type(self) -> None:
+        a1 = _make_alert(alert_type="ml")
+        a2 = _make_alert(alert_type="sigma")
+        backend = await self._make_backend_with_alerts([a1, a2])
+        try:
+            result = await backend.query_alerts(AlertQuery(alert_type="sigma"))
+            assert result.total == 1
+            assert result.items[0].alert_type == "sigma"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_severity_min(self) -> None:
+        a1 = _make_alert(severity=SeverityLevel.INFORMATIONAL)
+        a2 = _make_alert(severity=SeverityLevel.CRITICAL)
+        backend = await self._make_backend_with_alerts([a1, a2])
+        try:
+            result = await backend.query_alerts(AlertQuery(severity_min=4))
+            assert result.total == 1
+        finally:
+            await backend.close()
+
+    async def test_filter_by_entity_uuid(self) -> None:
+        a1 = _make_alert(entity_uuid="entity-aaa")
+        a2 = _make_alert(entity_uuid="entity-bbb")
+        backend = await self._make_backend_with_alerts([a1, a2])
+        try:
+            result = await backend.query_alerts(AlertQuery(entity_uuid="entity-aaa"))
+            assert result.total == 1
+        finally:
+            await backend.close()
+
+    async def test_pagination(self) -> None:
+        alerts = [_make_alert(message=f"alert {i}") for i in range(5)]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page1 = await backend.query_alerts(AlertQuery(limit=2, page=1))
+            assert len(page1.items) == 2
+            assert page1.total == 5
+            assert page1.has_next is True
+        finally:
+            await backend.close()
+
+
+class TestUpdateFeedback:
+    async def _make_backend_with_alert(self, alert: Alert) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        await backend.write_alert(alert)
+        return backend
+
+    async def test_update_feedback_tp(self) -> None:
+        alert = _make_alert()
+        backend = await self._make_backend_with_alert(alert)
+        try:
+            await backend.update_feedback(alert.alert_id, "tp")
+            async with await backend._conn.execute(
+                "SELECT feedback FROM alerts WHERE alert_id = ?", [alert.alert_id]
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == "tp"
+        finally:
+            await backend.close()
+
+    async def test_update_feedback_fp(self) -> None:
+        alert = _make_alert()
+        backend = await self._make_backend_with_alert(alert)
+        try:
+            await backend.update_feedback(alert.alert_id, "fp")
+            async with await backend._conn.execute(
+                "SELECT feedback FROM alerts WHERE alert_id = ?", [alert.alert_id]
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == "fp"
+        finally:
+            await backend.close()
+
+    async def test_feedback_updates_data_blob(self) -> None:
+        alert = _make_alert()
+        backend = await self._make_backend_with_alert(alert)
+        try:
+            await backend.update_feedback(alert.alert_id, "tp")
+            async with await backend._conn.execute(
+                "SELECT data FROM alerts WHERE alert_id = ?", [alert.alert_id]
+            ) as cur:
+                row = await cur.fetchone()
+            decoded = msgspec.msgpack.decode(row[0], type=Alert)
+            assert decoded.feedback == "tp"
+        finally:
+            await backend.close()
+
+    async def test_nonexistent_alert_is_noop(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            await backend.update_feedback("nonexistent-id", "tp")
+        finally:
+            await backend.close()
+
+
+class TestModelStore:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_save_and_load(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("hst:global", b"model-data-bytes")
+            result = await backend.load_state("hst:global")
+            assert result == b"model-data-bytes"
+        finally:
+            await backend.close()
+
+    async def test_load_nonexistent_returns_none(self) -> None:
+        backend = await self._make_backend()
+        try:
+            result = await backend.load_state("nonexistent-key")
+            assert result is None
+        finally:
+            await backend.close()
+
+    async def test_save_overwrites_existing(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("hst:global", b"v1")
+            await backend.save_state("hst:global", b"v2")
+            result = await backend.load_state("hst:global")
+            assert result == b"v2"
+        finally:
+            await backend.close()
+
+    async def test_save_empty_key_rejected(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="empty"):
+                await backend.save_state("", b"data")
+        finally:
+            await backend.close()
+
+    async def test_save_long_key_rejected(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="exceeds"):
+                await backend.save_state("a" * 257, b"data")
+        finally:
+            await backend.close()
+
+    async def test_load_empty_key_rejected(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="empty"):
+                await backend.load_state("")
+        finally:
+            await backend.close()
+
+    async def test_updated_at_set(self) -> None:
+        backend = await self._make_backend()
+        try:
+            before_ns = time.time_ns()
+            await backend.save_state("key", b"data")
+            after_ns = time.time_ns()
+            async with await backend._conn.execute(
+                "SELECT updated_at FROM model_state WHERE key = ?", ["key"]
+            ) as cur:
+                row = await cur.fetchone()
+            assert before_ns <= row[0] <= after_ns
+        finally:
+            await backend.close()
+
+
+class TestProtocolConformance:
+    async def test_isinstance_alert_store(self) -> None:
+        from seerflow.storage.protocols import AlertStore
+
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            assert isinstance(backend, AlertStore)
+        finally:
+            await backend.close()
+
+    async def test_isinstance_model_store(self) -> None:
+        from seerflow.storage.protocols import ModelStore as ModelStoreProto
+
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            assert isinstance(backend, ModelStoreProto)
+        finally:
+            await backend.close()
