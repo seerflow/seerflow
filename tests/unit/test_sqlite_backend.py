@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 
 import aiosqlite
@@ -240,7 +241,7 @@ class TestWriteBatch:
             await backend._write_batch([event])
             cursor = await backend._conn.execute("SELECT severity_id FROM events")
             row = await cursor.fetchone()
-            assert row[0] == 5
+            assert row[0] == SeverityLevel.CRITICAL.value
             assert isinstance(row[0], int)
         finally:
             await backend.close()
@@ -335,6 +336,17 @@ class TestWriteBatch:
         finally:
             await backend.close()
 
+    async def test_template_id_sentinel_stored_as_null(self) -> None:
+        backend = await self._make_backend()
+        try:
+            event = _make_event()  # template_id defaults to -1
+            await backend._write_batch([event])
+            cursor = await backend._conn.execute("SELECT template_id FROM events")
+            row = await cursor.fetchone()
+            assert row[0] is None  # -1 sentinel converted to NULL
+        finally:
+            await backend.close()
+
 
 class TestWriteEvents:
     async def test_events_persisted_via_buffer_flush(self) -> None:
@@ -371,7 +383,7 @@ class TestWriteEvents:
         finally:
             await backend.close()
 
-    async def test_events_flushed_on_close(self) -> None:
+    async def test_events_persisted_after_manual_flush(self) -> None:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
         events = [_make_event(message=f"event {i}") for i in range(5)]
@@ -389,8 +401,6 @@ class TestWriteEvents:
 
 class TestWritePerformance:
     async def test_batch_write_throughput(self) -> None:
-        import time
-
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
         try:
@@ -400,5 +410,25 @@ class TestWritePerformance:
             elapsed = time.perf_counter() - start
             rate = 10_000 / elapsed
             assert rate >= 1000, f"Write throughput {rate:.0f}/sec below 1000/sec floor"
+        finally:
+            await backend.close()
+
+
+class TestNotImplementedStubs:
+    async def test_query_events_raises(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            with pytest.raises(NotImplementedError):
+                await backend.query_events(None)  # type: ignore[arg-type]
+        finally:
+            await backend.close()
+
+    async def test_search_text_raises(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            with pytest.raises(NotImplementedError):
+                await backend.search_text("test", 10)
         finally:
             await backend.close()

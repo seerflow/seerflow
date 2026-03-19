@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
+import logging
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +21,8 @@ import aiosqlite
 import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
+
+_log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -127,12 +129,12 @@ END;
 
 
 _PRAGMAS = (
-    "PRAGMA journal_mode=WAL",
-    "PRAGMA synchronous=NORMAL",
-    "PRAGMA cache_size=-64000",
-    "PRAGMA mmap_size=268435456",
-    "PRAGMA temp_store=MEMORY",
-    "PRAGMA busy_timeout=5000",
+    "PRAGMA journal_mode=WAL",  # concurrent reads during writes
+    "PRAGMA synchronous=NORMAL",  # fsync on checkpoint only — ~100ms loss on power fail
+    "PRAGMA cache_size=-64000",  # 64 MiB in-memory page cache
+    "PRAGMA mmap_size=268435456",  # 256 MiB memory-mapped I/O (fallback to normal I/O)
+    "PRAGMA temp_store=MEMORY",  # temp tables in RAM
+    "PRAGMA busy_timeout=5000",  # 5 s retry on locked DB
 )
 
 _INSERT_EVENT_SQL = """\
@@ -148,7 +150,11 @@ VALUES (?, ?, ?)"""
 
 
 async def _init_schema(conn: aiosqlite.Connection) -> None:
-    """Create all tables, indexes, and triggers (idempotent)."""
+    """Create all tables, indexes, and triggers (idempotent).
+
+    WARNING: Uses ``executescript`` which auto-commits any open transaction.
+    Must only be called on a freshly opened connection with no pending writes.
+    """
     await conn.executescript(_SCHEMA_DDL)
 
 
@@ -157,6 +163,10 @@ class WriteBuffer:
 
     The lock protects only the buffer drain — the flush callback runs
     outside the lock so ``append()`` is never blocked by a DB write.
+
+    NOTE: ``append()`` assumes a single writer coroutine. If multiple
+    coroutines call ``append()`` concurrently, the buffer may briefly
+    exceed ``max_size`` before flushing. This is safe but not optimal.
     """
 
     __slots__ = (
@@ -183,6 +193,8 @@ class WriteBuffer:
 
     def start(self) -> None:
         """Start the periodic flush background task."""
+        if self._task is not None:
+            return
         self._task = asyncio.create_task(self._periodic_flush())
 
     async def append(self, events: list[Any]) -> None:
@@ -212,7 +224,10 @@ class WriteBuffer:
         """Flush on a timer until cancelled."""
         while True:
             await asyncio.sleep(self._flush_interval)
-            await self.flush()
+            try:
+                await self.flush()
+            except Exception:
+                _log.exception("WriteBuffer: periodic flush failed")
 
 
 # ---------------------------------------------------------------------------
@@ -236,14 +251,18 @@ class SqliteBackend:
         path = config.sqlite_path
         if path != ":memory:":
             _validate_path(path)
-            parent = str(Path(path).parent)
-            _validate_path(parent)
-            os.makedirs(parent, exist_ok=True)
+            parent_dir = Path(path).parent
+            _validate_path(str(parent_dir))
+            parent_dir.mkdir(parents=True, exist_ok=True)
 
         conn = await aiosqlite.connect(path)
-        for pragma in _PRAGMAS:
-            await conn.execute(pragma)
-        await _init_schema(conn)
+        try:
+            for pragma in _PRAGMAS:
+                await conn.execute(pragma)
+            await _init_schema(conn)
+        except Exception:
+            await conn.close()
+            raise
 
         backend = cls(conn)
         backend._write_buffer = WriteBuffer(backend._write_batch)
@@ -268,13 +287,15 @@ class SqliteBackend:
 
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]:
         """Query stored events (not yet implemented)."""
-        raise NotImplementedError("query_events is implemented in S-007")
+        msg = "query_events is implemented in S-007"
+        raise NotImplementedError(msg)
 
     async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]:
         """Full-text search across stored events (not yet implemented)."""
-        raise NotImplementedError("search_text is implemented in S-007")
+        msg = "search_text is implemented in S-007"
+        raise NotImplementedError(msg)
 
-    async def _write_batch(self, events: list[Any]) -> None:
+    async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""
         if not events:
             return
@@ -291,15 +312,22 @@ class SqliteBackend:
                     int(event.severity_id),
                     event.source_type,
                     event.source_id,
-                    event.template_id,
+                    event.template_id if event.template_id != -1 else None,
                     event.message,
                     json.dumps(list(event.entity_refs)),
                     data,
                 )
             )
-            for entity_uuid in event.entity_refs:
-                entity_rows.append((entity_uuid, event_id_str, event.timestamp_ns))
-        await self._conn.executemany(_INSERT_EVENT_SQL, event_rows)
-        if entity_rows:
-            await self._conn.executemany(_INSERT_ENTITY_EVENT_SQL, entity_rows)
-        await self._conn.commit()
+            entity_rows.extend(
+                (entity_uuid, event_id_str, event.timestamp_ns)
+                for entity_uuid in event.entity_refs
+            )
+        try:
+            await self._conn.executemany(_INSERT_EVENT_SQL, event_rows)
+            if entity_rows:
+                await self._conn.executemany(_INSERT_ENTITY_EVENT_SQL, entity_rows)
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("SQLite batch write failed — %d events lost", len(events))
+            raise
