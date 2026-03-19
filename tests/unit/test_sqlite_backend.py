@@ -12,8 +12,44 @@ import pytest
 
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.event import SeerflowEvent, SeverityLevel
+from seerflow.models.query import EventQuery, TimeRange
 from seerflow.storage.protocols import LogStore
-from seerflow.storage.sqlite import SqliteBackend, _init_schema, _validate_path
+from seerflow.storage.sqlite import (
+    SqliteBackend,
+    _build_query,
+    _init_schema,
+    _sanitize_fts_query,
+    _validate_path,
+)
+
+
+class TestFtsSanitization:
+    def test_normal_text_wrapped_in_quotes(self) -> None:
+        assert _sanitize_fts_query("hello world") == '"hello world"'
+
+    def test_double_quotes_stripped(self) -> None:
+        assert _sanitize_fts_query('say "hello"') == '"say hello"'
+
+    def test_control_characters_removed(self) -> None:
+        assert _sanitize_fts_query("hello\x00world\x01test") == '"helloworldtest"'
+
+    def test_length_capped_at_256(self) -> None:
+        long_query = "a" * 300
+        result = _sanitize_fts_query(long_query)
+        assert len(result) == 258  # 256 chars + 2 quotes
+
+    def test_empty_string_returns_empty_phrase(self) -> None:
+        assert _sanitize_fts_query("") == '""'
+
+    def test_whitespace_only_returns_empty_phrase(self) -> None:
+        assert _sanitize_fts_query("   ") == '""'
+
+    def test_single_quotes_stripped(self) -> None:
+        assert _sanitize_fts_query("it's broken") == '"its broken"'
+
+    def test_fts5_operators_neutralized(self) -> None:
+        result = _sanitize_fts_query("error OR warning NOT info")
+        assert result == '"error OR warning NOT info"'
 
 
 class TestPathValidation:
@@ -414,21 +450,273 @@ class TestWritePerformance:
             await backend.close()
 
 
-class TestNotImplementedStubs:
-    async def test_query_events_raises(self) -> None:
+class TestQueryPerformance:
+    async def test_query_100k_events_under_5s(self) -> None:
+        """Query 100K events — informational benchmark."""
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
         try:
-            with pytest.raises(NotImplementedError):
-                await backend.query_events(None)  # type: ignore[arg-type]
+            for batch_start in range(0, 100_000, 10_000):
+                events = [_make_event(message=f"event {batch_start + i}") for i in range(10_000)]
+                await backend._write_batch(events)
+
+            start = time.perf_counter()
+            result = await backend.query_events(EventQuery(limit=100))
+            elapsed = time.perf_counter() - start
+
+            assert result.total == 100_000
+            assert len(result.items) == 100
+            assert elapsed < 5.0, f"Query took {elapsed:.2f}s — expected <5s"
         finally:
             await backend.close()
 
-    async def test_search_text_raises(self) -> None:
+
+class TestSearchText:
+    async def _make_backend_with_events(
+        self, events: list[SeerflowEvent] | None = None
+    ) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
+        if events is not None:
+            await backend._write_batch(events)
+        return backend
+
+    async def test_finds_matching_events(self) -> None:
+        e1 = _make_event(message="authentication failed for user admin")
+        e2 = _make_event(message="connection established successfully")
+        backend = await self._make_backend_with_events([e1, e2])
         try:
-            with pytest.raises(NotImplementedError):
-                await backend.search_text("test", 10)
+            results = await backend.search_text("authentication", 10)
+            assert len(results) == 1
+            assert results[0].message == "authentication failed for user admin"
         finally:
             await backend.close()
+
+    async def test_no_matches_returns_empty(self) -> None:
+        e1 = _make_event(message="hello world")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("nonexistent", 10)
+            assert results == []
+        finally:
+            await backend.close()
+
+    async def test_limit_respected(self) -> None:
+        events = [_make_event(message=f"error on line {i}") for i in range(10)]
+        backend = await self._make_backend_with_events(events)
+        try:
+            results = await backend.search_text("error", 3)
+            assert len(results) == 3
+        finally:
+            await backend.close()
+
+    async def test_empty_query_returns_empty(self) -> None:
+        e1 = _make_event(message="hello world")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("", 10)
+            assert results == []
+        finally:
+            await backend.close()
+
+    async def test_operators_treated_as_literal(self) -> None:
+        e1 = _make_event(message="error OR warning in log")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("error OR warning", 10)
+            assert len(results) == 1
+        finally:
+            await backend.close()
+
+    async def test_limit_clamped_to_ceiling(self) -> None:
+        """Verify search_text clamps limit to internal ceiling."""
+        e1 = _make_event(message="test event")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("test", 10_000_000)
+            assert len(results) == 1
+        finally:
+            await backend.close()
+
+
+class TestQueryEvents:
+    async def _make_backend_with_events(
+        self, events: list[SeerflowEvent] | None = None
+    ) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        if events is not None:
+            await backend._write_batch(events)
+        return backend
+
+    async def test_empty_result(self) -> None:
+        backend = await self._make_backend_with_events()
+        try:
+            result = await backend.query_events(EventQuery())
+            assert result.items == ()
+            assert result.total == 0
+            assert result.page == 1
+        finally:
+            await backend.close()
+
+    async def test_returns_all_events_no_filter(self) -> None:
+        events = [_make_event(message=f"event {i}") for i in range(3)]
+        backend = await self._make_backend_with_events(events)
+        try:
+            result = await backend.query_events(EventQuery())
+            assert result.total == 3
+            assert len(result.items) == 3
+        finally:
+            await backend.close()
+
+    async def test_filter_by_time_range(self) -> None:
+        e_base = _make_event()
+        e1 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="old"
+        )
+        e2 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="new"
+        )
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(
+                EventQuery(time_range=TimeRange(start_ns=200, end_ns=400))
+            )
+            assert result.total == 1
+            assert result.items[0].message == "new"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_source_type(self) -> None:
+        e1 = _make_event(source_type="syslog", message="sys event")
+        e2 = _make_event(source_type="otlp", message="otlp event")
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(source_type="syslog"))
+            assert result.total == 1
+            assert result.items[0].message == "sys event"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_severity_min(self) -> None:
+        e1 = _make_event(severity=SeverityLevel.INFORMATIONAL)
+        e2 = _make_event(severity=SeverityLevel.CRITICAL)
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(severity_min=4))
+            assert result.total == 1
+            assert result.items[0].severity_id == SeverityLevel.CRITICAL
+        finally:
+            await backend.close()
+
+    async def test_filter_by_entity_uuid(self) -> None:
+        e1 = _make_event(entity_refs=("entity-aaa",), message="with entity")
+        e2 = _make_event(entity_refs=(), message="no entity")
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(entity_uuid="entity-aaa"))
+            assert result.total == 1
+            assert result.items[0].message == "with entity"
+        finally:
+            await backend.close()
+
+    async def test_pagination(self) -> None:
+        events = [_make_event(message=f"event {i}") for i in range(5)]
+        backend = await self._make_backend_with_events(events)
+        try:
+            page1 = await backend.query_events(EventQuery(limit=2, page=1))
+            assert len(page1.items) == 2
+            assert page1.total == 5
+            assert page1.has_next is True
+
+            page3 = await backend.query_events(EventQuery(limit=2, page=3))
+            assert len(page3.items) == 1
+            assert page3.has_next is False
+        finally:
+            await backend.close()
+
+    async def test_events_sorted_desc(self) -> None:
+        e_base = _make_event()
+        e1 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="oldest"
+        )
+        e2 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="newest"
+        )
+        e3 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=200, message="middle"
+        )
+        backend = await self._make_backend_with_events([e1, e2, e3])
+        try:
+            result = await backend.query_events(EventQuery())
+            messages = [e.message for e in result.items]
+            assert messages == ["newest", "middle", "oldest"]
+        finally:
+            await backend.close()
+
+    async def test_filter_by_text_query(self) -> None:
+        e1 = _make_event(message="authentication failed for user admin")
+        e2 = _make_event(message="connection established")
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(text_query="authentication"))
+            assert result.total == 1
+            assert result.items[0].message == "authentication failed for user admin"
+        finally:
+            await backend.close()
+
+
+class TestBuildQuery:
+    def test_no_filters(self) -> None:
+        filters = EventQuery()
+        where, joins, params = _build_query(filters)
+        assert where == "1=1"
+        assert joins == ""
+        assert params == []
+
+    def test_time_range(self) -> None:
+        tr = TimeRange(start_ns=100, end_ns=200)
+        filters = EventQuery(time_range=tr)
+        where, _joins, params = _build_query(filters)
+        assert "e.timestamp_ns >= ?" in where
+        assert "e.timestamp_ns <= ?" in where
+        assert params == [100, 200]
+
+    def test_source_type(self) -> None:
+        filters = EventQuery(source_type="syslog")
+        where, _joins, params = _build_query(filters)
+        assert "e.source_type = ?" in where
+        assert params == ["syslog"]
+
+    def test_severity_min(self) -> None:
+        filters = EventQuery(severity_min=3)
+        where, _joins, params = _build_query(filters)
+        assert "e.severity_id >= ?" in where
+        assert params == [3]
+
+    def test_template_id(self) -> None:
+        filters = EventQuery(template_id=42)
+        where, _joins, params = _build_query(filters)
+        assert "e.template_id = ?" in where
+        assert params == [42]
+
+    def test_entity_uuid_adds_join(self) -> None:
+        filters = EventQuery(entity_uuid="uuid-123")
+        where, joins, params = _build_query(filters)
+        assert "JOIN entity_events" in joins
+        assert "ee.entity_uuid = ?" in where
+        assert params == ["uuid-123"]
+
+    def test_text_query_adds_fts_join(self) -> None:
+        filters = EventQuery(text_query="authentication failed")
+        where, joins, params = _build_query(filters)
+        assert "JOIN events_fts" in joins
+        assert "events_fts MATCH ?" in where
+        assert params == ['"authentication failed"']
+
+    def test_compound_filters(self) -> None:
+        tr = TimeRange(start_ns=100, end_ns=200)
+        filters = EventQuery(time_range=tr, source_type="syslog", severity_min=3)
+        where, _joins, params = _build_query(filters)
+        assert " AND " in where
+        assert len(params) == 4
