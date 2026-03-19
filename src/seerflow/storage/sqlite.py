@@ -1,10 +1,9 @@
-"""SQLite storage backend — schema creation and event batch writes.
+"""SQLite storage backend — schema creation, event writes, and queries.
 
-Implements ``LogStore.write_events`` via aiosqlite with WAL mode.
-Schema is auto-created on first run. Events are batched via ``WriteBuffer``
-(1000 events or 100ms, whichever first) for high-throughput writes.
-
-See: docs/superpowers/specs/2026-03-18-s006-sqlite-backend-design.md
+Implements ``LogStore`` via aiosqlite with WAL mode.
+Schema is auto-created on first run. Writes are batched via ``WriteBuffer``
+(1000 events or 100ms, whichever first). Queries support composable filters,
+pagination, and FTS5 full-text search.
 """
 
 from __future__ import annotations
@@ -47,18 +46,23 @@ def _validate_path(path: str) -> None:
 # ---------------------------------------------------------------------------
 
 _MAX_FTS_QUERY_LENGTH = 256
+_MAX_SEARCH_LIMIT = 10_000
 
 
 def _sanitize_fts_query(query: str) -> str:
     """Convert user input to a safe FTS5 phrase query.
 
-    Strips double quotes, removes control characters, caps length at 256,
-    and wraps in phrase quotes to prevent FTS5 operator injection.
+    Wraps cleaned input in double quotes, producing an FTS5 phrase literal.
+    Inside a phrase, all FTS5 operators (AND, OR, NOT, NEAR, ^, *, parentheses)
+    are treated as literal text.
+
+    Steps: remove non-printable chars → strip quotes (single + double) →
+    strip whitespace → cap at 256 chars → wrap in phrase quotes.
     """
     cleaned = "".join(c for c in query if c.isprintable())
-    cleaned = cleaned.replace('"', "")
-    cleaned = cleaned[:_MAX_FTS_QUERY_LENGTH]
+    cleaned = cleaned.replace('"', "").replace("'", "")
     cleaned = cleaned.strip()
+    cleaned = cleaned[:_MAX_FTS_QUERY_LENGTH]
     if not cleaned:
         return '""'
     return f'"{cleaned}"'
@@ -90,6 +94,8 @@ def _build_query(filters: EventQuery) -> tuple[str, str, list[Any]]:
         params.append(filters.severity_min)
 
     if filters.template_id is not None:
+        # Note: template_id=-1 is stored as NULL in the DB (sentinel conversion
+        # in _write_batch). Filtering by -1 will match nothing. Use None to skip.
         clauses.append("e.template_id = ?")
         params.append(filters.template_id)
 
@@ -355,20 +361,23 @@ class SqliteBackend:
         """Query events with composable filters and pagination."""
         where, join_str, params = _build_query(filters)
 
-        # Count query
+        # join_str and where are assembled from hardcoded SQL fragments in _build_query().
+        # User values are bound exclusively via params. No user data is interpolated.
         count_sql = f"SELECT COUNT(*) FROM events e {join_str} WHERE {where}"  # noqa: S608  # nosec B608
-        cursor = await self._conn.execute(count_sql, params)
-        row = await cursor.fetchone()
-        total = row[0] if row else 0
+        async with await self._conn.execute(count_sql, params) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
 
         # Data query
         offset = (filters.page - 1) * filters.limit
+        # join_str and where are assembled from hardcoded SQL fragments in _build_query().
+        # User values are bound exclusively via params. No user data is interpolated.
         data_sql = (
             f"SELECT e.data FROM events e {join_str} "  # noqa: S608  # nosec B608
             f"WHERE {where} ORDER BY e.timestamp_ns DESC LIMIT ? OFFSET ?"
         )
-        cursor = await self._conn.execute(data_sql, [*params, filters.limit, offset])
-        rows = await cursor.fetchall()
+        async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
+            rows = await cursor.fetchall()
 
         items = tuple(msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows)
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
@@ -379,14 +388,16 @@ class SqliteBackend:
         if safe_query == '""':
             return []
 
+        clamped_limit = min(max(limit, 1), _MAX_SEARCH_LIMIT)
+
         sql = (
             "SELECT e.data FROM events e "
             "JOIN events_fts fts ON fts.rowid = e.rowid "
             "WHERE fts.events_fts MATCH ? "
             "ORDER BY e.timestamp_ns DESC LIMIT ?"
         )
-        cursor = await self._conn.execute(sql, [safe_query, limit])
-        rows = await cursor.fetchall()
+        async with await self._conn.execute(sql, [safe_query, clamped_limit]) as cursor:
+            rows = await cursor.fetchall()
         return [msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows]
 
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
@@ -423,5 +434,5 @@ class SqliteBackend:
             await self._conn.commit()
         except Exception:
             await self._conn.rollback()
-            _log.exception("SQLite batch write failed — %d events lost", len(events))
+            _log.exception("SQLite batch write failed — %d events not committed", len(events))
             raise

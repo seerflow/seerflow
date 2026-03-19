@@ -44,6 +44,9 @@ class TestFtsSanitization:
     def test_whitespace_only_returns_empty_phrase(self) -> None:
         assert _sanitize_fts_query("   ") == '""'
 
+    def test_single_quotes_stripped(self) -> None:
+        assert _sanitize_fts_query("it's broken") == '"its broken"'
+
     def test_fts5_operators_neutralized(self) -> None:
         result = _sanitize_fts_query("error OR warning NOT info")
         assert result == '"error OR warning NOT info"'
@@ -469,10 +472,13 @@ class TestQueryPerformance:
 
 
 class TestSearchText:
-    async def _make_backend_with_events(self, events: list[SeerflowEvent]) -> SqliteBackend:
+    async def _make_backend_with_events(
+        self, events: list[SeerflowEvent] | None = None
+    ) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
-        await backend._write_batch(events)
+        if events is not None:
+            await backend._write_batch(events)
         return backend
 
     async def test_finds_matching_events(self) -> None:
@@ -522,6 +528,16 @@ class TestSearchText:
         finally:
             await backend.close()
 
+    async def test_limit_clamped_to_ceiling(self) -> None:
+        """Verify search_text clamps limit to internal ceiling."""
+        e1 = _make_event(message="test event")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("test", 10_000_000)
+            assert len(results) == 1
+        finally:
+            await backend.close()
+
 
 class TestQueryEvents:
     async def _make_backend_with_events(
@@ -529,7 +545,7 @@ class TestQueryEvents:
     ) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
-        if events:
+        if events is not None:
             await backend._write_batch(events)
         return backend
 
@@ -554,11 +570,13 @@ class TestQueryEvents:
             await backend.close()
 
     async def test_filter_by_time_range(self) -> None:
-        import msgspec as ms
-
         e_base = _make_event()
-        e1 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="old")
-        e2 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="new")
+        e1 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="old"
+        )
+        e2 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="new"
+        )
         backend = await self._make_backend_with_events([e1, e2])
         try:
             result = await backend.query_events(
@@ -618,17 +636,32 @@ class TestQueryEvents:
             await backend.close()
 
     async def test_events_sorted_desc(self) -> None:
-        import msgspec as ms
-
         e_base = _make_event()
-        e1 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="oldest")
-        e2 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="newest")
-        e3 = ms.structs.replace(e_base, event_id=uuid.uuid4(), timestamp_ns=200, message="middle")
+        e1 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=100, message="oldest"
+        )
+        e2 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=300, message="newest"
+        )
+        e3 = msgspec.structs.replace(
+            e_base, event_id=uuid.uuid4(), timestamp_ns=200, message="middle"
+        )
         backend = await self._make_backend_with_events([e1, e2, e3])
         try:
             result = await backend.query_events(EventQuery())
             messages = [e.message for e in result.items]
             assert messages == ["newest", "middle", "oldest"]
+        finally:
+            await backend.close()
+
+    async def test_filter_by_text_query(self) -> None:
+        e1 = _make_event(message="authentication failed for user admin")
+        e2 = _make_event(message="connection established")
+        backend = await self._make_backend_with_events([e1, e2])
+        try:
+            result = await backend.query_events(EventQuery(text_query="authentication"))
+            assert result.total == 1
+            assert result.items[0].message == "authentication failed for user admin"
         finally:
             await backend.close()
 
