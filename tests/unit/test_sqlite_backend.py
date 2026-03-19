@@ -893,3 +893,59 @@ class TestQueryAlerts:
             assert page1.has_next is True
         finally:
             await backend.close()
+
+
+class TestUpdateFeedback:
+    async def _make_backend_with_alert(self, alert: Alert) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        await backend.write_alert(alert)
+        return backend
+
+    async def test_update_feedback_tp(self) -> None:
+        alert = _make_alert()
+        backend = await self._make_backend_with_alert(alert)
+        try:
+            await backend.update_feedback(alert.alert_id, "tp")
+            async with await backend._conn.execute(
+                "SELECT feedback FROM alerts WHERE alert_id = ?", [alert.alert_id]
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == "tp"
+        finally:
+            await backend.close()
+
+    async def test_update_feedback_fp(self) -> None:
+        alert = _make_alert()
+        backend = await self._make_backend_with_alert(alert)
+        try:
+            await backend.update_feedback(alert.alert_id, "fp")
+            async with await backend._conn.execute(
+                "SELECT feedback FROM alerts WHERE alert_id = ?", [alert.alert_id]
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == "fp"
+        finally:
+            await backend.close()
+
+    async def test_feedback_updates_data_blob(self) -> None:
+        alert = _make_alert()
+        backend = await self._make_backend_with_alert(alert)
+        try:
+            await backend.update_feedback(alert.alert_id, "tp")
+            async with await backend._conn.execute(
+                "SELECT data FROM alerts WHERE alert_id = ?", [alert.alert_id]
+            ) as cur:
+                row = await cur.fetchone()
+            decoded = msgspec.msgpack.decode(row[0], type=Alert)
+            assert decoded.feedback == "tp"
+        finally:
+            await backend.close()
+
+    async def test_nonexistent_alert_is_noop(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            await backend.update_feedback("nonexistent-id", "tp")
+        finally:
+            await backend.close()

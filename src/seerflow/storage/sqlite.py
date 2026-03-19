@@ -477,6 +477,23 @@ class SqliteBackend:
         items = tuple(msgspec.msgpack.decode(row[0], type=Alert) for row in rows)
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
+    async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None:
+        """Update alert feedback and re-encode the BLOB."""
+        async with await self._conn.execute(
+            "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return
+        alert = msgspec.msgpack.decode(row[0], type=Alert)
+        updated = msgspec.structs.replace(alert, feedback=feedback)
+        data = msgspec.msgpack.encode(updated)
+        await self._conn.execute(
+            "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
+            [feedback, data, alert_id],
+        )
+        await self._conn.commit()
+
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""
         if not events:
