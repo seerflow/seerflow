@@ -12,8 +12,8 @@ import pytest
 
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.event import SeerflowEvent, SeverityLevel
+from seerflow.models.query import EventQuery, TimeRange
 from seerflow.storage.protocols import LogStore
-from seerflow.models.query import EventQuery, Page, TimeRange
 from seerflow.storage.sqlite import (
     SqliteBackend,
     _build_query,
@@ -447,6 +447,27 @@ class TestWritePerformance:
             await backend.close()
 
 
+class TestQueryPerformance:
+    async def test_query_100k_events_under_5s(self) -> None:
+        """Query 100K events — informational benchmark."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            for batch_start in range(0, 100_000, 10_000):
+                events = [_make_event(message=f"event {batch_start + i}") for i in range(10_000)]
+                await backend._write_batch(events)
+
+            start = time.perf_counter()
+            result = await backend.query_events(EventQuery(limit=100))
+            elapsed = time.perf_counter() - start
+
+            assert result.total == 100_000
+            assert len(result.items) == 100
+            assert elapsed < 5.0, f"Query took {elapsed:.2f}s — expected <5s"
+        finally:
+            await backend.close()
+
+
 class TestSearchText:
     async def _make_backend_with_events(self, events: list[SeerflowEvent]) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
@@ -623,26 +644,26 @@ class TestBuildQuery:
     def test_time_range(self) -> None:
         tr = TimeRange(start_ns=100, end_ns=200)
         filters = EventQuery(time_range=tr)
-        where, joins, params = _build_query(filters)
+        where, _joins, params = _build_query(filters)
         assert "e.timestamp_ns >= ?" in where
         assert "e.timestamp_ns <= ?" in where
         assert params == [100, 200]
 
     def test_source_type(self) -> None:
         filters = EventQuery(source_type="syslog")
-        where, joins, params = _build_query(filters)
+        where, _joins, params = _build_query(filters)
         assert "e.source_type = ?" in where
         assert params == ["syslog"]
 
     def test_severity_min(self) -> None:
         filters = EventQuery(severity_min=3)
-        where, joins, params = _build_query(filters)
+        where, _joins, params = _build_query(filters)
         assert "e.severity_id >= ?" in where
         assert params == [3]
 
     def test_template_id(self) -> None:
         filters = EventQuery(template_id=42)
-        where, joins, params = _build_query(filters)
+        where, _joins, params = _build_query(filters)
         assert "e.template_id = ?" in where
         assert params == [42]
 
@@ -663,6 +684,6 @@ class TestBuildQuery:
     def test_compound_filters(self) -> None:
         tr = TimeRange(start_ns=100, end_ns=200)
         filters = EventQuery(time_range=tr, source_type="syslog", severity_min=3)
-        where, joins, params = _build_query(filters)
+        where, _joins, params = _build_query(filters)
         assert " AND " in where
         assert len(params) == 4
