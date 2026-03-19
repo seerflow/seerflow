@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
+import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
 
@@ -273,4 +275,31 @@ class SqliteBackend:
         raise NotImplementedError("search_text is implemented in S-007")
 
     async def _write_batch(self, events: list[Any]) -> None:
-        """Write a batch of events to SQLite (stub — implemented in Task 6)."""
+        """Serialize and persist a batch of events to SQLite."""
+        if not events:
+            return
+        event_rows: list[tuple[Any, ...]] = []
+        entity_rows: list[tuple[str, str, int]] = []
+        for event in events:
+            data = msgspec.msgpack.encode(event)
+            event_id_str = str(event.event_id)
+            event_rows.append(
+                (
+                    event_id_str,
+                    event.timestamp_ns,
+                    event.observed_ns,
+                    int(event.severity_id),
+                    event.source_type,
+                    event.source_id,
+                    event.template_id,
+                    event.message,
+                    json.dumps(list(event.entity_refs)),
+                    data,
+                )
+            )
+            for entity_uuid in event.entity_refs:
+                entity_rows.append((entity_uuid, event_id_str, event.timestamp_ns))
+        await self._conn.executemany(_INSERT_EVENT_SQL, event_rows)
+        if entity_rows:
+            await self._conn.executemany(_INSERT_ENTITY_EVENT_SQL, entity_rows)
+        await self._conn.commit()

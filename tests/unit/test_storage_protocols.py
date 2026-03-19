@@ -122,7 +122,7 @@ class TestEntityStore:
 class TestExports:
     def test_all_protocols_in_dunder_all(self) -> None:
         """Every Protocol must be listed in ``storage.__all__``."""
-        expected = {"AlertStore", "EntityStore", "LogStore", "ModelStore"}
+        expected = {"AlertStore", "EntityStore", "LogStore", "ModelStore", "SqliteBackend"}
         assert expected == set(storage_mod.__all__)
 
 
