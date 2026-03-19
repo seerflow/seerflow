@@ -19,6 +19,8 @@ from seerflow.config import ConfigError
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    import aiosqlite
+
 
 # ---------------------------------------------------------------------------
 # Path validation
@@ -30,6 +32,96 @@ def _validate_path(path: str) -> None:
     if "\x00" in path:
         msg = f"Path contains null byte: {path!r}"
         raise ConfigError(msg)
+
+
+# ---------------------------------------------------------------------------
+# Schema DDL
+# ---------------------------------------------------------------------------
+
+_SCHEMA_DDL = """\
+CREATE TABLE IF NOT EXISTS events (
+    event_id     TEXT PRIMARY KEY,
+    timestamp_ns INTEGER NOT NULL,
+    observed_ns  INTEGER NOT NULL,
+    severity_id  INTEGER NOT NULL,
+    source_type  TEXT    NOT NULL,
+    source_id    TEXT    NOT NULL,
+    template_id  INTEGER,
+    message      TEXT    NOT NULL,
+    entity_refs  TEXT,
+    data         BLOB
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_time
+    ON events (timestamp_ns);
+CREATE INDEX IF NOT EXISTS idx_events_source_sev
+    ON events (source_type, severity_id);
+CREATE INDEX IF NOT EXISTS idx_events_template
+    ON events (template_id);
+
+CREATE TABLE IF NOT EXISTS entity_events (
+    entity_uuid  TEXT    NOT NULL,
+    timestamp_ns INTEGER NOT NULL,
+    event_id     TEXT    NOT NULL,
+    PRIMARY KEY (entity_uuid, timestamp_ns, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    alert_id     TEXT PRIMARY KEY,
+    alert_type   TEXT    NOT NULL,
+    timestamp_ns INTEGER NOT NULL,
+    severity_id  INTEGER NOT NULL,
+    rule_name    TEXT    NOT NULL,
+    entity_uuid  TEXT    NOT NULL,
+    entity_type  TEXT    NOT NULL,
+    entity_value TEXT    NOT NULL,
+    dedup_key    TEXT    NOT NULL,
+    dedup_count  INTEGER NOT NULL DEFAULT 1,
+    risk_score   REAL    NOT NULL DEFAULT 0.0,
+    feedback     TEXT,
+    data         BLOB
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_time
+    ON alerts (timestamp_ns);
+CREATE INDEX IF NOT EXISTS idx_alerts_entity
+    ON alerts (entity_uuid);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_dedup
+    ON alerts (dedup_key);
+CREATE INDEX IF NOT EXISTS idx_alerts_type
+    ON alerts (alert_type);
+
+CREATE TABLE IF NOT EXISTS model_state (
+    key        TEXT PRIMARY KEY,
+    data       BLOB    NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+    message,
+    content=events,
+    content_rowid=rowid,
+    tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS events_fts_insert AFTER INSERT ON events BEGIN
+    INSERT INTO events_fts(rowid, message) VALUES (new.rowid, new.message);
+END;
+
+CREATE TRIGGER IF NOT EXISTS events_fts_delete AFTER DELETE ON events BEGIN
+    INSERT INTO events_fts(events_fts, rowid, message) VALUES ('delete', old.rowid, old.message);
+END;
+
+CREATE TRIGGER IF NOT EXISTS events_fts_update AFTER UPDATE ON events BEGIN
+    INSERT INTO events_fts(events_fts, rowid, message) VALUES ('delete', old.rowid, old.message);
+    INSERT INTO events_fts(rowid, message) VALUES (new.rowid, new.message);
+END;
+"""
+
+
+async def _init_schema(conn: aiosqlite.Connection) -> None:
+    """Create all tables, indexes, and triggers (idempotent)."""
+    await conn.executescript(_SCHEMA_DDL)
 
 
 class WriteBuffer:
