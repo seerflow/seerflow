@@ -20,8 +20,9 @@ import aiosqlite
 import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
+from seerflow.models.alert import Alert, FeedbackType
 from seerflow.models.event import SeerflowEvent
-from seerflow.models.query import EventQuery, Page
+from seerflow.models.query import AlertQuery, EventQuery, Page
 
 _log = logging.getLogger(__name__)
 
@@ -220,6 +221,16 @@ _INSERT_ENTITY_EVENT_SQL = """\
 INSERT OR IGNORE INTO entity_events (entity_uuid, event_id, timestamp_ns)
 VALUES (?, ?, ?)"""
 
+_INSERT_ALERT_SQL = """\
+INSERT INTO alerts (
+    alert_id, alert_type, timestamp_ns, severity_id, rule_name,
+    entity_uuid, entity_type, entity_value, dedup_key, dedup_count,
+    risk_score, feedback, data
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(dedup_key) DO UPDATE SET
+    dedup_count = dedup_count + 1,
+    data = excluded.data"""
+
 
 async def _init_schema(conn: aiosqlite.Connection) -> None:
     """Create all tables, indexes, and triggers (idempotent).
@@ -399,6 +410,27 @@ class SqliteBackend:
         async with await self._conn.execute(sql, [safe_query, clamped_limit]) as cursor:
             rows = await cursor.fetchall()
         return [msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows]
+
+    async def write_alert(self, alert: Alert) -> None:
+        """Persist an alert with dedup upsert on conflict."""
+        data = msgspec.msgpack.encode(alert)
+        params = (
+            alert.alert_id,
+            alert.alert_type,
+            alert.timestamp_ns,
+            int(alert.severity_id),
+            alert.rule_name,
+            alert.entity_uuid,
+            alert.entity_type,
+            alert.entity_value,
+            alert.dedup_key,
+            alert.dedup_count,
+            alert.risk_score,
+            alert.feedback,
+            data,
+        )
+        await self._conn.execute(_INSERT_ALERT_SQL, params)
+        await self._conn.commit()
 
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""
