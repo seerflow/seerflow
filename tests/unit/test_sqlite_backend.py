@@ -399,7 +399,6 @@ class TestWritePerformance:
             await backend._write_batch(events)
             elapsed = time.perf_counter() - start
             rate = 10_000 / elapsed
-            print(f"\nBenchmark: {rate:,.0f} events/sec ({elapsed:.3f}s for 10K events)")
             assert rate >= 1000, f"Write throughput {rate:.0f}/sec below 1000/sec floor"
         finally:
             await backend.close()

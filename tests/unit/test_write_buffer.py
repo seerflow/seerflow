@@ -19,6 +19,7 @@ class TestWriteBufferFlush:
         async def callback(batch: list[Any]) -> None:
             recorder["batches"].append(batch)
             recorder["call_count"] += 1
+
         return callback
 
     async def test_flush_calls_callback_with_buffer_contents(self, recorder):
