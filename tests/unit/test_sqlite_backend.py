@@ -447,13 +447,57 @@ class TestWritePerformance:
             await backend.close()
 
 
-class TestNotImplementedStubs:
-    async def test_search_text_raises(self) -> None:
+class TestSearchText:
+    async def _make_backend_with_events(self, events: list[SeerflowEvent]) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
         backend = await SqliteBackend.connect(config)
+        await backend._write_batch(events)
+        return backend
+
+    async def test_finds_matching_events(self) -> None:
+        e1 = _make_event(message="authentication failed for user admin")
+        e2 = _make_event(message="connection established successfully")
+        backend = await self._make_backend_with_events([e1, e2])
         try:
-            with pytest.raises(NotImplementedError):
-                await backend.search_text("test", 10)
+            results = await backend.search_text("authentication", 10)
+            assert len(results) == 1
+            assert results[0].message == "authentication failed for user admin"
+        finally:
+            await backend.close()
+
+    async def test_no_matches_returns_empty(self) -> None:
+        e1 = _make_event(message="hello world")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("nonexistent", 10)
+            assert results == []
+        finally:
+            await backend.close()
+
+    async def test_limit_respected(self) -> None:
+        events = [_make_event(message=f"error on line {i}") for i in range(10)]
+        backend = await self._make_backend_with_events(events)
+        try:
+            results = await backend.search_text("error", 3)
+            assert len(results) == 3
+        finally:
+            await backend.close()
+
+    async def test_empty_query_returns_empty(self) -> None:
+        e1 = _make_event(message="hello world")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("", 10)
+            assert results == []
+        finally:
+            await backend.close()
+
+    async def test_operators_treated_as_literal(self) -> None:
+        e1 = _make_event(message="error OR warning in log")
+        backend = await self._make_backend_with_events([e1])
+        try:
+            results = await backend.search_text("error OR warning", 10)
+            assert len(results) == 1
         finally:
             await backend.close()
 

@@ -377,9 +377,23 @@ class SqliteBackend:
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
     async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]:
-        """Full-text search across stored events (not yet implemented)."""
-        msg = "search_text is implemented in S-007"
-        raise NotImplementedError(msg)
+        """Full-text search using FTS5 phrase matching."""
+        safe_query = _sanitize_fts_query(query)
+        if safe_query == '""':
+            return []
+
+        sql = (
+            "SELECT e.data FROM events e "
+            "JOIN events_fts fts ON fts.rowid = e.rowid "
+            "WHERE fts.events_fts MATCH ? "
+            "ORDER BY e.timestamp_ns DESC LIMIT ?"
+        )
+        cursor = await self._conn.execute(sql, [safe_query, limit])
+        rows = await cursor.fetchall()
+        return [
+            msgspec.msgpack.decode(row[0], type=SeerflowEvent)
+            for row in rows
+        ]
 
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""
