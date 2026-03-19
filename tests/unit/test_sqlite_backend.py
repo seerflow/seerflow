@@ -5,8 +5,9 @@ from __future__ import annotations
 import aiosqlite
 import pytest
 
-from seerflow.config import ConfigError
-from seerflow.storage.sqlite import _init_schema, _validate_path
+from seerflow.config import ConfigError, StorageConfig
+from seerflow.storage.protocols import LogStore
+from seerflow.storage.sqlite import SqliteBackend, _init_schema, _validate_path
 
 
 class TestPathValidation:
@@ -115,9 +116,7 @@ class TestSchema:
     async def test_fts_triggers_exist(self) -> None:
         conn = await self._init_memory_db()
         try:
-            cursor = await conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger'"
-            )
+            cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
             triggers = {row[0] for row in await cursor.fetchall()}
             assert triggers == {
                 "events_fts_insert",
@@ -134,3 +133,38 @@ class TestSchema:
             await _init_schema(conn)
         finally:
             await conn.close()
+
+
+class TestSqliteBackendLifecycle:
+    async def test_connect_returns_backend(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            assert isinstance(backend, SqliteBackend)
+        finally:
+            await backend.close()
+
+    async def test_isinstance_log_store(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            assert isinstance(backend, LogStore)
+        finally:
+            await backend.close()
+
+    async def test_schema_created_on_connect(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            cursor = await backend._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='events'"
+            )
+            assert await cursor.fetchone() is not None
+        finally:
+            await backend.close()
+
+    async def test_close_is_idempotent(self) -> None:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        await backend.close()
+        await backend.close()  # no error
