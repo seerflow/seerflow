@@ -21,6 +21,7 @@ import aiosqlite
 import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
+from seerflow.models.query import EventQuery
 
 _log = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from seerflow.models.event import SeerflowEvent
-    from seerflow.models.query import EventQuery, Page
+    from seerflow.models.query import Page
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,51 @@ def _sanitize_fts_query(query: str) -> str:
     if not cleaned:
         return '""'
     return f'"{cleaned}"'
+
+
+# ---------------------------------------------------------------------------
+# Dynamic SQL builder
+# ---------------------------------------------------------------------------
+
+
+def _build_query(filters: EventQuery) -> tuple[str, str, list[Any]]:
+    """Build WHERE clause, JOIN clause, and params from EventQuery."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    joins: list[str] = []
+
+    if filters.time_range is not None:
+        clauses.append("e.timestamp_ns >= ?")
+        params.append(filters.time_range.start_ns)
+        clauses.append("e.timestamp_ns <= ?")
+        params.append(filters.time_range.end_ns)
+
+    if filters.source_type is not None:
+        clauses.append("e.source_type = ?")
+        params.append(filters.source_type)
+
+    if filters.severity_min is not None:
+        clauses.append("e.severity_id >= ?")
+        params.append(filters.severity_min)
+
+    if filters.template_id is not None:
+        clauses.append("e.template_id = ?")
+        params.append(filters.template_id)
+
+    if filters.entity_uuid is not None:
+        joins.append("JOIN entity_events ee ON ee.event_id = e.event_id")
+        clauses.append("ee.entity_uuid = ?")
+        params.append(filters.entity_uuid)
+
+    if filters.text_query is not None:
+        safe_query = _sanitize_fts_query(filters.text_query)
+        joins.append("JOIN events_fts fts ON fts.rowid = e.rowid")
+        clauses.append("fts.events_fts MATCH ?")
+        params.append(safe_query)
+
+    where = " AND ".join(clauses) if clauses else "1=1"
+    join_str = " ".join(joins)
+    return where, join_str, params
 
 
 # ---------------------------------------------------------------------------

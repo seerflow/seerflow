@@ -13,8 +13,10 @@ import pytest
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.storage.protocols import LogStore
+from seerflow.models.query import EventQuery, TimeRange
 from seerflow.storage.sqlite import (
     SqliteBackend,
+    _build_query,
     _init_schema,
     _sanitize_fts_query,
     _validate_path,
@@ -463,3 +465,59 @@ class TestNotImplementedStubs:
                 await backend.search_text("test", 10)
         finally:
             await backend.close()
+
+
+class TestBuildQuery:
+    def test_no_filters(self) -> None:
+        filters = EventQuery()
+        where, joins, params = _build_query(filters)
+        assert where == "1=1"
+        assert joins == ""
+        assert params == []
+
+    def test_time_range(self) -> None:
+        tr = TimeRange(start_ns=100, end_ns=200)
+        filters = EventQuery(time_range=tr)
+        where, joins, params = _build_query(filters)
+        assert "e.timestamp_ns >= ?" in where
+        assert "e.timestamp_ns <= ?" in where
+        assert params == [100, 200]
+
+    def test_source_type(self) -> None:
+        filters = EventQuery(source_type="syslog")
+        where, joins, params = _build_query(filters)
+        assert "e.source_type = ?" in where
+        assert params == ["syslog"]
+
+    def test_severity_min(self) -> None:
+        filters = EventQuery(severity_min=3)
+        where, joins, params = _build_query(filters)
+        assert "e.severity_id >= ?" in where
+        assert params == [3]
+
+    def test_template_id(self) -> None:
+        filters = EventQuery(template_id=42)
+        where, joins, params = _build_query(filters)
+        assert "e.template_id = ?" in where
+        assert params == [42]
+
+    def test_entity_uuid_adds_join(self) -> None:
+        filters = EventQuery(entity_uuid="uuid-123")
+        where, joins, params = _build_query(filters)
+        assert "JOIN entity_events" in joins
+        assert "ee.entity_uuid = ?" in where
+        assert params == ["uuid-123"]
+
+    def test_text_query_adds_fts_join(self) -> None:
+        filters = EventQuery(text_query="authentication failed")
+        where, joins, params = _build_query(filters)
+        assert "JOIN events_fts" in joins
+        assert "events_fts MATCH ?" in where
+        assert params == ['"authentication failed"']
+
+    def test_compound_filters(self) -> None:
+        tr = TimeRange(start_ns=100, end_ns=200)
+        filters = EventQuery(time_range=tr, source_type="syslog", severity_min=3)
+        where, joins, params = _build_query(filters)
+        assert " AND " in where
+        assert len(params) == 4
