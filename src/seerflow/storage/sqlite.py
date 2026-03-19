@@ -245,6 +245,22 @@ def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
     return where, params
 
 
+_MAX_STATE_KEY_LENGTH = 256
+
+
+def _validate_state_key(key: str) -> None:
+    """Reject keys that violate the ModelStore contract."""
+    if not key:
+        msg = "model state key must not be empty"
+        raise ValueError(msg)
+    if len(key) > _MAX_STATE_KEY_LENGTH:
+        msg = f"model state key exceeds {_MAX_STATE_KEY_LENGTH} characters: {key!r}"
+        raise ValueError(msg)
+    if not key.isascii():
+        msg = f"model state key must be ASCII-only: {key!r}"
+        raise ValueError(msg)
+
+
 _SAVE_STATE_SQL = "INSERT OR REPLACE INTO model_state (key, data, updated_at) VALUES (?, ?, ?)"
 _LOAD_STATE_SQL = "SELECT data FROM model_state WHERE key = ?"
 
@@ -256,6 +272,7 @@ INSERT INTO alerts (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(dedup_key) DO UPDATE SET
     dedup_count = dedup_count + 1,
+    alert_id = excluded.alert_id,
     data = excluded.data"""
 
 
@@ -456,20 +473,28 @@ class SqliteBackend:
             alert.feedback,
             data,
         )
-        await self._conn.execute(_INSERT_ALERT_SQL, params)
-        await self._conn.commit()
+        try:
+            await self._conn.execute(_INSERT_ALERT_SQL, params)
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("write_alert failed for alert %s", alert.alert_id)
+            raise
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
         """Query alerts with composable filters and pagination."""
         where, params = _build_alert_query(filters)
 
-        # Hardcoded SQL fragments only — user values in params
+        # where clause assembled from hardcoded SQL fragments in _build_alert_query().
+        # All user values are bound via params. No user data is interpolated.
         count_sql = f"SELECT COUNT(*) FROM alerts a WHERE {where}"  # noqa: S608  # nosec B608
         async with await self._conn.execute(count_sql, params) as cursor:
             row = await cursor.fetchone()
             total = row[0] if row else 0
 
         offset = (filters.page - 1) * filters.limit
+        # where clause assembled from hardcoded SQL fragments in _build_alert_query().
+        # All user values are bound via params. No user data is interpolated.
         data_sql = (
             f"SELECT a.data FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
             f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
@@ -481,7 +506,13 @@ class SqliteBackend:
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
     async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None:
-        """Update alert feedback and re-encode the BLOB."""
+        """Update alert feedback and re-encode the BLOB.
+
+        Implementation note: this performs a SELECT then UPDATE. On the SQLite
+        backend this is safe because a single aiosqlite connection serializes
+        all operations. A PostgreSQL backend MUST use SELECT ... FOR UPDATE
+        inside a transaction to prevent a concurrent write from being lost.
+        """
         async with await self._conn.execute(
             "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]
         ) as cursor:
@@ -491,20 +522,32 @@ class SqliteBackend:
         alert = msgspec.msgpack.decode(row[0], type=Alert)
         updated = msgspec.structs.replace(alert, feedback=feedback)
         data = msgspec.msgpack.encode(updated)
-        await self._conn.execute(
-            "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
-            [feedback, data, alert_id],
-        )
-        await self._conn.commit()
+        try:
+            await self._conn.execute(
+                "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
+                [feedback, data, alert_id],
+            )
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("update_feedback failed for alert %s", alert_id)
+            raise
 
     async def save_state(self, key: str, data: bytes) -> None:
         """Persist serialized model state (upsert by key)."""
+        _validate_state_key(key)
         updated_at = time.time_ns()
-        await self._conn.execute(_SAVE_STATE_SQL, [key, data, updated_at])
-        await self._conn.commit()
+        try:
+            await self._conn.execute(_SAVE_STATE_SQL, [key, data, updated_at])
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("save_state failed for key %s", key)
+            raise
 
     async def load_state(self, key: str) -> bytes | None:
         """Load serialized model state, or None if not found."""
+        _validate_state_key(key)
         async with await self._conn.execute(_LOAD_STATE_SQL, [key]) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else None

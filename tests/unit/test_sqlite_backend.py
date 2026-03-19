@@ -806,6 +806,22 @@ class TestWriteAlert:
         finally:
             await backend.close()
 
+    async def test_dedup_updates_alert_id(self) -> None:
+        backend = await self._make_backend()
+        try:
+            a1 = _make_alert(dedup_key="same-key")
+            a2 = _make_alert(dedup_key="same-key")
+            await backend.write_alert(a1)
+            await backend.write_alert(a2)
+            async with await backend._conn.execute(
+                "SELECT alert_id, data FROM alerts WHERE dedup_key = 'same-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            decoded = msgspec.msgpack.decode(row[1], type=Alert)
+            assert row[0] == decoded.alert_id  # column matches BLOB
+        finally:
+            await backend.close()
+
     async def test_dedup_updates_data_blob(self) -> None:
         backend = await self._make_backend()
         try:
@@ -847,6 +863,20 @@ class TestQueryAlerts:
         try:
             result = await backend.query_alerts(AlertQuery())
             assert result.total == 3
+        finally:
+            await backend.close()
+
+    async def test_filter_by_time_range(self) -> None:
+        a1 = _make_alert()  # timestamp_ns = 1_710_000_000_000_000_000
+        backend = await self._make_backend_with_alerts([a1])
+        try:
+            tr = TimeRange(start_ns=1_700_000_000_000_000_000, end_ns=1_720_000_000_000_000_000)
+            result = await backend.query_alerts(AlertQuery(time_range=tr))
+            assert result.total == 1
+
+            tr_miss = TimeRange(start_ns=1, end_ns=2)
+            result2 = await backend.query_alerts(AlertQuery(time_range=tr_miss))
+            assert result2.total == 0
         finally:
             await backend.close()
 
@@ -981,22 +1011,51 @@ class TestModelStore:
         finally:
             await backend.close()
 
-    async def test_updated_at_set(self) -> None:
+    async def test_save_empty_key_rejected(self) -> None:
         backend = await self._make_backend()
         try:
-            await backend.save_state("key", b"data")
-            async with await backend._conn.execute(
-                "SELECT updated_at FROM model_state WHERE key = 'key'"
-            ) as cur:
-                row = await cur.fetchone()
-            assert row[0] > 0
+            with pytest.raises(ValueError, match="empty"):
+                await backend.save_state("", b"data")
         finally:
             await backend.close()
 
+    async def test_save_long_key_rejected(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="exceeds"):
+                await backend.save_state("a" * 257, b"data")
+        finally:
+            await backend.close()
+
+    async def test_load_empty_key_rejected(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="empty"):
+                await backend.load_state("")
+        finally:
+            await backend.close()
+
+    async def test_updated_at_set(self) -> None:
+        backend = await self._make_backend()
+        try:
+            before_ns = time.time_ns()
+            await backend.save_state("key", b"data")
+            after_ns = time.time_ns()
+            async with await backend._conn.execute(
+                "SELECT updated_at FROM model_state WHERE key = ?", ["key"]
+            ) as cur:
+                row = await cur.fetchone()
+            assert before_ns <= row[0] <= after_ns
+        finally:
+            await backend.close()
+
+
+class TestProtocolConformance:
     async def test_isinstance_alert_store(self) -> None:
         from seerflow.storage.protocols import AlertStore
 
-        backend = await self._make_backend()
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
         try:
             assert isinstance(backend, AlertStore)
         finally:
@@ -1005,7 +1064,8 @@ class TestModelStore:
     async def test_isinstance_model_store(self) -> None:
         from seerflow.storage.protocols import ModelStore as ModelStoreProto
 
-        backend = await self._make_backend()
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
         try:
             assert isinstance(backend, ModelStoreProto)
         finally:
