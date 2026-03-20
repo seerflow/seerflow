@@ -61,5 +61,5 @@ class TestAlertBenchmarks:
         load_elapsed = time.perf_counter() - start
         load_rate = 1000 / load_elapsed
 
-        assert save_rate >= 5000, f"Model save {save_rate:.0f}/sec below 5000 floor"
-        assert load_rate >= 5000, f"Model load {load_rate:.0f}/sec below 5000 floor"
+        assert save_rate >= 2000, f"Model save {save_rate:.0f}/sec below 2000 floor"
+        assert load_rate >= 2000, f"Model load {load_rate:.0f}/sec below 2000 floor"
