@@ -41,9 +41,7 @@ class TestQueryBenchmarks:
 
     async def test_fts5_search_throughput(self, backend: SqliteBackend) -> None:
         """10K events, FTS5 search — floor 1 000 events/sec."""
-        events = [
-            make_event(message=f"authentication failed attempt {i}") for i in range(10_000)
-        ]
+        events = [make_event(message=f"authentication failed attempt {i}") for i in range(10_000)]
         await backend._write_batch(events)
         start = time.perf_counter()
         results = await backend.search_text("authentication", 100)
