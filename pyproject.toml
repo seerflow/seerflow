@@ -45,6 +45,7 @@ dev = [
     "pytest-asyncio>=0.25",
     "pytest-cov>=6.0",
     "types-pyyaml>=6.0.12.20250915",
+    "pytest-benchmark>=5.2.3",
 ]
 
 [tool.ruff]
@@ -101,9 +102,10 @@ skips = ["B101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers -m 'not slow'"
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "benchmark: performance benchmarks",
+    "slow: heavyweight benchmarks, run with pytest -m slow",
 ]
 
 [tool.coverage.run]
