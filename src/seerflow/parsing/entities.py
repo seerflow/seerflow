@@ -28,12 +28,12 @@ _IPV6_RE = re.compile(
 
 
 _USER_RE = re.compile(
-    r"(?:user[= ]|for user |by )([a-zA-Z0-9._-]+)",
+    r"(?:user=|for user )([a-zA-Z0-9._@-]{1,64})",
     re.IGNORECASE,
 )
 
 _HOST_RE = re.compile(
-    r"(?:host(?:name)?[= ]|on )"
+    r"(?:host(?:name)?[= ])"
     r"([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
     r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)",
     re.IGNORECASE,
@@ -52,18 +52,50 @@ def _extract_users(message: str) -> list[str]:
     return list(dict.fromkeys(_USER_RE.findall(message)))
 
 
+# NOTE: URL paths (e.g. /api/v1/health) may match as file paths — acceptable
+# trade-off for v1; will be refined in a future story.
 _FILE_RE = re.compile(r"(?:^|(?<=\s))(/(?:[a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+)")
+
+_NON_TLD = frozenset(
+    {
+        "conf",
+        "log",
+        "txt",
+        "py",
+        "sh",
+        "yml",
+        "yaml",
+        "json",
+        "xml",
+        "gz",
+        "bz2",
+        "xz",
+        "zst",
+        "tar",
+        "zip",
+        "csv",
+        "ini",
+        "cfg",
+        "pid",
+        "sock",
+        "lock",
+        "tmp",
+        "bak",
+        "old",
+    }
+)
 
 _DOMAIN_RE = re.compile(
     r"\b([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
-    r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*"
-    r"\.[a-zA-Z]{2,})\b"
+    r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?){0,10}"
+    r"\.[a-zA-Z]{2,63})\b"
 )
 
 
 def _extract_hosts(message: str) -> list[str]:
     """Extract unique hostnames from a log message."""
-    return list(dict.fromkeys(_HOST_RE.findall(message)))
+    candidates = _HOST_RE.findall(message)
+    return list(dict.fromkeys(c for c in candidates if not _IPV4_RE.fullmatch(c)))
 
 
 def _extract_files(message: str) -> list[str]:
@@ -74,8 +106,16 @@ def _extract_files(message: str) -> list[str]:
 def _extract_domains(message: str) -> list[str]:
     """Extract unique domain names from a log message, excluding IPs."""
     candidates = _DOMAIN_RE.findall(message)
-    return list(dict.fromkeys(c for c in candidates if not _IPV4_RE.fullmatch(c)))
+    return list(
+        dict.fromkeys(
+            c
+            for c in candidates
+            if not _IPV4_RE.fullmatch(c) and c.rsplit(".", 1)[-1].lower() not in _NON_TLD
+        )
+    )
 
+
+_MAX_MESSAGE_LEN = 32_768
 
 # Mapping from entity type name to its extraction function
 _EXTRACTORS: dict[str, Callable[[str], list[str]]] = {
@@ -102,10 +142,16 @@ class EntityExtractor:
         enabled_types: frozenset[str] | None = None,
     ) -> None:
         types = enabled_types if enabled_types is not None else _ALL_ENTITY_TYPES
+        unknown = types - _ALL_ENTITY_TYPES
+        if unknown:
+            msg = f"Unknown entity types: {unknown!r}. Valid: {_ALL_ENTITY_TYPES!r}"
+            raise ValueError(msg)
         self._extractors: dict[str, Callable[[str], list[str]]] = {
             t: _EXTRACTORS[t] for t in types
         }
 
     def extract(self, message: str) -> dict[str, list[str]]:
         """Extract all enabled entity types from *message*."""
+        if len(message) > _MAX_MESSAGE_LEN:
+            message = message[:_MAX_MESSAGE_LEN]
         return {name: fn(message) for name, fn in self._extractors.items()}

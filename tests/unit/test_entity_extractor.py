@@ -45,8 +45,12 @@ class TestUserExtraction:
     def test_user_for(self) -> None:
         assert "john.doe" in _extract_users("Login failed for user john.doe")
 
-    def test_user_by(self) -> None:
-        assert "root" in _extract_users("authenticated by root")
+    def test_by_default_not_extracted_as_user(self) -> None:
+        assert _extract_users("disabled by default") == []
+
+    def test_user_space_not_too_loose(self) -> None:
+        result = _extract_users("user account disabled")
+        assert "account" not in result
 
     def test_no_users(self) -> None:
         assert _extract_users("plain text") == []
@@ -64,6 +68,13 @@ class TestHostExtraction:
     def test_hostname_equals(self) -> None:
         result = _extract_hosts("hostname=app-server-01")
         assert "app-server-01" in result
+
+    def test_on_monday_not_extracted_as_host(self) -> None:
+        assert _extract_hosts("meeting on monday") == []
+
+    def test_host_does_not_capture_ip(self) -> None:
+        result = _extract_hosts("host=10.0.0.1 connected")
+        assert "10.0.0.1" not in result
 
     def test_no_hosts(self) -> None:
         assert _extract_hosts("plain text message") == []
@@ -90,6 +101,10 @@ class TestDomainExtraction:
     def test_subdomain(self) -> None:
         result = _extract_domains("host api.seerflow.dev responded")
         assert any("seerflow.dev" in d for d in result)
+
+    def test_domain_does_not_match_file_extensions(self) -> None:
+        result = _extract_domains("/var/log/nginx.conf is loaded")
+        assert "nginx.conf" not in result
 
     def test_no_domains(self) -> None:
         assert _extract_domains("local connection") == []
@@ -121,6 +136,18 @@ class TestEntityExtractor:
     def test_dedup(self) -> None:
         result = EntityExtractor().extract("10.0.0.1 10.0.0.1 10.0.0.1")
         assert len(result["ip"]) == 1
+
+    def test_invalid_enabled_types_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="Unknown entity types"):
+            EntityExtractor(enabled_types=frozenset({"ip", "banana"}))
+
+    def test_long_message_truncated(self) -> None:
+        ext = EntityExtractor()
+        long_msg = "10.0.0.1 " * 100_000
+        result = ext.extract(long_msg)
+        assert isinstance(result, dict)
 
     def test_returns_dict(self) -> None:
         result = EntityExtractor().extract("test")
