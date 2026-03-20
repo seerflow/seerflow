@@ -79,3 +79,62 @@ class TestReceiverManagerLifecycle:
         assert r_good.started  # good one still started
         assert "bad" in caplog.text or "start failed" in caplog.text
         await mgr.stop()
+
+
+def _make_event(source_id: str = "test") -> RawEvent:
+    return RawEvent(
+        data=b"test log", source_type="test", source_id=source_id,
+        received_ns=1_710_000_000_000_000_000, metadata={},
+    )
+
+
+class TestQueueAndBackpressure:
+    async def test_put_event_adds_to_queue(self) -> None:
+        mgr = ReceiverManager(queue_maxsize=100)
+        event = _make_event()
+        result = await mgr.put_event(event)
+        assert result is True
+        assert mgr.queue_depth == 1
+
+    async def test_get_event_returns_from_queue(self) -> None:
+        mgr = ReceiverManager(queue_maxsize=100)
+        event = _make_event()
+        await mgr.put_event(event)
+        got = await mgr.get_event()
+        assert got is event
+
+    async def test_queue_depth(self) -> None:
+        mgr = ReceiverManager(queue_maxsize=100)
+        assert mgr.queue_depth == 0
+        await mgr.put_event(_make_event())
+        assert mgr.queue_depth == 1
+        await mgr.put_event(_make_event())
+        assert mgr.queue_depth == 2
+
+    async def test_queue_utilization(self) -> None:
+        mgr = ReceiverManager(queue_maxsize=10)
+        assert mgr.queue_utilization == 0.0
+        for _ in range(5):
+            await mgr.put_event(_make_event())
+        assert mgr.queue_utilization == pytest.approx(0.5)
+
+    async def test_backpressure_full_returns_false(self) -> None:
+        mgr = ReceiverManager(queue_maxsize=2)
+        await mgr.put_event(_make_event())
+        await mgr.put_event(_make_event())
+        result = await mgr.put_event(_make_event())  # queue full
+        assert result is False
+        assert mgr.queue_depth == 2
+
+    async def test_backpressure_80pct_logs_warning(self, caplog) -> None:
+        mgr = ReceiverManager(queue_maxsize=10)
+        for _ in range(8):
+            await mgr.put_event(_make_event())
+        with caplog.at_level(logging.WARNING):
+            await mgr.put_event(_make_event())  # 9th item = 90%
+        assert "utilization" in caplog.text.lower() or "90" in caplog.text
+
+    async def test_put_event_normal_returns_true(self) -> None:
+        mgr = ReceiverManager(queue_maxsize=100)
+        result = await mgr.put_event(_make_event())
+        assert result is True
