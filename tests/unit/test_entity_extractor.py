@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from seerflow.parsing.entities import _extract_hosts, _extract_ips, _extract_users
+from seerflow.parsing.entities import (
+    _extract_domains,
+    _extract_files,
+    _extract_hosts,
+    _extract_ips,
+    _extract_users,
+)
 
 
 class TestIPExtraction:
@@ -60,3 +66,29 @@ class TestHostExtraction:
 
     def test_no_hosts(self) -> None:
         assert _extract_hosts("plain text message") == []
+
+
+class TestFileExtraction:
+    def test_absolute_path(self) -> None:
+        assert "/var/log/syslog" in _extract_files("reading /var/log/syslog")
+
+    def test_path_with_extension(self) -> None:
+        assert "/etc/nginx/nginx.conf" in _extract_files("config /etc/nginx/nginx.conf loaded")
+
+    def test_no_relative_paths(self) -> None:
+        assert _extract_files("file data/log.txt") == []
+
+    def test_no_files(self) -> None:
+        assert _extract_files("plain text") == []
+
+
+class TestDomainExtraction:
+    def test_domain(self) -> None:
+        assert "example.com" in _extract_domains("connecting to example.com")
+
+    def test_subdomain(self) -> None:
+        result = _extract_domains("host api.seerflow.dev responded")
+        assert any("seerflow.dev" in d for d in result)
+
+    def test_no_domains(self) -> None:
+        assert _extract_domains("local connection") == []

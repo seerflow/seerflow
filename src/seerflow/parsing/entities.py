@@ -46,6 +46,26 @@ def _extract_users(message: str) -> list[str]:
     return list(dict.fromkeys(_USER_RE.findall(message)))
 
 
+_FILE_RE = re.compile(r"(?:^|(?<=\s))(/(?:[a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+)")
+
+_DOMAIN_RE = re.compile(
+    r"\b([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+    r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*"
+    r"\.[a-zA-Z]{2,})\b"
+)
+
+
 def _extract_hosts(message: str) -> list[str]:
     """Extract unique hostnames from a log message."""
     return list(dict.fromkeys(_HOST_RE.findall(message)))
+
+
+def _extract_files(message: str) -> list[str]:
+    """Extract unique absolute file paths from a log message."""
+    return list(dict.fromkeys(_FILE_RE.findall(message)))
+
+
+def _extract_domains(message: str) -> list[str]:
+    """Extract unique domain names from a log message, excluding IPs."""
+    candidates = _DOMAIN_RE.findall(message)
+    return list(dict.fromkeys(c for c in candidates if not _IPV4_RE.fullmatch(c)))
