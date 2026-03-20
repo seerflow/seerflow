@@ -6,16 +6,11 @@ SourceCondition defines per-source match conditions within a rule.
 """
 
 import uuid
-from typing import Literal
 
 import msgspec
 
+from seerflow.models._types import AlertType, EntityType, FeedbackType
 from seerflow.models.event import SeverityLevel
-
-# Type aliases for constrained string fields.
-AlertType = Literal["ml", "sigma", "correlation", "ueba", "ioc"]
-FeedbackType = Literal["", "tp", "fp"]
-EntityType = Literal["user", "ip", "host", "process", "file", "domain"]
 
 
 class SourceCondition(msgspec.Struct, frozen=True):

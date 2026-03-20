@@ -18,7 +18,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from seerflow.models.alert import Alert, FeedbackType
+    from seerflow.models._types import FeedbackType
+    from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
     from seerflow.models.query import AlertQuery, EntityRelation, EventQuery, Page, TimeRange
 

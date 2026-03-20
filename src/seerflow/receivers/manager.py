@@ -37,16 +37,19 @@ class ReceiverManager:
         """Register a receiver for lifecycle management."""
         self._receivers[source_id] = receiver
 
-    async def start(self) -> None:
-        """Start all registered receivers."""
+    async def start(self) -> list[str]:
+        """Start all registered receivers. Returns list of failed source_ids."""
         if self._started:
-            return
+            return []
         self._started = True
+        failed: list[str] = []
         for source_id, receiver in self._receivers.items():
             try:
                 await receiver.start()
             except Exception:
                 _log.exception("Failed to start receiver %s", source_id)
+                failed.append(source_id)
+        return failed
 
     async def stop(self) -> None:
         """Stop all receivers."""
@@ -59,8 +62,8 @@ class ReceiverManager:
             except Exception:
                 _log.exception("Failed to stop receiver %s", source_id)
 
-    async def put_event(self, event: RawEvent) -> bool:
-        """Put event in queue. Returns False if queue is full (backpressure)."""
+    def _enqueue(self, event: RawEvent) -> bool:
+        """Shared enqueue logic with backpressure warning."""
         utilization = self.queue_utilization
         if utilization >= 0.8:
             _log.warning("Queue at %.1f%% utilization", utilization * 100)
@@ -70,16 +73,13 @@ class ReceiverManager:
             return False
         return True
 
+    async def put_event(self, event: RawEvent) -> bool:
+        """Put event in queue. Returns False if queue is full (backpressure)."""
+        return self._enqueue(event)
+
     def put_event_sync(self, event: RawEvent) -> bool:
         """Synchronous variant of ``put_event`` for use in protocol callbacks."""
-        utilization = self.queue_utilization
-        if utilization >= 0.8:
-            _log.warning("Queue at %.1f%% utilization", utilization * 100)
-        try:
-            self._queue.put_nowait(event)
-        except asyncio.QueueFull:
-            return False
-        return True
+        return self._enqueue(event)
 
     async def get_event(self) -> RawEvent:
         """Get next event from queue (blocks until available)."""

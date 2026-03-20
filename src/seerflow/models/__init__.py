@@ -1,11 +1,9 @@
 """Data models for the Seerflow processing pipeline."""
 
+from seerflow.models._types import AlertType, EntityType, FeedbackType
 from seerflow.models.alert import (
     Alert,
-    AlertType,
     CorrelationRule,
-    EntityType,
-    FeedbackType,
     SourceCondition,
 )
 from seerflow.models.event import AttrValue, SeerflowEvent, SeverityLevel

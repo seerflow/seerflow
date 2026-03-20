@@ -264,6 +264,8 @@ def load_config(
                 raw = yaml.safe_load(f) or {}
         except yaml.YAMLError as exc:
             raise ConfigError(f"Failed to parse config file {path}: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise ConfigError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
     else:
         search = search_dir or Path.cwd()
         candidate = search / "seerflow.yaml"
@@ -273,6 +275,8 @@ def load_config(
                     raw = yaml.safe_load(f) or {}
             except yaml.YAMLError as exc:
                 raise ConfigError(f"Failed to parse config file {candidate}: {exc}") from exc
+            if not isinstance(raw, dict):
+                raise ConfigError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
 
     # Interpolate env vars in all string values
     raw = _walk_and_interpolate(raw)
