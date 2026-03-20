@@ -229,3 +229,49 @@ class TestSyslogReceiverTCP:
             assert event.metadata["protocol"] == "tcp"
         finally:
             await receiver.stop()
+
+
+class TestSyslogIntegration:
+    async def test_register_with_manager(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(
+            mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False
+        )
+        mgr.register("syslog-main", receiver)
+        await mgr.start()
+        assert receiver.is_healthy()
+        await mgr.stop()
+
+    async def test_end_to_end_udp(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(
+            mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False
+        )
+        mgr.register("syslog-main", receiver)
+        await mgr.start()
+        try:
+            port = receiver.udp_port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(
+                b"<165>1 2026-03-20T04:00:00Z host app - - - e2e test",
+                ("127.0.0.1", port),
+            )
+            sock.close()
+            await asyncio.sleep(0.1)
+            event = await mgr.get_event()
+            assert event.source_id == "syslog-main"
+            assert b"e2e test" in event.data
+        finally:
+            await mgr.stop()
+
+
+class TestSyslogExports:
+    def test_import(self) -> None:
+        import seerflow.receivers as mod
+
+        assert hasattr(mod, "SyslogReceiver")
+
+    def test_all(self) -> None:
+        import seerflow.receivers as mod
+
+        assert "SyslogReceiver" in mod.__all__

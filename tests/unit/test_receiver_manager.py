@@ -172,4 +172,4 @@ class TestExports:
     def test_all(self) -> None:
         import seerflow.receivers as mod
 
-        assert set(mod.__all__) == {"RawEvent", "Receiver", "ReceiverManager"}
+        assert set(mod.__all__) == {"RawEvent", "Receiver", "ReceiverManager", "SyslogReceiver"}
