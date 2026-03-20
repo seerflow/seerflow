@@ -1,4 +1,5 @@
 """Syslog throughput benchmarks."""
+
 from __future__ import annotations
 
 import asyncio
@@ -81,8 +82,7 @@ class TestSyslogHeavyweight:
             await asyncio.sleep(3.0)  # generous wait for processing
             elapsed = time.perf_counter() - start
             received = mgr.queue_depth
-            rate = received / elapsed
-            print(f"\nSustained UDP: {received}/{total} received, {rate:,.0f}/sec")
+            received / elapsed
             assert received >= total * 0.95, f"Dropped too many: {received}/{total}"
         finally:
             await receiver.stop()

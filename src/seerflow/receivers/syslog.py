@@ -110,17 +110,17 @@ class SyslogReceiver:
     """
 
     __slots__ = (
+        "_bind_addr",
         "_manager",
         "_source_id",
-        "_bind_addr",
-        "_udp_port_config",
-        "_tcp_port_config",
-        "_udp_enabled",
-        "_tcp_enabled",
-        "_udp_transport",
-        "_tcp_server",
         "_started",
         "_stopped",
+        "_tcp_enabled",
+        "_tcp_port_config",
+        "_tcp_server",
+        "_udp_enabled",
+        "_udp_port_config",
+        "_udp_transport",
     )
 
     def __init__(
@@ -157,7 +157,7 @@ class SyslogReceiver:
                 lambda: _SyslogUDPProtocol(self._manager, self._source_id),
                 local_addr=(self._bind_addr, self._udp_port_config),
             )
-            self._udp_transport = transport  # type: ignore[assignment]
+            self._udp_transport = transport
         if self._tcp_enabled:
             self._tcp_server = await asyncio.start_server(
                 self._handle_tcp_client,

@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import socket
 
-import pytest
-
 from seerflow.receivers.base import Receiver
 from seerflow.receivers.manager import ReceiverManager
 from seerflow.receivers.syslog import (
@@ -20,13 +18,14 @@ from seerflow.receivers.syslog import (
 
 class TestSyslogParsing:
     def test_parse_priority(self) -> None:
-        facility, severity, rest = _parse_priority(b"<165>1 2026-03-20T04:00:00Z host app - - - msg")
+        data = b"<165>1 2026-03-20T04:00:00Z host app - - - msg"
+        facility, severity, rest = _parse_priority(data)
         assert facility == 20
         assert severity == 5
         assert rest.startswith(b"1 ")
 
     def test_parse_priority_low(self) -> None:
-        facility, severity, rest = _parse_priority(b"<0>emergency message")
+        facility, severity, _rest = _parse_priority(b"<0>emergency message")
         assert facility == 0
         assert severity == 0
 
@@ -147,9 +146,7 @@ class TestSyslogReceiverUDP:
 
     async def test_udp_source_type(self) -> None:
         mgr = ReceiverManager()
-        receiver = SyslogReceiver(
-            mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False
-        )
+        receiver = SyslogReceiver(mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False)
         await receiver.start()
         try:
             port = receiver.udp_port
@@ -171,7 +168,7 @@ class TestSyslogReceiverTCP:
         await receiver.start()
         try:
             port = receiver.tcp_port
-            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
             writer.write(b"<165>1 2026-03-20T04:00:00Z host app - - - tcp msg\n")
             await writer.drain()
             writer.close()
@@ -189,7 +186,7 @@ class TestSyslogReceiverTCP:
         await receiver.start()
         try:
             port = receiver.tcp_port
-            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
             writer.write(b"<165>line1\n<165>line2\n<165>line3\n")
             await writer.drain()
             writer.close()
@@ -205,7 +202,7 @@ class TestSyslogReceiverTCP:
         await receiver.start()
         try:
             port = receiver.tcp_port
-            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
             writer.close()
             await writer.wait_closed()
             await asyncio.sleep(0.1)
@@ -218,7 +215,7 @@ class TestSyslogReceiverTCP:
         await receiver.start()
         try:
             port = receiver.tcp_port
-            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
             writer.write(b"<34>test msg\n")
             await writer.drain()
             writer.close()
@@ -234,9 +231,7 @@ class TestSyslogReceiverTCP:
 class TestSyslogIntegration:
     async def test_register_with_manager(self) -> None:
         mgr = ReceiverManager()
-        receiver = SyslogReceiver(
-            mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False
-        )
+        receiver = SyslogReceiver(mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False)
         mgr.register("syslog-main", receiver)
         await mgr.start()
         assert receiver.is_healthy()
@@ -244,9 +239,7 @@ class TestSyslogIntegration:
 
     async def test_end_to_end_udp(self) -> None:
         mgr = ReceiverManager()
-        receiver = SyslogReceiver(
-            mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False
-        )
+        receiver = SyslogReceiver(mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False)
         mgr.register("syslog-main", receiver)
         await mgr.start()
         try:
