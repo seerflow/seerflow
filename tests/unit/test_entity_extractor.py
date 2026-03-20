@@ -128,3 +128,15 @@ class TestEntityExtractor:
     def test_returns_dict(self) -> None:
         result = EntityExtractor().extract("test")
         assert isinstance(result, dict)
+
+
+class TestEntityExports:
+    def test_import_from_parsing_package(self) -> None:
+        from seerflow.parsing import EntityExtractor as Cls
+
+        assert Cls is EntityExtractor
+
+    def test_in_all(self) -> None:
+        import seerflow.parsing as pkg
+
+        assert "EntityExtractor" in pkg.__all__
