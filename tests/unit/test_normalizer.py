@@ -79,12 +79,37 @@ class TestNormalizerBasicFields:
         result = normalizer.normalize(_make_raw())
         assert result.timestamp_ns == 1_710_000_000_000_000_000
 
+    def test_observed_ns_captured_before_processing(self) -> None:
+        normalizer = EventNormalizer()
+        before = __import__("time").time_ns()
+        result = normalizer.normalize(_make_raw())
+        after = __import__("time").time_ns()
+        assert before <= result.observed_ns <= after
+
+    def test_severity_invalid_value_falls_back(self) -> None:
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw(metadata={"seerflow_severity": 99}))
+        assert result.severity_id == SeverityLevel.INFORMATIONAL
+
+    def test_severity_invalid_type_falls_back(self) -> None:
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw(metadata={"seerflow_severity": "high"}))
+        assert result.severity_id == SeverityLevel.INFORMATIONAL
+
+    def test_message_truncated_at_max_length(self) -> None:
+        long_msg = "x" * 50_000
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw(long_msg))
+        assert len(result.message) == 32_768
+
 
 class TestNormalizerDrainIntegration:
     def test_template_id_populated(self) -> None:
         normalizer = EventNormalizer()
-        result = normalizer.normalize(_make_raw("Login failed for user admin from 10.0.0.1"))
-        assert result.template_id > 0 or result.template_id == -1  # depends on Drain state
+        # Send same pattern twice to force a real cluster assignment
+        normalizer.normalize(_make_raw("Login failed for user admin from 10.0.0.1"))
+        result = normalizer.normalize(_make_raw("Login failed for user bob from 10.0.0.2"))
+        assert result.template_id >= 1  # real Drain3 cluster ID after second message
 
     def test_template_str_populated(self) -> None:
         normalizer = EventNormalizer()
