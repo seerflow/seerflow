@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+
+_ALL_ENTITY_TYPES = frozenset({"ip", "user", "host", "file", "domain"})
 
 # IPv4 — valid octets 0-255 with word boundaries
 _IPV4_RE = re.compile(
@@ -69,3 +72,37 @@ def _extract_domains(message: str) -> list[str]:
     """Extract unique domain names from a log message, excluding IPs."""
     candidates = _DOMAIN_RE.findall(message)
     return list(dict.fromkeys(c for c in candidates if not _IPV4_RE.fullmatch(c)))
+
+
+# Mapping from entity type name to its extraction function
+_EXTRACTORS: dict[str, Callable[[str], list[str]]] = {
+    "ip": _extract_ips,
+    "user": _extract_users,
+    "host": _extract_hosts,
+    "file": _extract_files,
+    "domain": _extract_domains,
+}
+
+
+class EntityExtractor:
+    """Compose regex extractors to pull structured entities from log messages.
+
+    By default all entity types are extracted. Pass ``enabled_types`` to
+    restrict to a subset (e.g. ``frozenset({"ip", "user"})``).
+    """
+
+    __slots__ = ("_extractors",)
+
+    def __init__(
+        self,
+        *,
+        enabled_types: frozenset[str] | None = None,
+    ) -> None:
+        types = enabled_types if enabled_types is not None else _ALL_ENTITY_TYPES
+        self._extractors: dict[str, Callable[[str], list[str]]] = {
+            t: _EXTRACTORS[t] for t in types
+        }
+
+    def extract(self, message: str) -> dict[str, list[str]]:
+        """Extract all enabled entity types from *message*."""
+        return {name: fn(message) for name, fn in self._extractors.items()}

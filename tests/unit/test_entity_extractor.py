@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from seerflow.parsing.entities import (
+    EntityExtractor,
     _extract_domains,
     _extract_files,
     _extract_hosts,
@@ -92,3 +93,38 @@ class TestDomainExtraction:
 
     def test_no_domains(self) -> None:
         assert _extract_domains("local connection") == []
+
+
+class TestEntityExtractor:
+    def test_extract_all_types(self) -> None:
+        msg = (
+            "user=admin from 192.168.1.1 reading /var/log/syslog"
+            " on web-01 via api.example.com"
+        )
+        ext = EntityExtractor()
+        result = ext.extract(msg)
+        assert "ip" in result
+        assert "user" in result
+        assert "file" in result
+
+    def test_empty_message(self) -> None:
+        result = EntityExtractor().extract("")
+        assert all(v == [] for v in result.values())
+
+    def test_configurable_types(self) -> None:
+        ext = EntityExtractor(enabled_types=frozenset({"ip"}))
+        result = ext.extract("user=admin from 10.0.0.1")
+        assert "ip" in result
+        assert "user" not in result
+
+    def test_default_all_types(self) -> None:
+        result = EntityExtractor().extract("test")
+        assert set(result.keys()) == {"ip", "user", "host", "file", "domain"}
+
+    def test_dedup(self) -> None:
+        result = EntityExtractor().extract("10.0.0.1 10.0.0.1 10.0.0.1")
+        assert len(result["ip"]) == 1
+
+    def test_returns_dict(self) -> None:
+        result = EntityExtractor().extract("test")
+        assert isinstance(result, dict)
