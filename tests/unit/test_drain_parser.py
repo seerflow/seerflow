@@ -1,7 +1,7 @@
 """Tests for DrainParser — template extraction, masking, params."""
 from __future__ import annotations
 
-from seerflow.parsing.drain import DrainParser, _mask_tokens
+from seerflow.parsing.drain import DrainParser, _extract_params, _mask_tokens
 
 
 class TestRegexMasking:
@@ -65,3 +65,21 @@ class TestDrainParser:
         parser = DrainParser(sim_th=0.5, depth=5, max_clusters=500)
         tid, template, params = parser.parse("test message 123")
         assert tid > 0  # works with custom config
+
+
+class TestParamExtraction:
+    def test_basic_extraction(self) -> None:
+        params = _extract_params("Login from <IP>", "Login from <*>")
+        assert params == ("<IP>",)
+
+    def test_multiple_params(self) -> None:
+        params = _extract_params("user alice host <IP>", "user <*> host <*>")
+        assert params == ("alice", "<IP>")
+
+    def test_no_wildcards(self) -> None:
+        params = _extract_params("exact match", "exact match")
+        assert params == ()
+
+    def test_length_mismatch(self) -> None:
+        params = _extract_params("short", "longer template here")
+        assert params == ()

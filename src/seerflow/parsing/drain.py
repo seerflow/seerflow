@@ -18,7 +18,11 @@ def _mask_tokens(message: str) -> str:
 
 def _extract_params(message: str, template: str) -> tuple[str, ...]:
     """Extract parameter values by comparing message tokens with template wildcards."""
-    return ()  # implemented in Task 4
+    msg_tokens = message.split()
+    tmpl_tokens = template.split()
+    if len(msg_tokens) != len(tmpl_tokens):
+        return ()
+    return tuple(m for m, t in zip(msg_tokens, tmpl_tokens) if t == "<*>")
 
 
 class DrainParser:
