@@ -1,4 +1,5 @@
 """Tests for DrainParser — template extraction, masking, params."""
+
 from __future__ import annotations
 
 from seerflow.parsing.drain import DrainParser, _extract_params, _mask_tokens
@@ -63,7 +64,7 @@ class TestDrainParser:
 
     def test_configurable_params(self) -> None:
         parser = DrainParser(sim_th=0.5, depth=5, max_clusters=500)
-        tid, template, params = parser.parse("test message 123")
+        tid, _template, _params = parser.parse("test message 123")
         assert tid > 0  # works with custom config
 
 
@@ -83,3 +84,15 @@ class TestParamExtraction:
     def test_length_mismatch(self) -> None:
         params = _extract_params("short", "longer template here")
         assert params == ()
+
+
+class TestExports:
+    def test_import(self) -> None:
+        import seerflow.parsing as mod
+
+        assert hasattr(mod, "DrainParser")
+
+    def test_all(self) -> None:
+        import seerflow.parsing as mod
+
+        assert "DrainParser" in mod.__all__

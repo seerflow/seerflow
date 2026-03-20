@@ -1,7 +1,12 @@
 """Drain3 parser wrapper — streaming log template extraction."""
+
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any
 
 _IP_RE = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")
 _UUID_RE = re.compile(
@@ -22,7 +27,7 @@ def _extract_params(message: str, template: str) -> tuple[str, ...]:
     tmpl_tokens = template.split()
     if len(msg_tokens) != len(tmpl_tokens):
         return ()
-    return tuple(m for m, t in zip(msg_tokens, tmpl_tokens) if t == "<*>")
+    return tuple(m for m, t in zip(msg_tokens, tmpl_tokens, strict=True) if t == "<*>")
 
 
 class DrainParser:
@@ -59,9 +64,9 @@ class DrainParser:
             variable parts replaced by ``<*>`` in the template.
         """
         masked = _mask_tokens(message)
-        result: dict[str, object] = self._miner.add_log_message(masked)
+        result: dict[str, Any] = self._miner.add_log_message(masked)
         template = str(result["template_mined"])
-        cluster_id = int(result["cluster_id"])  # type: ignore[arg-type]
+        cluster_id = int(result["cluster_id"])
         params = _extract_params(masked, template)
         return cluster_id, template, params
 

@@ -1,4 +1,5 @@
 """Drain3 throughput benchmarks."""
+
 from __future__ import annotations
 
 import time
@@ -12,10 +13,7 @@ class TestDrainBenchmarks:
     def test_parse_throughput(self) -> None:
         """Parse 10K messages — floor 5K/sec."""
         parser = DrainParser()
-        messages = [
-            f"Login failed for user user{i} from 10.0.0.{i % 256}"
-            for i in range(10_000)
-        ]
+        messages = [f"Login failed for user user{i} from 10.0.0.{i % 256}" for i in range(10_000)]
         start = time.perf_counter()
         for msg in messages:
             parser.parse(msg)
