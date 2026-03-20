@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import socket
+
 import pytest
 
+from seerflow.receivers.base import Receiver
+from seerflow.receivers.manager import ReceiverManager
 from seerflow.receivers.syslog import (
+    SyslogReceiver,
     _detect_rfc_version,
     _map_severity,
     _parse_priority,
@@ -87,3 +93,72 @@ class TestSeverityMapping:
         data = b"<165>1 2026-03-20T04:00:00Z host app - - - msg"
         event = _parse_syslog(data, "127.0.0.1", "udp")
         assert event.metadata["seerflow_severity"] == 2  # syslog 5 -> notice -> 2
+
+
+class TestSyslogReceiverUDP:
+    async def test_isinstance_receiver(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test-syslog", udp_port=0, tcp_enabled=False)
+        assert isinstance(receiver, Receiver)
+
+    async def test_start_stop_lifecycle(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_port=0, tcp_enabled=False)
+        await receiver.start()
+        assert receiver.is_healthy()
+        await receiver.stop()
+        assert not receiver.is_healthy()
+
+    async def test_udp_receive_message(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_port=0, tcp_enabled=False)
+        await receiver.start()
+        try:
+            port = receiver.udp_port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(
+                b"<165>1 2026-03-20T04:00:00Z host app - - - test msg",
+                ("127.0.0.1", port),
+            )
+            sock.close()
+            await asyncio.sleep(0.1)
+            assert mgr.queue_depth == 1
+            event = await mgr.get_event()
+            assert event.source_type == "syslog"
+            assert event.source_id == "test"
+        finally:
+            await receiver.stop()
+
+    async def test_udp_metadata(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_port=0, tcp_enabled=False)
+        await receiver.start()
+        try:
+            port = receiver.udp_port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(b"<34>Mar 20 04:00:00 host sshd: test", ("127.0.0.1", port))
+            sock.close()
+            await asyncio.sleep(0.1)
+            event = await mgr.get_event()
+            assert "remote_addr" in event.metadata
+            assert event.metadata["protocol"] == "udp"
+        finally:
+            await receiver.stop()
+
+    async def test_udp_source_type(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(
+            mgr, source_id="syslog-main", udp_port=0, tcp_enabled=False
+        )
+        await receiver.start()
+        try:
+            port = receiver.udp_port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(b"<165>test", ("127.0.0.1", port))
+            sock.close()
+            await asyncio.sleep(0.1)
+            event = await mgr.get_event()
+            assert event.source_type == "syslog"
+            assert event.source_id == "syslog-main"
+        finally:
+            await receiver.stop()

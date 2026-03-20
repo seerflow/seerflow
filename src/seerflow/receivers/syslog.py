@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import time
 from typing import TYPE_CHECKING
@@ -10,6 +12,8 @@ from seerflow.receivers.base import RawEvent
 
 if TYPE_CHECKING:
     from seerflow.receivers.manager import ReceiverManager
+
+_log = logging.getLogger(__name__)
 
 _PRIORITY_RE = re.compile(rb"^<(\d{1,3})>(.*)$", re.DOTALL)
 
@@ -76,3 +80,114 @@ def _parse_syslog(data: bytes, remote_addr: str, protocol: str) -> RawEvent:
             "rfc_version": rfc,
         },
     )
+
+
+class _SyslogUDPProtocol(asyncio.DatagramProtocol):
+    """Asyncio datagram protocol that parses syslog and enqueues RawEvents."""
+
+    def __init__(self, manager: ReceiverManager, source_id: str) -> None:
+        self._manager = manager
+        self._source_id = source_id
+
+    def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        event = _parse_syslog(data, addr[0], "udp")
+        event = RawEvent(
+            data=event.data,
+            source_type=event.source_type,
+            source_id=self._source_id,
+            received_ns=event.received_ns,
+            metadata=event.metadata,
+        )
+        asyncio.get_running_loop().create_task(self._manager.put_event(event))
+
+
+class SyslogReceiver:
+    """Syslog receiver supporting UDP and TCP (RFC 5424 + 3164).
+
+    Use ``udp_port=0`` and ``tcp_port=0`` in tests to let the OS assign
+    ephemeral ports. Read the actual ports via the ``udp_port`` and
+    ``tcp_port`` properties after ``start()``.
+    """
+
+    __slots__ = (
+        "_manager",
+        "_source_id",
+        "_bind_addr",
+        "_udp_port_config",
+        "_tcp_port_config",
+        "_udp_enabled",
+        "_tcp_enabled",
+        "_udp_transport",
+        "_tcp_server",
+        "_started",
+        "_stopped",
+    )
+
+    def __init__(
+        self,
+        manager: ReceiverManager,
+        *,
+        source_id: str,
+        bind_addr: str = "0.0.0.0",  # noqa: S104
+        udp_port: int = 514,
+        tcp_port: int = 601,
+        udp_enabled: bool = True,
+        tcp_enabled: bool = True,
+    ) -> None:
+        self._manager = manager
+        self._source_id = source_id
+        self._bind_addr = bind_addr
+        self._udp_port_config = udp_port
+        self._tcp_port_config = tcp_port
+        self._udp_enabled = udp_enabled
+        self._tcp_enabled = tcp_enabled
+        self._udp_transport: asyncio.DatagramTransport | None = None
+        self._tcp_server: asyncio.Server | None = None
+        self._started = False
+        self._stopped = False
+
+    async def start(self) -> None:
+        """Start listening on configured UDP and/or TCP sockets."""
+        if self._started:
+            return
+        self._started = True
+        loop = asyncio.get_running_loop()
+        if self._udp_enabled:
+            transport, _protocol = await loop.create_datagram_endpoint(
+                lambda: _SyslogUDPProtocol(self._manager, self._source_id),
+                local_addr=(self._bind_addr, self._udp_port_config),
+            )
+            self._udp_transport = transport  # type: ignore[assignment]
+
+    async def stop(self) -> None:
+        """Stop all listeners."""
+        if self._stopped:
+            return
+        self._stopped = True
+        if self._udp_transport is not None:
+            self._udp_transport.close()
+        if self._tcp_server is not None:
+            self._tcp_server.close()
+            await self._tcp_server.wait_closed()
+
+    def is_healthy(self) -> bool:
+        """Return True if the receiver has started and not been stopped."""
+        return self._started and not self._stopped
+
+    @property
+    def udp_port(self) -> int:
+        """Actual bound UDP port (useful when configured with port=0)."""
+        if self._udp_transport is not None:
+            sockname = self._udp_transport.get_extra_info("sockname")
+            if sockname:
+                return int(sockname[1])
+        return self._udp_port_config
+
+    @property
+    def tcp_port(self) -> int:
+        """Actual bound TCP port (useful when configured with port=0)."""
+        if self._tcp_server is not None:
+            sockets = self._tcp_server.sockets
+            if sockets:
+                return int(sockets[0].getsockname()[1])
+        return self._tcp_port_config
