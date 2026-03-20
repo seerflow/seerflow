@@ -1,4 +1,5 @@
 """EventNormalizer throughput benchmarks."""
+
 from __future__ import annotations
 
 import time

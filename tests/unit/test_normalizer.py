@@ -1,4 +1,5 @@
 """Tests for EventNormalizer — RawEvent → SeerflowEvent."""
+
 from __future__ import annotations
 
 import uuid
@@ -82,18 +83,14 @@ class TestNormalizerBasicFields:
 class TestNormalizerDrainIntegration:
     def test_template_id_populated(self) -> None:
         normalizer = EventNormalizer()
-        result = normalizer.normalize(
-            _make_raw("Login failed for user admin from 10.0.0.1")
-        )
+        result = normalizer.normalize(_make_raw("Login failed for user admin from 10.0.0.1"))
         assert result.template_id > 0 or result.template_id == -1  # depends on Drain state
 
     def test_template_str_populated(self) -> None:
         normalizer = EventNormalizer()
         # Send same pattern twice to force template generalization
         normalizer.normalize(_make_raw("Login failed for user alice from 10.0.0.1"))
-        result = normalizer.normalize(
-            _make_raw("Login failed for user bob from 10.0.0.2")
-        )
+        result = normalizer.normalize(_make_raw("Login failed for user bob from 10.0.0.2"))
         assert result.template_str != ""
 
     def test_template_params_tuple(self) -> None:
@@ -125,9 +122,7 @@ class TestNormalizerEntityIntegration:
         assert any("web-01" in h for h in result.related_hosts)
 
     def test_empty_message_no_entities(self) -> None:
-        raw = RawEvent(
-            data=b"", source_type="t", source_id="s", received_ns=0, metadata={}
-        )
+        raw = RawEvent(data=b"", source_type="t", source_id="s", received_ns=0, metadata={})
         normalizer = EventNormalizer()
         result = normalizer.normalize(raw)
         assert result.related_ips == ()
