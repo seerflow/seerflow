@@ -158,6 +158,42 @@ class SyslogReceiver:
                 local_addr=(self._bind_addr, self._udp_port_config),
             )
             self._udp_transport = transport  # type: ignore[assignment]
+        if self._tcp_enabled:
+            self._tcp_server = await asyncio.start_server(
+                self._handle_tcp_client,
+                self._bind_addr,
+                self._tcp_port_config,
+            )
+
+    async def _handle_tcp_client(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Handle a single TCP client connection with newline framing."""
+        addr = writer.get_extra_info("peername")
+        remote = addr[0] if addr else "unknown"
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                stripped = line.rstrip(b"\n\r")
+                if not stripped:
+                    continue
+                event = _parse_syslog(stripped, remote, "tcp")
+                event = RawEvent(
+                    data=event.data,
+                    source_type=event.source_type,
+                    source_id=self._source_id,
+                    received_ns=event.received_ns,
+                    metadata=event.metadata,
+                )
+                await self._manager.put_event(event)
+        except ConnectionError:
+            _log.debug("TCP client %s disconnected", remote)
+        finally:
+            writer.close()
 
     async def stop(self) -> None:
         """Stop all listeners."""

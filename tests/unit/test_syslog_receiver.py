@@ -162,3 +162,70 @@ class TestSyslogReceiverUDP:
             assert event.source_id == "syslog-main"
         finally:
             await receiver.stop()
+
+
+class TestSyslogReceiverTCP:
+    async def test_tcp_receive_message(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_enabled=False, tcp_port=0)
+        await receiver.start()
+        try:
+            port = receiver.tcp_port
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"<165>1 2026-03-20T04:00:00Z host app - - - tcp msg\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.sleep(0.1)
+            assert mgr.queue_depth >= 1
+            event = await mgr.get_event()
+            assert event.metadata["protocol"] == "tcp"
+        finally:
+            await receiver.stop()
+
+    async def test_tcp_multiple_lines(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_enabled=False, tcp_port=0)
+        await receiver.start()
+        try:
+            port = receiver.tcp_port
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"<165>line1\n<165>line2\n<165>line3\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.sleep(0.2)
+            assert mgr.queue_depth >= 3
+        finally:
+            await receiver.stop()
+
+    async def test_tcp_client_disconnect(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_enabled=False, tcp_port=0)
+        await receiver.start()
+        try:
+            port = receiver.tcp_port
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.sleep(0.1)
+        finally:
+            await receiver.stop()
+
+    async def test_tcp_metadata(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_enabled=False, tcp_port=0)
+        await receiver.start()
+        try:
+            port = receiver.tcp_port
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"<34>test msg\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.sleep(0.1)
+            event = await mgr.get_event()
+            assert "remote_addr" in event.metadata
+            assert event.metadata["protocol"] == "tcp"
+        finally:
+            await receiver.stop()
