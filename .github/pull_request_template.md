@@ -1,3 +1,5 @@
+<!-- All PRs must target the `dev` branch. Never PR directly to `main`. -->
+
 ## Summary
 
 <!-- 1-3 bullet points describing what this PR does and why -->

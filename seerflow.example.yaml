@@ -1,0 +1,50 @@
+# Seerflow Configuration
+# All settings are optional — sensible defaults are used when omitted.
+# Use ${ENV_VAR} or ${ENV_VAR:-default} for secrets and environment-specific values.
+# Default config file: seerflow.yaml in the current working directory.
+
+storage:
+  backend: sqlite                        # sqlite | postgresql
+  # data_dir: ~/.local/share/seerflow    # default XDG data dir; override with ${SEERFLOW_DATA_DIR}
+  # sqlite_path: auto-derived from data_dir (data_dir/seerflow.db)
+  # postgresql_url: ${SEERFLOW_PG_URL}   # required when backend=postgresql
+
+receivers:
+  syslog_enabled: true
+  syslog_udp_port: 514
+  syslog_tcp_port: 601
+  otlp_grpc_enabled: true
+  otlp_grpc_port: 4317
+  otlp_http_enabled: true
+  otlp_http_port: 4318
+  # file_paths:                          # glob patterns for file tailing
+  #   - /var/log/*.log
+  #   - /var/log/auth.log
+
+detection:
+  hst_window_size: 1000
+  hst_n_trees: 25
+  dspot:
+    calibration_window: 1000             # minimum events before DSPOT activates
+    risk_level: 0.0001                   # false positive rate (1 in 10,000)
+  weights_content: 0.30                  # Half-Space Trees weight
+  weights_volume: 0.25                   # Holt-Winters weight
+  weights_sequence: 0.25                 # Markov chains weight
+  weights_pattern: 0.20                  # CUSUM weight
+
+alerting:
+  dedup_window_seconds: 900              # 15 minutes
+  # webhooks:
+  #   - url: ${SLACK_WEBHOOK_URL}
+  #     format: slack
+  #   - url: ${TEAMS_WEBHOOK_URL}
+  #     format: teams
+  # pagerduty_routing_key: ${SEERFLOW_PD_KEY}
+
+# llm:
+#   backend: llamacpp                    # llamacpp | ollama | cloud
+#   model_path: ~/.cache/seerflow/phi-4-mini-Q4_K_M.gguf
+#   ollama_url: http://localhost:11434
+
+dashboard_port: 8080
+log_level: INFO                          # DEBUG | INFO | WARNING | ERROR

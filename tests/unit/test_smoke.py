@@ -1,0 +1,72 @@
+"""Smoke tests verifying the seerflow package structure is importable."""
+
+from __future__ import annotations
+
+
+def test_version_exists() -> None:
+    import seerflow
+
+    assert hasattr(seerflow, "__version__")
+    assert isinstance(seerflow.__version__, str)
+    assert seerflow.__version__ == "0.1.0"
+
+
+def test_subpackages_importable() -> None:
+    import seerflow.alerting
+    import seerflow.api
+    import seerflow.correlation
+    import seerflow.detection
+    import seerflow.llm
+    import seerflow.models
+    import seerflow.parsing
+    import seerflow.receivers
+    import seerflow.sigma
+    import seerflow.storage
+    import seerflow.threat_intel
+    import seerflow.ueba
+    import seerflow.utils
+
+    # Verify all imports succeeded (no ImportError)
+    assert seerflow.models is not None
+    assert seerflow.receivers is not None
+    assert seerflow.parsing is not None
+    assert seerflow.detection is not None
+    assert seerflow.sigma is not None
+    assert seerflow.correlation is not None
+    assert seerflow.ueba is not None
+    assert seerflow.threat_intel is not None
+    assert seerflow.storage is not None
+    assert seerflow.alerting is not None
+    assert seerflow.llm is not None
+    assert seerflow.api is not None
+    assert seerflow.utils is not None
+
+
+def test_nested_subpackages_importable() -> None:
+    import seerflow.alerting.sinks
+    import seerflow.api.routes
+
+    assert seerflow.alerting.sinks is not None
+    assert seerflow.api.routes is not None
+
+
+def test_main_entry_point(capsys: object) -> None:
+    from seerflow.__main__ import main
+
+    assert callable(main)
+    main()
+    import _pytest.capture
+
+    captured = _pytest.capture.CaptureFixture.readouterr(capsys)  # type: ignore[arg-type]
+    assert "seerflow 0.1.0" in captured.out
+
+
+def test_cli_entry_point(capsys: object) -> None:
+    from seerflow.cli import main
+
+    assert callable(main)
+    main()
+    import _pytest.capture
+
+    captured = _pytest.capture.CaptureFixture.readouterr(capsys)  # type: ignore[arg-type]
+    assert "seerflow 0.1.0" in captured.out
