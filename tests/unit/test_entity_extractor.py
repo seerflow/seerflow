@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from seerflow.parsing.entities import _extract_ips
+from seerflow.parsing.entities import _extract_hosts, _extract_ips, _extract_users
 
 
 class TestIPExtraction:
@@ -29,3 +29,34 @@ class TestIPExtraction:
     def test_dedup_ips(self) -> None:
         result = _extract_ips("from 10.0.0.1 to 10.0.0.1")
         assert result == ["10.0.0.1"]
+
+
+class TestUserExtraction:
+    def test_user_equals(self) -> None:
+        assert "admin" in _extract_users("user=admin login")
+
+    def test_user_for(self) -> None:
+        assert "john.doe" in _extract_users("Login failed for user john.doe")
+
+    def test_user_by(self) -> None:
+        assert "root" in _extract_users("authenticated by root")
+
+    def test_no_users(self) -> None:
+        assert _extract_users("plain text") == []
+
+    def test_dedup_users(self) -> None:
+        result = _extract_users("user=admin for user admin")
+        assert result.count("admin") == 1
+
+
+class TestHostExtraction:
+    def test_hostname(self) -> None:
+        result = _extract_hosts("connecting to host web-01.prod.internal")
+        assert any("web-01" in h for h in result)
+
+    def test_hostname_equals(self) -> None:
+        result = _extract_hosts("hostname=app-server-01")
+        assert "app-server-01" in result
+
+    def test_no_hosts(self) -> None:
+        assert _extract_hosts("plain text message") == []
