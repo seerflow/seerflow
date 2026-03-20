@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from typing import Any
-
-_IP_RE = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")
+_IP_RE = re.compile(
+    r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
+    r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
+)
 _UUID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
     re.IGNORECASE,
 )
 
+_DEFAULT_MAX_MESSAGE_LEN = 8192
+
 
 def _mask_tokens(message: str) -> str:
     """Pre-process message by masking IPs and UUIDs for better template stability."""
-    message = _IP_RE.sub("<IP>", message)
-    return _UUID_RE.sub("<UUID>", message)
+    masked = _IP_RE.sub("<IP>", message)
+    return _UUID_RE.sub("<UUID>", masked)
 
 
 def _extract_params(message: str, template: str) -> tuple[str, ...]:
@@ -33,10 +35,14 @@ def _extract_params(message: str, template: str) -> tuple[str, ...]:
 class DrainParser:
     """Streaming log template extractor wrapping drain3.TemplateMiner.
 
-    Masks IPs and UUIDs before parsing to improve template stability.
+    NOT thread-safe. Create one instance per thread/coroutine or protect
+    with a lock. Masks IPs and UUIDs before parsing for template stability.
+
+    Note: ``params`` in the return tuple contain values from the *masked*
+    message. IPs appear as ``<IP>``, UUIDs as ``<UUID>``.
     """
 
-    __slots__ = ("_miner",)
+    __slots__ = ("_max_message_len", "_miner")
 
     def __init__(
         self,
@@ -44,7 +50,18 @@ class DrainParser:
         sim_th: float = 0.4,
         depth: int = 4,
         max_clusters: int = 1000,
+        max_message_len: int = _DEFAULT_MAX_MESSAGE_LEN,
     ) -> None:
+        if not (0.0 < sim_th <= 1.0):
+            msg = f"sim_th must be in (0.0, 1.0], got {sim_th!r}"
+            raise ValueError(msg)
+        if depth < 3:
+            msg = f"depth must be >= 3, got {depth!r}"
+            raise ValueError(msg)
+        if max_clusters < 1:
+            msg = f"max_clusters must be >= 1, got {max_clusters!r}"
+            raise ValueError(msg)
+
         from drain3 import TemplateMiner
         from drain3.template_miner_config import TemplateMinerConfig
 
@@ -55,6 +72,7 @@ class DrainParser:
         config.parametrize_numeric_tokens = True
 
         self._miner = TemplateMiner(config=config)
+        self._max_message_len = max_message_len
 
     def parse(self, message: str) -> tuple[int, str, tuple[str, ...]]:
         """Extract template from a log message.
@@ -63,6 +81,11 @@ class DrainParser:
             (template_id, template_str, params) where params are the
             variable parts replaced by ``<*>`` in the template.
         """
+        if not message or not message.strip():
+            return -1, "", ()
+        if len(message) > self._max_message_len:
+            message = message[: self._max_message_len]
+        message = " ".join(message.split())  # normalize whitespace
         masked = _mask_tokens(message)
         result: dict[str, Any] = self._miner.add_log_message(masked)
         template = str(result["template_mined"])

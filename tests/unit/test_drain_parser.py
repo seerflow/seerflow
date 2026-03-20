@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from seerflow.parsing.drain import DrainParser, _extract_params, _mask_tokens
 
 
@@ -19,6 +21,10 @@ class TestRegexMasking:
 
     def test_mask_no_match(self) -> None:
         assert _mask_tokens("plain text message") == "plain text message"
+
+    def test_mask_does_not_match_invalid_octets(self) -> None:
+        assert _mask_tokens("version 999.999.999.999") == "version 999.999.999.999"
+        assert _mask_tokens("code 1.2.3.456") == "code 1.2.3.456"
 
     def test_mask_combined(self) -> None:
         result = _mask_tokens("host 10.0.0.1 req 550e8400-e29b-41d4-a716-446655440000")
@@ -66,6 +72,32 @@ class TestDrainParser:
         parser = DrainParser(sim_th=0.5, depth=5, max_clusters=500)
         tid, _template, _params = parser.parse("test message 123")
         assert tid > 0  # works with custom config
+
+    def test_parse_empty_string(self) -> None:
+        parser = DrainParser()
+        tid, template, params = parser.parse("")
+        assert tid == -1
+        assert template == ""
+        assert params == ()
+
+    def test_parse_whitespace_only(self) -> None:
+        parser = DrainParser()
+        tid, _template, _params = parser.parse("   ")
+        assert tid == -1
+
+    def test_invalid_sim_th_raises(self) -> None:
+        with pytest.raises(ValueError, match="sim_th"):
+            DrainParser(sim_th=0.0)
+
+    def test_invalid_depth_raises(self) -> None:
+        with pytest.raises(ValueError, match="depth"):
+            DrainParser(depth=2)
+
+    def test_long_message_truncated(self) -> None:
+        parser = DrainParser(max_message_len=100)
+        long_msg = "word " * 1000
+        tid, _template, _params = parser.parse(long_msg)
+        assert tid > 0  # still works, just truncated
 
 
 class TestParamExtraction:

@@ -19,7 +19,7 @@ class TestDrainBenchmarks:
             parser.parse(msg)
         elapsed = time.perf_counter() - start
         rate = 10_000 / elapsed
-        assert rate >= 5000, f"Drain parse {rate:.0f}/sec below 5K floor"
+        assert rate >= 10_000, f"Drain parse {rate:.0f}/sec below 10K floor"
 
 
 @pytest.mark.slow
