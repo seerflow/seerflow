@@ -1,4 +1,5 @@
 """Tests for Receiver Protocol and RawEvent."""
+
 from __future__ import annotations
 
 import pytest
@@ -39,16 +40,22 @@ class TestRawEvent:
 
     def test_frozen(self) -> None:
         event = RawEvent(
-            data=b"test", source_type="syslog", source_id="s1",
-            received_ns=0, metadata={},
+            data=b"test",
+            source_type="syslog",
+            source_id="s1",
+            received_ns=0,
+            metadata={},
         )
         with pytest.raises(AttributeError):
             event.data = b"changed"  # type: ignore[misc]
 
     def test_metadata_types(self) -> None:
         event = RawEvent(
-            data=b"test", source_type="file_tailer", source_id="f1",
-            received_ns=0, metadata={"path": "/var/log/syslog", "line": "42"},
+            data=b"test",
+            source_type="file_tailer",
+            source_id="f1",
+            received_ns=0,
+            metadata={"path": "/var/log/syslog", "line": "42"},
         )
         assert event.metadata["path"] == "/var/log/syslog"
 

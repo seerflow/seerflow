@@ -1,11 +1,12 @@
 """Tests for ReceiverManager."""
+
 from __future__ import annotations
 
 import logging
 
 import pytest
 
-from seerflow.receivers.base import RawEvent, Receiver
+from seerflow.receivers.base import RawEvent
 from seerflow.receivers.manager import ReceiverManager
 
 
@@ -83,8 +84,11 @@ class TestReceiverManagerLifecycle:
 
 def _make_event(source_id: str = "test") -> RawEvent:
     return RawEvent(
-        data=b"test log", source_type="test", source_id=source_id,
-        received_ns=1_710_000_000_000_000_000, metadata={},
+        data=b"test log",
+        source_type="test",
+        source_id=source_id,
+        received_ns=1_710_000_000_000_000_000,
+        metadata={},
     )
 
 
@@ -159,11 +163,13 @@ class TestGracefulShutdown:
 
 class TestExports:
     def test_imports(self) -> None:
-        from seerflow.receivers import RawEvent, Receiver, ReceiverManager
-        assert RawEvent is not None
-        assert Receiver is not None
-        assert ReceiverManager is not None
+        import seerflow.receivers as receivers_mod
+
+        assert hasattr(receivers_mod, "RawEvent")
+        assert hasattr(receivers_mod, "Receiver")
+        assert hasattr(receivers_mod, "ReceiverManager")
 
     def test_all(self) -> None:
         import seerflow.receivers as mod
+
         assert set(mod.__all__) == {"RawEvent", "Receiver", "ReceiverManager"}

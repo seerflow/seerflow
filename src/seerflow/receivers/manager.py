@@ -1,14 +1,13 @@
 """ReceiverManager — lifecycle orchestrator for all receivers."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from seerflow.receivers.base import RawEvent
-
 if TYPE_CHECKING:
-    from seerflow.receivers.base import Receiver
+    from seerflow.receivers.base import RawEvent, Receiver
 
 _log = logging.getLogger(__name__)
 

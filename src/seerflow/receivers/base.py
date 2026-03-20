@@ -1,4 +1,5 @@
 """Receiver Protocol and RawEvent model for the ingestion layer."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

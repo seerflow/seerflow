@@ -1,4 +1,5 @@
 """Receivers: Protocol, RawEvent, and ReceiverManager."""
+
 from __future__ import annotations
 
 from seerflow.receivers.base import RawEvent, Receiver
