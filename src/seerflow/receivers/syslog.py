@@ -40,6 +40,20 @@ def _detect_rfc_version(rest: bytes) -> str:
     return "3164"
 
 
+_SYSLOG_TO_SEERFLOW = (6, 5, 5, 4, 3, 2, 1, 0)
+
+
+def _map_severity(syslog_severity: int) -> int:
+    """Map syslog severity (0-7) to SeerflowEvent severity_id (0-6).
+
+    Syslog: 0=Emergency, 1=Alert, 2=Critical, 3=Error, 4=Warning,
+            5=Notice, 6=Informational, 7=Debug
+    Seerflow: 0=TRACE, 1=INFORMATIONAL, 2=NOTICE, 3=WARNING, 4=ERROR,
+              5=CRITICAL, 6=FATAL
+    """
+    return _SYSLOG_TO_SEERFLOW[min(syslog_severity, 7)]
+
+
 def _parse_syslog(data: bytes, remote_addr: str, protocol: str) -> RawEvent:
     """Parse a syslog message into a RawEvent.
 
@@ -58,6 +72,7 @@ def _parse_syslog(data: bytes, remote_addr: str, protocol: str) -> RawEvent:
             "protocol": protocol,
             "facility": facility,
             "severity": severity,
+            "seerflow_severity": _map_severity(severity),
             "rfc_version": rfc,
         },
     )

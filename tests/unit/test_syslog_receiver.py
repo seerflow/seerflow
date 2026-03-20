@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from seerflow.receivers.syslog import _detect_rfc_version, _parse_priority, _parse_syslog
+from seerflow.receivers.syslog import (
+    _detect_rfc_version,
+    _map_severity,
+    _parse_priority,
+    _parse_syslog,
+)
 
 
 class TestSyslogParsing:
@@ -51,3 +56,34 @@ class TestSyslogParsing:
         assert event.metadata["facility"] == 4
         assert event.metadata["severity"] == 2
         assert event.metadata["protocol"] == "tcp"
+
+
+class TestSeverityMapping:
+    def test_emergency(self) -> None:
+        assert _map_severity(0) == 6  # FATAL
+
+    def test_alert(self) -> None:
+        assert _map_severity(1) == 5  # CRITICAL
+
+    def test_critical(self) -> None:
+        assert _map_severity(2) == 5  # CRITICAL
+
+    def test_error(self) -> None:
+        assert _map_severity(3) == 4  # ERROR
+
+    def test_warning(self) -> None:
+        assert _map_severity(4) == 3  # WARNING
+
+    def test_notice(self) -> None:
+        assert _map_severity(5) == 2  # NOTICE
+
+    def test_info(self) -> None:
+        assert _map_severity(6) == 1  # INFORMATIONAL
+
+    def test_debug(self) -> None:
+        assert _map_severity(7) == 0  # TRACE
+
+    def test_parse_syslog_includes_seerflow_severity(self) -> None:
+        data = b"<165>1 2026-03-20T04:00:00Z host app - - - msg"
+        event = _parse_syslog(data, "127.0.0.1", "udp")
+        assert event.metadata["seerflow_severity"] == 2  # syslog 5 -> notice -> 2
