@@ -23,3 +23,24 @@ class TestWriteBenchmarks:
         elapsed = time.perf_counter() - start
         rate = 10_000 / elapsed
         assert rate >= 5000, f"Batch write {rate:.0f}/sec below 5000 floor"
+
+    async def test_individual_write_throughput(self, backend: SqliteBackend) -> None:
+        """100 single-event writes via write_events — floor 500 events/sec."""
+        events = [make_event(message=f"ind {i}") for i in range(100)]
+        start = time.perf_counter()
+        for event in events:
+            await backend.write_events([event])
+            await backend._write_buffer.flush()
+        elapsed = time.perf_counter() - start
+        rate = 100 / elapsed
+        assert rate >= 500, f"Individual write {rate:.0f}/sec below 500 floor"
+
+    async def test_write_buffer_e2e_throughput(self, backend: SqliteBackend) -> None:
+        """5K events through WriteBuffer e2e — floor 2 000 events/sec."""
+        events = [make_event(message=f"buf {i}") for i in range(5000)]
+        start = time.perf_counter()
+        await backend.write_events(events)
+        await backend._write_buffer.flush()
+        elapsed = time.perf_counter() - start
+        rate = 5000 / elapsed
+        assert rate >= 2000, f"WriteBuffer e2e {rate:.0f}/sec below 2000 floor"
