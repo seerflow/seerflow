@@ -97,10 +97,7 @@ class TestDomainExtraction:
 
 class TestEntityExtractor:
     def test_extract_all_types(self) -> None:
-        msg = (
-            "user=admin from 192.168.1.1 reading /var/log/syslog"
-            " on web-01 via api.example.com"
-        )
+        msg = "user=admin from 192.168.1.1 reading /var/log/syslog on web-01 via api.example.com"
         ext = EntityExtractor()
         result = ext.extract(msg)
         assert "ip" in result
