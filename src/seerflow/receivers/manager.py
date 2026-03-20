@@ -70,6 +70,17 @@ class ReceiverManager:
             return False
         return True
 
+    def put_event_sync(self, event: RawEvent) -> bool:
+        """Synchronous variant of ``put_event`` for use in protocol callbacks."""
+        utilization = self.queue_utilization
+        if utilization >= 0.8:
+            _log.warning("Queue at %.1f%% utilization", utilization * 100)
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            return False
+        return True
+
     async def get_event(self) -> RawEvent:
         """Get next event from queue (blocks until available)."""
         return await self._queue.get()

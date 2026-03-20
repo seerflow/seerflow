@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import socket
 
+import pytest
+
 from seerflow.receivers.base import Receiver
 from seerflow.receivers.manager import ReceiverManager
 from seerflow.receivers.syslog import (
@@ -256,6 +258,62 @@ class TestSyslogIntegration:
             assert b"e2e test" in event.data
         finally:
             await mgr.stop()
+
+
+class TestSyslogEdgeCases:
+    async def test_start_is_idempotent(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_port=0, tcp_enabled=False)
+        await receiver.start()
+        await receiver.start()  # second call should be a no-op
+        assert receiver.is_healthy()
+        await receiver.stop()
+
+    async def test_stop_is_idempotent(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_port=0, tcp_enabled=False)
+        await receiver.start()
+        await receiver.stop()
+        await receiver.stop()  # second call should be a no-op
+        assert not receiver.is_healthy()
+
+    def test_detect_rfc_version_empty_bytes(self) -> None:
+        assert _detect_rfc_version(b"") == "3164"
+
+    def test_detect_rfc3164_starts_with_digit(self) -> None:
+        assert _detect_rfc_version(b"10 Mar host") == "3164"
+
+    def test_priority_out_of_range_clamped(self) -> None:
+        facility, severity, _rest = _parse_priority(b"<999>test")
+        assert facility == 1  # default user
+        assert severity == 5  # default notice
+
+    def test_udp_port_when_disabled(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(
+            mgr,
+            source_id="test",
+            udp_port=514,
+            udp_enabled=False,
+            tcp_enabled=False,
+        )
+        assert receiver.udp_port == 514
+
+    def test_tcp_port_when_disabled(self) -> None:
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(
+            mgr,
+            source_id="test",
+            tcp_port=601,
+            udp_enabled=False,
+            tcp_enabled=False,
+        )
+        assert receiver.tcp_port == 601
+
+    def test_empty_bind_addr_rejected(self) -> None:
+        mgr = ReceiverManager()
+        with pytest.raises(ValueError, match="bind_addr must be a non-empty string"):
+            SyslogReceiver(mgr, source_id="test", bind_addr="")
 
 
 class TestSyslogExports:

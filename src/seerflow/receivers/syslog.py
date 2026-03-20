@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -17,6 +18,10 @@ _log = logging.getLogger(__name__)
 
 _PRIORITY_RE = re.compile(rb"^<(\d{1,3})>(.*)$", re.DOTALL)
 
+_MAX_TCP_CONNECTIONS = 256
+_MAX_UDP_BYTES = 8192
+_MAX_LINE_BYTES = 8192
+
 
 def _parse_priority(data: bytes) -> tuple[int, int, bytes]:
     """Extract facility and severity from syslog priority.
@@ -28,18 +33,20 @@ def _parse_priority(data: bytes) -> tuple[int, int, bytes]:
     if not match:
         return 1, 5, data  # default: user.notice
     priority = int(match.group(1))
+    if priority > 191:
+        return 1, 5, match.group(2)  # default user.notice for out-of-range
     facility = priority >> 3
     severity = priority & 0x07
     return facility, severity, match.group(2)
 
 
 def _detect_rfc_version(rest: bytes) -> str:
-    """Detect RFC 5424 vs 3164 based on first byte after priority.
+    """Detect RFC 5424 vs 3164 based on first bytes after priority.
 
-    RFC 5424 messages start with a version digit (e.g. ``1 ...``).
+    RFC 5424 messages start with version ``1`` followed by a space.
     Everything else is treated as RFC 3164.
     """
-    if rest and rest[0:1].isdigit():
+    if len(rest) >= 2 and rest[0:1] == b"1" and rest[1:2] == b" ":
         return "5424"
     return "3164"
 
@@ -58,19 +65,25 @@ def _map_severity(syslog_severity: int) -> int:
     return _SYSLOG_TO_SEERFLOW[min(syslog_severity, 7)]
 
 
-def _parse_syslog(data: bytes, remote_addr: str, protocol: str) -> RawEvent:
+def _parse_syslog(
+    data: bytes,
+    remote_addr: str,
+    protocol: str,
+    source_id: str = "",
+    received_ns: int = 0,
+) -> RawEvent:
     """Parse a syslog message into a RawEvent.
 
-    The ``source_id`` field is left empty — the caller (SyslogReceiver)
-    fills it from its own configuration.
+    When ``source_id`` or ``received_ns`` are not supplied the caller is
+    expected to provide them; ``received_ns`` defaults to ``time.time_ns()``.
     """
     facility, severity, rest = _parse_priority(data)
     rfc = _detect_rfc_version(rest)
     return RawEvent(
         data=data,
         source_type="syslog",
-        source_id="",
-        received_ns=time.time_ns(),
+        source_id=source_id,
+        received_ns=received_ns or time.time_ns(),
         metadata={
             "remote_addr": remote_addr,
             "protocol": protocol,
@@ -90,15 +103,15 @@ class _SyslogUDPProtocol(asyncio.DatagramProtocol):
         self._source_id = source_id
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
-        event = _parse_syslog(data, addr[0], "udp")
-        event = RawEvent(
-            data=event.data,
-            source_type=event.source_type,
-            source_id=self._source_id,
-            received_ns=event.received_ns,
-            metadata=event.metadata,
-        )
-        asyncio.get_running_loop().create_task(self._manager.put_event(event))
+        if len(data) > _MAX_UDP_BYTES:
+            _log.warning("Oversized UDP datagram (%d bytes) from %s, dropped", len(data), addr[0])
+            return
+        event = _parse_syslog(data, addr[0], "udp", source_id=self._source_id)
+        if not self._manager.put_event_sync(event):
+            _log.warning("UDP queue full, dropped event from %s", addr[0])
+
+    def error_received(self, exc: Exception) -> None:
+        _log.warning("UDP socket error: %s", exc)
 
 
 class SyslogReceiver:
@@ -117,6 +130,7 @@ class SyslogReceiver:
         "_stopped",
         "_tcp_enabled",
         "_tcp_port_config",
+        "_tcp_semaphore",
         "_tcp_server",
         "_udp_enabled",
         "_udp_port_config",
@@ -134,6 +148,9 @@ class SyslogReceiver:
         udp_enabled: bool = True,
         tcp_enabled: bool = True,
     ) -> None:
+        if not bind_addr:
+            msg = "bind_addr must be a non-empty string"
+            raise ValueError(msg)
         self._manager = manager
         self._source_id = source_id
         self._bind_addr = bind_addr
@@ -143,6 +160,7 @@ class SyslogReceiver:
         self._tcp_enabled = tcp_enabled
         self._udp_transport: asyncio.DatagramTransport | None = None
         self._tcp_server: asyncio.Server | None = None
+        self._tcp_semaphore: asyncio.Semaphore | None = None
         self._started = False
         self._stopped = False
 
@@ -159,10 +177,12 @@ class SyslogReceiver:
             )
             self._udp_transport = transport
         if self._tcp_enabled:
+            self._tcp_semaphore = asyncio.Semaphore(_MAX_TCP_CONNECTIONS)
             self._tcp_server = await asyncio.start_server(
                 self._handle_tcp_client,
                 self._bind_addr,
                 self._tcp_port_config,
+                limit=_MAX_LINE_BYTES,
             )
 
     async def _handle_tcp_client(
@@ -171,29 +191,40 @@ class SyslogReceiver:
         writer: asyncio.StreamWriter,
     ) -> None:
         """Handle a single TCP client connection with newline framing."""
-        addr = writer.get_extra_info("peername")
-        remote = addr[0] if addr else "unknown"
-        try:
-            while True:
-                line = await reader.readline()
-                if not line:
-                    break
-                stripped = line.rstrip(b"\n\r")
-                if not stripped:
-                    continue
-                event = _parse_syslog(stripped, remote, "tcp")
-                event = RawEvent(
-                    data=event.data,
-                    source_type=event.source_type,
-                    source_id=self._source_id,
-                    received_ns=event.received_ns,
-                    metadata=event.metadata,
-                )
-                await self._manager.put_event(event)
-        except ConnectionError:
-            _log.debug("TCP client %s disconnected", remote)
-        finally:
+        assert self._tcp_semaphore is not None
+        if self._tcp_semaphore.locked():
             writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return
+
+        await self._tcp_semaphore.acquire()
+        try:
+            addr = writer.get_extra_info("peername")
+            remote = addr[0] if addr else "unknown"
+            try:
+                while True:
+                    line = await reader.readline()
+                    if not line:
+                        break
+                    stripped = line.rstrip(b"\n\r")
+                    if not stripped:
+                        continue
+                    event = _parse_syslog(stripped, remote, "tcp", source_id=self._source_id)
+                    await self._manager.put_event(event)
+            except (
+                ConnectionError,
+                EOFError,
+                asyncio.LimitOverrunError,
+                asyncio.IncompleteReadError,
+            ):
+                _log.debug("TCP client %s disconnected", remote)
+            finally:
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
+        finally:
+            self._tcp_semaphore.release()
 
     async def stop(self) -> None:
         """Stop all listeners."""

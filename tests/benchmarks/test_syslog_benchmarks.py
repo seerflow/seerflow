@@ -82,7 +82,8 @@ class TestSyslogHeavyweight:
             await asyncio.sleep(3.0)  # generous wait for processing
             elapsed = time.perf_counter() - start
             received = mgr.queue_depth
-            received / elapsed
+            rate = received / elapsed
+            assert rate >= 2000, f"Sustained UDP {rate:.0f}/sec below 2000 floor"
             assert received >= total * 0.95, f"Dropped too many: {received}/{total}"
         finally:
             await receiver.stop()
