@@ -138,3 +138,32 @@ class TestQueueAndBackpressure:
         mgr = ReceiverManager(queue_maxsize=100)
         result = await mgr.put_event(_make_event())
         assert result is True
+
+
+class TestGracefulShutdown:
+    async def test_stop_preserves_queue_events(self) -> None:
+        mgr = ReceiverManager(queue_maxsize=100)
+        mgr.register("r1", _MockReceiver())
+        await mgr.start()
+        await mgr.put_event(_make_event())
+        await mgr.put_event(_make_event())
+        await mgr.stop()
+        # Events should still be in queue after stop
+        assert mgr.queue_depth == 2
+
+    async def test_start_stop_no_receivers(self) -> None:
+        mgr = ReceiverManager()
+        await mgr.start()
+        await mgr.stop()  # no error with empty receivers
+
+
+class TestExports:
+    def test_imports(self) -> None:
+        from seerflow.receivers import RawEvent, Receiver, ReceiverManager
+        assert RawEvent is not None
+        assert Receiver is not None
+        assert ReceiverManager is not None
+
+    def test_all(self) -> None:
+        import seerflow.receivers as mod
+        assert set(mod.__all__) == {"RawEvent", "Receiver", "ReceiverManager"}
