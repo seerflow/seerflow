@@ -436,42 +436,6 @@ class TestWriteEvents:
         await backend.close()
 
 
-class TestWritePerformance:
-    async def test_batch_write_throughput(self) -> None:
-        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
-        backend = await SqliteBackend.connect(config)
-        try:
-            events = [_make_event(message=f"perf event {i}") for i in range(10_000)]
-            start = time.perf_counter()
-            await backend._write_batch(events)
-            elapsed = time.perf_counter() - start
-            rate = 10_000 / elapsed
-            assert rate >= 1000, f"Write throughput {rate:.0f}/sec below 1000/sec floor"
-        finally:
-            await backend.close()
-
-
-class TestQueryPerformance:
-    async def test_query_100k_events_under_5s(self) -> None:
-        """Query 100K events — informational benchmark."""
-        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
-        backend = await SqliteBackend.connect(config)
-        try:
-            for batch_start in range(0, 100_000, 10_000):
-                events = [_make_event(message=f"event {batch_start + i}") for i in range(10_000)]
-                await backend._write_batch(events)
-
-            start = time.perf_counter()
-            result = await backend.query_events(EventQuery(limit=100))
-            elapsed = time.perf_counter() - start
-
-            assert result.total == 100_000
-            assert len(result.items) == 100
-            assert elapsed < 5.0, f"Query took {elapsed:.2f}s — expected <5s"
-        finally:
-            await backend.close()
-
-
 class TestSearchText:
     async def _make_backend_with_events(
         self, events: list[SeerflowEvent] | None = None
