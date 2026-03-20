@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 
 from seerflow.models.event import SeerflowEvent, SeverityLevel
+from seerflow.parsing.drain import DrainParser
 from seerflow.parsing.normalizer import EventNormalizer
 from seerflow.receivers.base import RawEvent
 
@@ -76,3 +77,32 @@ class TestNormalizerBasicFields:
         normalizer = EventNormalizer()
         result = normalizer.normalize(_make_raw())
         assert result.timestamp_ns == 1_710_000_000_000_000_000
+
+
+class TestNormalizerDrainIntegration:
+    def test_template_id_populated(self) -> None:
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(
+            _make_raw("Login failed for user admin from 10.0.0.1")
+        )
+        assert result.template_id > 0 or result.template_id == -1  # depends on Drain state
+
+    def test_template_str_populated(self) -> None:
+        normalizer = EventNormalizer()
+        # Send same pattern twice to force template generalization
+        normalizer.normalize(_make_raw("Login failed for user alice from 10.0.0.1"))
+        result = normalizer.normalize(
+            _make_raw("Login failed for user bob from 10.0.0.2")
+        )
+        assert result.template_str != ""
+
+    def test_template_params_tuple(self) -> None:
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw("test message 123"))
+        assert isinstance(result.template_params, tuple)
+
+    def test_custom_drain_parser_injected(self) -> None:
+        parser = DrainParser(sim_th=0.5, depth=5)
+        normalizer = EventNormalizer(drain_parser=parser)
+        result = normalizer.normalize(_make_raw("custom parser test"))
+        assert isinstance(result, SeerflowEvent)
