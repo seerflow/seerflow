@@ -128,7 +128,7 @@ class SyslogReceiver:
         manager: ReceiverManager,
         *,
         source_id: str,
-        bind_addr: str = "0.0.0.0",  # noqa: S104
+        bind_addr: str = "0.0.0.0",  # noqa: S104  # nosec B104 — syslog receiver must listen on all interfaces
         udp_port: int = 514,
         tcp_port: int = 601,
         udp_enabled: bool = True,
