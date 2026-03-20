@@ -106,3 +106,29 @@ class TestNormalizerDrainIntegration:
         normalizer = EventNormalizer(drain_parser=parser)
         result = normalizer.normalize(_make_raw("custom parser test"))
         assert isinstance(result, SeerflowEvent)
+
+
+class TestNormalizerEntityIntegration:
+    def test_related_ips_populated(self) -> None:
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw("Login from 192.168.1.1"))
+        assert "192.168.1.1" in result.related_ips
+
+    def test_related_users_populated(self) -> None:
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw("user=admin login"))
+        assert "admin" in result.related_users
+
+    def test_related_hosts_populated(self) -> None:
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw("host=web-01.prod connected"))
+        assert any("web-01" in h for h in result.related_hosts)
+
+    def test_empty_message_no_entities(self) -> None:
+        raw = RawEvent(
+            data=b"", source_type="t", source_id="s", received_ns=0, metadata={}
+        )
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(raw)
+        assert result.related_ips == ()
+        assert result.related_users == ()
