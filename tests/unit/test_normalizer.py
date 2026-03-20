@@ -132,3 +132,15 @@ class TestNormalizerEntityIntegration:
         result = normalizer.normalize(raw)
         assert result.related_ips == ()
         assert result.related_users == ()
+
+
+class TestNormalizerExports:
+    def test_importable_from_package(self) -> None:
+        from seerflow.parsing import EventNormalizer as Exported
+
+        assert Exported is EventNormalizer
+
+    def test_in_all(self) -> None:
+        import seerflow.parsing
+
+        assert "EventNormalizer" in seerflow.parsing.__all__

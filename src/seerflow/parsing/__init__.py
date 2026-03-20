@@ -2,5 +2,6 @@
 
 from seerflow.parsing.drain import DrainParser
 from seerflow.parsing.entities import EntityExtractor
+from seerflow.parsing.normalizer import EventNormalizer
 
-__all__ = ["DrainParser", "EntityExtractor"]
+__all__ = ["DrainParser", "EntityExtractor", "EventNormalizer"]
