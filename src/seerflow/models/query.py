@@ -11,11 +11,10 @@ String interpolation into SQL or query DSL strings is forbidden.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING
 
-# Re-export AlertType for use in AlertQuery without circular import.
-AlertType = Literal["ml", "sigma", "correlation", "ueba", "ioc"]
-EntityType = Literal["user", "ip", "host", "process", "file", "domain"]
+if TYPE_CHECKING:
+    from seerflow.models._types import AlertType
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +80,7 @@ class Page[T]:
     @property
     def has_next(self) -> bool:
         """True if there are more pages after the current one."""
-        return (self.page - 1) * self.limit + len(self.items) < self.total
+        return len(self.items) > 0 and (self.page - 1) * self.limit + len(self.items) < self.total
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

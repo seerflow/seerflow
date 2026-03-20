@@ -168,7 +168,6 @@ class SyslogReceiver:
         """Start listening on configured UDP and/or TCP sockets."""
         if self._started:
             return
-        self._started = True
         loop = asyncio.get_running_loop()
         if self._udp_enabled:
             transport, _protocol = await loop.create_datagram_endpoint(
@@ -184,6 +183,7 @@ class SyslogReceiver:
                 self._tcp_port_config,
                 limit=_MAX_LINE_BYTES,
             )
+        self._started = True
 
     async def _handle_tcp_client(
         self,
@@ -191,10 +191,10 @@ class SyslogReceiver:
         writer: asyncio.StreamWriter,
     ) -> None:
         """Handle a single TCP client connection with newline framing."""
-        assert self._tcp_semaphore is not None
-        if self._tcp_semaphore.locked():
+        if self._tcp_semaphore is None:
+            _log.error("TCP semaphore not initialized")
             writer.close()
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(ConnectionError, OSError):
                 await writer.wait_closed()
             return
 
@@ -221,7 +221,7 @@ class SyslogReceiver:
                 _log.debug("TCP client %s disconnected", remote)
             finally:
                 writer.close()
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(ConnectionError, OSError):
                     await writer.wait_closed()
         finally:
             self._tcp_semaphore.release()
