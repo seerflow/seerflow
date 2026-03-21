@@ -46,24 +46,48 @@ def _save_checkpoint(path: Path, offsets: dict[str, FileOffset]) -> None:
 
 
 def _load_checkpoint(path: Path) -> dict[str, FileOffset]:
-    """Load file offsets from JSON. Returns empty dict if file is missing."""
+    """Load file offsets from JSON. Returns empty dict if file is missing or corrupted."""
     if not path.exists():
         return {}
-    data: dict[str, dict[str, int]] = json.loads(path.read_text())
-    return {k: FileOffset(offset=v["offset"], inode=v["inode"]) for k, v in data.items()}
+    try:
+        raw = json.loads(path.read_text())
+        if not isinstance(raw, dict):
+            _log.warning("Checkpoint malformed (not a dict), starting fresh: %s", path)
+            return {}
+        result: dict[str, FileOffset] = {}
+        for k, v in raw.items():
+            if not isinstance(v, dict):
+                continue
+            offset = v.get("offset")
+            inode = v.get("inode")
+            if not isinstance(offset, int) or not isinstance(inode, int):
+                continue
+            if offset < 0 or inode < 0:
+                continue
+            result[k] = FileOffset(offset=offset, inode=inode)
+        return result
+    except (json.JSONDecodeError, TypeError) as exc:
+        _log.warning("Corrupted checkpoint %s, starting fresh: %s", path, exc)
+        return {}
+
+
+_MAX_BYTES_PER_READ = 64 * 1024  # 64 KB per call to bound memory usage
 
 
 def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
     """Read new complete lines from *path* starting at *offset*.
 
-    Returns (lines, new_offset) where new_offset is the file position
-    after the last byte read.
+    Returns only complete lines (ending with ``\\n``). Partial lines at
+    EOF are left for the next read. Uses a byte-size hint to bound
+    memory usage per call.
     """
     with path.open("rb") as fh:
         fh.seek(offset)
-        lines = fh.readlines()
-        new_offset = fh.tell()
-    return lines, new_offset
+        raw_lines = fh.readlines(_MAX_BYTES_PER_READ)
+    # Filter out incomplete trailing line (no newline at end)
+    complete = [ln for ln in raw_lines if ln.endswith(b"\n")]
+    new_offset = offset + sum(len(ln) for ln in complete)
+    return complete, new_offset
 
 
 def _check_rotation(path: Path, saved: FileOffset) -> str:
@@ -190,7 +214,10 @@ class FileTailReceiver:
                     if resolved in self._watched_files:
                         modified_paths.add(resolved)
                 for path_str in modified_paths:
-                    await self._process_file(path_str)
+                    try:
+                        await self._process_file(path_str)
+                    except OSError as exc:
+                        _log.warning("IO error processing %s: %s", path_str, exc)
         except asyncio.CancelledError:
             return
 
@@ -203,16 +230,16 @@ class FileTailReceiver:
             _log.warning("File deleted: %s", path_str)
             self._watched_files.discard(path_str)
             return
+        # Single stat call to avoid TOCTOU races
+        st = path.stat()
         if status in ("rotated", "truncated"):
             _log.info("File %s: %s — resetting offset to 0", status, path_str)
-            inode = path.stat().st_ino
-            saved = FileOffset(offset=0, inode=inode)
+            saved = FileOffset(offset=0, inode=st.st_ino)
         lines, new_offset = _read_new_lines(path, saved.offset)
-        inode = path.stat().st_ino
-        self._offsets[path_str] = FileOffset(offset=new_offset, inode=inode)
+        self._offsets[path_str] = FileOffset(offset=new_offset, inode=st.st_ino)
         for line in lines:
             raw = RawEvent(
-                data=line.rstrip(b"\n").rstrip(b"\r"),
+                data=line.rstrip(b"\r\n"),
                 source_type="file",
                 source_id=self._source_id,
                 received_ns=time.time_ns(),

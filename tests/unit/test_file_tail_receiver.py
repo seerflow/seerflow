@@ -51,6 +51,32 @@ class TestCheckpoint:
         content = cp_file.read_text()
         assert '"offset": 50' in content
 
+    def test_load_corrupted_returns_empty(self, tmp_path: Path) -> None:
+        cp_file = tmp_path / "offsets.json"
+        cp_file.write_text("not valid json {{{")
+        loaded = _load_checkpoint(cp_file)
+        assert loaded == {}
+
+    def test_load_not_dict_returns_empty(self, tmp_path: Path) -> None:
+        cp_file = tmp_path / "offsets.json"
+        cp_file.write_text('"just a string"')
+        loaded = _load_checkpoint(cp_file)
+        assert loaded == {}
+
+    def test_load_negative_offset_skipped(self, tmp_path: Path) -> None:
+        cp_file = tmp_path / "offsets.json"
+        cp_file.write_text('{"bad": {"offset": -1, "inode": 1}}')
+        loaded = _load_checkpoint(cp_file)
+        assert loaded == {}
+
+    def test_load_invalid_types_skipped(self, tmp_path: Path) -> None:
+        cp_file = tmp_path / "offsets.json"
+        data = '{"ok": {"offset": 10, "inode": 1}, "bad": {"offset": "x", "inode": 1}}'
+        cp_file.write_text(data)
+        loaded = _load_checkpoint(cp_file)
+        assert len(loaded) == 1
+        assert "ok" in loaded
+
 
 class TestFileReader:
     def test_read_new_lines(self, tmp_path: Path) -> None:
@@ -71,6 +97,13 @@ class TestFileReader:
         f.write_bytes(b"line1\n")
         lines, _ = _read_new_lines(f, 6)
         assert lines == []
+
+    def test_partial_line_not_emitted(self, tmp_path: Path) -> None:
+        f = tmp_path / "test.log"
+        f.write_bytes(b"complete\npartial")  # no trailing newline
+        lines, new_offset = _read_new_lines(f, 0)
+        assert lines == [b"complete\n"]
+        assert new_offset == 9  # only complete line consumed
 
     def test_read_empty_file(self, tmp_path: Path) -> None:
         f = tmp_path / "test.log"
@@ -210,9 +243,7 @@ class TestFileTailEdgeCases:
     async def test_start_no_matching_files(self, tmp_path: Path) -> None:
         """Start with glob that matches nothing — still healthy, no crash."""
         mgr = ReceiverManager()
-        r = FileTailReceiver(
-            mgr, source_id="t", file_paths=(str(tmp_path / "*.nonexistent"),)
-        )
+        r = FileTailReceiver(mgr, source_id="t", file_paths=(str(tmp_path / "*.nonexistent"),))
         await r.start()
         assert r.is_healthy()
         assert len(r._watched_files) == 0
