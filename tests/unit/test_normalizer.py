@@ -103,6 +103,29 @@ class TestNormalizerBasicFields:
         result = normalizer.normalize(_make_raw(long_msg))
         assert len(result.message) == 32_768
 
+    def test_raw_bytes_capped_before_decode(self) -> None:
+        """Content beyond byte cap must not appear in output."""
+        from seerflow.parsing._constants import MAX_RAW_BYTES
+
+        boundary = b"A" * MAX_RAW_BYTES
+        smuggled = b"SMUGGLED"
+        raw = RawEvent(
+            data=boundary + smuggled,
+            source_type="t",
+            source_id="s",
+            received_ns=0,
+            metadata={},
+        )
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(raw)
+        assert "SMUGGLED" not in result.message
+
+    def test_normal_bytes_not_truncated(self) -> None:
+        """Small raw data is preserved exactly."""
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw("hello"))
+        assert result.message == "hello"
+
 
 class TestNormalizerDrainIntegration:
     def test_template_id_populated(self) -> None:
@@ -166,3 +189,21 @@ class TestNormalizerExports:
         import seerflow.parsing
 
         assert "EventNormalizer" in seerflow.parsing.__all__
+
+
+class TestConstants:
+    def test_constants_importable(self) -> None:
+        from seerflow.parsing._constants import (
+            MAX_ENTITIES_PER_TYPE,
+            MAX_MESSAGE_LEN,
+            MAX_RAW_BYTES,
+        )
+
+        assert isinstance(MAX_MESSAGE_LEN, int)
+        assert isinstance(MAX_ENTITIES_PER_TYPE, int)
+        assert isinstance(MAX_RAW_BYTES, int)
+
+    def test_raw_bytes_derived_from_message_len(self) -> None:
+        from seerflow.parsing._constants import MAX_MESSAGE_LEN, MAX_RAW_BYTES
+
+        assert MAX_RAW_BYTES == MAX_MESSAGE_LEN * 2
