@@ -193,3 +193,16 @@ class TestFileTailReceiver:
             assert str(f) == raw.metadata["path"]
         finally:
             await r.stop()
+
+
+class TestExports:
+    def test_importable_from_package(self) -> None:
+        from seerflow.receivers import FileTailReceiver as Exported
+        from seerflow.receivers.file_tail import FileTailReceiver
+
+        assert Exported is FileTailReceiver
+
+    def test_in_all(self) -> None:
+        import seerflow.receivers
+
+        assert "FileTailReceiver" in seerflow.receivers.__all__
