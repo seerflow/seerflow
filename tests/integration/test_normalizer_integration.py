@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.parsing.drain import DrainParser
 from seerflow.parsing.entities import EntityExtractor
@@ -9,7 +11,7 @@ from seerflow.parsing.normalizer import EventNormalizer
 from seerflow.receivers.base import RawEvent
 
 
-def _raw(msg: str, **meta: int) -> RawEvent:
+def _raw(msg: str, **meta: Any) -> RawEvent:
     return RawEvent(
         data=msg.encode(),
         source_type="syslog",

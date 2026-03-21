@@ -56,11 +56,17 @@ class EventNormalizer:
             message = message[:_MAX_MESSAGE_LEN]
 
         # Severity from metadata (set by SyslogReceiver) or default
-        sev_value = raw.metadata.get("seerflow_severity", 1)
+        sev_value = raw.metadata.get(
+            "seerflow_severity",
+            SeverityLevel.INFORMATIONAL.value,
+        )
         try:
             severity = SeverityLevel(sev_value)
-        except (ValueError, KeyError):
-            _log.warning("Invalid seerflow_severity=%r, defaulting to INFORMATIONAL", sev_value)
+        except (ValueError, KeyError, TypeError):
+            _log.warning(
+                "Invalid seerflow_severity type=%s, defaulting to INFORMATIONAL",
+                type(sev_value).__name__,
+            )
             severity = SeverityLevel.INFORMATIONAL
 
         # Template extraction

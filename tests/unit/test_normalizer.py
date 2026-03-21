@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 
 from seerflow.models.event import SeerflowEvent, SeverityLevel
@@ -14,7 +15,7 @@ def _make_raw(
     message: str = "test log line",
     source_type: str = "syslog",
     source_id: str = "syslog-main",
-    metadata: dict | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> RawEvent:
     return RawEvent(
         data=message.encode("utf-8"),
@@ -81,9 +82,9 @@ class TestNormalizerBasicFields:
 
     def test_observed_ns_captured_before_processing(self) -> None:
         normalizer = EventNormalizer()
-        before = __import__("time").time_ns()
+        before = time.time_ns()
         result = normalizer.normalize(_make_raw())
-        after = __import__("time").time_ns()
+        after = time.time_ns()
         assert before <= result.observed_ns <= after
 
     def test_severity_invalid_value_falls_back(self) -> None:
@@ -152,6 +153,7 @@ class TestNormalizerEntityIntegration:
         result = normalizer.normalize(raw)
         assert result.related_ips == ()
         assert result.related_users == ()
+        assert result.related_hosts == ()
 
 
 class TestNormalizerExports:
