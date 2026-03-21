@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _USED_ENTITY_TYPES = frozenset({"ip", "user", "host"})
+_MAX_RAW_BYTES = 65_536  # 2x message cap, safety net before decode
 
 
 class EventNormalizer:
@@ -51,7 +52,10 @@ class EventNormalizer:
         """Convert a RawEvent to a SeerflowEvent."""
         observed_ns = time.time_ns()
 
-        message = raw.data.decode("utf-8", errors="replace")
+        data = raw.data
+        if len(data) > _MAX_RAW_BYTES:
+            data = data[:_MAX_RAW_BYTES]
+        message = data.decode("utf-8", errors="replace")
         if len(message) > MAX_MESSAGE_LEN:
             message = message[:MAX_MESSAGE_LEN]
 

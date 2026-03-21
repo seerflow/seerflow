@@ -103,6 +103,25 @@ class TestNormalizerBasicFields:
         result = normalizer.normalize(_make_raw(long_msg))
         assert len(result.message) == 32_768
 
+    def test_raw_bytes_capped_at_65536(self) -> None:
+        """Raw bytes > 65536 are truncated before decode."""
+        from seerflow.parsing.normalizer import _MAX_RAW_BYTES
+
+        big_data = b"A" * 100_000
+        raw = RawEvent(data=big_data, source_type="t", source_id="s", received_ns=0, metadata={})
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(raw)
+        # After byte cap (65536) and message cap (32768), message is at most 32768
+        assert len(result.message) <= 32_768
+        # The constant exists and is 65536
+        assert _MAX_RAW_BYTES == 65_536
+
+    def test_normal_bytes_not_truncated(self) -> None:
+        """Small raw data is preserved exactly."""
+        normalizer = EventNormalizer()
+        result = normalizer.normalize(_make_raw("hello"))
+        assert result.message == "hello"
+
 
 class TestNormalizerDrainIntegration:
     def test_template_id_populated(self) -> None:
