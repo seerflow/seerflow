@@ -195,6 +195,91 @@ class TestFileTailReceiver:
             await r.stop()
 
 
+class TestFileTailEdgeCases:
+    async def test_start_idempotent(self, tmp_path: Path) -> None:
+        """Calling start() twice does nothing on second call."""
+        f = tmp_path / "test.log"
+        f.write_bytes(b"")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(mgr, source_id="t", file_paths=(str(f),))
+        await r.start()
+        await r.start()  # second call is no-op
+        assert r.is_healthy()
+        await r.stop()
+
+    async def test_start_no_matching_files(self, tmp_path: Path) -> None:
+        """Start with glob that matches nothing — still healthy, no crash."""
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr, source_id="t", file_paths=(str(tmp_path / "*.nonexistent"),)
+        )
+        await r.start()
+        assert r.is_healthy()
+        assert len(r._watched_files) == 0
+        # _watch_loop with no dirs sets ready immediately and returns
+        await r.wait_ready()
+        await r.stop()
+
+    async def test_stop_without_checkpoint_dir(self, tmp_path: Path) -> None:
+        """Stop without checkpoint_dir does not crash."""
+        f = tmp_path / "test.log"
+        f.write_bytes(b"")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(mgr, source_id="t", file_paths=(str(f),))
+        await r.start()
+        await r.stop()  # no checkpoint_dir — should not crash
+        assert not r.is_healthy()
+
+    async def test_checkpoint_persisted_on_stop(self, tmp_path: Path) -> None:
+        """Checkpoint file is written on stop when checkpoint_dir is set."""
+        f = tmp_path / "test.log"
+        f.write_bytes(b"data\n")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="t",
+            file_paths=(str(f),),
+            checkpoint_dir=str(tmp_path),
+        )
+        await r.start()
+        await r.stop()
+        cp = tmp_path / "file_offsets.json"
+        assert cp.exists()
+
+    async def test_process_deleted_file(self, tmp_path: Path) -> None:
+        """Calling _process_file on a deleted file logs warning and removes it."""
+        f = tmp_path / "gone.log"
+        f.write_bytes(b"data\n")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(mgr, source_id="t", file_paths=(str(f),))
+        await r.start()
+        path_str = str(f.resolve())
+        assert path_str in r._watched_files
+        f.unlink()
+        await r._process_file(path_str)
+        assert path_str not in r._watched_files
+        await r.stop()
+
+    async def test_process_truncated_file(self, tmp_path: Path) -> None:
+        """Truncated file resets offset to 0 and reads from start."""
+        f = tmp_path / "trunc.log"
+        f.write_bytes(b"old data line\n")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(mgr, source_id="t", file_paths=(str(f),))
+        await r.start()
+        path_str = str(f.resolve())
+        # Simulate: offset is beyond file size (truncation)
+        inode = f.stat().st_ino
+        r._offsets[path_str] = FileOffset(offset=9999, inode=inode)
+        # Write new content after truncation
+        f.write_bytes(b"new line\n")
+        await r._process_file(path_str)
+        assert r._offsets[path_str].offset == 9  # "new line\n" = 9 bytes
+        raw = await asyncio.wait_for(mgr._queue.get(), timeout=2.0)
+        assert b"new line" in raw.data
+        await r.stop()
+
+
 class TestExports:
     def test_importable_from_package(self) -> None:
         from seerflow.receivers import FileTailReceiver as Exported
