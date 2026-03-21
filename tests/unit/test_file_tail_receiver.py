@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
+from typing import TYPE_CHECKING
 
+from seerflow.receivers.base import Receiver
 from seerflow.receivers.file_tail import (
     FileOffset,
+    FileTailReceiver,
     _check_rotation,
     _load_checkpoint,
     _read_new_lines,
     _save_checkpoint,
 )
+from seerflow.receivers.manager import ReceiverManager
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestCheckpoint:
@@ -56,7 +63,7 @@ class TestFileReader:
     def test_read_from_offset(self, tmp_path: Path) -> None:
         f = tmp_path / "test.log"
         f.write_bytes(b"line1\nline2\n")
-        lines, new_offset = _read_new_lines(f, 6)  # skip "line1\n"
+        lines, _new_offset = _read_new_lines(f, 6)  # skip "line1\n"
         assert lines == [b"line2\n"]
 
     def test_read_no_new_content(self, tmp_path: Path) -> None:
@@ -98,3 +105,91 @@ class TestRotation:
         f = tmp_path / "gone.log"
         result = _check_rotation(f, FileOffset(offset=0, inode=1))
         assert result == "deleted"
+
+
+class TestFileTailReceiver:
+    def test_isinstance_receiver(self) -> None:
+        mgr = ReceiverManager()
+        r = FileTailReceiver(mgr, source_id="test", file_paths=("/tmp/test.log",))
+        assert isinstance(r, Receiver)
+
+    async def test_start_stop_lifecycle(self, tmp_path: Path) -> None:
+        f = tmp_path / "test.log"
+        f.write_bytes(b"initial\n")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(f),),
+            checkpoint_dir=str(tmp_path),
+        )
+        await r.start()
+        assert r.is_healthy()
+        await r.stop()
+        assert not r.is_healthy()
+
+    async def test_tail_reads_new_lines(self, tmp_path: Path) -> None:
+        f = tmp_path / "test.log"
+        f.write_bytes(b"")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="tail",
+            file_paths=(str(f),),
+            checkpoint_dir=str(tmp_path),
+            debounce_ms=200,
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            with f.open("ab") as fh:
+                fh.write(b"hello world\n")
+                fh.flush()
+            raw = await asyncio.wait_for(mgr._queue.get(), timeout=5.0)
+            assert raw.source_type == "file"
+            assert b"hello world" in raw.data
+        finally:
+            await r.stop()
+
+    async def test_glob_pattern(self, tmp_path: Path) -> None:
+        (tmp_path / "a.log").write_bytes(b"")
+        (tmp_path / "b.log").write_bytes(b"")
+        (tmp_path / "c.txt").write_bytes(b"")
+        mgr = ReceiverManager()
+        pattern = str(tmp_path / "*.log")
+        r = FileTailReceiver(
+            mgr,
+            source_id="glob",
+            file_paths=(pattern,),
+            checkpoint_dir=str(tmp_path),
+        )
+        await r.start()
+        try:
+            assert len(r._watched_files) >= 2  # a.log, b.log
+        finally:
+            await r.stop()
+
+    async def test_metadata_contains_path(self, tmp_path: Path) -> None:
+        f = tmp_path / "meta.log"
+        f.write_bytes(b"")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="meta",
+            file_paths=(str(f),),
+            checkpoint_dir=str(tmp_path),
+            debounce_ms=200,
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            with f.open("ab") as fh:
+                fh.write(b"test line\n")
+                fh.flush()
+            raw = await asyncio.wait_for(mgr._queue.get(), timeout=5.0)
+            assert "path" in raw.metadata
+            assert str(f) == raw.metadata["path"]
+        finally:
+            await r.stop()
