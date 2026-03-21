@@ -43,3 +43,16 @@ def _load_checkpoint(path: Path) -> dict[str, FileOffset]:
         return {}
     data: dict[str, dict[str, int]] = json.loads(path.read_text())
     return {k: FileOffset(offset=v["offset"], inode=v["inode"]) for k, v in data.items()}
+
+
+def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
+    """Read new complete lines from *path* starting at *offset*.
+
+    Returns (lines, new_offset) where new_offset is the file position
+    after the last byte read.
+    """
+    with path.open("rb") as fh:
+        fh.seek(offset)
+        lines = fh.readlines()
+        new_offset = fh.tell()
+    return lines, new_offset
