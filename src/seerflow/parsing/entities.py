@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from seerflow.parsing._constants import MAX_MESSAGE_LEN
+from seerflow.parsing._constants import MAX_ENTITIES_PER_TYPE, MAX_MESSAGE_LEN
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -154,4 +154,4 @@ class EntityExtractor:
         """Extract all enabled entity types from *message*."""
         if len(message) > MAX_MESSAGE_LEN:
             message = message[:MAX_MESSAGE_LEN]
-        return {name: fn(message) for name, fn in self._extractors.items()}
+        return {name: fn(message)[:MAX_ENTITIES_PER_TYPE] for name, fn in self._extractors.items()}
