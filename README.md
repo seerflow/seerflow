@@ -61,7 +61,12 @@ uv run pytest tests/benchmarks/ --benchmark-compare
 
 # Run only benchmarks (skip slow tests)
 uv run pytest tests/benchmarks/ -m "not slow"
+
+# Override minimum rounds (default 10, configured in pyproject.toml)
+uv run pytest tests/benchmarks/ --benchmark-min-rounds=20
 ```
+
+The default `--benchmark-min-rounds=10` is configured in `pyproject.toml`. Increase it for tighter statistics on important runs (e.g., before a release). Lower it for faster local iteration.
 
 #### Saved benchmark runs
 
