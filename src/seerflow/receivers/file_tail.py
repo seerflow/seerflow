@@ -56,3 +56,18 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
         lines = fh.readlines()
         new_offset = fh.tell()
     return lines, new_offset
+
+
+def _check_rotation(path: Path, saved: FileOffset) -> str:
+    """Detect log rotation or truncation.
+
+    Returns one of: ``"ok"``, ``"rotated"``, ``"truncated"``, ``"deleted"``.
+    """
+    if not path.exists():
+        return "deleted"
+    stat = path.stat()
+    if stat.st_ino != saved.inode:
+        return "rotated"
+    if saved.offset > stat.st_size:
+        return "truncated"
+    return "ok"
