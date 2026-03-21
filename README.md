@@ -49,8 +49,6 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src/ && uv ru
 
 ### Benchmarks
 
-Sync benchmarks (parsing, entity extraction, normalization) use `pytest-benchmark` for regression tracking:
-
 ```bash
 # Run benchmarks and save baseline
 uv run pytest tests/benchmarks/ --benchmark-autosave
@@ -62,7 +60,45 @@ uv run pytest tests/benchmarks/ --benchmark-compare=0001
 uv run pytest tests/benchmarks/ -m "not slow"
 ```
 
-Async benchmarks (SQLite writes, queries, UDP receive) use manual timing with floor assertions. These run alongside the sync benchmarks but do not produce `pytest-benchmark` data -- the `benchmark` fixture is incompatible with asyncio event loops.
+#### Reading benchmark output
+
+Each benchmark processes 10K messages per call. The output table shows:
+
+| Column | Meaning |
+|--------|---------|
+| **Min/Max/Mean** | Wall-clock time per call (lower is faster) |
+| **StdDev** | Standard deviation across rounds. Lower = more consistent |
+| **Rounds** | How many times the function was called. More rounds = better statistical confidence. Minimum 10 (configured in `pyproject.toml`) |
+| **Iterations** | Calls per round. Stays at 1 when each call is already measurable (>1ms) |
+| **OPS** | Operations per second (`1 / Mean`). Multiply by 10,000 for messages/sec throughput |
+| **IQR** | Interquartile range (middle 50% spread). More robust than StdDev for outlier-heavy runs |
+| **Outliers** | Format `A;B` where A = mild (>1 StdDev from mean), B = extreme (>1.5 IQR from quartiles) |
+
+**Colors and ratios:** Green = fastest (best) in that column, baseline `(1.0)`. Red = slowest. Parenthesized numbers are ratios relative to fastest (e.g., `(4.69)` = 4.69x slower).
+
+**Throughput interpretation:** OPS x 10,000 = messages/sec. For example, OPS 56.14 = ~561K syslog parses/sec.
+
+#### Example output
+
+```
+Name (time in ms)                Min       Max      Mean    StdDev    Rounds  OPS
+test_parse_throughput (syslog)  17.08    19.52    17.81     0.54        57   56.14
+test_parse_throughput (drain)   80.18    92.50    83.34     3.43        11   12.00
+test_extraction_throughput     239.00   246.02   243.01     2.68        10    4.12
+test_normalize_throughput      247.86   263.30   252.99     6.29        10    3.95
+```
+
+#### Sync vs async benchmarks
+
+**4 sync benchmarks** (drain, entity, normalizer, syslog parse) use the `pytest-benchmark` fixture:
+- Support `--benchmark-autosave` and `--benchmark-compare`
+- Statistical analysis (mean, stddev, rounds, outliers)
+- Throughput floor assertions via `benchmark.stats["mean"]`
+
+**11 async benchmarks** (SQLite writes, queries, alerts, UDP receive) use manual `time.perf_counter()`:
+- Floor assertions catch regressions in CI (e.g., `assert rate >= 5000`)
+- Do not produce `pytest-benchmark` JSON data
+- Reason: the `benchmark` fixture calls functions in a tight loop, which is incompatible with asyncio event loops and aiosqlite connections
 
 ### Project Structure
 
