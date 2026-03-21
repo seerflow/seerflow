@@ -53,12 +53,32 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src/ && uv ru
 # Run benchmarks and save baseline
 uv run pytest tests/benchmarks/ --benchmark-autosave
 
-# Compare against previous run
+# Compare current run against a saved baseline
 uv run pytest tests/benchmarks/ --benchmark-compare=0001
+
+# Compare against ALL saved baselines at once
+uv run pytest tests/benchmarks/ --benchmark-compare
 
 # Run only benchmarks (skip slow tests)
 uv run pytest tests/benchmarks/ -m "not slow"
 ```
+
+#### Saved benchmark runs
+
+Each `--benchmark-autosave` saves a JSON file to `.benchmarks/`. List them with:
+
+```bash
+ls .benchmarks/Linux-CPython-3.13-64bit/
+```
+
+Filename format: `{run_number}_{git_commit}_{date}_{time}_{dirty}.json`
+
+```
+0001_d55e6b2_20260321_202338_uncommited-changes.json   # run 1, dirty working tree
+0002_087b881_20260321_205430.json                       # run 2, clean commit
+```
+
+When you use `--benchmark-compare=0002`, the output shows two rows per test: `(0002_087b881)` (saved) vs `(NOW)` (current run), so you can see if performance changed.
 
 #### Reading benchmark output
 
@@ -98,6 +118,14 @@ test_parse_throughput (drain)   80.18    92.50    83.34     3.43        11   12.
 test_extraction_throughput     239.00   246.02   243.01     2.68        10    4.12
 test_normalize_throughput      247.86   263.30   252.99     6.29        10    3.95
 ```
+
+**How to read this:**
+- **Syslog parse** finished 10K messages in 17.08ms best case (57 rounds of data). That's **~561K msgs/sec**. Very fast because it's pure string parsing with no ML.
+- **Drain parse** took 80.18ms best case for 10K messages (**~120K msgs/sec**). Slower because Drain3 maintains a template tree that grows with each unique pattern.
+- **Entity extraction** took 239ms for 10K messages (**~41K msgs/sec**). Runs 3 compiled regexes (IP, user, host) per message with deduplication.
+- **Normalizer** took 247ms for 10K messages (**~39.5K msgs/sec**). This is the full pipeline: decode bytes + Drain3 + entity extraction + build SeerflowEvent. It's the slowest because it composes all the above.
+- **Rounds 57 vs 10**: syslog is fast (~17ms/call), so pytest-benchmark ran it 57 times for tight statistics. Normalizer is slow (~250ms/call), so it ran exactly the minimum 10 rounds. More rounds = lower StdDev = more reliable Mean.
+- **OPS 56.14** means pytest-benchmark measured 56.14 calls/sec. Since each call processes 10K messages: 56.14 x 10,000 = 561K msgs/sec.
 
 #### Sync vs async benchmarks
 
