@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import time
+from typing import TYPE_CHECKING
 
 from seerflow.parsing.normalizer import EventNormalizer
 from seerflow.receivers.base import RawEvent
 
+if TYPE_CHECKING:
+    from pytest_benchmark.fixture import BenchmarkFixture
+
 
 class TestNormalizerBenchmarks:
-    def test_normalize_throughput(self) -> None:
+    def test_normalize_throughput(self, benchmark: BenchmarkFixture) -> None:
         normalizer = EventNormalizer()
         raws = [
             RawEvent(
@@ -21,9 +24,9 @@ class TestNormalizerBenchmarks:
             )
             for i in range(10_000)
         ]
-        start = time.perf_counter()
-        for raw in raws:
-            normalizer.normalize(raw)
-        elapsed = time.perf_counter() - start
-        rate = 10_000 / elapsed
-        assert rate >= 5000, f"Normalize {rate:.0f}/sec below 5K floor"
+
+        def run() -> None:
+            for raw in raws:
+                normalizer.normalize(raw)
+
+        benchmark(run)

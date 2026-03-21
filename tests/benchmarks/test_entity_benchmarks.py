@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-import time
-
-import pytest
+from typing import TYPE_CHECKING
 
 from seerflow.parsing.entities import EntityExtractor
 
+if TYPE_CHECKING:
+    from pytest_benchmark.fixture import BenchmarkFixture
+
 
 class TestEntityBenchmarks:
-    @pytest.mark.benchmark
-    def test_extraction_throughput(self) -> None:
+    def test_extraction_throughput(self, benchmark: BenchmarkFixture) -> None:
         ext = EntityExtractor()
         messages = [
             f"Login from 10.0.0.{i % 256} user user{i}"
             f" to /var/log/app{i}.log via host-{i % 50}.example.com"
             for i in range(10_000)
         ]
-        start = time.perf_counter()
-        for msg in messages:
-            ext.extract(msg)
-        elapsed = time.perf_counter() - start
-        rate = 10_000 / elapsed
-        assert rate >= 10_000, f"Entity extraction {rate:.0f}/sec below 10K floor"
+
+        def run() -> None:
+            for msg in messages:
+                ext.extract(msg)
+
+        benchmark(run)

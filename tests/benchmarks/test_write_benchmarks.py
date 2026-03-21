@@ -1,4 +1,6 @@
 """Write throughput benchmarks."""
+# NOTE: These benchmarks use manual timing (time.perf_counter) because
+# pytest-benchmark fixture is incompatible with asyncio event loops.
 
 from __future__ import annotations
 
