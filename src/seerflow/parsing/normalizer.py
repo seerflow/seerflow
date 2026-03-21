@@ -12,6 +12,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from seerflow.models.event import SeerflowEvent, SeverityLevel
+from seerflow.parsing._constants import MAX_MESSAGE_LEN
 from seerflow.parsing.drain import DrainParser
 from seerflow.parsing.entities import EntityExtractor
 
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-_MAX_MESSAGE_LEN = 32_768
 _USED_ENTITY_TYPES = frozenset({"ip", "user", "host"})
 
 
@@ -52,8 +52,8 @@ class EventNormalizer:
         observed_ns = time.time_ns()
 
         message = raw.data.decode("utf-8", errors="replace")
-        if len(message) > _MAX_MESSAGE_LEN:
-            message = message[:_MAX_MESSAGE_LEN]
+        if len(message) > MAX_MESSAGE_LEN:
+            message = message[:MAX_MESSAGE_LEN]
 
         # Severity from metadata (set by SyslogReceiver) or default
         sev_value = raw.metadata.get(

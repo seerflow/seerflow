@@ -166,3 +166,15 @@ class TestNormalizerExports:
         import seerflow.parsing
 
         assert "EventNormalizer" in seerflow.parsing.__all__
+
+
+class TestConstants:
+    def test_constants_importable(self) -> None:
+        from seerflow.parsing._constants import MAX_MESSAGE_LEN
+
+        assert isinstance(MAX_MESSAGE_LEN, int)
+
+    def test_constants_value(self) -> None:
+        from seerflow.parsing._constants import MAX_MESSAGE_LEN
+
+        assert MAX_MESSAGE_LEN == 32_768

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from seerflow.parsing._constants import MAX_MESSAGE_LEN
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -115,8 +117,6 @@ def _extract_domains(message: str) -> list[str]:
     )
 
 
-_MAX_MESSAGE_LEN = 32_768
-
 # Mapping from entity type name to its extraction function
 _EXTRACTORS: dict[str, Callable[[str], list[str]]] = {
     "ip": _extract_ips,
@@ -152,6 +152,6 @@ class EntityExtractor:
 
     def extract(self, message: str) -> dict[str, list[str]]:
         """Extract all enabled entity types from *message*."""
-        if len(message) > _MAX_MESSAGE_LEN:
-            message = message[:_MAX_MESSAGE_LEN]
+        if len(message) > MAX_MESSAGE_LEN:
+            message = message[:MAX_MESSAGE_LEN]
         return {name: fn(message) for name, fn in self._extractors.items()}
