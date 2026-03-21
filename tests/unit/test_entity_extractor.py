@@ -155,16 +155,15 @@ class TestEntityExtractor:
 
 
 class TestEntityCountCap:
-    def test_entity_count_capped_at_50(self) -> None:
-        """Message with 100 distinct IPs returns at most 50."""
+    def test_entity_count_capped(self) -> None:
+        """Message with 100 distinct IPs returns exactly MAX_ENTITIES_PER_TYPE."""
         from seerflow.parsing._constants import MAX_ENTITIES_PER_TYPE
 
         ips = [f"10.0.{i // 256}.{i % 256}" for i in range(100)]
         message = " ".join(ips)
         ext = EntityExtractor(enabled_types=frozenset({"ip"}))
         result = ext.extract(message)
-        assert len(result["ip"]) <= MAX_ENTITIES_PER_TYPE
-        assert MAX_ENTITIES_PER_TYPE == 50
+        assert len(result["ip"]) == MAX_ENTITIES_PER_TYPE
 
     def test_small_entity_count_not_capped(self) -> None:
         """Message with 3 IPs returns all 3."""

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 class TestDrainBenchmarks:
     def test_parse_throughput(self, benchmark: BenchmarkFixture) -> None:
-        """Parse 10K messages — floor 5K/sec."""
+        """Parse 10K messages — floor 10K/sec."""
         parser = DrainParser()
         messages = [f"Login failed for user user{i} from 10.0.0.{i % 256}" for i in range(10_000)]
 
@@ -23,6 +23,8 @@ class TestDrainBenchmarks:
                 parser.parse(msg)
 
         benchmark(run)
+        rate = 10_000 / benchmark.stats["mean"]
+        assert rate >= 10_000, f"Drain parse {rate:.0f}/sec below 10K floor"
 
 
 @pytest.mark.slow

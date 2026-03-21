@@ -30,3 +30,5 @@ class TestNormalizerBenchmarks:
                 normalizer.normalize(raw)
 
         benchmark(run)
+        rate = 10_000 / benchmark.stats["mean"]
+        assert rate >= 5_000, f"Normalize {rate:.0f}/sec below 5K floor"

@@ -29,6 +29,8 @@ class TestSyslogBenchmarks:
                 _parse_syslog(msg, "127.0.0.1", "udp")
 
         benchmark(run)
+        rate = 10_000 / benchmark.stats["mean"]
+        assert rate >= 50_000, f"Parse throughput {rate:.0f}/sec below 50K floor"
 
     # NOTE: Async benchmarks use manual timing (time.perf_counter) because
     # pytest-benchmark fixture is incompatible with asyncio event loops.

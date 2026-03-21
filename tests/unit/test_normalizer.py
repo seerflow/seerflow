@@ -103,18 +103,22 @@ class TestNormalizerBasicFields:
         result = normalizer.normalize(_make_raw(long_msg))
         assert len(result.message) == 32_768
 
-    def test_raw_bytes_capped_at_65536(self) -> None:
-        """Raw bytes > 65536 are truncated before decode."""
-        from seerflow.parsing.normalizer import _MAX_RAW_BYTES
+    def test_raw_bytes_capped_before_decode(self) -> None:
+        """Content beyond byte cap must not appear in output."""
+        from seerflow.parsing._constants import MAX_RAW_BYTES
 
-        big_data = b"A" * 100_000
-        raw = RawEvent(data=big_data, source_type="t", source_id="s", received_ns=0, metadata={})
+        boundary = b"A" * MAX_RAW_BYTES
+        smuggled = b"SMUGGLED"
+        raw = RawEvent(
+            data=boundary + smuggled,
+            source_type="t",
+            source_id="s",
+            received_ns=0,
+            metadata={},
+        )
         normalizer = EventNormalizer()
         result = normalizer.normalize(raw)
-        # After byte cap (65536) and message cap (32768), message is at most 32768
-        assert len(result.message) <= 32_768
-        # The constant exists and is 65536
-        assert _MAX_RAW_BYTES == 65_536
+        assert "SMUGGLED" not in result.message
 
     def test_normal_bytes_not_truncated(self) -> None:
         """Small raw data is preserved exactly."""
@@ -189,11 +193,17 @@ class TestNormalizerExports:
 
 class TestConstants:
     def test_constants_importable(self) -> None:
-        from seerflow.parsing._constants import MAX_MESSAGE_LEN
+        from seerflow.parsing._constants import (
+            MAX_ENTITIES_PER_TYPE,
+            MAX_MESSAGE_LEN,
+            MAX_RAW_BYTES,
+        )
 
         assert isinstance(MAX_MESSAGE_LEN, int)
+        assert isinstance(MAX_ENTITIES_PER_TYPE, int)
+        assert isinstance(MAX_RAW_BYTES, int)
 
-    def test_constants_value(self) -> None:
-        from seerflow.parsing._constants import MAX_MESSAGE_LEN
+    def test_raw_bytes_derived_from_message_len(self) -> None:
+        from seerflow.parsing._constants import MAX_MESSAGE_LEN, MAX_RAW_BYTES
 
-        assert MAX_MESSAGE_LEN == 32_768
+        assert MAX_RAW_BYTES == MAX_MESSAGE_LEN * 2

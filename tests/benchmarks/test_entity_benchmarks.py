@@ -24,3 +24,5 @@ class TestEntityBenchmarks:
                 ext.extract(msg)
 
         benchmark(run)
+        rate = 10_000 / benchmark.stats["mean"]
+        assert rate >= 10_000, f"Entity extraction {rate:.0f}/sec below 10K floor"
