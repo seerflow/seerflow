@@ -38,6 +38,12 @@ from seerflow.models.query import (
 )
 
 __all__ = [
+    "NS_DOMAIN",
+    "NS_FILE",
+    "NS_HOST",
+    "NS_IP",
+    "NS_PROCESS",
+    "NS_USER",
     "Alert",
     "AlertQuery",
     "AlertType",
@@ -51,12 +57,6 @@ __all__ = [
     "FileEntity",
     "HostEntity",
     "IPEntity",
-    "NS_DOMAIN",
-    "NS_FILE",
-    "NS_HOST",
-    "NS_IP",
-    "NS_PROCESS",
-    "NS_USER",
     "Page",
     "ProcessEntity",
     "SecurityEntity",
