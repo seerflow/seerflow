@@ -432,6 +432,32 @@ class TestPathConfinement:
         assert loaded.receivers.allowed_log_roots == ("/var/log", "/opt/logs")
 
 
+class TestCheckpointDirValidation:
+    """S-117: checkpoint_dir must not contain '..' components."""
+
+    def test_checkpoint_dir_rejects_dotdot(self) -> None:
+        """checkpoint_dir with '..' raises ValueError."""
+        mgr = ReceiverManager()
+        with pytest.raises(ValueError, match=r"checkpoint_dir must not contain '\.\.'"):
+            FileTailReceiver(
+                mgr,
+                source_id="test",
+                file_paths=("/tmp/test.log",),
+                checkpoint_dir="/var/data/../etc",
+            )
+
+    def test_checkpoint_dir_clean_path_accepted(self, tmp_path: Path) -> None:
+        """Normal checkpoint_dir without '..' works fine."""
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=("/tmp/test.log",),
+            checkpoint_dir=str(tmp_path / "checkpoints"),
+        )
+        assert r._checkpoint_path is not None
+
+
 class TestSymlinkProtection:
     """S-117: symlink protection — skip symlinks during glob expansion."""
 

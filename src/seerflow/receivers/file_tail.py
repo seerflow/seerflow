@@ -164,6 +164,11 @@ class FileTailReceiver:
         debounce_ms: int = 1600,
         allowed_log_roots: tuple[str, ...] = (),
     ) -> None:
+        if checkpoint_dir:
+            cp_parts = Path(checkpoint_dir).parts
+            if ".." in cp_parts:
+                msg = f"checkpoint_dir must not contain '..': {checkpoint_dir!r}"
+                raise ValueError(msg)
         self._manager = manager
         self._source_id = source_id
         self._file_paths = file_paths
@@ -211,7 +216,7 @@ class FileTailReceiver:
         return newly_added
 
     async def start(self) -> None:
-        """Expand globs, load checkpoints, and start the watcher task."""
+        """Load checkpoints, expand globs, and start the watcher task."""
         if self._started:
             return
         if self._checkpoint_path:
