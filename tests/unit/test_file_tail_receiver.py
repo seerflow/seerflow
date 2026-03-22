@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
+import pytest
+
+from seerflow.config import ReceiverConfig, load_config
 from seerflow.receivers.base import Receiver
 from seerflow.receivers.file_tail import (
     FileOffset,
     FileTailReceiver,
     _check_rotation,
+    _is_path_allowed,
     _load_checkpoint,
     _read_new_lines,
     _save_checkpoint,
+    _validate_pattern,
 )
 from seerflow.receivers.manager import ReceiverManager
 
@@ -322,3 +328,388 @@ class TestExports:
         import seerflow.receivers
 
         assert "FileTailReceiver" in seerflow.receivers.__all__
+
+
+class TestIsPathAllowed:
+    """Direct unit tests for _is_path_allowed — security boundary function."""
+
+    def test_empty_roots_allows_all(self) -> None:
+        """Empty allowed_roots tuple means no restriction — always True."""
+        assert _is_path_allowed("/any/path/file.log", ()) is True
+
+    def test_path_under_root_allowed(self, tmp_path: Path) -> None:
+        """Path under an allowed root returns True."""
+        root = str(tmp_path)
+        child = str(tmp_path / "subdir" / "file.log")
+        assert _is_path_allowed(child, (root,)) is True
+
+    def test_path_outside_root_rejected(self, tmp_path: Path) -> None:
+        """Path outside all allowed roots returns False."""
+        allowed = str(tmp_path / "allowed")
+        outside = str(tmp_path / "outside" / "file.log")
+        assert _is_path_allowed(outside, (allowed,)) is False
+
+    def test_root_prefix_not_confused_with_directory(self, tmp_path: Path) -> None:
+        """/var/log must NOT match /var/log_archive/file.log."""
+        root = str(tmp_path / "var" / "log")
+        (tmp_path / "var" / "log").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "var" / "log_archive").mkdir(parents=True, exist_ok=True)
+        file_path = str(tmp_path / "var" / "log_archive" / "file.log")
+        assert _is_path_allowed(file_path, (root,)) is False
+
+    def test_multiple_roots_any_match(self, tmp_path: Path) -> None:
+        """File under second root is allowed when first root doesn't match."""
+        root_a = str(tmp_path / "a")
+        root_b = str(tmp_path / "b")
+        (tmp_path / "b" / "sub").mkdir(parents=True, exist_ok=True)
+        file_path = str(tmp_path / "b" / "sub" / "file.log")
+        assert _is_path_allowed(file_path, (root_a, root_b)) is True
+
+
+class TestPathConfinement:
+    """S-117: path confinement — reject .. and enforce allowed_log_roots."""
+
+    def test_reject_dotdot_pattern(self) -> None:
+        """Pattern containing '..' component raises ValueError."""
+        with pytest.raises(ValueError, match=r"\.\.|parent traversal"):
+            _validate_pattern("/var/log/../etc/shadow")
+        with pytest.raises(ValueError, match=r"\.\.|parent traversal"):
+            _validate_pattern("../relative/path")
+        # Clean patterns must NOT raise
+        _validate_pattern("/var/log/syslog")
+        _validate_pattern("/var/log/*.log")
+
+    async def test_reject_path_outside_allowed_roots(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Resolved path not under any allowed root is skipped with warning."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+        outside_log = outside_dir / "sneaky.log"
+        outside_log.write_bytes(b"data\n")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="confined",
+            file_paths=(str(outside_log),),
+            allowed_log_roots=(str(allowed_dir),),
+        )
+        with caplog.at_level(logging.WARNING):
+            await r.start()
+        # File outside allowed root must NOT be watched
+        assert len(r._watched_files) == 0
+        assert "not under any allowed log root" in caplog.text
+        await r.stop()
+
+    async def test_allowed_roots_empty_allows_all(self, tmp_path: Path) -> None:
+        """Empty allowed_log_roots means no restriction — all files accepted."""
+        f = tmp_path / "any.log"
+        f.write_bytes(b"data\n")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="open",
+            file_paths=(str(f),),
+            allowed_log_roots=(),  # empty = no restriction
+        )
+        await r.start()
+        assert len(r._watched_files) == 1
+        await r.stop()
+
+    def test_config_allowed_log_roots(self, tmp_path: Path) -> None:
+        """ReceiverConfig has allowed_log_roots field and YAML loads it."""
+        # Default is empty tuple
+        cfg = ReceiverConfig()
+        assert cfg.allowed_log_roots == ()
+
+        # YAML round-trip
+        yaml_content = "receivers:\n  allowed_log_roots:\n    - /var/log\n    - /opt/logs\n"
+        config_file = tmp_path / "seerflow.yaml"
+        config_file.write_text(yaml_content)
+        loaded = load_config(str(config_file))
+        assert loaded.receivers.allowed_log_roots == ("/var/log", "/opt/logs")
+
+
+class TestCheckpointDirValidation:
+    """S-117: checkpoint_dir must not contain '..' components."""
+
+    def test_checkpoint_dir_rejects_dotdot(self) -> None:
+        """checkpoint_dir with '..' raises ValueError."""
+        mgr = ReceiverManager()
+        with pytest.raises(ValueError, match=r"checkpoint_dir must not contain '\.\.'"):
+            FileTailReceiver(
+                mgr,
+                source_id="test",
+                file_paths=("/tmp/test.log",),
+                checkpoint_dir="/var/data/../etc",
+            )
+
+    def test_checkpoint_dir_clean_path_accepted(self, tmp_path: Path) -> None:
+        """Normal checkpoint_dir without '..' works fine."""
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=("/tmp/test.log",),
+            checkpoint_dir=str(tmp_path / "checkpoints"),
+        )
+        assert r._checkpoint_path is not None
+
+
+class TestSymlinkProtection:
+    """S-117: symlink protection — skip symlinks during glob expansion."""
+
+    async def test_symlink_skipped_during_glob(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Symlink in glob results is skipped with a warning log."""
+        real_file = tmp_path / "real.log"
+        real_file.write_bytes(b"data\n")
+        symlink_file = tmp_path / "link.log"
+        symlink_file.symlink_to(real_file)
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="symtest",
+            file_paths=(pattern,),
+        )
+        with caplog.at_level(logging.WARNING):
+            await r.start()
+        # Only the real file should be watched, not the symlink
+        resolved_real = str(real_file.resolve())
+        assert resolved_real in r._watched_files
+        # The symlink target resolves to the same path, but the symlink
+        # itself must have been skipped — so only 1 watched file
+        assert len(r._watched_files) == 1
+        assert "symlink" in caplog.text.lower()
+        await r.stop()
+
+    async def test_regular_file_not_skipped(self, tmp_path: Path) -> None:
+        """Normal (non-symlink) file passes through glob expansion."""
+        f = tmp_path / "normal.log"
+        f.write_bytes(b"data\n")
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="regular",
+            file_paths=(pattern,),
+        )
+        await r.start()
+        assert len(r._watched_files) == 1
+        assert str(f.resolve()) in r._watched_files
+        await r.stop()
+
+
+class TestLiteralReturnType:
+    """Task 4: _check_rotation must return one of the four Literal values."""
+
+    def test_check_rotation_return_type(self, tmp_path: Path) -> None:
+        """Return value is always one of the four allowed Literal strings."""
+        valid_values = {"ok", "rotated", "truncated", "deleted"}
+
+        # "ok" case
+        f = tmp_path / "test.log"
+        f.write_bytes(b"data\n")
+        inode = f.stat().st_ino
+        assert _check_rotation(f, FileOffset(offset=5, inode=inode)) in valid_values
+
+        # "rotated" case
+        assert _check_rotation(f, FileOffset(offset=5, inode=99999)) in valid_values
+
+        # "truncated" case
+        assert _check_rotation(f, FileOffset(offset=9999, inode=inode)) in valid_values
+
+        # "deleted" case
+        missing = tmp_path / "gone.log"
+        assert _check_rotation(missing, FileOffset(offset=0, inode=1)) in valid_values
+
+    def test_no_encoding_param(self) -> None:
+        """FileTailReceiver.__init__ must not accept an 'encoding' parameter."""
+        import inspect
+
+        sig = inspect.signature(FileTailReceiver.__init__)
+        assert "encoding" not in sig.parameters, (
+            "FileTailReceiver.__init__ should not have an 'encoding' parameter"
+        )
+
+
+class TestReGlobOnNewFiles:
+    """S-117: re-glob on new file events — discover files created after start."""
+
+    async def test_new_file_discovered_after_start(self, tmp_path: Path) -> None:
+        """Create a new file matching the glob after start → it gets picked up."""
+        existing = tmp_path / "app.log"
+        existing.write_bytes(b"initial\n")
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="reglob",
+            file_paths=(pattern,),
+            debounce_ms=200,
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            # Create a NEW file matching the glob after start
+            new_file = tmp_path / "new_app.log"
+            new_file.write_bytes(b"new content\n")
+            # Wait for the watcher to pick it up via re-glob
+            deadline = asyncio.get_running_loop().time() + 5.0
+            resolved_new = str(new_file.resolve())
+            while asyncio.get_running_loop().time() < deadline:
+                if resolved_new in r._watched_files:
+                    break
+                await asyncio.sleep(0.2)
+            assert resolved_new in r._watched_files, (
+                f"New file {resolved_new} not discovered via re-glob"
+            )
+        finally:
+            await r.stop()
+
+    async def test_non_matching_new_file_ignored(self, tmp_path: Path) -> None:
+        """New file NOT matching the glob pattern is ignored by re-glob."""
+        existing = tmp_path / "app.log"
+        existing.write_bytes(b"initial\n")
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="reglob",
+            file_paths=(pattern,),
+            debounce_ms=200,
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            # Create a file that does NOT match the *.log pattern
+            non_matching = tmp_path / "data.txt"
+            non_matching.write_bytes(b"should be ignored\n")
+            # Give watcher time to process the event
+            await asyncio.sleep(1.0)
+            resolved_nm = str(non_matching.resolve())
+            assert resolved_nm not in r._watched_files, (
+                f"Non-matching file {resolved_nm} should NOT be in watched_files"
+            )
+        finally:
+            await r.stop()
+
+    async def test_re_glob_respects_allowed_roots(self, tmp_path: Path) -> None:
+        """New file outside allowed_log_roots is NOT added via re-glob."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+        # Existing file inside allowed dir
+        existing = allowed_dir / "app.log"
+        existing.write_bytes(b"initial\n")
+        # Glob pattern covers both dirs (use ** recursive or multiple patterns)
+        pattern_allowed = str(allowed_dir / "*.log")
+        pattern_outside = str(outside_dir / "*.log")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="reglob",
+            file_paths=(pattern_allowed, pattern_outside),
+            debounce_ms=200,
+            allowed_log_roots=(str(allowed_dir),),
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            # Create new file outside allowed roots
+            outside_file = outside_dir / "sneaky.log"
+            outside_file.write_bytes(b"sneaky data\n")
+            # Also create a new file inside allowed roots
+            new_allowed = allowed_dir / "new_app.log"
+            new_allowed.write_bytes(b"allowed data\n")
+            # Wait for re-glob to pick up the allowed file
+            deadline = asyncio.get_running_loop().time() + 5.0
+            resolved_allowed = str(new_allowed.resolve())
+            while asyncio.get_running_loop().time() < deadline:
+                if resolved_allowed in r._watched_files:
+                    break
+                await asyncio.sleep(0.2)
+            assert resolved_allowed in r._watched_files, (
+                "New file under allowed root should be discovered"
+            )
+            resolved_outside = str(outside_file.resolve())
+            assert resolved_outside not in r._watched_files, (
+                "File outside allowed roots must NOT be added via re-glob"
+            )
+        finally:
+            await r.stop()
+
+
+class TestCheckpointKeyFiltering:
+    """S-117: checkpoint keys must be filtered by allowed_log_roots on load."""
+
+    async def test_checkpoint_keys_filtered_by_allowed_roots(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Keys in checkpoint outside allowed roots are dropped on start()."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+
+        # Create a real file inside allowed dir so glob has something to match
+        allowed_log = allowed_dir / "app.log"
+        allowed_log.write_bytes(b"data\n")
+        allowed_resolved = str(allowed_log.resolve())
+        outside_resolved = str((outside_dir / "evil.log").resolve())
+
+        # Write a checkpoint with both an allowed and an outside path
+        cp_file = tmp_path / "file_offsets.json"
+        import json
+
+        cp_data = {
+            allowed_resolved: {"offset": 10, "inode": 1},
+            outside_resolved: {"offset": 20, "inode": 2},
+        }
+        cp_file.write_text(json.dumps(cp_data))
+
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="ckpt-filter",
+            file_paths=(str(allowed_log),),
+            checkpoint_dir=str(tmp_path),
+            allowed_log_roots=(str(allowed_dir),),
+        )
+        await r.start()
+        # The outside path must have been filtered out of _offsets
+        assert allowed_resolved in r._offsets
+        assert outside_resolved not in r._offsets
+        await r.stop()
+
+
+class TestAllowedRootsResolvedAtInit:
+    """S-117: allowed_log_roots should be resolved once at __init__."""
+
+    def test_allowed_roots_resolved_at_init(self, tmp_path: Path) -> None:
+        """Symlink roots are resolved eagerly — stored value is the real path."""
+        real_dir = tmp_path / "real_logs"
+        real_dir.mkdir()
+        link_dir = tmp_path / "link_logs"
+        link_dir.symlink_to(real_dir)
+
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="resolve-test",
+            file_paths=("/tmp/test.log",),
+            allowed_log_roots=(str(link_dir),),
+        )
+        # The stored root should be the resolved (real) path, not the symlink
+        assert len(r._allowed_log_roots) == 1
+        assert r._allowed_log_roots[0] == str(real_dir.resolve())
+        assert str(link_dir) != r._allowed_log_roots[0]

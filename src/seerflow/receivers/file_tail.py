@@ -17,7 +17,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import watchfiles
 
@@ -71,6 +71,30 @@ def _load_checkpoint(path: Path) -> dict[str, FileOffset]:
         return {}
 
 
+def _validate_pattern(pattern: str) -> None:
+    """Reject glob patterns containing parent traversal (``..``) components.
+
+    Raises:
+        ValueError: If any path component is ``..``.
+    """
+    parts = Path(pattern).parts
+    if ".." in parts:
+        msg = f"Pattern contains parent traversal (..): {pattern!r}"
+        raise ValueError(msg)
+
+
+def _is_path_allowed(resolved: str, allowed_roots: tuple[str, ...]) -> bool:
+    """Check whether *resolved* path is under at least one allowed root.
+
+    Returns ``True`` if *allowed_roots* is empty (no restriction) or the
+    resolved path starts with one of the allowed root directories.
+    """
+    if not allowed_roots:
+        return True
+    resolved_path = Path(resolved)
+    return any(resolved_path.is_relative_to(root) for root in allowed_roots)
+
+
 _MAX_BYTES_PER_READ = 64 * 1024  # 64 KB per call to bound memory usage
 
 
@@ -90,7 +114,10 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
     return complete, new_offset
 
 
-def _check_rotation(path: Path, saved: FileOffset) -> str:
+RotationStatus = Literal["ok", "rotated", "truncated", "deleted"]
+
+
+def _check_rotation(path: Path, saved: FileOffset) -> RotationStatus:
     """Detect log rotation or truncation.
 
     Returns one of: ``"ok"``, ``"rotated"``, ``"truncated"``, ``"deleted"``.
@@ -113,10 +140,10 @@ class FileTailReceiver:
     """
 
     __slots__ = (
+        "_allowed_log_roots",
         "_checkpoint_dir",
         "_checkpoint_path",
         "_debounce_ms",
-        "_encoding",
         "_file_paths",
         "_manager",
         "_offsets",
@@ -134,15 +161,22 @@ class FileTailReceiver:
         source_id: str,
         file_paths: tuple[str, ...],
         checkpoint_dir: str = "",
-        encoding: str = "utf-8",
         debounce_ms: int = 1600,
+        allowed_log_roots: tuple[str, ...] = (),
     ) -> None:
+        if checkpoint_dir:
+            cp_parts = Path(checkpoint_dir).parts
+            if ".." in cp_parts:
+                msg = f"checkpoint_dir must not contain '..': {checkpoint_dir!r}"
+                raise ValueError(msg)
         self._manager = manager
         self._source_id = source_id
         self._file_paths = file_paths
         self._checkpoint_dir = checkpoint_dir
-        self._encoding = encoding
         self._debounce_ms = debounce_ms
+        self._allowed_log_roots: tuple[str, ...] = tuple(
+            str(Path(r).resolve()) for r in allowed_log_roots
+        )
         self._offsets: dict[str, FileOffset] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self._started = False
@@ -152,23 +186,50 @@ class FileTailReceiver:
             Path(checkpoint_dir) / "file_offsets.json" if checkpoint_dir else None
         )
 
-    async def start(self) -> None:
-        """Expand globs, load checkpoints, and start the watcher task."""
-        if self._started:
-            return
-        if self._checkpoint_path:
-            self._offsets = _load_checkpoint(self._checkpoint_path)
+    def _expand_globs(self) -> set[str]:
+        """Expand glob patterns into validated, resolved file paths.
+
+        Skips symlinks and paths outside allowed roots. Initialises offsets
+        for newly-discovered files (tail from end). Returns the set of
+        *new* paths that were not previously in ``_watched_files``.
+        """
+        newly_added: set[str] = set()
         for pattern in self._file_paths:
+            _validate_pattern(pattern)
             for match in glob_module.glob(pattern, recursive=True):
                 p = Path(match)
+                if p.is_symlink():
+                    _log.warning("Skipping symlink %s — symlinks are not followed", p)
+                    continue
                 if p.is_file():
                     path_str = str(p.resolve())
+                    if path_str in self._watched_files:
+                        continue
+                    if not _is_path_allowed(path_str, self._allowed_log_roots):
+                        _log.warning("Skipping %s — not under any allowed log root", path_str)
+                        continue
                     self._watched_files.add(path_str)
                     if path_str not in self._offsets:
                         stat = p.stat()
                         self._offsets[path_str] = FileOffset(
                             offset=stat.st_size, inode=stat.st_ino
                         )
+                    newly_added.add(path_str)
+        return newly_added
+
+    async def start(self) -> None:
+        """Load checkpoints, expand globs, and start the watcher task."""
+        if self._started:
+            return
+        if self._checkpoint_path:
+            self._offsets = _load_checkpoint(self._checkpoint_path)
+            if self._allowed_log_roots:
+                self._offsets = {
+                    k: v
+                    for k, v in self._offsets.items()
+                    if _is_path_allowed(k, self._allowed_log_roots)
+                }
+        self._expand_globs()
         self._started = True
         self._watcher_task = asyncio.create_task(self._watch_loop())
 
@@ -192,7 +253,13 @@ class FileTailReceiver:
         await asyncio.wait_for(self._ready.wait(), timeout=timeout)
 
     async def _watch_loop(self) -> None:
-        """Watch parent directories for file changes and process them."""
+        """Watch parent directories for file changes and process them.
+
+        When a ``Change.added`` event is detected, re-runs glob expansion
+        to discover new files (e.g. after log rotation). If any newly
+        discovered file lives in a directory not yet being watched, the
+        loop restarts ``awatch`` with the updated directory set.
+        """
         watch_dirs: set[str] = set()
         for fp in self._watched_files:
             watch_dirs.add(str(Path(fp).parent))
@@ -201,23 +268,36 @@ class FileTailReceiver:
             return
         self._ready.set()
         try:
-            async for changes in watchfiles.awatch(
-                *watch_dirs,
-                watch_filter=None,
-                debounce=self._debounce_ms,
-            ):
-                if not self._started:
-                    break
-                modified_paths: set[str] = set()
-                for _change_type, change_path in changes:
-                    resolved = str(Path(change_path).resolve())
-                    if resolved in self._watched_files:
-                        modified_paths.add(resolved)
-                for path_str in modified_paths:
-                    try:
-                        await self._process_file(path_str)
-                    except OSError as exc:
-                        _log.warning("IO error processing %s: %s", path_str, exc)
+            while self._started:
+                restart_needed = False
+                async for changes in watchfiles.awatch(
+                    *watch_dirs,
+                    watch_filter=None,
+                    debounce=self._debounce_ms,
+                ):
+                    if not self._started:
+                        return
+                    # Check whether any change is an "added" event
+                    has_added = any(ct == watchfiles.Change.added for ct, _ in changes)
+                    if has_added:
+                        new_paths = self._expand_globs()
+                        for new_path in new_paths:
+                            parent = str(Path(new_path).parent)
+                            if parent not in watch_dirs:
+                                watch_dirs.add(parent)
+                                restart_needed = True
+                    modified_paths: set[str] = set()
+                    for _change_type, change_path in changes:
+                        resolved = str(Path(change_path).resolve())
+                        if resolved in self._watched_files:
+                            modified_paths.add(resolved)
+                    for path_str in modified_paths:
+                        try:
+                            await self._process_file(path_str)
+                        except OSError as exc:
+                            _log.warning("IO error processing %s: %s", path_str, exc)
+                    if restart_needed:
+                        break  # break inner awatch loop to restart with new dirs
         except asyncio.CancelledError:
             return
 
