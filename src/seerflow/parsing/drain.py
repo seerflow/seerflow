@@ -42,7 +42,7 @@ class DrainParser:
     message. IPs appear as ``<IP>``, UUIDs as ``<UUID>``.
     """
 
-    __slots__ = ("_max_message_len", "_miner")
+    __slots__ = ("_max_message_len", "_miner", "_persistence")
 
     def __init__(
         self,
@@ -63,6 +63,7 @@ class DrainParser:
             raise ValueError(msg)
 
         from drain3 import TemplateMiner
+        from drain3.memory_buffer_persistence import MemoryBufferPersistence
         from drain3.template_miner_config import TemplateMinerConfig
 
         config = TemplateMinerConfig()
@@ -70,8 +71,18 @@ class DrainParser:
         config.drain_depth = depth
         config.drain_max_clusters = max_clusters
         config.parametrize_numeric_tokens = True
+        # Suppress periodic auto-save: with interval=0 Drain3 would save on
+        # every add_log_message(); a large value effectively disables periodic
+        # saves while still allowing saves on template changes (to the cheap
+        # in-memory buffer). We control external persistence via get_state().
+        config.snapshot_interval_minutes = 99_999_999
 
-        self._miner = TemplateMiner(config=config)
+        self._persistence = MemoryBufferPersistence()
+        # TemplateMiner calls load_state() in __init__; MemoryBufferPersistence
+        # starts with state=None so the load finds nothing (expected).
+        self._miner = TemplateMiner(
+            persistence_handler=self._persistence, config=config
+        )
         self._max_message_len = max_message_len
 
     def parse(self, message: str) -> tuple[int, str, tuple[str, ...]]:
@@ -97,3 +108,17 @@ class DrainParser:
     def template_count(self) -> int:
         """Number of unique templates discovered so far."""
         return len(self._miner.drain.clusters)
+
+    def get_state(self) -> bytes:
+        """Serialize current template miner state to bytes.
+
+        Triggers TemplateMiner's internal serialization (jsonpickle + zlib
+        compression) and returns the result. Suitable for passing to
+        ``ModelStore.save_state()``.
+        """
+        self._miner.save_state("checkpoint")
+        state = self._persistence.state
+        if state is None:
+            msg = "save_state produced no output"
+            raise RuntimeError(msg)
+        return bytes(state)
