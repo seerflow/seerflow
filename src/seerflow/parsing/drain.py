@@ -80,9 +80,7 @@ class DrainParser:
         self._persistence = MemoryBufferPersistence()
         # TemplateMiner calls load_state() in __init__; MemoryBufferPersistence
         # starts with state=None so the load finds nothing (expected).
-        self._miner = TemplateMiner(
-            persistence_handler=self._persistence, config=config
-        )
+        self._miner = TemplateMiner(persistence_handler=self._persistence, config=config)
         self._max_message_len = max_message_len
 
     def parse(self, message: str) -> tuple[int, str, tuple[str, ...]]:

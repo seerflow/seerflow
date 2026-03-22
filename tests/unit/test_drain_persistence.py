@@ -61,12 +61,12 @@ class TestLoadState:
 
     def test_corrupted_bytes_raises_valueerror(self) -> None:
         parser = DrainParser()
-        with pytest.raises(ValueError, match="[Dd]eserializ|[Cc]orrupt|[Ff]ail"):
+        with pytest.raises(ValueError, match=r"[Dd]eserializ|[Cc]orrupt|[Ff]ail"):
             parser.load_state(b"not valid state data")
 
     def test_empty_bytes_raises_valueerror(self) -> None:
         parser = DrainParser()
-        with pytest.raises(ValueError, match="[Ee]mpty|[Dd]eserializ"):
+        with pytest.raises(ValueError, match=r"[Ee]mpty|[Dd]eserializ"):
             parser.load_state(b"")
 
 
