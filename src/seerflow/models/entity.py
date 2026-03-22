@@ -150,10 +150,10 @@ def normalize_username(raw: str, default_domain: str = "") -> tuple[str, str]:
 
 def generate_user_id(username: str, domain: str) -> uuid.UUID:
     """Deterministic UUID5 for a user entity."""
-    canonical = f"{domain}:{username}" if domain else username
-    if not canonical.strip():
-        msg = "canonical user string is empty"
+    if not username.strip():
+        msg = "username is empty"
         raise ValueError(msg)
+    canonical = f"{domain}:{username}" if domain else username
     return uuid.uuid5(NS_USER, canonical)
 
 
