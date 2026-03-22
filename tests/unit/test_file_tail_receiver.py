@@ -478,6 +478,39 @@ class TestSymlinkProtection:
         await r.stop()
 
 
+class TestLiteralReturnType:
+    """Task 4: _check_rotation must return one of the four Literal values."""
+
+    def test_check_rotation_return_type(self, tmp_path: Path) -> None:
+        """Return value is always one of the four allowed Literal strings."""
+        valid_values = {"ok", "rotated", "truncated", "deleted"}
+
+        # "ok" case
+        f = tmp_path / "test.log"
+        f.write_bytes(b"data\n")
+        inode = f.stat().st_ino
+        assert _check_rotation(f, FileOffset(offset=5, inode=inode)) in valid_values
+
+        # "rotated" case
+        assert _check_rotation(f, FileOffset(offset=5, inode=99999)) in valid_values
+
+        # "truncated" case
+        assert _check_rotation(f, FileOffset(offset=9999, inode=inode)) in valid_values
+
+        # "deleted" case
+        missing = tmp_path / "gone.log"
+        assert _check_rotation(missing, FileOffset(offset=0, inode=1)) in valid_values
+
+    def test_no_encoding_param(self) -> None:
+        """FileTailReceiver.__init__ must not accept an 'encoding' parameter."""
+        import inspect
+
+        sig = inspect.signature(FileTailReceiver.__init__)
+        assert "encoding" not in sig.parameters, (
+            "FileTailReceiver.__init__ should not have an 'encoding' parameter"
+        )
+
+
 class TestReGlobOnNewFiles:
     """S-117: re-glob on new file events — discover files created after start."""
 

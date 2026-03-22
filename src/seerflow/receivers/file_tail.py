@@ -17,7 +17,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import watchfiles
 
@@ -114,7 +114,10 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
     return complete, new_offset
 
 
-def _check_rotation(path: Path, saved: FileOffset) -> str:
+RotationStatus = Literal["ok", "rotated", "truncated", "deleted"]
+
+
+def _check_rotation(path: Path, saved: FileOffset) -> RotationStatus:
     """Detect log rotation or truncation.
 
     Returns one of: ``"ok"``, ``"rotated"``, ``"truncated"``, ``"deleted"``.
@@ -141,7 +144,6 @@ class FileTailReceiver:
         "_checkpoint_dir",
         "_checkpoint_path",
         "_debounce_ms",
-        "_encoding",
         "_file_paths",
         "_manager",
         "_offsets",
@@ -159,7 +161,6 @@ class FileTailReceiver:
         source_id: str,
         file_paths: tuple[str, ...],
         checkpoint_dir: str = "",
-        encoding: str = "utf-8",
         debounce_ms: int = 1600,
         allowed_log_roots: tuple[str, ...] = (),
     ) -> None:
@@ -167,7 +168,6 @@ class FileTailReceiver:
         self._source_id = source_id
         self._file_paths = file_paths
         self._checkpoint_dir = checkpoint_dir
-        self._encoding = encoding
         self._debounce_ms = debounce_ms
         self._allowed_log_roots = allowed_log_roots
         self._offsets: dict[str, FileOffset] = {}
