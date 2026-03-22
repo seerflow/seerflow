@@ -501,9 +501,9 @@ class TestReGlobOnNewFiles:
             new_file = tmp_path / "new_app.log"
             new_file.write_bytes(b"new content\n")
             # Wait for the watcher to pick it up via re-glob
-            deadline = asyncio.get_event_loop().time() + 5.0
+            deadline = asyncio.get_running_loop().time() + 5.0
             resolved_new = str(new_file.resolve())
-            while asyncio.get_event_loop().time() < deadline:
+            while asyncio.get_running_loop().time() < deadline:
                 if resolved_new in r._watched_files:
                     break
                 await asyncio.sleep(0.2)
@@ -572,9 +572,9 @@ class TestReGlobOnNewFiles:
             new_allowed = allowed_dir / "new_app.log"
             new_allowed.write_bytes(b"allowed data\n")
             # Wait for re-glob to pick up the allowed file
-            deadline = asyncio.get_event_loop().time() + 5.0
+            deadline = asyncio.get_running_loop().time() + 5.0
             resolved_allowed = str(new_allowed.resolve())
-            while asyncio.get_event_loop().time() < deadline:
+            while asyncio.get_running_loop().time() < deadline:
                 if resolved_allowed in r._watched_files:
                     break
                 await asyncio.sleep(0.2)

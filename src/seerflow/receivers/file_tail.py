@@ -268,8 +268,8 @@ class FileTailReceiver:
                     has_added = any(ct == watchfiles.Change.added for ct, _ in changes)
                     if has_added:
                         new_paths = self._expand_globs()
-                        for np in new_paths:
-                            parent = str(Path(np).parent)
+                        for new_path in new_paths:
+                            parent = str(Path(new_path).parent)
                             if parent not in watch_dirs:
                                 watch_dirs.add(parent)
                                 restart_needed = True
