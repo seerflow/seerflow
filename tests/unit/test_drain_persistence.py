@@ -180,3 +180,17 @@ class TestLoadDrainState:
         await load_drain_state(parser2, store, key="drain3:custom")
 
         store.load_state.assert_called_once_with("drain3:custom")
+
+
+class TestExports:
+    def test_import_from_parsing(self) -> None:
+        from seerflow.parsing import load_drain_state, save_drain_state
+
+        assert callable(load_drain_state)
+        assert callable(save_drain_state)
+
+    def test_all_contains_persistence_functions(self) -> None:
+        import seerflow.parsing as mod
+
+        assert "load_drain_state" in mod.__all__
+        assert "save_drain_state" in mod.__all__
