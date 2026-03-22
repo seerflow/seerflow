@@ -430,3 +430,49 @@ class TestPathConfinement:
         config_file.write_text(yaml_content)
         loaded = load_config(str(config_file))
         assert loaded.receivers.allowed_log_roots == ("/var/log", "/opt/logs")
+
+
+class TestSymlinkProtection:
+    """S-117: symlink protection — skip symlinks during glob expansion."""
+
+    async def test_symlink_skipped_during_glob(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Symlink in glob results is skipped with a warning log."""
+        real_file = tmp_path / "real.log"
+        real_file.write_bytes(b"data\n")
+        symlink_file = tmp_path / "link.log"
+        symlink_file.symlink_to(real_file)
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="symtest",
+            file_paths=(pattern,),
+        )
+        with caplog.at_level(logging.WARNING):
+            await r.start()
+        # Only the real file should be watched, not the symlink
+        resolved_real = str(real_file.resolve())
+        assert resolved_real in r._watched_files
+        # The symlink target resolves to the same path, but the symlink
+        # itself must have been skipped — so only 1 watched file
+        assert len(r._watched_files) == 1
+        assert "symlink" in caplog.text.lower()
+        await r.stop()
+
+    async def test_regular_file_not_skipped(self, tmp_path: Path) -> None:
+        """Normal (non-symlink) file passes through glob expansion."""
+        f = tmp_path / "normal.log"
+        f.write_bytes(b"data\n")
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="regular",
+            file_paths=(pattern,),
+        )
+        await r.start()
+        assert len(r._watched_files) == 1
+        assert str(f.resolve()) in r._watched_files
+        await r.stop()

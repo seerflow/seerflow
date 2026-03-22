@@ -189,6 +189,9 @@ class FileTailReceiver:
             _validate_pattern(pattern)
             for match in glob_module.glob(pattern, recursive=True):
                 p = Path(match)
+                if p.is_symlink():
+                    _log.warning("Skipping symlink %s — symlinks are not followed", p)
+                    continue
                 if p.is_file():
                     path_str = str(p.resolve())
                     if not _is_path_allowed(path_str, self._allowed_log_roots):
