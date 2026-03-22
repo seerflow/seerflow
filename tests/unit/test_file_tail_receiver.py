@@ -646,3 +646,69 @@ class TestReGlobOnNewFiles:
             )
         finally:
             await r.stop()
+
+
+class TestCheckpointKeyFiltering:
+    """S-117: checkpoint keys must be filtered by allowed_log_roots on load."""
+
+    async def test_checkpoint_keys_filtered_by_allowed_roots(
+        self, tmp_path: Path,
+    ) -> None:
+        """Keys in checkpoint outside allowed roots are dropped on start()."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+
+        # Create a real file inside allowed dir so glob has something to match
+        allowed_log = allowed_dir / "app.log"
+        allowed_log.write_bytes(b"data\n")
+        allowed_resolved = str(allowed_log.resolve())
+        outside_resolved = str((outside_dir / "evil.log").resolve())
+
+        # Write a checkpoint with both an allowed and an outside path
+        cp_file = tmp_path / "file_offsets.json"
+        import json
+
+        cp_data = {
+            allowed_resolved: {"offset": 10, "inode": 1},
+            outside_resolved: {"offset": 20, "inode": 2},
+        }
+        cp_file.write_text(json.dumps(cp_data))
+
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="ckpt-filter",
+            file_paths=(str(allowed_log),),
+            checkpoint_dir=str(tmp_path),
+            allowed_log_roots=(str(allowed_dir),),
+        )
+        await r.start()
+        # The outside path must have been filtered out of _offsets
+        assert allowed_resolved in r._offsets
+        assert outside_resolved not in r._offsets
+        await r.stop()
+
+
+class TestAllowedRootsResolvedAtInit:
+    """S-117: allowed_log_roots should be resolved once at __init__."""
+
+    def test_allowed_roots_resolved_at_init(self, tmp_path: Path) -> None:
+        """Symlink roots are resolved eagerly — stored value is the real path."""
+        real_dir = tmp_path / "real_logs"
+        real_dir.mkdir()
+        link_dir = tmp_path / "link_logs"
+        link_dir.symlink_to(real_dir)
+
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="resolve-test",
+            file_paths=("/tmp/test.log",),
+            allowed_log_roots=(str(link_dir),),
+        )
+        # The stored root should be the resolved (real) path, not the symlink
+        assert len(r._allowed_log_roots) == 1
+        assert r._allowed_log_roots[0] == str(real_dir.resolve())
+        assert str(link_dir) != r._allowed_log_roots[0]

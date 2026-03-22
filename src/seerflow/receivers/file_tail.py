@@ -92,7 +92,7 @@ def _is_path_allowed(resolved: str, allowed_roots: tuple[str, ...]) -> bool:
     if not allowed_roots:
         return True
     resolved_path = Path(resolved)
-    return any(resolved_path.is_relative_to(Path(root).resolve()) for root in allowed_roots)
+    return any(resolved_path.is_relative_to(root) for root in allowed_roots)
 
 
 _MAX_BYTES_PER_READ = 64 * 1024  # 64 KB per call to bound memory usage
@@ -174,7 +174,9 @@ class FileTailReceiver:
         self._file_paths = file_paths
         self._checkpoint_dir = checkpoint_dir
         self._debounce_ms = debounce_ms
-        self._allowed_log_roots = allowed_log_roots
+        self._allowed_log_roots: tuple[str, ...] = tuple(
+            str(Path(r).resolve()) for r in allowed_log_roots
+        )
         self._offsets: dict[str, FileOffset] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self._started = False
@@ -221,6 +223,12 @@ class FileTailReceiver:
             return
         if self._checkpoint_path:
             self._offsets = _load_checkpoint(self._checkpoint_path)
+            if self._allowed_log_roots:
+                self._offsets = {
+                    k: v
+                    for k, v in self._offsets.items()
+                    if _is_path_allowed(k, self._allowed_log_roots)
+                }
         self._expand_globs()
         self._started = True
         self._watcher_task = asyncio.create_task(self._watch_loop())
