@@ -652,7 +652,8 @@ class TestCheckpointKeyFiltering:
     """S-117: checkpoint keys must be filtered by allowed_log_roots on load."""
 
     async def test_checkpoint_keys_filtered_by_allowed_roots(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Keys in checkpoint outside allowed roots are dropped on start()."""
         allowed_dir = tmp_path / "allowed"
