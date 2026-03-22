@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from seerflow.parsing.drain import DrainParser
@@ -87,3 +89,94 @@ class TestLargeState:
         for msg, expected_tid in list(templates_before.items())[:10]:
             tid, _, _ = parser2.parse(msg)
             assert tid == expected_tid
+
+
+class TestSaveDrainState:
+    async def test_save_calls_model_store(self) -> None:
+        from seerflow.parsing.drain_persistence import save_drain_state
+
+        parser = DrainParser()
+        parser.parse("Login failed for user admin")
+
+        store = AsyncMock()
+        store.save_state = AsyncMock()
+
+        await save_drain_state(parser, store)
+
+        store.save_state.assert_called_once()
+        key, data = store.save_state.call_args[0]
+        assert key == "drain3:global"
+        assert isinstance(data, bytes)
+        assert len(data) > 0
+
+    async def test_save_custom_key(self) -> None:
+        from seerflow.parsing.drain_persistence import save_drain_state
+
+        parser = DrainParser()
+        parser.parse("test message")
+
+        store = AsyncMock()
+        store.save_state = AsyncMock()
+
+        await save_drain_state(parser, store, key="drain3:source1")
+
+        key, _ = store.save_state.call_args[0]
+        assert key == "drain3:source1"
+
+
+class TestLoadDrainState:
+    async def test_load_returns_true_when_state_exists(self) -> None:
+        from seerflow.parsing.drain_persistence import load_drain_state
+
+        parser = DrainParser()
+        parser.parse("Login failed for user admin")
+        state = parser.get_state()
+
+        store = AsyncMock()
+        store.load_state = AsyncMock(return_value=state)
+
+        parser2 = DrainParser()
+        loaded = await load_drain_state(parser2, store)
+
+        assert loaded is True
+        assert parser2.template_count == parser.template_count
+        store.load_state.assert_called_once_with("drain3:global")
+
+    async def test_load_returns_false_when_no_state(self) -> None:
+        from seerflow.parsing.drain_persistence import load_drain_state
+
+        store = AsyncMock()
+        store.load_state = AsyncMock(return_value=None)
+
+        parser = DrainParser()
+        loaded = await load_drain_state(parser, store)
+
+        assert loaded is False
+        assert parser.template_count == 0
+
+    async def test_load_returns_false_on_corruption(self) -> None:
+        from seerflow.parsing.drain_persistence import load_drain_state
+
+        store = AsyncMock()
+        store.load_state = AsyncMock(return_value=b"corrupted data")
+
+        parser = DrainParser()
+        loaded = await load_drain_state(parser, store)
+
+        assert loaded is False
+        assert parser.template_count == 0
+
+    async def test_load_custom_key(self) -> None:
+        from seerflow.parsing.drain_persistence import load_drain_state
+
+        parser = DrainParser()
+        parser.parse("test")
+        state = parser.get_state()
+
+        store = AsyncMock()
+        store.load_state = AsyncMock(return_value=state)
+
+        parser2 = DrainParser()
+        await load_drain_state(parser2, store, key="drain3:custom")
+
+        store.load_state.assert_called_once_with("drain3:custom")
