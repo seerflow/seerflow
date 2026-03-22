@@ -122,3 +122,26 @@ class DrainParser:
             msg = "save_state produced no output"
             raise RuntimeError(msg)
         return bytes(state)
+
+    def load_state(self, data: bytes) -> None:
+        """Restore template miner state from previously serialized bytes.
+
+        After loading, existing template IDs are preserved and new
+        templates receive non-colliding IDs (``clusters_counter``
+        continues from the restored value).
+
+        Args:
+            data: Bytes previously returned by ``get_state()``.
+
+        Raises:
+            ValueError: If *data* is empty or cannot be deserialized.
+        """
+        if not data:
+            msg = "state data is empty"
+            raise ValueError(msg)
+        self._persistence.state = data
+        try:
+            self._miner.load_state()
+        except Exception as exc:
+            msg = f"failed to deserialize Drain3 state: {exc}"
+            raise ValueError(msg) from exc
