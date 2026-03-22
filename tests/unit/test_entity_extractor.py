@@ -206,17 +206,24 @@ class TestProcessExtraction:
         assert _extract_processes("plain text message") == []
 
     def test_dedup(self) -> None:
-        result = _extract_processes("sshd[1234] sshd[1234]")
+        result = _extract_processes("sshd[1234]: ok sshd[1234]: ok")
         assert result.count("sshd:1234") == 1
 
     def test_multiple_patterns(self) -> None:
-        result = _extract_processes("sshd[1234] process=nginx")
+        result = _extract_processes("sshd[1234]: ok process=nginx")
         assert len(result) == 2
 
     def test_max_entities_cap(self) -> None:
         from seerflow.parsing._constants import MAX_ENTITIES_PER_TYPE
 
         ext = EntityExtractor()
-        msg = " ".join(f"proc{i}[{i}]" for i in range(MAX_ENTITIES_PER_TYPE + 10))
+        msg = " ".join(f"proc{i}[{i}]: ok" for i in range(MAX_ENTITIES_PER_TYPE + 10))
         result = ext.extract(msg)
         assert len(result["process"]) <= MAX_ENTITIES_PER_TYPE
+
+    def test_array_index_not_matched(self) -> None:
+        assert _extract_processes("array[0] processed items[42]") == []
+
+    def test_syslog_requires_colon_or_whitespace(self) -> None:
+        result = _extract_processes("sshd[1234]: login failed")
+        assert "sshd:1234" in result

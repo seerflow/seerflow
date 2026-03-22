@@ -63,6 +63,9 @@ class TestGenerateUserId:
         uid = generate_user_id("alice", "corp")
         assert uid == uuid.uuid5(NS_USER, "corp:alice")
 
+    def test_whitespace_stripped_from_username(self) -> None:
+        assert generate_user_id(" alice ", "corp") == generate_user_id("alice", "corp")
+
     def test_empty_username_empty_domain_raises(self) -> None:
         with pytest.raises(ValueError, match="empty"):
             generate_user_id("", "")

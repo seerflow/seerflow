@@ -93,7 +93,7 @@ _DOMAIN_RE = re.compile(
     r"\.[a-zA-Z]{2,63})\b"
 )
 
-_PROCESS_SYSLOG_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9_.-]*)\[(\d{1,7})\]")
+_PROCESS_SYSLOG_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9_.-]*)\[(\d{1,7})\]:")
 _PROCESS_KV_RE = re.compile(
     r"(?:process(?:_name)?)[= ]([a-zA-Z][a-zA-Z0-9_.-]{0,63})",
     re.IGNORECASE,
@@ -129,6 +129,10 @@ def _extract_processes(message: str) -> list[str]:
 
     Returns strings in ``"name:pid"``, ``"name"``, or ``"pid"`` format.
     Structured ProcessEntity construction is deferred to entity resolution.
+
+    Note: dedup is exact-string only. The same process may appear in multiple
+    formats (e.g. ``"sshd:1234"`` and ``"1234"``). Cross-format dedup is
+    handled downstream in entity resolution (S-034).
     """
     results: list[str] = []
     for m in _PROCESS_SYSLOG_RE.finditer(message):
@@ -149,6 +153,8 @@ _EXTRACTORS: dict[str, Callable[[str], list[str]]] = {
     "domain": _extract_domains,
     "process": _extract_processes,
 }
+
+assert frozenset(_EXTRACTORS) == _ALL_ENTITY_TYPES, "Extractor registry out of sync"
 
 
 class EntityExtractor:
