@@ -66,3 +66,24 @@ class TestLoadState:
         parser = DrainParser()
         with pytest.raises(ValueError, match="[Ee]mpty|[Dd]eserializ"):
             parser.load_state(b"")
+
+
+class TestLargeState:
+    def test_many_templates_round_trip(self) -> None:
+        parser = DrainParser(max_clusters=200)
+        templates_before: dict[str, int] = {}
+        for i in range(100):
+            msg = f"Unique pattern {i} with value {i * 10} on host server{i % 5}"
+            tid, _, _ = parser.parse(msg)
+            templates_before[msg] = tid
+
+        state = parser.get_state()
+        assert len(state) > 100
+
+        parser2 = DrainParser(max_clusters=200)
+        parser2.load_state(state)
+        assert parser2.template_count == parser.template_count
+
+        for msg, expected_tid in list(templates_before.items())[:10]:
+            tid, _, _ = parser2.parse(msg)
+            assert tid == expected_tid
