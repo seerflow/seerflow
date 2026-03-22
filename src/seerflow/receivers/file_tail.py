@@ -71,6 +71,30 @@ def _load_checkpoint(path: Path) -> dict[str, FileOffset]:
         return {}
 
 
+def _validate_pattern(pattern: str) -> None:
+    """Reject glob patterns containing parent traversal (``..``) components.
+
+    Raises:
+        ValueError: If any path component is ``..``.
+    """
+    parts = Path(pattern).parts
+    if ".." in parts:
+        msg = f"Pattern contains parent traversal (..): {pattern!r}"
+        raise ValueError(msg)
+
+
+def _is_path_allowed(resolved: str, allowed_roots: tuple[str, ...]) -> bool:
+    """Check whether *resolved* path is under at least one allowed root.
+
+    Returns ``True`` if *allowed_roots* is empty (no restriction) or the
+    resolved path starts with one of the allowed root directories.
+    """
+    if not allowed_roots:
+        return True
+    resolved_path = Path(resolved)
+    return any(resolved_path.is_relative_to(root) for root in allowed_roots)
+
+
 _MAX_BYTES_PER_READ = 64 * 1024  # 64 KB per call to bound memory usage
 
 
@@ -113,6 +137,7 @@ class FileTailReceiver:
     """
 
     __slots__ = (
+        "_allowed_log_roots",
         "_checkpoint_dir",
         "_checkpoint_path",
         "_debounce_ms",
@@ -136,6 +161,7 @@ class FileTailReceiver:
         checkpoint_dir: str = "",
         encoding: str = "utf-8",
         debounce_ms: int = 1600,
+        allowed_log_roots: tuple[str, ...] = (),
     ) -> None:
         self._manager = manager
         self._source_id = source_id
@@ -143,6 +169,7 @@ class FileTailReceiver:
         self._checkpoint_dir = checkpoint_dir
         self._encoding = encoding
         self._debounce_ms = debounce_ms
+        self._allowed_log_roots = allowed_log_roots
         self._offsets: dict[str, FileOffset] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self._started = False
@@ -159,10 +186,14 @@ class FileTailReceiver:
         if self._checkpoint_path:
             self._offsets = _load_checkpoint(self._checkpoint_path)
         for pattern in self._file_paths:
+            _validate_pattern(pattern)
             for match in glob_module.glob(pattern, recursive=True):
                 p = Path(match)
                 if p.is_file():
                     path_str = str(p.resolve())
+                    if not _is_path_allowed(path_str, self._allowed_log_roots):
+                        _log.warning("Skipping %s — not under any allowed log root", path_str)
+                        continue
                     self._watched_files.add(path_str)
                     if path_str not in self._offsets:
                         stat = p.stat()

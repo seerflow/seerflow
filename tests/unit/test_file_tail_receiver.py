@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
+import pytest
+
+from seerflow.config import ReceiverConfig, load_config
 from seerflow.receivers.base import Receiver
 from seerflow.receivers.file_tail import (
     FileOffset,
@@ -13,6 +17,7 @@ from seerflow.receivers.file_tail import (
     _load_checkpoint,
     _read_new_lines,
     _save_checkpoint,
+    _validate_pattern,
 )
 from seerflow.receivers.manager import ReceiverManager
 
@@ -322,3 +327,69 @@ class TestExports:
         import seerflow.receivers
 
         assert "FileTailReceiver" in seerflow.receivers.__all__
+
+
+class TestPathConfinement:
+    """S-117: path confinement — reject .. and enforce allowed_log_roots."""
+
+    def test_reject_dotdot_pattern(self) -> None:
+        """Pattern containing '..' component raises ValueError."""
+        with pytest.raises(ValueError, match=r"\.\.|parent traversal"):
+            _validate_pattern("/var/log/../etc/shadow")
+        with pytest.raises(ValueError, match=r"\.\.|parent traversal"):
+            _validate_pattern("../relative/path")
+        # Clean patterns must NOT raise
+        _validate_pattern("/var/log/syslog")
+        _validate_pattern("/var/log/*.log")
+
+    async def test_reject_path_outside_allowed_roots(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Resolved path not under any allowed root is skipped with warning."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+        outside_log = outside_dir / "sneaky.log"
+        outside_log.write_bytes(b"data\n")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="confined",
+            file_paths=(str(outside_log),),
+            allowed_log_roots=(str(allowed_dir),),
+        )
+        with caplog.at_level(logging.WARNING):
+            await r.start()
+        # File outside allowed root must NOT be watched
+        assert len(r._watched_files) == 0
+        assert "not under any allowed log root" in caplog.text
+        await r.stop()
+
+    async def test_allowed_roots_empty_allows_all(self, tmp_path: Path) -> None:
+        """Empty allowed_log_roots means no restriction — all files accepted."""
+        f = tmp_path / "any.log"
+        f.write_bytes(b"data\n")
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="open",
+            file_paths=(str(f),),
+            allowed_log_roots=(),  # empty = no restriction
+        )
+        await r.start()
+        assert len(r._watched_files) == 1
+        await r.stop()
+
+    def test_config_allowed_log_roots(self, tmp_path: Path) -> None:
+        """ReceiverConfig has allowed_log_roots field and YAML loads it."""
+        # Default is empty tuple
+        cfg = ReceiverConfig()
+        assert cfg.allowed_log_roots == ()
+
+        # YAML round-trip
+        yaml_content = "receivers:\n  allowed_log_roots:\n    - /var/log\n    - /opt/logs\n"
+        config_file = tmp_path / "seerflow.yaml"
+        config_file.write_text(yaml_content)
+        loaded = load_config(str(config_file))
+        assert loaded.receivers.allowed_log_roots == ("/var/log", "/opt/logs")

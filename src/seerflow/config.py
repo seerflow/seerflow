@@ -58,6 +58,7 @@ class ReceiverConfig:
     otlp_http_enabled: bool = True
     otlp_http_port: int = 4318
     file_paths: tuple[str, ...] = ()
+    allowed_log_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -177,6 +178,9 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     file_paths = data.get("file_paths", ())
     if isinstance(file_paths, list):
         file_paths = tuple(file_paths)
+    allowed_log_roots = data.get("allowed_log_roots", ())
+    if isinstance(allowed_log_roots, list):
+        allowed_log_roots = tuple(allowed_log_roots)
     cfg = ReceiverConfig(
         syslog_enabled=data.get("syslog_enabled", True),
         syslog_udp_port=data.get("syslog_udp_port", 514),
@@ -186,6 +190,7 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
         otlp_http_enabled=data.get("otlp_http_enabled", True),
         otlp_http_port=data.get("otlp_http_port", 4318),
         file_paths=file_paths,
+        allowed_log_roots=allowed_log_roots,
     )
     _require_valid_port("receivers.syslog_udp_port", cfg.syslog_udp_port)
     _require_valid_port("receivers.syslog_tcp_port", cfg.syslog_tcp_port)
