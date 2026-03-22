@@ -8,6 +8,7 @@ from seerflow.parsing.entities import (
     _extract_files,
     _extract_hosts,
     _extract_ips,
+    _extract_processes,
     _extract_users,
 )
 
@@ -131,7 +132,7 @@ class TestEntityExtractor:
 
     def test_default_all_types(self) -> None:
         result = EntityExtractor().extract("test")
-        assert set(result.keys()) == {"ip", "user", "host", "file", "domain"}
+        assert set(result.keys()) == {"ip", "user", "host", "file", "domain", "process"}
 
     def test_dedup(self) -> None:
         result = EntityExtractor().extract("10.0.0.1 10.0.0.1 10.0.0.1")
@@ -182,3 +183,40 @@ class TestEntityExports:
         import seerflow.parsing as pkg
 
         assert "EntityExtractor" in pkg.__all__
+
+
+class TestProcessExtraction:
+    def test_syslog_format(self) -> None:
+        result = _extract_processes("Mar 22 sshd[1234]: Failed password")
+        assert "sshd:1234" in result
+
+    def test_pid_equals(self) -> None:
+        result = _extract_processes("pid=5678 exited")
+        assert "5678" in result
+
+    def test_process_equals(self) -> None:
+        result = _extract_processes("process=nginx started")
+        assert "nginx" in result
+
+    def test_process_name_equals(self) -> None:
+        result = _extract_processes("process_name=httpd running")
+        assert "httpd" in result
+
+    def test_no_processes(self) -> None:
+        assert _extract_processes("plain text message") == []
+
+    def test_dedup(self) -> None:
+        result = _extract_processes("sshd[1234] sshd[1234]")
+        assert result.count("sshd:1234") == 1
+
+    def test_multiple_patterns(self) -> None:
+        result = _extract_processes("sshd[1234] process=nginx")
+        assert len(result) == 2
+
+    def test_max_entities_cap(self) -> None:
+        from seerflow.parsing._constants import MAX_ENTITIES_PER_TYPE
+
+        ext = EntityExtractor()
+        msg = " ".join(f"proc{i}[{i}]" for i in range(MAX_ENTITIES_PER_TYPE + 10))
+        result = ext.extract(msg)
+        assert len(result["process"]) <= MAX_ENTITIES_PER_TYPE
