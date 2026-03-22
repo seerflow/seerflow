@@ -14,6 +14,7 @@ from seerflow.receivers.file_tail import (
     FileOffset,
     FileTailReceiver,
     _check_rotation,
+    _is_path_allowed,
     _load_checkpoint,
     _read_new_lines,
     _save_checkpoint,
@@ -327,6 +328,42 @@ class TestExports:
         import seerflow.receivers
 
         assert "FileTailReceiver" in seerflow.receivers.__all__
+
+
+class TestIsPathAllowed:
+    """Direct unit tests for _is_path_allowed — security boundary function."""
+
+    def test_empty_roots_allows_all(self) -> None:
+        """Empty allowed_roots tuple means no restriction — always True."""
+        assert _is_path_allowed("/any/path/file.log", ()) is True
+
+    def test_path_under_root_allowed(self, tmp_path: Path) -> None:
+        """Path under an allowed root returns True."""
+        root = str(tmp_path)
+        child = str(tmp_path / "subdir" / "file.log")
+        assert _is_path_allowed(child, (root,)) is True
+
+    def test_path_outside_root_rejected(self, tmp_path: Path) -> None:
+        """Path outside all allowed roots returns False."""
+        allowed = str(tmp_path / "allowed")
+        outside = str(tmp_path / "outside" / "file.log")
+        assert _is_path_allowed(outside, (allowed,)) is False
+
+    def test_root_prefix_not_confused_with_directory(self, tmp_path: Path) -> None:
+        """/var/log must NOT match /var/log_archive/file.log."""
+        root = str(tmp_path / "var" / "log")
+        (tmp_path / "var" / "log").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "var" / "log_archive").mkdir(parents=True, exist_ok=True)
+        file_path = str(tmp_path / "var" / "log_archive" / "file.log")
+        assert _is_path_allowed(file_path, (root,)) is False
+
+    def test_multiple_roots_any_match(self, tmp_path: Path) -> None:
+        """File under second root is allowed when first root doesn't match."""
+        root_a = str(tmp_path / "a")
+        root_b = str(tmp_path / "b")
+        (tmp_path / "b" / "sub").mkdir(parents=True, exist_ok=True)
+        file_path = str(tmp_path / "b" / "sub" / "file.log")
+        assert _is_path_allowed(file_path, (root_a, root_b)) is True
 
 
 class TestPathConfinement:

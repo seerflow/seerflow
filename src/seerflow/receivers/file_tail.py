@@ -92,7 +92,7 @@ def _is_path_allowed(resolved: str, allowed_roots: tuple[str, ...]) -> bool:
     if not allowed_roots:
         return True
     resolved_path = Path(resolved)
-    return any(resolved_path.is_relative_to(root) for root in allowed_roots)
+    return any(resolved_path.is_relative_to(Path(root).resolve()) for root in allowed_roots)
 
 
 _MAX_BYTES_PER_READ = 64 * 1024  # 64 KB per call to bound memory usage
