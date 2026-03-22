@@ -476,3 +476,114 @@ class TestSymlinkProtection:
         assert len(r._watched_files) == 1
         assert str(f.resolve()) in r._watched_files
         await r.stop()
+
+
+class TestReGlobOnNewFiles:
+    """S-117: re-glob on new file events — discover files created after start."""
+
+    async def test_new_file_discovered_after_start(self, tmp_path: Path) -> None:
+        """Create a new file matching the glob after start → it gets picked up."""
+        existing = tmp_path / "app.log"
+        existing.write_bytes(b"initial\n")
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="reglob",
+            file_paths=(pattern,),
+            debounce_ms=200,
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            # Create a NEW file matching the glob after start
+            new_file = tmp_path / "new_app.log"
+            new_file.write_bytes(b"new content\n")
+            # Wait for the watcher to pick it up via re-glob
+            deadline = asyncio.get_event_loop().time() + 5.0
+            resolved_new = str(new_file.resolve())
+            while asyncio.get_event_loop().time() < deadline:
+                if resolved_new in r._watched_files:
+                    break
+                await asyncio.sleep(0.2)
+            assert resolved_new in r._watched_files, (
+                f"New file {resolved_new} not discovered via re-glob"
+            )
+        finally:
+            await r.stop()
+
+    async def test_non_matching_new_file_ignored(self, tmp_path: Path) -> None:
+        """New file NOT matching the glob pattern is ignored by re-glob."""
+        existing = tmp_path / "app.log"
+        existing.write_bytes(b"initial\n")
+        pattern = str(tmp_path / "*.log")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="reglob",
+            file_paths=(pattern,),
+            debounce_ms=200,
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            # Create a file that does NOT match the *.log pattern
+            non_matching = tmp_path / "data.txt"
+            non_matching.write_bytes(b"should be ignored\n")
+            # Give watcher time to process the event
+            await asyncio.sleep(1.0)
+            resolved_nm = str(non_matching.resolve())
+            assert resolved_nm not in r._watched_files, (
+                f"Non-matching file {resolved_nm} should NOT be in watched_files"
+            )
+        finally:
+            await r.stop()
+
+    async def test_re_glob_respects_allowed_roots(self, tmp_path: Path) -> None:
+        """New file outside allowed_log_roots is NOT added via re-glob."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+        # Existing file inside allowed dir
+        existing = allowed_dir / "app.log"
+        existing.write_bytes(b"initial\n")
+        # Glob pattern covers both dirs (use ** recursive or multiple patterns)
+        pattern_allowed = str(allowed_dir / "*.log")
+        pattern_outside = str(outside_dir / "*.log")
+        mgr = ReceiverManager(queue_maxsize=100)
+        r = FileTailReceiver(
+            mgr,
+            source_id="reglob",
+            file_paths=(pattern_allowed, pattern_outside),
+            debounce_ms=200,
+            allowed_log_roots=(str(allowed_dir),),
+        )
+        await r.start()
+        await r.wait_ready()
+        try:
+            await asyncio.sleep(0.1)
+            # Create new file outside allowed roots
+            outside_file = outside_dir / "sneaky.log"
+            outside_file.write_bytes(b"sneaky data\n")
+            # Also create a new file inside allowed roots
+            new_allowed = allowed_dir / "new_app.log"
+            new_allowed.write_bytes(b"allowed data\n")
+            # Wait for re-glob to pick up the allowed file
+            deadline = asyncio.get_event_loop().time() + 5.0
+            resolved_allowed = str(new_allowed.resolve())
+            while asyncio.get_event_loop().time() < deadline:
+                if resolved_allowed in r._watched_files:
+                    break
+                await asyncio.sleep(0.2)
+            assert resolved_allowed in r._watched_files, (
+                "New file under allowed root should be discovered"
+            )
+            resolved_outside = str(outside_file.resolve())
+            assert resolved_outside not in r._watched_files, (
+                "File outside allowed roots must NOT be added via re-glob"
+            )
+        finally:
+            await r.stop()
