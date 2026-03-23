@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from river import anomaly
 
 if TYPE_CHECKING:
+    from seerflow.config import DetectionConfig
     from seerflow.models import SeerflowEvent
 
 _HST_HEIGHT = 8
@@ -60,3 +61,17 @@ class HSTDetector:
         Warning: pickle can execute arbitrary code. Only load from trusted sources.
         """
         self._model = pickle.loads(data)  # noqa: S301
+
+
+def get_hst_detector(
+    source_type: str,
+    config: DetectionConfig,
+    registry: dict[str, HSTDetector],
+) -> HSTDetector:
+    """Get or create an HSTDetector for the given source type."""
+    if source_type not in registry:
+        registry[source_type] = HSTDetector(
+            n_trees=config.hst_n_trees,
+            window_size=config.hst_window_size,
+        )
+    return registry[source_type]

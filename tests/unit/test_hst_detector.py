@@ -213,3 +213,52 @@ class TestProtocolConformance:
 
         detector = HSTDetector()
         assert isinstance(detector, Detector)
+
+
+# ---------------------------------------------------------------------------
+# Per-source factory tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetHstDetector:
+    def test_same_source_returns_same_detector(self) -> None:
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.hst import HSTDetector, get_hst_detector
+
+        config = DetectionConfig()
+        registry: dict[str, HSTDetector] = {}
+
+        d1 = get_hst_detector("syslog", config, registry)
+        d2 = get_hst_detector("syslog", config, registry)
+
+        assert d1 is d2
+
+    def test_different_source_returns_different_detector(self) -> None:
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.hst import HSTDetector, get_hst_detector
+
+        config = DetectionConfig()
+        registry: dict[str, HSTDetector] = {}
+
+        d1 = get_hst_detector("syslog", config, registry)
+        d2 = get_hst_detector("cloudwatch", config, registry)
+
+        assert d1 is not d2
+
+    def test_uses_config_values(self) -> None:
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.hst import HSTDetector, get_hst_detector
+
+        config = DetectionConfig(hst_n_trees=10, hst_window_size=500)
+        registry: dict[str, HSTDetector] = {}
+
+        detector = get_hst_detector("test_source", config, registry)
+
+        assert detector._model.n_trees == 10
+        assert detector._model.window_size == 500
+
+    def test_factory_exported_from_package(self) -> None:
+        from seerflow.detection import HSTDetector, get_hst_detector
+
+        assert callable(get_hst_detector)
+        assert HSTDetector is not None
