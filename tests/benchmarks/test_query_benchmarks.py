@@ -86,8 +86,7 @@ class TestSyncQueryBenchmarks:
             b = await SqliteBackend.connect(config)
             try:
                 events = [
-                    make_event(message=f"filter {i}", source_type="syslog")
-                    for i in range(10_000)
+                    make_event(message=f"filter {i}", source_type="syslog") for i in range(10_000)
                 ]
                 await b._write_batch(events)
                 await b.query_events(EventQuery(source_type="syslog", limit=100))
@@ -104,8 +103,7 @@ class TestSyncQueryBenchmarks:
             b = await SqliteBackend.connect(config)
             try:
                 events = [
-                    make_event(message=f"authentication failed attempt {i}")
-                    for i in range(10_000)
+                    make_event(message=f"authentication failed attempt {i}") for i in range(10_000)
                 ]
                 await b._write_batch(events)
                 await b.search_text("authentication", 100)
