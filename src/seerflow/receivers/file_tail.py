@@ -190,6 +190,10 @@ class FileTailReceiver:
         self._allowed_log_roots: tuple[str, ...] = tuple(
             str(Path(r).resolve()) for r in allowed_log_roots
         )
+        if file_paths and not allowed_log_roots:
+            _log.warning(
+                "No allowed_log_roots configured — file tailing has no path confinement"
+            )
         self._offsets: dict[str, FileOffset] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self._started = False
@@ -278,7 +282,14 @@ class FileTailReceiver:
         watch_dirs: set[str] = set()
         for fp in self._watched_files:
             watch_dirs.add(str(Path(fp).parent))
+        # When no files match, derive watch dirs from glob pattern parents
         if not watch_dirs:
+            for pattern in self._file_paths:
+                parent = str(Path(pattern).parent)
+                if os.path.isdir(parent):
+                    watch_dirs.add(parent)
+        if not watch_dirs:
+            _log.warning("No watchable directories found for patterns: %s", self._file_paths)
             self._ready.set()
             return
         self._ready.set()

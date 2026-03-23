@@ -745,6 +745,49 @@ class TestCheckpointKeyFiltering:
         await r.stop()
 
 
+class TestEmptyStartRecovery:
+    async def test_empty_start_stays_running(self, tmp_path: Path) -> None:
+        """Receiver stays healthy when zero files match at startup."""
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+        )
+        await r.start()
+        assert r.is_healthy()
+        await r.wait_ready(timeout=2.0)
+        await r.stop()
+
+
+class TestConfinementWarning:
+    def test_warning_when_no_allowed_roots(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mgr = ReceiverManager()
+        with caplog.at_level(logging.WARNING):
+            FileTailReceiver(
+                mgr,
+                source_id="test",
+                file_paths=(str(tmp_path / "*.log"),),
+                allowed_log_roots=(),
+            )
+        assert any("confinement" in r.message.lower() for r in caplog.records)
+
+    def test_no_warning_with_allowed_roots(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mgr = ReceiverManager()
+        with caplog.at_level(logging.WARNING):
+            FileTailReceiver(
+                mgr,
+                source_id="test",
+                file_paths=(str(tmp_path / "*.log"),),
+                allowed_log_roots=(str(tmp_path),),
+            )
+        assert not any("confinement" in r.message.lower() for r in caplog.records)
+
+
 class TestAllowedRootsResolvedAtInit:
     """S-117: allowed_log_roots should be resolved once at __init__."""
 
