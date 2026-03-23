@@ -93,7 +93,7 @@ _DOMAIN_RE = re.compile(
     r"\.[a-zA-Z]{2,63})\b"
 )
 
-_PROCESS_SYSLOG_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9_.-]*)\[(\d{1,7})\]:")
+_PROCESS_SYSLOG_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9_.-]{0,63})\[(\d{1,7})\]:")
 _PROCESS_KV_RE = re.compile(
     r"(?:process(?:_name)?)[= ]([a-zA-Z][a-zA-Z0-9_.-]{0,63})",
     re.IGNORECASE,
@@ -154,7 +154,10 @@ _EXTRACTORS: dict[str, Callable[[str], list[str]]] = {
     "process": _extract_processes,
 }
 
-assert frozenset(_EXTRACTORS) == _ALL_ENTITY_TYPES, "Extractor registry out of sync"
+if frozenset(_EXTRACTORS) != _ALL_ENTITY_TYPES:
+    _missing = _ALL_ENTITY_TYPES - frozenset(_EXTRACTORS)
+    _msg = f"Extractor registry out of sync, missing: {_missing!r}"
+    raise RuntimeError(_msg)
 
 
 class EntityExtractor:
