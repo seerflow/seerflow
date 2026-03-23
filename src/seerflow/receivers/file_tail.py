@@ -283,11 +283,18 @@ class FileTailReceiver:
         # When no files match, derive watch dirs from glob pattern parents
         if not watch_dirs:
             for pattern in self._file_paths:
-                parent = str(Path(pattern).parent)
-                if os.path.isdir(parent):
-                    watch_dirs.add(parent)
+                _validate_pattern(pattern)
+                parent = str(Path(pattern).parent.resolve())
+                if not os.path.isdir(parent):
+                    continue
+                if not _is_path_allowed(parent, self._allowed_log_roots):
+                    continue
+                watch_dirs.add(parent)
         if not watch_dirs:
-            _log.warning("No watchable directories found for patterns: %s", self._file_paths)
+            _log.warning(
+                "No watchable directories found (%d patterns configured)",
+                len(self._file_paths),
+            )
             self._ready.set()
             return
         self._ready.set()
