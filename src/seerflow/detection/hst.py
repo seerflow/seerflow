@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import pickle  # nosec B403 — needed for River model serialization
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,29 @@ if TYPE_CHECKING:
     from seerflow.models import SeerflowEvent
 
 _HST_HEIGHT = 8
+
+# Restricted unpickler — only classes needed for HalfSpaceTrees round-trip
+_HST_ALLOWED_CLASSES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("builtins", "tuple"),
+        ("collections", "defaultdict"),
+        ("functools", "partial"),
+        ("random", "Random"),
+        ("river.anomaly.hst", "HSTBranch"),
+        ("river.anomaly.hst", "HSTLeaf"),
+        ("river.anomaly.hst", "HalfSpaceTrees"),
+    }
+)
+
+
+class _HSTUnpickler(pickle.Unpickler):
+    """Restricted unpickler — refuses to deserialize classes not in the allowlist."""
+
+    def find_class(self, module: str, name: str) -> type:
+        if (module, name) not in _HST_ALLOWED_CLASSES:
+            msg = f"Refused to deserialize {module}.{name}"
+            raise pickle.UnpicklingError(msg)
+        return super().find_class(module, name)  # type: ignore[no-any-return]
 
 
 def _extract_features(event: SeerflowEvent) -> dict[str, float]:
@@ -54,11 +78,13 @@ class HSTDetector:
         return pickle.dumps(self._model)
 
     def deserialize(self, data: bytes) -> None:
-        """Restore model state from pickle bytes.
+        """Restore model state from restricted pickle bytes.
 
-        Warning: pickle can execute arbitrary code. Only load from trusted sources.
+        Uses a restricted unpickler that only allows the classes needed
+        for HalfSpaceTrees reconstruction. Rejects arbitrary code execution
+        payloads.
         """
-        obj = pickle.loads(data)  # noqa: S301  # nosec B301
+        obj = _HSTUnpickler(io.BytesIO(data)).load()
         if not isinstance(obj, anomaly.HalfSpaceTrees):
             msg = f"Expected HalfSpaceTrees, got {type(obj).__name__}"
             raise TypeError(msg)
