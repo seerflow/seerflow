@@ -26,6 +26,40 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+class TestLineSizeLimit:
+    def test_normal_lines_pass(self, tmp_path: Path) -> None:
+        f = tmp_path / "test.log"
+        f.write_bytes(b"short line\n")
+        lines, offset = _read_new_lines(f, 0)
+        assert len(lines) == 1
+        assert lines[0] == b"short line\n"
+
+    def test_oversized_line_discarded(self, tmp_path: Path) -> None:
+        from seerflow.receivers.file_tail import _MAX_LINE_BYTES
+
+        f = tmp_path / "test.log"
+        oversized = b"x" * (_MAX_LINE_BYTES + 1) + b"\n"
+        f.write_bytes(b"good\n" + oversized + b"also good\n")
+        lines, offset = _read_new_lines(f, 0)
+        assert b"good\n" in lines
+        assert oversized not in lines
+        # "also good\n" may not appear because _MAX_BYTES_PER_READ (64 KB)
+        # limits how much readlines reads per call; the oversized line alone
+        # exceeds that budget so the trailing line is deferred to a later read.
+        # Verify it is retrievable with a second read from the new offset:
+        lines2, _ = _read_new_lines(f, offset)
+        assert b"also good\n" in lines2
+
+    def test_exactly_max_size_passes(self, tmp_path: Path) -> None:
+        from seerflow.receivers.file_tail import _MAX_LINE_BYTES
+
+        f = tmp_path / "test.log"
+        exact = b"x" * (_MAX_LINE_BYTES - 1) + b"\n"
+        f.write_bytes(exact)
+        lines, offset = _read_new_lines(f, 0)
+        assert len(lines) == 1
+
+
 class TestCheckpoint:
     def test_save_and_load(self, tmp_path: Path) -> None:
         cp_file = tmp_path / "offsets.json"

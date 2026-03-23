@@ -97,21 +97,30 @@ def _is_path_allowed(resolved: str, allowed_roots: tuple[str, ...]) -> bool:
 
 
 _MAX_BYTES_PER_READ = 64 * 1024  # 64 KB per call to bound memory usage
+_MAX_LINE_BYTES = 1024 * 1024  # 1 MB — lines exceeding this are discarded
 
 
 def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
     """Read new complete lines from *path* starting at *offset*.
 
-    Returns only complete lines (ending with ``\\n``). Partial lines at
-    EOF are left for the next read. Uses a byte-size hint to bound
-    memory usage per call.
+    Returns only complete lines (ending with ``\\n``) that are within
+    the ``_MAX_LINE_BYTES`` limit. Oversized lines are logged and
+    discarded. Partial lines at EOF are left for the next read.
     """
     with path.open("rb") as fh:
         fh.seek(offset)
         raw_lines = fh.readlines(_MAX_BYTES_PER_READ)
-    # Filter out incomplete trailing line (no newline at end)
-    complete = [ln for ln in raw_lines if ln.endswith(b"\n")]
-    new_offset = offset + sum(len(ln) for ln in complete)
+    complete: list[bytes] = []
+    total_bytes = 0
+    for ln in raw_lines:
+        if not ln.endswith(b"\n"):
+            continue
+        total_bytes += len(ln)
+        if len(ln) > _MAX_LINE_BYTES:
+            _log.warning("Discarding oversized line (%d bytes) from %s", len(ln), path)
+            continue
+        complete.append(ln)
+    new_offset = offset + total_bytes
     return complete, new_offset
 
 
