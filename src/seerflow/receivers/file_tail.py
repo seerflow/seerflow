@@ -217,9 +217,7 @@ class FileTailReceiver:
                     continue
                 self._watched_files.add(path_str)
                 if path_str not in self._offsets:
-                    self._offsets[path_str] = FileOffset(
-                        offset=st.st_size, inode=st.st_ino
-                    )
+                    self._offsets[path_str] = FileOffset(offset=st.st_size, inode=st.st_ino)
                 newly_added.add(path_str)
         return newly_added
 
