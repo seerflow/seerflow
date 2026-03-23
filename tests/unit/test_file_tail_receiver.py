@@ -118,6 +118,26 @@ class TestCheckpoint:
         assert "ok" in loaded
 
 
+class TestCheckpointPermissions:
+    def test_checkpoint_file_permissions(self, tmp_path: Path) -> None:
+        cp_path = tmp_path / "file_offsets.json"
+        offsets = {"test": FileOffset(offset=10, inode=123)}
+        _save_checkpoint(cp_path, offsets)
+        mode = cp_path.stat().st_mode & 0o777
+        assert mode == 0o600
+
+    def test_checkpoint_encoding_utf8(self, tmp_path: Path) -> None:
+        cp_path = tmp_path / "file_offsets.json"
+        offsets = {"test": FileOffset(offset=10, inode=123)}
+        _save_checkpoint(cp_path, offsets)
+        content = cp_path.read_text(encoding="utf-8")
+        assert "test" in content
+
+    def test_load_checkpoint_missing_file(self, tmp_path: Path) -> None:
+        result = _load_checkpoint(tmp_path / "nonexistent.json")
+        assert result == {}
+
+
 class TestFileReader:
     def test_read_new_lines(self, tmp_path: Path) -> None:
         f = tmp_path / "test.log"

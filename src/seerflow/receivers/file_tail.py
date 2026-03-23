@@ -42,34 +42,36 @@ def _save_checkpoint(path: Path, offsets: dict[str, FileOffset]) -> None:
     """Persist file offsets to JSON with atomic write (tmp + rename)."""
     data = {k: {"offset": v.offset, "inode": v.inode} for k, v in offsets.items()}
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=2))
     os.replace(tmp, path)
 
 
 def _load_checkpoint(path: Path) -> dict[str, FileOffset]:
     """Load file offsets from JSON. Returns empty dict if file is missing or corrupted."""
-    if not path.exists():
-        return {}
     try:
-        raw = json.loads(path.read_text())
-        if not isinstance(raw, dict):
-            _log.warning("Checkpoint malformed (not a dict), starting fresh: %s", path)
-            return {}
-        result: dict[str, FileOffset] = {}
-        for k, v in raw.items():
-            if not isinstance(v, dict):
-                continue
-            offset = v.get("offset")
-            inode = v.get("inode")
-            if not isinstance(offset, int) or not isinstance(inode, int):
-                continue
-            if offset < 0 or inode < 0:
-                continue
-            result[k] = FileOffset(offset=offset, inode=inode)
-        return result
-    except (json.JSONDecodeError, TypeError) as exc:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
         _log.warning("Corrupted checkpoint %s, starting fresh: %s", path, exc)
         return {}
+    if not isinstance(raw, dict):
+        _log.warning("Checkpoint malformed (not a dict), starting fresh: %s", path)
+        return {}
+    result: dict[str, FileOffset] = {}
+    for k, v in raw.items():
+        if not isinstance(v, dict):
+            continue
+        offset = v.get("offset")
+        inode = v.get("inode")
+        if not isinstance(offset, int) or not isinstance(inode, int):
+            continue
+        if offset < 0 or inode < 0:
+            continue
+        result[k] = FileOffset(offset=offset, inode=inode)
+    return result
 
 
 def _validate_pattern(pattern: str) -> None:
