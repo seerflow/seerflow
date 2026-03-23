@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pickle
+import pickle  # nosec B403 — needed for River model serialization
 from typing import TYPE_CHECKING
 
 from river import anomaly
@@ -30,9 +30,7 @@ class HSTDetector:
 
     __slots__ = ("_model",)
 
-    def __init__(
-        self, *, n_trees: int = 25, window_size: int = 1000, seed: int = 42
-    ) -> None:
+    def __init__(self, *, n_trees: int = 25, window_size: int = 1000, seed: int = 42) -> None:
         self._model = anomaly.HalfSpaceTrees(
             n_trees=n_trees,
             height=_HST_HEIGHT,
@@ -43,13 +41,13 @@ class HSTDetector:
     def score(self, event: SeerflowEvent) -> float:
         """Return anomaly score in [0.0, 1.0]."""
         features = _extract_features(event)
-        raw = self._model.score_one(features)
+        raw: float = self._model.score_one(features)  # type: ignore[no-untyped-call]
         return max(0.0, min(1.0, raw))
 
     def learn(self, event: SeerflowEvent) -> None:
         """Update HST model incrementally."""
         features = _extract_features(event)
-        self._model.learn_one(features)
+        self._model.learn_one(features)  # type: ignore[no-untyped-call]
 
     def serialize(self) -> bytes:
         """Serialize model state via pickle."""
@@ -60,7 +58,7 @@ class HSTDetector:
 
         Warning: pickle can execute arbitrary code. Only load from trusted sources.
         """
-        self._model = pickle.loads(data)  # noqa: S301
+        self._model = pickle.loads(data)  # noqa: S301  # nosec B301
 
 
 def get_hst_detector(
