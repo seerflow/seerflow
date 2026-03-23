@@ -123,26 +123,26 @@ class TestRotation:
     def test_no_rotation(self, tmp_path: Path) -> None:
         f = tmp_path / "test.log"
         f.write_bytes(b"data\n")
-        inode = f.stat().st_ino
-        result = _check_rotation(f, FileOffset(offset=5, inode=inode))
+        st = f.stat()
+        result = _check_rotation(st, FileOffset(offset=5, inode=st.st_ino))
         assert result == "ok"
 
     def test_inode_change(self, tmp_path: Path) -> None:
         f = tmp_path / "test.log"
         f.write_bytes(b"data\n")
-        result = _check_rotation(f, FileOffset(offset=5, inode=99999))
+        st = f.stat()
+        result = _check_rotation(st, FileOffset(offset=5, inode=99999))
         assert result == "rotated"
 
     def test_truncation(self, tmp_path: Path) -> None:
         f = tmp_path / "test.log"
         f.write_bytes(b"x")  # 1 byte
-        inode = f.stat().st_ino
-        result = _check_rotation(f, FileOffset(offset=100, inode=inode))
+        st = f.stat()
+        result = _check_rotation(st, FileOffset(offset=100, inode=st.st_ino))
         assert result == "truncated"
 
-    def test_deleted_file(self, tmp_path: Path) -> None:
-        f = tmp_path / "gone.log"
-        result = _check_rotation(f, FileOffset(offset=0, inode=1))
+    def test_deleted_file(self) -> None:
+        result = _check_rotation(None, FileOffset(offset=0, inode=1))
         assert result == "deleted"
 
 
@@ -514,18 +514,17 @@ class TestLiteralReturnType:
         # "ok" case
         f = tmp_path / "test.log"
         f.write_bytes(b"data\n")
-        inode = f.stat().st_ino
-        assert _check_rotation(f, FileOffset(offset=5, inode=inode)) in valid_values
+        st = f.stat()
+        assert _check_rotation(st, FileOffset(offset=5, inode=st.st_ino)) in valid_values
 
         # "rotated" case
-        assert _check_rotation(f, FileOffset(offset=5, inode=99999)) in valid_values
+        assert _check_rotation(st, FileOffset(offset=5, inode=99999)) in valid_values
 
         # "truncated" case
-        assert _check_rotation(f, FileOffset(offset=9999, inode=inode)) in valid_values
+        assert _check_rotation(st, FileOffset(offset=9999, inode=st.st_ino)) in valid_values
 
         # "deleted" case
-        missing = tmp_path / "gone.log"
-        assert _check_rotation(missing, FileOffset(offset=0, inode=1)) in valid_values
+        assert _check_rotation(None, FileOffset(offset=0, inode=1)) in valid_values
 
     def test_no_encoding_param(self) -> None:
         """FileTailReceiver.__init__ must not accept an 'encoding' parameter."""

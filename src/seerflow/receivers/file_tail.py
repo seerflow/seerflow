@@ -14,6 +14,7 @@ import glob as glob_module
 import json
 import logging
 import os
+import stat as stat_module
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,17 +118,18 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
 RotationStatus = Literal["ok", "rotated", "truncated", "deleted"]
 
 
-def _check_rotation(path: Path, saved: FileOffset) -> RotationStatus:
-    """Detect log rotation or truncation.
+def _check_rotation(stat_result: os.stat_result | None, saved: FileOffset) -> RotationStatus:
+    """Detect log rotation or truncation from a pre-fetched stat result.
 
-    Returns one of: ``"ok"``, ``"rotated"``, ``"truncated"``, ``"deleted"``.
+    Accepts ``None`` when the file no longer exists (deleted).
+    The caller is responsible for performing the ``stat()`` call — this
+    function never touches the filesystem, eliminating TOCTOU windows.
     """
-    if not path.exists():
+    if stat_result is None:
         return "deleted"
-    stat = path.stat()
-    if stat.st_ino != saved.inode:
+    if stat_result.st_ino != saved.inode:
         return "rotated"
-    if saved.offset > stat.st_size:
+    if saved.offset > stat_result.st_size:
         return "truncated"
     return "ok"
 
@@ -198,23 +200,25 @@ class FileTailReceiver:
             _validate_pattern(pattern)
             for match in glob_module.glob(pattern, recursive=True):
                 p = Path(match)
-                if p.is_symlink():
+                try:
+                    st = p.lstat()  # single syscall — atomic symlink + file check
+                except OSError:
+                    continue
+                if stat_module.S_ISLNK(st.st_mode):
                     _log.warning("Skipping symlink %s — symlinks are not followed", p)
                     continue
-                if p.is_file():
-                    path_str = str(p.resolve())
-                    if path_str in self._watched_files:
-                        continue
-                    if not _is_path_allowed(path_str, self._allowed_log_roots):
-                        _log.warning("Skipping %s — not under any allowed log root", path_str)
-                        continue
-                    self._watched_files.add(path_str)
-                    if path_str not in self._offsets:
-                        stat = p.stat()
-                        self._offsets[path_str] = FileOffset(
-                            offset=stat.st_size, inode=stat.st_ino
-                        )
-                    newly_added.add(path_str)
+                if not stat_module.S_ISREG(st.st_mode):
+                    continue
+                path_str = str(p.resolve())
+                if path_str in self._watched_files:
+                    continue
+                if not _is_path_allowed(path_str, self._allowed_log_roots):
+                    _log.warning("Skipping %s — not under any allowed log root", path_str)
+                    continue
+                self._watched_files.add(path_str)
+                if path_str not in self._offsets:
+                    self._offsets[path_str] = FileOffset(offset=st.st_size, inode=st.st_ino)
+                newly_added.add(path_str)
         return newly_added
 
     async def start(self) -> None:
@@ -305,13 +309,13 @@ class FileTailReceiver:
         """Read new lines from a modified file and enqueue as RawEvents."""
         path = Path(path_str)
         saved = self._offsets.get(path_str, FileOffset(offset=0, inode=0))
-        status = _check_rotation(path, saved)
-        if status == "deleted":
+        try:
+            st = path.stat()
+        except OSError:
             _log.warning("File deleted: %s", path_str)
             self._watched_files.discard(path_str)
             return
-        # Single stat call to avoid TOCTOU races
-        st = path.stat()
+        status = _check_rotation(st, saved)
         if status in ("rotated", "truncated"):
             _log.info("File %s: %s — resetting offset to 0", status, path_str)
             saved = FileOffset(offset=0, inode=st.st_ino)
