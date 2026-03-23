@@ -1,6 +1,8 @@
-"""Tests for DSpotThreshold — streaming EVT-based anomaly threshold."""
+"""Tests for DSpotThreshold — streaming biDSPOT anomaly threshold."""
 
 from __future__ import annotations
+
+import random
 
 import pytest
 
@@ -11,13 +13,29 @@ class TestThresholdResult:
     """ThresholdResult struct tests."""
 
     def test_creation_and_fields(self) -> None:
-        result = ThresholdResult(is_anomaly=True, threshold=3.5, score=4.0)
+        result = ThresholdResult(
+            is_anomaly=True, upper_threshold=3.5, lower_threshold=-1.0, score=4.0
+        )
         assert result.is_anomaly is True
-        assert result.threshold == 3.5
+        assert result.upper_threshold == 3.5
+        assert result.lower_threshold == -1.0
         assert result.score == 4.0
+        assert result.anomaly_direction is None
+
+    def test_with_direction(self) -> None:
+        result = ThresholdResult(
+            is_anomaly=True,
+            upper_threshold=3.5,
+            lower_threshold=-1.0,
+            score=5.0,
+            anomaly_direction="upper",
+        )
+        assert result.anomaly_direction == "upper"
 
     def test_frozen(self) -> None:
-        result = ThresholdResult(is_anomaly=False, threshold=1.0, score=0.5)
+        result = ThresholdResult(
+            is_anomaly=False, upper_threshold=1.0, lower_threshold=-1.0, score=0.5
+        )
         with pytest.raises(AttributeError):
             result.is_anomaly = True  # type: ignore[misc]
 
@@ -31,8 +49,9 @@ class TestDSpotCalibration:
 
     def test_calibrates_after_window(self) -> None:
         ds = DSpotThreshold(calibration_window=200)
-        for i in range(200):
-            ds.update(float(i))
+        rng = random.Random(42)  # noqa: S311
+        for _ in range(200):
+            ds.update(rng.gauss(0, 1))
         assert ds.is_calibrated is True
 
     def test_returns_not_anomaly_during_calibration(self) -> None:
@@ -41,15 +60,21 @@ class TestDSpotCalibration:
             result = ds.update(float(i))
             assert result.is_anomaly is False
 
-    def test_threshold_set_after_calibration(self) -> None:
-        import random
-
+    def test_upper_threshold_set_after_calibration(self) -> None:
         rng = random.Random(42)  # noqa: S311
         ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
         for _ in range(500):
             ds.update(rng.gauss(0, 1))
         assert ds.threshold != float("inf")
         assert ds.threshold > 0
+
+    def test_lower_threshold_set_after_calibration(self) -> None:
+        rng = random.Random(42)  # noqa: S311
+        ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
+        for _ in range(500):
+            ds.update(rng.gauss(0, 1))
+        assert ds.lower_threshold != float("-inf")
+        assert ds.lower_threshold < 0
 
 
 class TestDSpotValidation:
@@ -76,62 +101,61 @@ class TestDSpotValidation:
             DSpotThreshold(initial_percentile=100)
 
 
+def _calibrated_detector() -> DSpotThreshold:
+    """Build a calibrated detector from normal Gaussian data."""
+    rng = random.Random(42)  # noqa: S311
+    ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
+    for _ in range(500):
+        ds.update(rng.gauss(0, 1))
+    assert ds.is_calibrated
+    return ds
+
+
 class TestDSpotAnomalyDetection:
     """Post-calibration anomaly detection tests."""
 
-    @staticmethod
-    def _calibrated_detector() -> DSpotThreshold:
-        """Build a calibrated detector from normal Gaussian data."""
-        import random
-
-        rng = random.Random(42)  # noqa: S311
-        ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
-        for _ in range(500):
-            ds.update(rng.gauss(0, 1))
-        assert ds.is_calibrated
-        return ds
-
     def test_normal_scores_low_fp_rate(self) -> None:
-        import random
-
-        ds = self._calibrated_detector()
+        ds = _calibrated_detector()
         rng = random.Random(99)  # noqa: S311
         anomalies = sum(ds.update(rng.gauss(0, 1)).is_anomaly for _ in range(200))
         assert anomalies / 200 < 0.05, f"FP rate {anomalies / 200:.2%} >= 5%"
 
-    def test_extreme_score_flagged(self) -> None:
-        ds = self._calibrated_detector()
-        result = ds.update(5.0)
+    def test_upper_extreme_flagged(self) -> None:
+        ds = _calibrated_detector()
+        result = ds.update(10.0)
         assert result.is_anomaly is True
+        assert result.anomaly_direction == "upper"
+
+    def test_lower_extreme_flagged(self) -> None:
+        ds = _calibrated_detector()
+        result = ds.update(-10.0)
+        assert result.is_anomaly is True
+        assert result.anomaly_direction == "lower"
 
     def test_result_contains_correct_score(self) -> None:
-        ds = self._calibrated_detector()
+        ds = _calibrated_detector()
         result = ds.update(0.42)
         assert result.score == 0.42
+
+    def test_result_has_both_thresholds(self) -> None:
+        ds = _calibrated_detector()
+        result = ds.update(0.0)
+        assert result.upper_threshold > result.lower_threshold
 
 
 class TestDSpotSerialization:
     """Serialization round-trip tests."""
 
-    @staticmethod
-    def _calibrated_detector() -> DSpotThreshold:
-        import random
-
-        rng = random.Random(42)  # noqa: S311
-        ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
-        for _ in range(500):
-            ds.update(rng.gauss(0, 1))
-        return ds
-
     def test_serialize_returns_bytes(self) -> None:
-        ds = self._calibrated_detector()
+        ds = _calibrated_detector()
         data = ds.serialize()
         assert isinstance(data, bytes)
         assert len(data) > 0
 
     def test_round_trip_preserves_state(self) -> None:
-        ds = self._calibrated_detector()
+        ds = _calibrated_detector()
         data = ds.serialize()
         restored = DSpotThreshold.deserialize(data)
         assert restored.is_calibrated == ds.is_calibrated
         assert restored.threshold == ds.threshold
+        assert restored.lower_threshold == ds.lower_threshold
