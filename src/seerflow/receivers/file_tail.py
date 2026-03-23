@@ -14,6 +14,7 @@ import glob as glob_module
 import json
 import logging
 import os
+import stat as stat_module
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -199,23 +200,27 @@ class FileTailReceiver:
             _validate_pattern(pattern)
             for match in glob_module.glob(pattern, recursive=True):
                 p = Path(match)
-                if p.is_symlink():
+                try:
+                    st = p.lstat()  # single syscall — atomic symlink + file check
+                except OSError:
+                    continue
+                if stat_module.S_ISLNK(st.st_mode):
                     _log.warning("Skipping symlink %s — symlinks are not followed", p)
                     continue
-                if p.is_file():
-                    path_str = str(p.resolve())
-                    if path_str in self._watched_files:
-                        continue
-                    if not _is_path_allowed(path_str, self._allowed_log_roots):
-                        _log.warning("Skipping %s — not under any allowed log root", path_str)
-                        continue
-                    self._watched_files.add(path_str)
-                    if path_str not in self._offsets:
-                        stat = p.stat()
-                        self._offsets[path_str] = FileOffset(
-                            offset=stat.st_size, inode=stat.st_ino
-                        )
-                    newly_added.add(path_str)
+                if not stat_module.S_ISREG(st.st_mode):
+                    continue
+                path_str = str(p.resolve())
+                if path_str in self._watched_files:
+                    continue
+                if not _is_path_allowed(path_str, self._allowed_log_roots):
+                    _log.warning("Skipping %s — not under any allowed log root", path_str)
+                    continue
+                self._watched_files.add(path_str)
+                if path_str not in self._offsets:
+                    self._offsets[path_str] = FileOffset(
+                        offset=st.st_size, inode=st.st_ino
+                    )
+                newly_added.add(path_str)
         return newly_added
 
     async def start(self) -> None:
