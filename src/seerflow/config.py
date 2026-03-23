@@ -69,6 +69,7 @@ class DetectionConfig:
     hst_n_trees: int = 25
     dspot_calibration_window: int = 1000
     dspot_risk_level: float = 0.0001
+    dspot_initial_percentile: int = 98
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
@@ -206,6 +207,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         hst_n_trees=data.get("hst_n_trees", 25),
         dspot_calibration_window=dspot.get("calibration_window", 1000),
         dspot_risk_level=dspot.get("risk_level", 0.0001),
+        dspot_initial_percentile=dspot.get("initial_percentile", 98),
         weights_content=data.get("weights_content", 0.30),
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
