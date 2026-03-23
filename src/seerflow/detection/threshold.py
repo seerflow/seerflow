@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Literal
 
 import msgspec
 import numpy as np
@@ -54,7 +55,7 @@ class ThresholdResult:
     upper_threshold: float
     lower_threshold: float
     score: float
-    anomaly_direction: str | None = None
+    anomaly_direction: Literal["upper", "lower"] | None = None
 
 
 class DSpotThreshold:

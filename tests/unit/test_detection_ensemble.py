@@ -27,14 +27,26 @@ def _make_event(*, source_type: str = "syslog", **kwargs):
 
 class TestDetectionResult:
     def test_fields(self) -> None:
-        r = DetectionResult(score=0.5, upper_threshold=3.0, lower_threshold=-1.0,
-                           is_anomaly=False, anomaly_direction=None, source_type="syslog")
+        r = DetectionResult(
+            score=0.5,
+            upper_threshold=3.0,
+            lower_threshold=-1.0,
+            is_anomaly=False,
+            anomaly_direction=None,
+            source_type="syslog",
+        )
         assert r.score == 0.5
         assert r.source_type == "syslog"
 
     def test_frozen(self) -> None:
-        r = DetectionResult(score=0.5, upper_threshold=3.0, lower_threshold=-1.0,
-                           is_anomaly=False, anomaly_direction=None, source_type="syslog")
+        r = DetectionResult(
+            score=0.5,
+            upper_threshold=3.0,
+            lower_threshold=-1.0,
+            is_anomaly=False,
+            anomaly_direction=None,
+            source_type="syslog",
+        )
         with pytest.raises(AttributeError):
             r.score = 1.0  # type: ignore[misc]
 
