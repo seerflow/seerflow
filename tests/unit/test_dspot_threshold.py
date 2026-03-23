@@ -73,7 +73,7 @@ class TestDSpotValidation:
 
     def test_percentile_too_high(self) -> None:
         with pytest.raises(ValueError, match="initial_percentile must be in"):
-            DSpotThreshold(initial_percentile=101)
+            DSpotThreshold(initial_percentile=100)
 
 
 class TestDSpotAnomalyDetection:
