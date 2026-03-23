@@ -316,10 +316,6 @@ class FileTailReceiver:
             self._watched_files.discard(path_str)
             return
         status = _check_rotation(st, saved)
-        if status == "deleted":
-            _log.warning("File deleted: %s", path_str)
-            self._watched_files.discard(path_str)
-            return
         if status in ("rotated", "truncated"):
             _log.info("File %s: %s — resetting offset to 0", status, path_str)
             saved = FileOffset(offset=0, inode=st.st_ino)
