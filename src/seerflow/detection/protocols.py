@@ -17,18 +17,18 @@ class Detector(Protocol):
     2. ``learn(event)`` -- update model with the new event
     """
 
-    def score(self, event: SeerflowEvent) -> float:
+    def score(self, event: SeerflowEvent) -> float:  # pragma: no cover
         """Return anomaly score in [0.0, 1.0]. Higher = more anomalous."""
         ...
 
-    def learn(self, event: SeerflowEvent) -> None:
+    def learn(self, event: SeerflowEvent) -> None:  # pragma: no cover
         """Update the model incrementally with a new event."""
         ...
 
-    def serialize(self) -> bytes:
+    def serialize(self) -> bytes:  # pragma: no cover
         """Serialize model state to bytes for persistence."""
         ...
 
-    def deserialize(self, data: bytes) -> None:
+    def deserialize(self, data: bytes) -> None:  # pragma: no cover
         """Restore model state from bytes."""
         ...

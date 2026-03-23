@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from seerflow.detection.protocols import Detector
 
 if TYPE_CHECKING:
@@ -68,9 +66,7 @@ class TestDetectorProtocol:
         assert not isinstance(obj, Detector)
 
     def test_protocol_is_runtime_checkable(self) -> None:
-        assert hasattr(Detector, "__protocol_attrs__") or hasattr(
-            Detector, "_is_runtime_protocol"
-        )
+        assert hasattr(Detector, "__protocol_attrs__") or hasattr(Detector, "_is_runtime_protocol")
 
     def test_detector_imported_from_detection_package(self) -> None:
         from seerflow.detection import Detector as DetectorFromInit

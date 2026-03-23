@@ -115,7 +115,10 @@ class TestHSTDetector:
         anomalous_event = _make_event(
             template_id=999,
             severity_id=SeverityLevel.FATAL,
-            message="CRITICAL FAILURE: kernel panic in module xyz with stack overflow and memory corruption detected across multiple subsystems resulting in total system degradation",
+            message=(
+                "CRITICAL FAILURE: kernel panic in module xyz with stack overflow "
+                "and memory corruption detected across multiple subsystems"
+            ),
             entity_refs=("e1", "e2", "e3", "e4", "e5"),
             template_params=("p1", "p2", "p3", "p4", "p5", "p6", "p7"),
         )
@@ -199,10 +202,12 @@ class TestSerialization:
         assert original_score == pytest.approx(restored_score, abs=1e-10)
 
     def test_deserialize_empty_raises(self) -> None:
+        import pickle
+
         from seerflow.detection.hst import HSTDetector
 
         detector = HSTDetector()
-        with pytest.raises(Exception):
+        with pytest.raises((pickle.UnpicklingError, EOFError)):
             detector.deserialize(b"")
 
 

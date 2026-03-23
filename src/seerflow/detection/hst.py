@@ -58,7 +58,11 @@ class HSTDetector:
 
         Warning: pickle can execute arbitrary code. Only load from trusted sources.
         """
-        self._model = pickle.loads(data)  # noqa: S301  # nosec B301
+        obj = pickle.loads(data)  # noqa: S301  # nosec B301
+        if not isinstance(obj, anomaly.HalfSpaceTrees):
+            msg = f"Expected HalfSpaceTrees, got {type(obj).__name__}"
+            raise TypeError(msg)
+        self._model = obj
 
 
 def get_hst_detector(
