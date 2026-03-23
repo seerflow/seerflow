@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from seerflow.models import SeerflowEvent, SeverityLevel
 
 
@@ -147,3 +149,67 @@ class TestHSTDetector:
             score = detector.score(event)
             assert 0.0 <= score <= 1.0
             detector.learn(event)
+
+
+# ---------------------------------------------------------------------------
+# Serialization + Protocol conformance tests
+# ---------------------------------------------------------------------------
+
+
+class TestSerialization:
+    def test_serialize_returns_bytes(self) -> None:
+        from seerflow.detection.hst import HSTDetector
+
+        detector = HSTDetector()
+        event = _make_event()
+        detector.learn(event)
+        data = detector.serialize()
+
+        assert isinstance(data, bytes)
+        assert len(data) > 0
+
+    def test_round_trip_produces_same_scores(self) -> None:
+        """Train 20 events, serialize, deserialize, compare scores."""
+        from seerflow.detection.hst import HSTDetector
+
+        detector = HSTDetector(n_trees=15, window_size=100, seed=42)
+
+        events = [
+            _make_event(
+                template_id=i % 3,
+                message=f"event number {i}",
+                severity_id=SeverityLevel.INFORMATIONAL,
+            )
+            for i in range(20)
+        ]
+
+        for event in events:
+            detector.score(event)
+            detector.learn(event)
+
+        data = detector.serialize()
+
+        restored = HSTDetector()
+        restored.deserialize(data)
+
+        test_event = _make_event(template_id=5, message="new unseen event")
+        original_score = detector.score(test_event)
+        restored_score = restored.score(test_event)
+
+        assert original_score == pytest.approx(restored_score, abs=1e-10)
+
+    def test_deserialize_empty_raises(self) -> None:
+        from seerflow.detection.hst import HSTDetector
+
+        detector = HSTDetector()
+        with pytest.raises(Exception):
+            detector.deserialize(b"")
+
+
+class TestProtocolConformance:
+    def test_hst_implements_detector(self) -> None:
+        from seerflow.detection.hst import HSTDetector
+        from seerflow.detection.protocols import Detector
+
+        detector = HSTDetector()
+        assert isinstance(detector, Detector)
