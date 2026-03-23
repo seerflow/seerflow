@@ -27,16 +27,16 @@ class DSpotThreshold:
     """Streaming DSPOT auto-threshold with EVT-based anomaly detection."""
 
     __slots__ = (
+        "_calibrated",
         "_calibration_window",
+        "_excesses",
         "_initial_percentile",
+        "_n_exceed",
+        "_n_total",
         "_risk_level",
         "_scores",
         "_threshold",
         "_z_q",
-        "_excesses",
-        "_n_total",
-        "_n_exceed",
-        "_calibrated",
     )
 
     def __init__(
@@ -117,9 +117,7 @@ class DSpotThreshold:
         if abs(shape) < 1e-10:
             self._z_q = self._threshold + scale * np.log(n_t / (n * q))
         else:
-            self._z_q = self._threshold + (scale / shape) * (
-                (n_t / (n * q)) ** shape - 1
-            )
+            self._z_q = self._threshold + (scale / shape) * ((n_t / (n * q)) ** shape - 1)
         self._z_q = float(self._z_q)
 
     def serialize(self) -> bytes:

@@ -44,7 +44,7 @@ class TestDSpotCalibration:
     def test_threshold_set_after_calibration(self) -> None:
         import random
 
-        rng = random.Random(42)
+        rng = random.Random(42)  # noqa: S311
         ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
         for _ in range(500):
             ds.update(rng.gauss(0, 1))
@@ -84,7 +84,7 @@ class TestDSpotAnomalyDetection:
         """Build a calibrated detector from normal Gaussian data."""
         import random
 
-        rng = random.Random(42)
+        rng = random.Random(42)  # noqa: S311
         ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
         for _ in range(500):
             ds.update(rng.gauss(0, 1))
@@ -95,10 +95,8 @@ class TestDSpotAnomalyDetection:
         import random
 
         ds = self._calibrated_detector()
-        rng = random.Random(99)
-        anomalies = sum(
-            ds.update(rng.gauss(0, 1)).is_anomaly for _ in range(200)
-        )
+        rng = random.Random(99)  # noqa: S311
+        anomalies = sum(ds.update(rng.gauss(0, 1)).is_anomaly for _ in range(200))
         assert anomalies / 200 < 0.05, f"FP rate {anomalies / 200:.2%} >= 5%"
 
     def test_extreme_score_flagged(self) -> None:
@@ -119,7 +117,7 @@ class TestDSpotSerialization:
     def _calibrated_detector() -> DSpotThreshold:
         import random
 
-        rng = random.Random(42)
+        rng = random.Random(42)  # noqa: S311
         ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
         for _ in range(500):
             ds.update(rng.gauss(0, 1))
