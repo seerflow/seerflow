@@ -26,6 +26,40 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+class TestLineSizeLimit:
+    def test_normal_lines_pass(self, tmp_path: Path) -> None:
+        f = tmp_path / "test.log"
+        f.write_bytes(b"short line\n")
+        lines, _offset = _read_new_lines(f, 0)
+        assert len(lines) == 1
+        assert lines[0] == b"short line\n"
+
+    def test_oversized_line_discarded(self, tmp_path: Path) -> None:
+        from seerflow.receivers.file_tail import _MAX_LINE_BYTES
+
+        f = tmp_path / "test.log"
+        oversized = b"x" * (_MAX_LINE_BYTES + 1) + b"\n"
+        f.write_bytes(b"good\n" + oversized + b"also good\n")
+        lines, offset = _read_new_lines(f, 0)
+        assert b"good\n" in lines
+        assert oversized not in lines
+        # "also good\n" may not appear because _MAX_BYTES_PER_READ (64 KB)
+        # limits how much readlines reads per call; the oversized line alone
+        # exceeds that budget so the trailing line is deferred to a later read.
+        # Verify it is retrievable with a second read from the new offset:
+        lines2, _ = _read_new_lines(f, offset)
+        assert b"also good\n" in lines2
+
+    def test_exactly_max_size_passes(self, tmp_path: Path) -> None:
+        from seerflow.receivers.file_tail import _MAX_LINE_BYTES
+
+        f = tmp_path / "test.log"
+        exact = b"x" * (_MAX_LINE_BYTES - 1) + b"\n"
+        f.write_bytes(exact)
+        lines, _offset = _read_new_lines(f, 0)
+        assert len(lines) == 1
+
+
 class TestCheckpoint:
     def test_save_and_load(self, tmp_path: Path) -> None:
         cp_file = tmp_path / "offsets.json"
@@ -82,6 +116,26 @@ class TestCheckpoint:
         loaded = _load_checkpoint(cp_file)
         assert len(loaded) == 1
         assert "ok" in loaded
+
+
+class TestCheckpointPermissions:
+    def test_checkpoint_file_permissions(self, tmp_path: Path) -> None:
+        cp_path = tmp_path / "file_offsets.json"
+        offsets = {"test": FileOffset(offset=10, inode=123)}
+        _save_checkpoint(cp_path, offsets)
+        mode = cp_path.stat().st_mode & 0o777
+        assert mode == 0o600
+
+    def test_checkpoint_encoding_utf8(self, tmp_path: Path) -> None:
+        cp_path = tmp_path / "file_offsets.json"
+        offsets = {"test": FileOffset(offset=10, inode=123)}
+        _save_checkpoint(cp_path, offsets)
+        content = cp_path.read_text(encoding="utf-8")
+        assert "test" in content
+
+    def test_load_checkpoint_missing_file(self, tmp_path: Path) -> None:
+        result = _load_checkpoint(tmp_path / "nonexistent.json")
+        assert result == {}
 
 
 class TestFileReader:
@@ -689,6 +743,49 @@ class TestCheckpointKeyFiltering:
         assert allowed_resolved in r._offsets
         assert outside_resolved not in r._offsets
         await r.stop()
+
+
+class TestEmptyStartRecovery:
+    async def test_empty_start_stays_running(self, tmp_path: Path) -> None:
+        """Receiver stays healthy when zero files match at startup."""
+        mgr = ReceiverManager()
+        r = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+        )
+        await r.start()
+        assert r.is_healthy()
+        await r.wait_ready(timeout=2.0)
+        await r.stop()
+
+
+class TestConfinementWarning:
+    def test_warning_when_no_allowed_roots(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mgr = ReceiverManager()
+        with caplog.at_level(logging.WARNING):
+            FileTailReceiver(
+                mgr,
+                source_id="test",
+                file_paths=(str(tmp_path / "*.log"),),
+                allowed_log_roots=(),
+            )
+        assert any("confinement" in r.message.lower() for r in caplog.records)
+
+    def test_no_warning_with_allowed_roots(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mgr = ReceiverManager()
+        with caplog.at_level(logging.WARNING):
+            FileTailReceiver(
+                mgr,
+                source_id="test",
+                file_paths=(str(tmp_path / "*.log"),),
+                allowed_log_roots=(str(tmp_path),),
+            )
+        assert not any("confinement" in r.message.lower() for r in caplog.records)
 
 
 class TestAllowedRootsResolvedAtInit:

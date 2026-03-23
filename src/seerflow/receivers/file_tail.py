@@ -42,34 +42,36 @@ def _save_checkpoint(path: Path, offsets: dict[str, FileOffset]) -> None:
     """Persist file offsets to JSON with atomic write (tmp + rename)."""
     data = {k: {"offset": v.offset, "inode": v.inode} for k, v in offsets.items()}
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=2))
     os.replace(tmp, path)
 
 
 def _load_checkpoint(path: Path) -> dict[str, FileOffset]:
     """Load file offsets from JSON. Returns empty dict if file is missing or corrupted."""
-    if not path.exists():
-        return {}
     try:
-        raw = json.loads(path.read_text())
-        if not isinstance(raw, dict):
-            _log.warning("Checkpoint malformed (not a dict), starting fresh: %s", path)
-            return {}
-        result: dict[str, FileOffset] = {}
-        for k, v in raw.items():
-            if not isinstance(v, dict):
-                continue
-            offset = v.get("offset")
-            inode = v.get("inode")
-            if not isinstance(offset, int) or not isinstance(inode, int):
-                continue
-            if offset < 0 or inode < 0:
-                continue
-            result[k] = FileOffset(offset=offset, inode=inode)
-        return result
-    except (json.JSONDecodeError, TypeError) as exc:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
         _log.warning("Corrupted checkpoint %s, starting fresh: %s", path, exc)
         return {}
+    if not isinstance(raw, dict):
+        _log.warning("Checkpoint malformed (not a dict), starting fresh: %s", path)
+        return {}
+    result: dict[str, FileOffset] = {}
+    for k, v in raw.items():
+        if not isinstance(v, dict):
+            continue
+        offset = v.get("offset")
+        inode = v.get("inode")
+        if not isinstance(offset, int) or not isinstance(inode, int):
+            continue
+        if offset < 0 or inode < 0:
+            continue
+        result[k] = FileOffset(offset=offset, inode=inode)
+    return result
 
 
 def _validate_pattern(pattern: str) -> None:
@@ -97,21 +99,30 @@ def _is_path_allowed(resolved: str, allowed_roots: tuple[str, ...]) -> bool:
 
 
 _MAX_BYTES_PER_READ = 64 * 1024  # 64 KB per call to bound memory usage
+_MAX_LINE_BYTES = 1024 * 1024  # 1 MB — lines exceeding this are discarded
 
 
 def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
     """Read new complete lines from *path* starting at *offset*.
 
-    Returns only complete lines (ending with ``\\n``). Partial lines at
-    EOF are left for the next read. Uses a byte-size hint to bound
-    memory usage per call.
+    Returns only complete lines (ending with ``\\n``) that are within
+    the ``_MAX_LINE_BYTES`` limit. Oversized lines are logged and
+    discarded. Partial lines at EOF are left for the next read.
     """
     with path.open("rb") as fh:
         fh.seek(offset)
         raw_lines = fh.readlines(_MAX_BYTES_PER_READ)
-    # Filter out incomplete trailing line (no newline at end)
-    complete = [ln for ln in raw_lines if ln.endswith(b"\n")]
-    new_offset = offset + sum(len(ln) for ln in complete)
+    complete: list[bytes] = []
+    total_bytes = 0
+    for ln in raw_lines:
+        if not ln.endswith(b"\n"):
+            continue
+        total_bytes += len(ln)
+        if len(ln) > _MAX_LINE_BYTES:
+            _log.warning("Discarding oversized line (%d bytes) from %s", len(ln), path)
+            continue
+        complete.append(ln)
+    new_offset = offset + total_bytes
     return complete, new_offset
 
 
@@ -179,6 +190,8 @@ class FileTailReceiver:
         self._allowed_log_roots: tuple[str, ...] = tuple(
             str(Path(r).resolve()) for r in allowed_log_roots
         )
+        if file_paths and not allowed_log_roots:
+            _log.warning("No allowed_log_roots configured - file tailing has no path confinement")
         self._offsets: dict[str, FileOffset] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self._started = False
@@ -267,7 +280,21 @@ class FileTailReceiver:
         watch_dirs: set[str] = set()
         for fp in self._watched_files:
             watch_dirs.add(str(Path(fp).parent))
+        # When no files match, derive watch dirs from glob pattern parents
         if not watch_dirs:
+            for pattern in self._file_paths:
+                _validate_pattern(pattern)
+                parent = str(Path(pattern).parent.resolve())
+                if not os.path.isdir(parent):
+                    continue
+                if not _is_path_allowed(parent, self._allowed_log_roots):
+                    continue
+                watch_dirs.add(parent)
+        if not watch_dirs:
+            _log.warning(
+                "No watchable directories found (%d patterns configured)",
+                len(self._file_paths),
+            )
             self._ready.set()
             return
         self._ready.set()
