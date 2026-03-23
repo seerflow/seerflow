@@ -191,7 +191,7 @@ class FileTailReceiver:
             str(Path(r).resolve()) for r in allowed_log_roots
         )
         if file_paths and not allowed_log_roots:
-            _log.warning("No allowed_log_roots configured — file tailing has no path confinement")
+            _log.warning("No allowed_log_roots configured - file tailing has no path confinement")
         self._offsets: dict[str, FileOffset] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self._started = False

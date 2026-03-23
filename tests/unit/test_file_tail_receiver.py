@@ -30,7 +30,7 @@ class TestLineSizeLimit:
     def test_normal_lines_pass(self, tmp_path: Path) -> None:
         f = tmp_path / "test.log"
         f.write_bytes(b"short line\n")
-        lines, offset = _read_new_lines(f, 0)
+        lines, _offset = _read_new_lines(f, 0)
         assert len(lines) == 1
         assert lines[0] == b"short line\n"
 
@@ -56,7 +56,7 @@ class TestLineSizeLimit:
         f = tmp_path / "test.log"
         exact = b"x" * (_MAX_LINE_BYTES - 1) + b"\n"
         f.write_bytes(exact)
-        lines, offset = _read_new_lines(f, 0)
+        lines, _offset = _read_new_lines(f, 0)
         assert len(lines) == 1
 
 
