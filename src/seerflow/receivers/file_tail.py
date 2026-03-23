@@ -117,17 +117,18 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
 RotationStatus = Literal["ok", "rotated", "truncated", "deleted"]
 
 
-def _check_rotation(path: Path, saved: FileOffset) -> RotationStatus:
-    """Detect log rotation or truncation.
+def _check_rotation(stat_result: os.stat_result | None, saved: FileOffset) -> RotationStatus:
+    """Detect log rotation or truncation from a pre-fetched stat result.
 
-    Returns one of: ``"ok"``, ``"rotated"``, ``"truncated"``, ``"deleted"``.
+    Accepts ``None`` when the file no longer exists (deleted).
+    The caller is responsible for performing the ``stat()`` call — this
+    function never touches the filesystem, eliminating TOCTOU windows.
     """
-    if not path.exists():
+    if stat_result is None:
         return "deleted"
-    stat = path.stat()
-    if stat.st_ino != saved.inode:
+    if stat_result.st_ino != saved.inode:
         return "rotated"
-    if saved.offset > stat.st_size:
+    if saved.offset > stat_result.st_size:
         return "truncated"
     return "ok"
 
@@ -305,13 +306,17 @@ class FileTailReceiver:
         """Read new lines from a modified file and enqueue as RawEvents."""
         path = Path(path_str)
         saved = self._offsets.get(path_str, FileOffset(offset=0, inode=0))
-        status = _check_rotation(path, saved)
+        try:
+            st = path.stat()
+        except OSError:
+            _log.warning("File deleted: %s", path_str)
+            self._watched_files.discard(path_str)
+            return
+        status = _check_rotation(st, saved)
         if status == "deleted":
             _log.warning("File deleted: %s", path_str)
             self._watched_files.discard(path_str)
             return
-        # Single stat call to avoid TOCTOU races
-        st = path.stat()
         if status in ("rotated", "truncated"):
             _log.info("File %s: %s — resetting offset to 0", status, path_str)
             saved = FileOffset(offset=0, inode=st.st_ino)
