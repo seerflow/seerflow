@@ -74,3 +74,66 @@ class TestDSpotValidation:
     def test_percentile_too_high(self) -> None:
         with pytest.raises(ValueError, match="initial_percentile must be in"):
             DSpotThreshold(initial_percentile=101)
+
+
+class TestDSpotAnomalyDetection:
+    """Post-calibration anomaly detection tests."""
+
+    @staticmethod
+    def _calibrated_detector() -> DSpotThreshold:
+        """Build a calibrated detector from normal Gaussian data."""
+        import random
+
+        rng = random.Random(42)
+        ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
+        for _ in range(500):
+            ds.update(rng.gauss(0, 1))
+        assert ds.is_calibrated
+        return ds
+
+    def test_normal_scores_low_fp_rate(self) -> None:
+        import random
+
+        ds = self._calibrated_detector()
+        rng = random.Random(99)
+        anomalies = sum(
+            ds.update(rng.gauss(0, 1)).is_anomaly for _ in range(200)
+        )
+        assert anomalies / 200 < 0.05, f"FP rate {anomalies / 200:.2%} >= 5%"
+
+    def test_extreme_score_flagged(self) -> None:
+        ds = self._calibrated_detector()
+        result = ds.update(5.0)
+        assert result.is_anomaly is True
+
+    def test_result_contains_correct_score(self) -> None:
+        ds = self._calibrated_detector()
+        result = ds.update(0.42)
+        assert result.score == 0.42
+
+
+class TestDSpotSerialization:
+    """Serialization round-trip tests."""
+
+    @staticmethod
+    def _calibrated_detector() -> DSpotThreshold:
+        import random
+
+        rng = random.Random(42)
+        ds = DSpotThreshold(calibration_window=500, initial_percentile=80)
+        for _ in range(500):
+            ds.update(rng.gauss(0, 1))
+        return ds
+
+    def test_serialize_returns_bytes(self) -> None:
+        ds = self._calibrated_detector()
+        data = ds.serialize()
+        assert isinstance(data, bytes)
+        assert len(data) > 0
+
+    def test_round_trip_preserves_state(self) -> None:
+        ds = self._calibrated_detector()
+        data = ds.serialize()
+        restored = DSpotThreshold.deserialize(data)
+        assert restored.is_calibrated == ds.is_calibrated
+        assert restored.threshold == ds.threshold
