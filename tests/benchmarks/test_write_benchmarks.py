@@ -1,6 +1,8 @@
 """Write throughput benchmarks."""
-# NOTE: These benchmarks use manual timing (time.perf_counter) because
+# NOTE: Async test classes use manual timing (time.perf_counter) because the
 # pytest-benchmark fixture is incompatible with asyncio event loops.
+# Sync wrapper classes (TestSync*) use asyncio.run() per iteration to produce
+# --benchmark-autosave data for regression tracking.
 
 from __future__ import annotations
 
@@ -79,7 +81,8 @@ class TestSyncWriteBenchmarks:
             try:
                 for event in events:
                     await b.write_events([event])
-                    await b._write_buffer.flush()
+                    if b._write_buffer is not None:
+                        await b._write_buffer.flush()
             finally:
                 await b.close()
 
@@ -94,7 +97,8 @@ class TestSyncWriteBenchmarks:
             b = await SqliteBackend.connect(config)
             try:
                 await b.write_events(events)
-                await b._write_buffer.flush()
+                if b._write_buffer is not None:
+                    await b._write_buffer.flush()
             finally:
                 await b.close()
 

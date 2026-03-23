@@ -1,6 +1,8 @@
 """Alert and model state throughput benchmarks."""
-# NOTE: These benchmarks use manual timing (time.perf_counter) because
+# NOTE: Async test classes use manual timing (time.perf_counter) because the
 # pytest-benchmark fixture is incompatible with asyncio event loops.
+# Sync wrapper classes (TestSync*) use asyncio.run() per iteration to produce
+# --benchmark-autosave data for regression tracking.
 
 from __future__ import annotations
 
