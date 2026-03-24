@@ -271,3 +271,50 @@ class TestWebhookConfig:
         )
         cfg = load_config(str(yaml_file))
         assert cfg.receivers.webhooks[0].auth_token == "env-secret"
+
+
+class TestReceiverConfigCompleteness:
+    def test_defaults_match_hardcoded(self) -> None:
+        cfg = load_config()
+        r = cfg.receivers
+        assert r.bind_addr == "0.0.0.0"  # noqa: S104
+        assert r.queue_maxsize == 10_000
+        assert r.webhook_enabled is False
+        assert r.webhook_port == 8081
+        assert r.file_checkpoint_dir == ""
+        assert r.file_debounce_ms == 1600
+        assert r.syslog_tcp_enabled is True
+        assert r.otlp_http_max_request_bytes == 4_194_304
+        assert r.otlp_grpc_max_workers == 4
+
+    def test_override_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  bind_addr: 127.0.0.1\n"
+            "  queue_maxsize: 5000\n"
+            "  webhook_enabled: true\n"
+            "  webhook_port: 9090\n"
+            "  file_checkpoint_dir: /tmp/checkpoints\n"
+            "  file_debounce_ms: 500\n"
+            "  syslog_tcp_enabled: false\n"
+            "  otlp_http_max_request_bytes: 1048576\n"
+            "  otlp_grpc_max_workers: 8\n"
+        )
+        cfg = load_config(str(yaml_file))
+        r = cfg.receivers
+        assert r.bind_addr == "127.0.0.1"
+        assert r.queue_maxsize == 5000
+        assert r.webhook_enabled is True
+        assert r.webhook_port == 9090
+        assert r.file_checkpoint_dir == "/tmp/checkpoints"
+        assert r.file_debounce_ms == 500
+        assert r.syslog_tcp_enabled is False
+        assert r.otlp_http_max_request_bytes == 1_048_576
+        assert r.otlp_grpc_max_workers == 8
+
+    def test_webhook_port_validated(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  webhook_port: 99999\n")
+        with pytest.raises(ConfigError, match="must be between 1 and 65535"):
+            load_config(str(yaml_file))
