@@ -160,6 +160,25 @@ class TestGracefulShutdown:
         await mgr.start()
         await mgr.stop()  # no error with empty receivers
 
+    async def test_get_event_returns_none_after_stop(self) -> None:
+        mgr = ReceiverManager()
+        await mgr.stop()
+        result = await mgr.get_event()
+        assert result is None
+
+    async def test_get_event_drains_before_none(self) -> None:
+        mgr = ReceiverManager()
+        event = RawEvent(
+            data=b"test", source_type="test", source_id="t", received_ns=0, metadata={}
+        )
+        await mgr.put_event(event)
+        await mgr.stop()
+        result = await mgr.get_event()
+        assert result is not None
+        assert result.data == b"test"
+        result2 = await mgr.get_event()
+        assert result2 is None
+
 
 class TestExports:
     def test_imports(self) -> None:
