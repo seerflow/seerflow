@@ -10,16 +10,48 @@ storage:
   # postgresql_url: ${SEERFLOW_PG_URL}   # required when backend=postgresql
 
 receivers:
-  syslog_enabled: true
-  syslog_udp_port: 514
-  syslog_tcp_port: 601
+  # Network binding
+  bind_addr: "0.0.0.0"                   # address to bind all receivers; use 127.0.0.1 to restrict to localhost
+  queue_maxsize: 10000                   # internal event queue depth before back-pressure
+
+  # Syslog receiver
+  syslog_enabled: true                   # enable UDP + TCP syslog listener
+  syslog_udp_port: 514                   # UDP syslog port (RFC 3164/5424)
+  syslog_tcp_port: 601                   # TCP syslog port (RFC 6587)
+  syslog_tcp_enabled: true               # set false to disable TCP syslog while keeping UDP
+
+  # OpenTelemetry gRPC receiver
   otlp_grpc_enabled: true
-  otlp_grpc_port: 4317
+  otlp_grpc_port: 4317                   # standard OTLP/gRPC port
+  otlp_grpc_max_workers: 4              # gRPC thread-pool size
+
+  # OpenTelemetry HTTP receiver
   otlp_http_enabled: true
-  otlp_http_port: 4318
+  otlp_http_port: 4318                   # standard OTLP/HTTP port
+  otlp_http_max_request_bytes: 4194304  # 4 MiB max request body; raise for high-volume batches
+
+  # File tailing
   # file_paths:                          # glob patterns for file tailing
   #   - /var/log/*.log
   #   - /var/log/auth.log
+  # file_checkpoint_dir: ""              # dir to persist tail offsets across restarts (empty = no persistence)
+  # file_debounce_ms: 1600               # milliseconds to wait after last write before re-reading
+
+  # Webhook HTTP receiver
+  webhook_enabled: false                 # enable the inbound webhook listener
+  webhook_port: 8081                     # port for the webhook HTTP server
+  # webhooks:
+  #   - path: /ingest/github
+  #     auth_header: X-Hub-Signature-256
+  #     auth_token: ${GITHUB_WEBHOOK_SECRET}
+  #     source_id: github
+  #     field_mapping:
+  #       message: action
+
+  # Access control
+  # allowed_log_roots:                   # restrict file_paths to these directory prefixes
+  #   - /var/log
+  #   - /home
 
 detection:
   hst_window_size: 1000
@@ -27,6 +59,7 @@ detection:
   dspot:
     calibration_window: 1000             # minimum events before DSPOT activates
     risk_level: 0.0001                   # false positive rate (1 in 10,000)
+    initial_percentile: 98               # seed percentile for DSPOT threshold initialization
   weights_content: 0.30                  # Half-Space Trees weight
   weights_volume: 0.25                   # Holt-Winters weight
   weights_sequence: 0.25                 # Markov chains weight
