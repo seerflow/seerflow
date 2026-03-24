@@ -223,3 +223,17 @@ class TestWebhookReceiverErrors:
                 assert resp.status == 415
         finally:
             await receiver.stop()
+
+
+class TestWebhookExports:
+    def test_import(self) -> None:
+        import seerflow.receivers as mod
+
+        assert hasattr(mod, "WebhookReceiver")
+        assert hasattr(mod, "WebhookConfig")
+
+    def test_all(self) -> None:
+        import seerflow.receivers as mod
+
+        assert "WebhookReceiver" in mod.__all__
+        assert "WebhookConfig" in mod.__all__
