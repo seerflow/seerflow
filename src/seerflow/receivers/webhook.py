@@ -68,7 +68,7 @@ class WebhookReceiver:
         manager: ReceiverManager,
         *,
         configs: tuple[WebhookConfig, ...] = (WebhookConfig(),),
-        bind_addr: str = "0.0.0.0",  # noqa: S104
+        bind_addr: str = "0.0.0.0",  # noqa: S104  # nosec B104 — receiver must listen on all interfaces
         port: int = 8081,
     ) -> None:
         if not bind_addr:
@@ -130,8 +130,9 @@ class WebhookReceiver:
         return self._actual_port
 
     def _make_handler(
-        self, config: WebhookConfig
-    ) -> Any:  # noqa: ANN401
+        self,
+        config: WebhookConfig,
+    ) -> Any:
         """Create a request handler bound to a specific WebhookConfig."""
 
         async def handler(
@@ -151,31 +152,19 @@ class WebhookReceiver:
                     post_data = await request.post()
                     data = dict(post_data)
                 else:
-                    return aiohttp.web.Response(
-                        status=415, text="Unsupported content type"
-                    )
+                    return aiohttp.web.Response(status=415, text="Unsupported content type")
             except json.JSONDecodeError as exc:
                 _log.debug("Malformed webhook body: %s", exc)
-                return aiohttp.web.Response(
-                    status=400, text="Malformed request body"
-                )
+                return aiohttp.web.Response(status=400, text="Malformed request body")
 
             # Apply field mapping to metadata
             metadata: dict[str, Any] = {}
             for target_field, source_path in config.field_mapping.items():
-                value = (
-                    _extract_field(data, source_path)
-                    if isinstance(data, dict)
-                    else None
-                )
+                value = _extract_field(data, source_path) if isinstance(data, dict) else None
                 if value is not None:
                     metadata[target_field] = value
 
-            body_bytes = (
-                json.dumps(data).encode("utf-8")
-                if isinstance(data, dict)
-                else b"{}"
-            )
+            body_bytes = json.dumps(data).encode("utf-8") if isinstance(data, dict) else b"{}"
             event = RawEvent(
                 data=body_bytes,
                 source_type="webhook",

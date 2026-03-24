@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import aiohttp
-import pytest
 
 from seerflow.receivers.base import Receiver
 from seerflow.receivers.manager import ReceiverManager
