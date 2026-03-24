@@ -15,6 +15,8 @@ import aiohttp.web
 from seerflow.receivers.base import RawEvent
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from seerflow.receivers.manager import ReceiverManager
 
 _log = logging.getLogger(__name__)
@@ -23,17 +25,29 @@ _MAX_REQUEST_BYTES = 4 * 1024 * 1024  # 4 MB
 
 @dataclass(frozen=True, slots=True)
 class WebhookConfig:
-    """Configuration for a single webhook endpoint."""
+    """Configuration for a single webhook endpoint.
+
+    Auth uses bearer-token comparison via constant-time ``hmac.compare_digest``.
+    Both ``auth_header`` and ``auth_token`` must be set together or both empty.
+    """
 
     path: str = "/ingest/webhook"
-    secret_header: str = ""
-    secret_value: str = ""
+    auth_header: str = ""
+    auth_token: str = ""
     field_mapping: dict[str, str] = field(default_factory=dict)
     source_id: str = "webhook"
 
+    def __post_init__(self) -> None:
+        if bool(self.auth_header) != bool(self.auth_token):
+            msg = "auth_header and auth_token must both be set or both be empty"
+            raise ValueError(msg)
+
 
 def _extract_field(data: dict[str, Any], dot_path: str) -> str | None:
-    """Extract a value from nested dict using dot-path (e.g. 'body.text')."""
+    """Extract a scalar value from nested dict using dot-path (e.g. 'body.text').
+
+    Returns None if the path is missing or the terminal value is not a scalar.
+    """
     keys = dot_path.split(".")
     current: Any = data
     for key in keys:
@@ -41,6 +55,8 @@ def _extract_field(data: dict[str, Any], dot_path: str) -> str | None:
             current = current[key]
         else:
             return None
+    if not isinstance(current, (str, int, float, bool)):
+        return None
     return str(current)
 
 
@@ -68,7 +84,7 @@ class WebhookReceiver:
         manager: ReceiverManager,
         *,
         configs: tuple[WebhookConfig, ...] = (WebhookConfig(),),
-        bind_addr: str = "0.0.0.0",  # noqa: S104  # nosec B104 — receiver must listen on all interfaces
+        bind_addr: str = "0.0.0.0",  # noqa: S104  # nosec B104
         port: int = 8081,
     ) -> None:
         if not bind_addr:
@@ -132,22 +148,26 @@ class WebhookReceiver:
     def _make_handler(
         self,
         config: WebhookConfig,
-    ) -> Any:
+    ) -> Callable[
+        [aiohttp.web.Request],
+        Coroutine[Any, Any, aiohttp.web.Response],
+    ]:
         """Create a request handler bound to a specific WebhookConfig."""
 
         async def handler(
             request: aiohttp.web.Request,
         ) -> aiohttp.web.Response:
-            # Auth check
-            if config.secret_header and config.secret_value:
-                provided = request.headers.get(config.secret_header, "")
-                if not hmac.compare_digest(provided, config.secret_value):
+            # Auth check (bearer-token, constant-time comparison)
+            if config.auth_header:
+                provided = request.headers.get(config.auth_header, "")
+                if not hmac.compare_digest(provided, config.auth_token):
                     return aiohttp.web.Response(status=401, text="Unauthorized")
 
+            # Content-type uses aiohttp's parsed media type (strips charset params)
             content_type = request.content_type
             try:
                 if content_type == "application/json":
-                    data = await request.json()
+                    data: dict[str, Any] = await request.json()
                 elif content_type == "application/x-www-form-urlencoded":
                     post_data = await request.post()
                     data = dict(post_data)
@@ -157,7 +177,7 @@ class WebhookReceiver:
                 _log.debug("Malformed webhook body: %s", exc)
                 return aiohttp.web.Response(status=400, text="Malformed request body")
 
-            # Apply field mapping to metadata
+            # Apply field mapping to metadata (scalars only)
             metadata: dict[str, Any] = {}
             for target_field, source_path in config.field_mapping.items():
                 value = _extract_field(data, source_path) if isinstance(data, dict) else None
