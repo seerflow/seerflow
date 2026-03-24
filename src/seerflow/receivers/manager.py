@@ -81,9 +81,18 @@ class ReceiverManager:
         """Synchronous variant of ``put_event`` for use in protocol callbacks."""
         return self._enqueue(event)
 
-    async def get_event(self) -> RawEvent:
-        """Get next event from queue (blocks until available)."""
-        return await self._queue.get()
+    async def get_event(self) -> RawEvent | None:
+        """Get next event. Returns None when shutdown is signaled."""
+        while not self._stopped:
+            try:
+                return await asyncio.wait_for(self._queue.get(), timeout=0.5)
+            except TimeoutError:
+                continue
+        # Drain remaining events before returning None
+        try:
+            return self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return None
 
     @property
     def queue_depth(self) -> int:
