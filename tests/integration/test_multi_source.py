@@ -60,9 +60,7 @@ async def test_three_sources_simultaneous() -> None:
         # Send OTLP HTTP
         http_record = logs_pb2.LogRecord(body=common_pb2.AnyValue(string_value="http test"))
         http_scope = logs_pb2.ScopeLogs(log_records=[http_record])
-        http_rl = logs_pb2.ResourceLogs(
-            resource=resource_pb2.Resource(), scope_logs=[http_scope]
-        )
+        http_rl = logs_pb2.ResourceLogs(resource=resource_pb2.Resource(), scope_logs=[http_scope])
         http_req = logs_service_pb2.ExportLogsServiceRequest(resource_logs=[http_rl])
         async with aiohttp.ClientSession() as session:
             await session.post(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from seerflow.config import ReceiverConfig, SeerflowConfig
-from seerflow.pipeline import Pipeline, build_pipeline
+from seerflow.pipeline import build_pipeline
 from seerflow.receivers.base import RawEvent
 
 

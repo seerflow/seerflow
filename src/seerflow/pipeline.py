@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from seerflow.receivers.manager import ReceiverManager
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from seerflow.config import SeerflowConfig
     from seerflow.receivers.base import RawEvent
 
