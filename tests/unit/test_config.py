@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from seerflow.config import ConfigError, SeerflowConfig, load_config
+from seerflow.config import ConfigError, SeerflowConfig, WebhookEndpointConfig, load_config
 
 
 class TestDefaultConfig:
@@ -207,3 +207,67 @@ class TestConfigValidation:
         yaml_file.write_text("dashboard_port: -1\n")
         with pytest.raises(ConfigError, match="must be between 1 and 65535"):
             load_config(str(yaml_file))
+
+
+class TestWebhookConfig:
+    def test_webhook_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  webhooks:\n"
+            "    - path: /ingest/github\n"
+            "      auth_header: X-Hub-Sig\n"
+            "      auth_token: secret123\n"
+            "      source_id: github\n"
+            "      field_mapping:\n"
+            "        message: action\n"
+            "        repo: repository.name\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert len(cfg.receivers.webhooks) == 1
+        wh = cfg.receivers.webhooks[0]
+        assert wh.path == "/ingest/github"
+        assert wh.auth_header == "X-Hub-Sig"
+        assert wh.auth_token == "secret123"
+        assert wh.source_id == "github"
+        assert wh.field_mapping == {"message": "action", "repo": "repository.name"}
+
+    def test_multiple_webhooks(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  webhooks:\n"
+            "    - path: /ingest/a\n"
+            "      source_id: a\n"
+            "    - path: /ingest/b\n"
+            "      source_id: b\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert len(cfg.receivers.webhooks) == 2
+        assert cfg.receivers.webhooks[0].source_id == "a"
+        assert cfg.receivers.webhooks[1].source_id == "b"
+
+    def test_no_webhooks_default_empty(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  syslog_enabled: true\n")
+        cfg = load_config(str(yaml_file))
+        assert cfg.receivers.webhooks == ()
+
+    def test_half_auth_raises(self) -> None:
+        with pytest.raises(ConfigError, match="auth_header and auth_token"):
+            WebhookEndpointConfig(auth_header="X-Token")
+
+    def test_webhook_env_var_interpolation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WH_SECRET", "env-secret")
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  webhooks:\n"
+            "    - path: /hook\n"
+            "      auth_header: X-Secret\n"
+            "      auth_token: ${WH_SECRET}\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert cfg.receivers.webhooks[0].auth_token == "env-secret"

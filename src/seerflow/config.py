@@ -47,6 +47,22 @@ class StorageConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class WebhookEndpointConfig:
+    """Configuration for a single webhook endpoint (YAML-loadable)."""
+
+    path: str = "/ingest/webhook"
+    auth_header: str = ""
+    auth_token: str = ""
+    field_mapping: dict[str, str] = field(default_factory=dict)
+    source_id: str = "webhook"
+
+    def __post_init__(self) -> None:
+        if bool(self.auth_header) != bool(self.auth_token):
+            msg = "auth_header and auth_token must both be set or both be empty"
+            raise ConfigError(msg)
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class ReceiverConfig:
     """Log receiver configuration."""
 
@@ -59,6 +75,7 @@ class ReceiverConfig:
     otlp_http_port: int = 4318
     file_paths: tuple[str, ...] = ()
     allowed_log_roots: tuple[str, ...] = ()
+    webhooks: tuple[WebhookEndpointConfig, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -182,6 +199,28 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     allowed_log_roots = data.get("allowed_log_roots", ())
     if isinstance(allowed_log_roots, list):
         allowed_log_roots = tuple(allowed_log_roots)
+    raw_webhooks = data.get("webhooks", ())
+    if isinstance(raw_webhooks, list):
+        webhook_configs: list[WebhookEndpointConfig] = []
+        for wh in raw_webhooks:
+            if not isinstance(wh, dict):
+                msg = "Each webhook entry must be a mapping"
+                raise ConfigError(msg)
+            fm = wh.get("field_mapping", {})
+            if isinstance(fm, dict):
+                fm = {str(k): str(v) for k, v in fm.items()}
+            webhook_configs.append(
+                WebhookEndpointConfig(
+                    path=wh.get("path", "/ingest/webhook"),
+                    auth_header=wh.get("auth_header", ""),
+                    auth_token=wh.get("auth_token", ""),
+                    field_mapping=fm,
+                    source_id=wh.get("source_id", "webhook"),
+                )
+            )
+        webhooks_tuple = tuple(webhook_configs)
+    else:
+        webhooks_tuple = ()
     cfg = ReceiverConfig(
         syslog_enabled=data.get("syslog_enabled", True),
         syslog_udp_port=data.get("syslog_udp_port", 514),
@@ -192,6 +231,7 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
         otlp_http_port=data.get("otlp_http_port", 4318),
         file_paths=file_paths,
         allowed_log_roots=allowed_log_roots,
+        webhooks=webhooks_tuple,
     )
     _require_valid_port("receivers.syslog_udp_port", cfg.syslog_udp_port)
     _require_valid_port("receivers.syslog_tcp_port", cfg.syslog_tcp_port)

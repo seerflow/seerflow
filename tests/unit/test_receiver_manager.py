@@ -180,5 +180,7 @@ class TestExports:
             "Receiver",
             "ReceiverManager",
             "SyslogReceiver",
+            "WebhookConfig",
+            "WebhookReceiver",
         }
         assert set(mod.__all__) == expected
