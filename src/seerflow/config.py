@@ -69,13 +69,22 @@ class ReceiverConfig:
     syslog_enabled: bool = True
     syslog_udp_port: int = 514
     syslog_tcp_port: int = 601
+    syslog_tcp_enabled: bool = True
     otlp_grpc_enabled: bool = True
     otlp_grpc_port: int = 4317
+    otlp_grpc_max_workers: int = 4
     otlp_http_enabled: bool = True
     otlp_http_port: int = 4318
+    otlp_http_max_request_bytes: int = 4_194_304
     file_paths: tuple[str, ...] = ()
+    file_checkpoint_dir: str = ""
+    file_debounce_ms: int = 1600
     allowed_log_roots: tuple[str, ...] = ()
     webhooks: tuple[WebhookEndpointConfig, ...] = ()
+    webhook_enabled: bool = False
+    webhook_port: int = 8081
+    bind_addr: str = "0.0.0.0"  # noqa: S104
+    queue_maxsize: int = 10_000
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -225,18 +234,28 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
         syslog_enabled=data.get("syslog_enabled", True),
         syslog_udp_port=data.get("syslog_udp_port", 514),
         syslog_tcp_port=data.get("syslog_tcp_port", 601),
+        syslog_tcp_enabled=data.get("syslog_tcp_enabled", True),
         otlp_grpc_enabled=data.get("otlp_grpc_enabled", True),
         otlp_grpc_port=data.get("otlp_grpc_port", 4317),
+        otlp_grpc_max_workers=data.get("otlp_grpc_max_workers", 4),
         otlp_http_enabled=data.get("otlp_http_enabled", True),
         otlp_http_port=data.get("otlp_http_port", 4318),
+        otlp_http_max_request_bytes=data.get("otlp_http_max_request_bytes", 4_194_304),
         file_paths=file_paths,
+        file_checkpoint_dir=data.get("file_checkpoint_dir", ""),
+        file_debounce_ms=data.get("file_debounce_ms", 1600),
         allowed_log_roots=allowed_log_roots,
         webhooks=webhooks_tuple,
+        webhook_enabled=data.get("webhook_enabled", False),
+        webhook_port=data.get("webhook_port", 8081),
+        bind_addr=data.get("bind_addr", "0.0.0.0"),  # noqa: S104
+        queue_maxsize=data.get("queue_maxsize", 10_000),
     )
     _require_valid_port("receivers.syslog_udp_port", cfg.syslog_udp_port)
     _require_valid_port("receivers.syslog_tcp_port", cfg.syslog_tcp_port)
     _require_valid_port("receivers.otlp_grpc_port", cfg.otlp_grpc_port)
     _require_valid_port("receivers.otlp_http_port", cfg.otlp_http_port)
+    _require_valid_port("receivers.webhook_port", cfg.webhook_port)
     return cfg
 
 
