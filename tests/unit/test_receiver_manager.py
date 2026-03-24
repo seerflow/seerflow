@@ -174,6 +174,7 @@ class TestExports:
 
         expected = {
             "FileTailReceiver",
+            "OtlpGrpcReceiver",
             "RawEvent",
             "Receiver",
             "ReceiverManager",

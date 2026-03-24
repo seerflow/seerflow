@@ -22,7 +22,9 @@ classifiers = [
 dependencies = [
     "aiosqlite>=0.22.1",
     "drain3>=0.9.11",
+    "grpcio>=1.78.0",
     "msgspec>=0.20.0",
+    "opentelemetry-proto>=1.40.0",
     "pyyaml>=6.0.3",
     "river>=0.23.0",
     "watchfiles>=1.1.1",
@@ -49,6 +51,8 @@ dev = [
     "pytest-cov>=6.0",
     "types-pyyaml>=6.0.12.20250915",
     "pytest-benchmark>=5.2.3",
+    "types-grpcio>=1.0.0.20251009",
+    "types-protobuf>=6.32.1.20260221",
 ]
 
 [tool.ruff]
