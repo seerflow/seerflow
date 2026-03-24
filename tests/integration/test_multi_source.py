@@ -40,12 +40,11 @@ async def test_three_sources_simultaneous() -> None:
         http_r = mgr._receivers["otlp-http"]
 
         # Send syslog UDP
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(
-            b"<134>1 2026-03-24T00:00:00Z host app 1 - - test syslog",
-            ("127.0.0.1", syslog_r.udp_port),
-        )
-        sock.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(
+                b"<134>1 2026-03-24T00:00:00Z host app 1 - - test syslog",
+                ("127.0.0.1", syslog_r.udp_port),
+            )
 
         # Send OTLP gRPC
         channel = grpc.insecure_channel(f"127.0.0.1:{grpc_r.actual_port}")

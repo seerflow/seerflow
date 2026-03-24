@@ -139,6 +139,8 @@ async def build_pipeline(config: SeerflowConfig) -> Pipeline:
 
     failed = await mgr.start()
     if failed:
-        _log.warning("Failed to start receivers: %s", failed)
+        await mgr.stop()
+        msg = f"Failed to start receivers: {failed}"
+        raise RuntimeError(msg)
 
     return Pipeline(mgr, config)
