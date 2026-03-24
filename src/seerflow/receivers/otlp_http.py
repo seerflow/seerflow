@@ -7,11 +7,13 @@ The aiohttp handler runs within the same event loop.
 from __future__ import annotations
 
 import logging
+import socket
 import time
 from typing import TYPE_CHECKING
 
 import aiohttp.web
 from google.protobuf.json_format import Parse, ParseError
+from google.protobuf.message import DecodeError
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 
 from seerflow.receivers.base import RawEvent
@@ -20,6 +22,8 @@ if TYPE_CHECKING:
     from seerflow.receivers.manager import ReceiverManager
 
 _log = logging.getLogger(__name__)
+
+_MAX_REQUEST_BYTES = 4 * 1024 * 1024  # 4 MB
 
 
 class OtlpHttpReceiver:
@@ -65,15 +69,22 @@ class OtlpHttpReceiver:
         """Start the HTTP server on the configured address and port."""
         if self._started:
             return
-        app = aiohttp.web.Application()
+        app = aiohttp.web.Application(client_max_size=_MAX_REQUEST_BYTES)
         app.router.add_post("/v1/logs", self._handle_logs)
         runner = aiohttp.web.AppRunner(app)
         await runner.setup()
-        site = aiohttp.web.TCPSite(runner, self._bind_addr, self._port)
-        await site.start()
-        if self._port == 0:
-            sockets = site._server.sockets  # type: ignore[union-attr]
-            self._actual_port = sockets[0].getsockname()[1]
+        # Use pre-created socket for reliable ephemeral port discovery
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((self._bind_addr, self._port))
+            self._actual_port = sock.getsockname()[1]
+            site = aiohttp.web.SockSite(runner, sock)
+            await site.start()
+        except Exception:
+            sock.close()
+            await runner.cleanup()
+            raise
         self._runner = runner
         self._started = True
         _log.info(
@@ -110,12 +121,20 @@ class OtlpHttpReceiver:
         try:
             if content_type == "application/x-protobuf":
                 req = logs_service_pb2.ExportLogsServiceRequest()
-                req.ParseFromString(body)
+                consumed = req.ParseFromString(body)
+                if consumed != len(body):
+                    return aiohttp.web.Response(
+                        status=400, text="Trailing bytes after protobuf message"
+                    )
             elif content_type == "application/json":
                 req = Parse(body, logs_service_pb2.ExportLogsServiceRequest())
             else:
                 return aiohttp.web.Response(status=415, text="Unsupported content type")
-        except (ParseError, Exception):
+        except (ParseError, DecodeError) as exc:
+            _log.debug("Malformed request body: %s", exc)
+            return aiohttp.web.Response(status=400, text="Malformed request body")
+        except Exception:
+            _log.exception("Unexpected error parsing OTLP HTTP request")
             return aiohttp.web.Response(status=400, text="Malformed request body")
 
         for resource_logs in req.resource_logs:
