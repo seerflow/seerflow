@@ -13,9 +13,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="seerflow",
         description="Streaming log intelligence agent",
     )
-    parser.add_argument(
-        "--version", action="version", version=f"seerflow {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"seerflow {__version__}")
     parser.add_argument(
         "--config",
         type=str,
