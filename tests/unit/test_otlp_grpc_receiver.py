@@ -117,7 +117,7 @@ class TestOtlpGrpcReceiverIngest:
 
             await asyncio.sleep(0.1)
             assert mgr.queue_depth == 5
-            for i in range(5):
+            for _ in range(5):
                 event = await mgr.get_event()
                 assert event.source_type == "otlp_grpc"
         finally:

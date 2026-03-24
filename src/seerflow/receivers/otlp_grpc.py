@@ -1,7 +1,12 @@
-"""OTLP gRPC receiver — OpenTelemetry Logs Protocol ingestion."""
+"""OTLP gRPC receiver — OpenTelemetry Logs Protocol ingestion.
+
+NOT thread-safe for start/stop — designed for single event-loop operation.
+The gRPC servicer itself is thread-safe (runs in grpcio's thread pool).
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from concurrent import futures
@@ -61,6 +66,7 @@ class _LogsServicer(logs_service_pb2_grpc.LogsServiceServicer):
 class OtlpGrpcReceiver:
     """OTLP gRPC receiver for OpenTelemetry log ingestion.
 
+    NOT thread-safe for start/stop — single event-loop only.
     Use ``port=0`` in tests to let the OS assign an ephemeral port.
     Read the actual port via the ``actual_port`` property after ``start()``.
     """
@@ -103,19 +109,29 @@ class OtlpGrpcReceiver:
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=_GRPC_THREAD_POOL_SIZE))
         servicer = _LogsServicer(self._manager, self._source_id)
         logs_service_pb2_grpc.add_LogsServiceServicer_to_server(servicer, server)  # type: ignore[no-untyped-call]
-        self._actual_port = server.add_insecure_port(f"{self._bind_addr}:{self._port}")
-        server.start()
+        bound_port = server.add_insecure_port(f"{self._bind_addr}:{self._port}")
+        if bound_port == 0:
+            msg = f"gRPC server failed to bind to {self._bind_addr}:{self._port}"
+            raise OSError(msg)
+        try:
+            server.start()
+        except Exception:
+            server.stop(0)
+            raise
+        self._actual_port = bound_port
         self._server = server
         self._started = True
         _log.info("OTLP gRPC receiver listening on %s:%d", self._bind_addr, self._actual_port)
 
     async def stop(self) -> None:
-        """Gracefully stop the gRPC server."""
+        """Gracefully stop the gRPC server and wait for in-flight RPCs."""
         if self._stopped:
             return
         self._stopped = True
         if self._server is not None:
-            self._server.stop(grace=_GRACEFUL_SHUTDOWN_SECONDS)
+            stop_event = self._server.stop(grace=_GRACEFUL_SHUTDOWN_SECONDS)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, stop_event.wait)
             _log.info("OTLP gRPC receiver stopped")
 
     def is_healthy(self) -> bool:
