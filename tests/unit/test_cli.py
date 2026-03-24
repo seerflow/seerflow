@@ -25,3 +25,15 @@ class TestCLIArgs:
         with pytest.raises(SystemExit) as exc:
             parse_args(["--unknown"])
         assert exc.value.code == 2
+
+
+class TestMainImport:
+    def test_main_callable(self) -> None:
+        from seerflow.__main__ import main
+
+        assert callable(main)
+
+    def test_run_callable(self) -> None:
+        from seerflow.__main__ import _run
+
+        assert callable(_run)
