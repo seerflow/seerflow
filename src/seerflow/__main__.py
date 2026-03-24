@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 from seerflow import __version__
 from seerflow.cli import parse_args
@@ -14,7 +16,9 @@ from seerflow.config import load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.models import SeerflowEvent
 from seerflow.pipeline import build_pipeline
-from seerflow.receivers.base import RawEvent
+
+if TYPE_CHECKING:
+    from seerflow.receivers.base import RawEvent
 
 _log = logging.getLogger("seerflow")
 
@@ -33,9 +37,7 @@ async def _run(config_path: str | None) -> None:
 
     # Startup banner
     receivers = list(pipeline.manager._receivers.keys())
-    _log.info(
-        "Receivers: %s", ", ".join(receivers) if receivers else "none"
-    )
+    _log.info("Receivers: %s", ", ".join(receivers) if receivers else "none")
 
     # Graceful shutdown (Unix only — SIGINT/SIGTERM not available on Windows)
     if sys.platform != "win32":
@@ -43,9 +45,7 @@ async def _run(config_path: str | None) -> None:
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(
-                sig, lambda: asyncio.create_task(pipeline.stop())
-            )
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(pipeline.stop()))
 
     async def handler(event: RawEvent) -> None:
         seerflow_event = SeerflowEvent(
@@ -74,10 +74,8 @@ async def _run(config_path: str | None) -> None:
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_run(args.config))
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":
