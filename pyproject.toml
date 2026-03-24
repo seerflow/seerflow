@@ -20,6 +20,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "aiohttp>=3.13.3",
     "aiosqlite>=0.22.1",
     "drain3>=0.9.11",
     "grpcio>=1.78.0",
