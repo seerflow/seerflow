@@ -41,7 +41,10 @@ class Pipeline:
             event = await self._manager.get_event()
             if event is None:
                 break
-            await handler(event)
+            try:
+                await handler(event)
+            except Exception:
+                _log.exception("Handler error processing event from %s", event.source_type)
         self._running = False
 
     async def stop(self) -> None:
