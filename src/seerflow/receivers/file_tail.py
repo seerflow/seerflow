@@ -260,6 +260,9 @@ class FileTailReceiver:
                     f"(e.g. {unreadable}). Run as root or adjust file permissions."
                 )
                 raise PermissionError(msg)
+            _log.info("Watching %d file(s):", len(readable))
+            for f in sorted(readable):
+                _log.info("  %s", f)
             if len(readable) < len(self._watched_files):
                 skipped = len(self._watched_files) - len(readable)
                 _log.warning(
