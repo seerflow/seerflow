@@ -20,6 +20,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Path to seerflow.yaml config file",
     )
+
+    subparsers = parser.add_subparsers(dest="command")
+    tail_parser = subparsers.add_parser("tail", help="Monitor log files (no config needed)")
+    tail_parser.add_argument("paths", nargs="+", help="File paths or glob patterns")
+    tail_parser.add_argument(
+        "--config", type=str, default=None, help="Config for detection settings"
+    )
+
     return parser.parse_args(argv)
 
 

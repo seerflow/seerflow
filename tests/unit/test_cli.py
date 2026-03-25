@@ -210,7 +210,7 @@ class TestRunLoop:
 
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None)
+        mock_args = argparse.Namespace(config=None, command=None)
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.__main__.asyncio") as mock_asyncio,
@@ -226,7 +226,7 @@ class TestRunLoop:
 
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None)
+        mock_args = argparse.Namespace(config=None, command=None)
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.__main__.asyncio") as mock_asyncio,
@@ -235,3 +235,46 @@ class TestRunLoop:
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
+
+
+class TestTailSubcommand:
+    def test_tail_parses_single_path(self) -> None:
+        args = parse_args(["tail", "/var/log/syslog"])
+        assert args.command == "tail"
+        assert args.paths == ["/var/log/syslog"]
+
+    def test_tail_parses_multiple_paths(self) -> None:
+        args = parse_args(["tail", "/var/log/syslog", "/var/log/auth.log"])
+        assert args.paths == ["/var/log/syslog", "/var/log/auth.log"]
+
+    def test_tail_with_config(self) -> None:
+        args = parse_args(["tail", "/var/log/syslog", "--config", "my.yaml"])
+        assert args.paths == ["/var/log/syslog"]
+        assert args.config == "my.yaml"
+
+    def test_default_command_is_none(self) -> None:
+        args = parse_args([])
+        assert args.command is None
+
+    def test_tail_no_paths_exits(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["tail"])
+
+    def test_tail_builds_file_only_config(self) -> None:
+        """Verify tail creates config with only file receivers."""
+        from seerflow.config import ReceiverConfig, SeerflowConfig
+
+        args = parse_args(["tail", "/tmp/test.log", "/tmp/other.log"])
+        config = SeerflowConfig(
+            receivers=ReceiverConfig(
+                syslog_enabled=False,
+                otlp_grpc_enabled=False,
+                otlp_http_enabled=False,
+                webhook_enabled=False,
+                file_paths=tuple(args.paths),
+            ),
+        )
+        assert config.receivers.file_paths == ("/tmp/test.log", "/tmp/other.log")
+        assert config.receivers.syslog_enabled is False
+        assert config.receivers.otlp_grpc_enabled is False
+        assert config.receivers.otlp_http_enabled is False
