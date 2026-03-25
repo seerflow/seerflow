@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from seerflow import __version__
 from seerflow.cli import parse_args
-from seerflow.config import load_config
+from seerflow.config import ReceiverConfig, SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.models import SeerflowEvent
 from seerflow.pipeline import build_pipeline
@@ -25,15 +25,12 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 
-async def _run(config_path: str | None) -> None:
-    # Bootstrap logging early so load_config errors surface
+async def _run_with_config(config: SeerflowConfig) -> None:
+    """Run the pipeline with a pre-built config."""
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
-
-    config = load_config(config_path)
-
     # Reconfigure at user's chosen level
     logging.getLogger().setLevel(getattr(logging, config.log_level, logging.INFO))
     # Suppress noisy third-party loggers
@@ -187,11 +184,41 @@ def _make_handler(
     return handler
 
 
+async def _run(config_path: str | None) -> None:
+    """Load config from path and run the pipeline."""
+    config = load_config(config_path)
+    await _run_with_config(config)
+
+
+def _build_tail_config(paths: list[str], config_path: str | None = None) -> SeerflowConfig:
+    """Build a SeerflowConfig for tail mode (file receivers only)."""
+    base = load_config(config_path) if config_path is not None else SeerflowConfig()
+    tail_receivers = ReceiverConfig(
+        syslog_enabled=False,
+        otlp_grpc_enabled=False,
+        otlp_http_enabled=False,
+        webhook_enabled=False,
+        file_paths=tuple(paths),
+    )
+    return SeerflowConfig(
+        receivers=tail_receivers,
+        storage=base.storage,
+        detection=base.detection,
+        alerting=base.alerting,
+        llm=base.llm,
+        log_level=base.log_level,
+    )
+
+
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
     try:
-        asyncio.run(_run(args.config))
+        if args.command == "tail":
+            tail_config = _build_tail_config(args.paths, config_path=args.config)
+            asyncio.run(_run_with_config(tail_config))
+        else:
+            asyncio.run(_run(args.config))
     except KeyboardInterrupt:
         sys.exit(0)
 

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from seerflow.config import ReceiverConfig, SeerflowConfig
+import os
+import tempfile
+
+from seerflow.config import ReceiverConfig, SeerflowConfig, WebhookEndpointConfig
 from seerflow.pipeline import build_pipeline
 from seerflow.receivers.base import RawEvent
 
@@ -75,3 +78,57 @@ class TestPipelineBuilder:
         assert pipeline.manager is not None
         assert pipeline.config is config
         await pipeline.stop()
+
+
+class TestAutoEnable:
+    """Tests for auto-enabling receivers from config presence."""
+
+    async def test_webhooks_auto_enables_webhook_receiver(self) -> None:
+        """Webhook receiver registers when webhooks non-empty, even if disabled."""
+        config = SeerflowConfig(
+            receivers=ReceiverConfig(
+                syslog_enabled=False,
+                otlp_grpc_enabled=False,
+                otlp_http_enabled=False,
+                webhook_enabled=False,
+                webhooks=(WebhookEndpointConfig(path="/hook"),),
+            ),
+        )
+        pipeline = await build_pipeline(config)
+        assert "webhook" in pipeline.manager._receivers
+        await pipeline.stop()
+
+    async def test_empty_webhooks_no_receiver(self) -> None:
+        """No webhook receiver when webhooks list is empty."""
+        config = SeerflowConfig(
+            receivers=ReceiverConfig(
+                syslog_enabled=False,
+                otlp_grpc_enabled=False,
+                otlp_http_enabled=False,
+                webhook_enabled=False,
+            ),
+        )
+        pipeline = await build_pipeline(config)
+        assert "webhook" not in pipeline.manager._receivers
+        await pipeline.stop()
+
+    async def test_file_paths_auto_enables_file_receiver(self) -> None:
+        """File receiver registers when file_paths is non-empty (regression)."""
+        with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as f:
+            f.write(b"test\n")
+            tmp_path = f.name
+        try:
+            config = SeerflowConfig(
+                receivers=ReceiverConfig(
+                    syslog_enabled=False,
+                    otlp_grpc_enabled=False,
+                    otlp_http_enabled=False,
+                    webhook_enabled=False,
+                    file_paths=(tmp_path,),
+                ),
+            )
+            pipeline = await build_pipeline(config)
+            assert "file" in pipeline.manager._receivers
+            await pipeline.stop()
+        finally:
+            os.unlink(tmp_path)

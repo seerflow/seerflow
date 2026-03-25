@@ -210,7 +210,7 @@ class TestRunLoop:
 
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None)
+        mock_args = argparse.Namespace(config=None, command=None)
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.__main__.asyncio") as mock_asyncio,
@@ -226,7 +226,7 @@ class TestRunLoop:
 
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None)
+        mock_args = argparse.Namespace(config=None, command=None)
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.__main__.asyncio") as mock_asyncio,
@@ -235,3 +235,69 @@ class TestRunLoop:
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
+
+
+class TestTailSubcommand:
+    def test_tail_parses_single_path(self) -> None:
+        args = parse_args(["tail", "/var/log/syslog"])
+        assert args.command == "tail"
+        assert args.paths == ["/var/log/syslog"]
+
+    def test_tail_parses_multiple_paths(self) -> None:
+        args = parse_args(["tail", "/var/log/syslog", "/var/log/auth.log"])
+        assert args.paths == ["/var/log/syslog", "/var/log/auth.log"]
+
+    def test_tail_with_config_before_subcommand(self) -> None:
+        args = parse_args(["--config", "my.yaml", "tail", "/var/log/syslog"])
+        assert args.paths == ["/var/log/syslog"]
+        assert args.config == "my.yaml"
+
+    def test_default_command_is_none(self) -> None:
+        args = parse_args([])
+        assert args.command is None
+
+    def test_tail_no_paths_exits(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            parse_args(["tail"])
+        assert exc.value.code == 2
+
+    def test_build_tail_config_no_base(self) -> None:
+        """_build_tail_config with no config_path uses defaults."""
+        from seerflow.__main__ import _build_tail_config
+
+        config = _build_tail_config(["/tmp/test.log", "/tmp/other.log"])
+        assert config.receivers.file_paths == ("/tmp/test.log", "/tmp/other.log")
+        assert config.receivers.syslog_enabled is False
+        assert config.receivers.otlp_grpc_enabled is False
+        assert config.receivers.otlp_http_enabled is False
+        assert config.receivers.webhook_enabled is False
+
+    def test_build_tail_config_with_base(self, tmp_path: Path) -> None:
+        """_build_tail_config with config_path inherits detection/storage."""
+        from seerflow.__main__ import _build_tail_config
+
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("log_level: DEBUG\ndetection:\n  hst_window_size: 500\n")
+        config = _build_tail_config(["/tmp/x.log"], config_path=str(yaml_file))
+        assert config.receivers.file_paths == ("/tmp/x.log",)
+        assert config.receivers.syslog_enabled is False
+        assert config.log_level == "DEBUG"
+        assert config.detection.hst_window_size == 500
+
+    def test_main_dispatches_tail(self) -> None:
+        """main() dispatches to _build_tail_config + _run_with_config for tail."""
+        import argparse
+        from unittest.mock import MagicMock, patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(config=None, command="tail", paths=["/tmp/test.log"])
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.__main__._build_tail_config") as mock_build,
+            patch("seerflow.__main__.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.run = MagicMock()
+            main()
+            mock_build.assert_called_once_with(["/tmp/test.log"], config_path=None)
+            mock_asyncio.run.assert_called_once()

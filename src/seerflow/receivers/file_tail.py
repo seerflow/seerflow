@@ -219,6 +219,7 @@ class FileTailReceiver:
                 try:
                     st = p.lstat()  # single syscall — atomic symlink + file check
                 except OSError:
+                    _log.debug("Skipping inaccessible path %s", p)
                     continue
                 if stat_module.S_ISLNK(st.st_mode):
                     _log.warning("Skipping symlink %s — symlinks are not followed", p)

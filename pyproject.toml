@@ -25,11 +25,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-[project.urls]
-Homepage = "https://github.com/seerflow/seerflow"
-Repository = "https://github.com/seerflow/seerflow"
-Issues = "https://github.com/seerflow/seerflow/issues"
-Documentation = "https://github.com/seerflow/seerflow/blob/main/SETTINGS.md"
 dependencies = [
     "aiohttp>=3.13.3",
     "aiosqlite>=0.22.1",
@@ -42,13 +37,14 @@ dependencies = [
     "watchfiles>=1.1.1",
 ]
 
-[project.scripts]
-seerflow = "seerflow.cli:main"
-
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
 Repository = "https://github.com/seerflow/seerflow"
 Issues = "https://github.com/seerflow/seerflow/issues"
+Documentation = "https://github.com/seerflow/seerflow/blob/main/SETTINGS.md"
+
+[project.scripts]
+seerflow = "seerflow.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/seerflow"]
