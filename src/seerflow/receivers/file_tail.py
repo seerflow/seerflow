@@ -284,7 +284,11 @@ class FileTailReceiver:
                     "Check file permissions and allowed_log_roots."
                 )
                 raise PermissionError(msg)
-            _log.info("No files match yet — watching parent directories for new files")
+            _log.warning(
+                "No files match patterns %s — watching directories for new files. "
+                "Check that the file paths and extensions are correct.",
+                self._file_paths,
+            )
         self._started = True
         self._watcher_task = asyncio.create_task(self._watch_loop())
 

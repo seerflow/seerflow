@@ -35,6 +35,8 @@ async def _run(config_path: str | None) -> None:
 
     # Reconfigure at user's chosen level
     logging.getLogger().setLevel(getattr(logging, config.log_level, logging.INFO))
+    # Suppress noisy third-party loggers
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
 
     _log.info("Seerflow %s starting", __version__)
 
