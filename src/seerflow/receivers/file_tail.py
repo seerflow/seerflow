@@ -364,9 +364,7 @@ class FileTailReceiver:
                             # offset=st_size which would skip existing data).
                             saved = self._offsets.get(new_path)
                             if saved is not None:
-                                self._offsets[new_path] = FileOffset(
-                                    offset=0, inode=saved.inode
-                                )
+                                self._offsets[new_path] = FileOffset(offset=0, inode=saved.inode)
                             try:
                                 await self._process_file(new_path)
                             except OSError as exc:
