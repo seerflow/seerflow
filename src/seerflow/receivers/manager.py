@@ -74,8 +74,10 @@ class ReceiverManager:
         for source_id, receiver in self._receivers.items():
             try:
                 await receiver.stop()
+            except PermissionError as exc:
+                _log.warning("Error stopping receiver '%s': %s", source_id, exc)
             except Exception:
-                _log.exception("Failed to stop receiver %s", source_id)
+                _log.warning("Error stopping receiver '%s'", source_id, exc_info=True)
 
     def _enqueue(self, event: RawEvent) -> bool:
         """Shared enqueue logic with backpressure warning."""
