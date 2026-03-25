@@ -62,7 +62,7 @@ async def _run(config_path: str | None) -> None:
 
     # Graceful shutdown via event (Unix only)
     _shutdown_task: asyncio.Task[None] | None = None
-    if sys.platform != "win32":
+    if sys.platform != "win32":  # pragma: no branch
         import signal
 
         def _request_shutdown() -> None:  # pragma: no cover — called by OS signal only

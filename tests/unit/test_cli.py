@@ -155,6 +155,46 @@ class TestRunLoop:
             await built_pipeline.stop()
             await task  # should complete cleanly
 
+    async def test_handler_batch_flush_and_stats(self) -> None:
+        """Handler flushes batch at 50 events and tracks stats."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig(
+            detection=SeerflowConfig().detection,
+        )
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        # Send 55 events — should trigger one batch flush at 50
+        for i in range(55):
+            event = RawEvent(
+                data=f"event {i}".encode(),
+                source_type="test",
+                source_id="t",
+                received_ns=1_700_000_000_000_000_000 + i,
+                metadata={},
+            )
+            await handler(event)
+
+        # Batch should have flushed once (50 events), 5 remaining
+        mock_storage.write_events.assert_called_once()
+        assert len(handler.batch) == 5  # type: ignore[union-attr]
+
+        # Stats should be accessible
+        get_stats = handler.get_stats  # type: ignore[union-attr]
+        events, anomalies, templates, t0 = get_stats()
+        assert events == 55
+        assert anomalies >= 0
+        assert len(templates) >= 1
+        assert t0 > 0
+
     def test_main_with_nonexistent_config_raises(self) -> None:
         """main() with a bad config path should raise."""
         from seerflow.__main__ import _run
