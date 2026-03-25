@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import time
@@ -70,6 +71,23 @@ def _sanitize_fts_query(query: str) -> str:
     if not cleaned:
         return '""'
     return f'"{cleaned}"'
+
+
+# ---------------------------------------------------------------------------
+# Template metadata
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TemplateInfo:
+    """Template metadata for the templates table."""
+
+    template_id: int
+    template_str: str
+    first_seen_ns: int
+    last_seen_ns: int
+    event_count: int
+    example_message: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +219,15 @@ CREATE TRIGGER IF NOT EXISTS events_fts_update AFTER UPDATE ON events BEGIN
     INSERT INTO events_fts(events_fts, rowid, message) VALUES ('delete', old.rowid, old.message);
     INSERT INTO events_fts(rowid, message) VALUES (new.rowid, new.message);
 END;
+
+CREATE TABLE IF NOT EXISTS templates (
+    template_id    INTEGER PRIMARY KEY,
+    template_str   TEXT    NOT NULL,
+    first_seen_ns  INTEGER NOT NULL,
+    last_seen_ns   INTEGER NOT NULL,
+    event_count    INTEGER NOT NULL DEFAULT 1,
+    example_message TEXT
+);
 """
 
 
@@ -223,6 +250,17 @@ INSERT OR IGNORE INTO events (
 _INSERT_ENTITY_EVENT_SQL = """\
 INSERT OR IGNORE INTO entity_events (entity_uuid, event_id, timestamp_ns)
 VALUES (?, ?, ?)"""
+
+_UPSERT_TEMPLATE_SQL = """\
+INSERT INTO templates (
+    template_id, template_str, first_seen_ns,
+    last_seen_ns, event_count, example_message
+) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(template_id) DO UPDATE SET
+    last_seen_ns = MAX(templates.last_seen_ns, excluded.last_seen_ns),
+    event_count = templates.event_count + excluded.event_count,
+    template_str = excluded.template_str
+"""
 
 
 def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
@@ -415,6 +453,35 @@ class SqliteBackend:
             return
         if self._write_buffer is not None:
             await self._write_buffer.append(events)
+
+    async def write_templates(self, templates: list[TemplateInfo]) -> None:
+        """Upsert template metadata — increment counts, update last_seen."""
+        if not templates:
+            return
+        rows = [
+            (
+                t.template_id,
+                t.template_str,
+                t.first_seen_ns,
+                t.last_seen_ns,
+                t.event_count,
+                t.example_message,
+            )
+            for t in templates
+        ]
+        await self._conn.executemany(_UPSERT_TEMPLATE_SQL, rows)
+        await self._conn.commit()
+
+    async def get_templates(self, limit: int = 1000) -> list[TemplateInfo]:
+        """Query templates sorted by event_count descending."""
+        sql = (
+            "SELECT template_id, template_str, first_seen_ns, last_seen_ns,"
+            " event_count, example_message FROM templates"
+            " ORDER BY event_count DESC LIMIT ?"
+        )
+        async with await self._conn.execute(sql, [limit]) as cursor:
+            rows = await cursor.fetchall()
+        return [TemplateInfo(*row) for row in rows]
 
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]:
         """Query events with composable filters and pagination."""
