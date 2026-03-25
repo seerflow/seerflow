@@ -37,6 +37,7 @@ async def _run(config_path: str | None) -> None:
     logging.getLogger().setLevel(getattr(logging, config.log_level, logging.INFO))
     # Suppress noisy third-party loggers
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
+    logging.getLogger("drain3").setLevel(logging.WARNING)
 
     _log.info("Seerflow %s starting", __version__)
 
@@ -98,6 +99,14 @@ def _make_handler(
             entity_refs=entity_refs,
         )
         result = ensemble.process_event(seerflow_event)
+        _log.debug(
+            "event tid=%d entities=%d score=%.4f thresh=%.4f src=%s",
+            template_id,
+            len(entity_refs),
+            result.score,
+            result.upper_threshold,
+            event.source_type,
+        )
         if result.is_anomaly:  # pragma: no cover — tested in test_detection_ensemble
             _log.warning(
                 "ANOMALY [%s] score=%.3f dir=%s src=%s",
