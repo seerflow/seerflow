@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import TYPE_CHECKING
 
@@ -109,8 +110,6 @@ class TestRunLoop:
 
     async def test_run_starts_and_stops_with_config(self, tmp_path: Path) -> None:
         """_run() with a minimal config starts and stops cleanly."""
-        import asyncio
-
         from seerflow.__main__ import _run
 
         yaml_file = tmp_path / "seerflow.yaml"
@@ -122,13 +121,6 @@ class TestRunLoop:
             "  webhook_enabled: false\n"
         )
 
-        # _run will block on pipeline.run() which blocks on get_event()
-        # We need to stop it after a short delay
-        async def stop_after_delay() -> None:
-            await asyncio.sleep(0.5)
-            # _run has no external handle, but the pipeline will see _stopped
-            # via the manager. We can't easily access it, so we'll use a timeout.
-
         task = asyncio.create_task(_run(str(yaml_file)))
         await asyncio.sleep(0.5)
         task.cancel()
@@ -137,16 +129,13 @@ class TestRunLoop:
 
     def test_main_with_nonexistent_config_raises(self) -> None:
         """main() with a bad config path should raise."""
+        from seerflow.__main__ import _run
         from seerflow.config import ConfigError
 
         with pytest.raises(ConfigError, match="not found"):
-            import asyncio
-
-            from seerflow.__main__ import _run
-
             asyncio.run(_run("/nonexistent/path.yaml"))
 
-    def test_main_calls_parse_args_and_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_main_calls_parse_args_and_run(self) -> None:
         """main() wires parse_args → asyncio.run(_run)."""
         import argparse
         from unittest.mock import MagicMock, patch
@@ -161,3 +150,20 @@ class TestRunLoop:
             mock_asyncio.run = MagicMock()
             main()
             mock_asyncio.run.assert_called_once()
+
+    def test_main_handles_keyboard_interrupt(self) -> None:
+        """main() exits cleanly on KeyboardInterrupt."""
+        import argparse
+        from unittest.mock import MagicMock, patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(config=None)
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.__main__.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.run = MagicMock(side_effect=KeyboardInterrupt)
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import sys
 import time
@@ -26,11 +25,16 @@ _log = logging.getLogger("seerflow")
 
 
 async def _run(config_path: str | None) -> None:
-    config = load_config(config_path)
+    # Bootstrap logging early so load_config errors surface
     logging.basicConfig(
-        level=getattr(logging, config.log_level),
+        level=logging.WARNING,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+
+    config = load_config(config_path)
+
+    # Reconfigure at user's chosen level
+    logging.getLogger().setLevel(getattr(logging, config.log_level, logging.INFO))
 
     _log.info("Seerflow %s starting", __version__)
 
@@ -41,13 +45,19 @@ async def _run(config_path: str | None) -> None:
     receivers = list(pipeline.manager._receivers.keys())
     _log.info("Receivers: %s", ", ".join(receivers) if receivers else "none")
 
-    # Graceful shutdown (Unix only — SIGINT/SIGTERM not available on Windows)
+    # Graceful shutdown via event (Unix only)
+    _shutdown_task: asyncio.Task[None] | None = None
     if sys.platform != "win32":
         import signal
 
+        def _request_shutdown() -> None:
+            nonlocal _shutdown_task
+            if _shutdown_task is None:
+                _shutdown_task = asyncio.create_task(pipeline.stop())
+
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(pipeline.stop()))
+            loop.add_signal_handler(sig, _request_shutdown)
 
     _log.info("Pipeline running — Ctrl+C to stop")
     await pipeline.run(_make_handler(ensemble))
@@ -84,8 +94,10 @@ def _make_handler(
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
-    with contextlib.suppress(KeyboardInterrupt):
+    try:
         asyncio.run(_run(args.config))
+    except KeyboardInterrupt:
+        sys.exit(0)
 
 
 if __name__ == "__main__":
