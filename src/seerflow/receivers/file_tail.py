@@ -250,8 +250,25 @@ class FileTailReceiver:
                     if _is_path_allowed(k, self._allowed_log_roots)
                 }
         self._expand_globs()
-        # Check if at least one pattern parent directory is accessible
-        if not self._watched_files:
+        if self._watched_files:
+            # Verify at least one matched file is readable
+            readable = [f for f in self._watched_files if os.access(f, os.R_OK)]
+            if not readable:
+                unreadable = list(self._watched_files)[:3]
+                msg = (
+                    f"Found {len(self._watched_files)} file(s) but none are readable "
+                    f"(e.g. {unreadable}). Run as root or adjust file permissions."
+                )
+                raise PermissionError(msg)
+            if len(readable) < len(self._watched_files):
+                skipped = len(self._watched_files) - len(readable)
+                _log.warning(
+                    "%d of %d matched files are not readable (skipped)",
+                    skipped,
+                    len(self._watched_files),
+                )
+        else:
+            # No files matched — check if parent dirs are accessible
             any_accessible = False
             for pattern in self._file_paths:
                 parent = Path(pattern).parent
@@ -264,9 +281,7 @@ class FileTailReceiver:
                     "Check file permissions and allowed_log_roots."
                 )
                 raise PermissionError(msg)
-            _log.info(
-                "No files match yet — watching parent directories for new files"
-            )
+            _log.info("No files match yet — watching parent directories for new files")
         self._started = True
         self._watcher_task = asyncio.create_task(self._watch_loop())
 
