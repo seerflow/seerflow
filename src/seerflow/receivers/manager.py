@@ -37,16 +37,34 @@ class ReceiverManager:
         """Register a receiver for lifecycle management."""
         self._receivers[source_id] = receiver
 
-    async def start(self) -> None:
-        """Start all registered receivers."""
+    async def start(self) -> list[str]:
+        """Start all registered receivers. Returns list of failed source_ids."""
         if self._started:
-            return
+            return []
         self._started = True
+        failed: list[str] = []
         for source_id, receiver in self._receivers.items():
             try:
                 await receiver.start()
+            except PermissionError as exc:
+                _log.error(
+                    "Failed to start receiver '%s': %s "
+                    "(hint: ports below 1024 require root or CAP_NET_BIND_SERVICE)",
+                    source_id,
+                    exc,
+                )
+                failed.append(source_id)
+            except OSError as exc:
+                _log.error(
+                    "Failed to start receiver '%s': %s",
+                    source_id,
+                    exc,
+                )
+                failed.append(source_id)
             except Exception:
-                _log.exception("Failed to start receiver %s", source_id)
+                _log.exception("Failed to start receiver '%s'", source_id)
+                failed.append(source_id)
+        return failed
 
     async def stop(self) -> None:
         """Stop all receivers."""
@@ -56,11 +74,13 @@ class ReceiverManager:
         for source_id, receiver in self._receivers.items():
             try:
                 await receiver.stop()
+            except PermissionError as exc:
+                _log.warning("Error stopping receiver '%s': %s", source_id, exc)
             except Exception:
-                _log.exception("Failed to stop receiver %s", source_id)
+                _log.warning("Error stopping receiver '%s'", source_id, exc_info=True)
 
-    async def put_event(self, event: RawEvent) -> bool:
-        """Put event in queue. Returns False if queue is full (backpressure)."""
+    def _enqueue(self, event: RawEvent) -> bool:
+        """Shared enqueue logic with backpressure warning."""
         utilization = self.queue_utilization
         if utilization >= 0.8:
             _log.warning("Queue at %.1f%% utilization", utilization * 100)
@@ -70,9 +90,26 @@ class ReceiverManager:
             return False
         return True
 
-    async def get_event(self) -> RawEvent:
-        """Get next event from queue (blocks until available)."""
-        return await self._queue.get()
+    async def put_event(self, event: RawEvent) -> bool:
+        """Put event in queue. Returns False if queue is full (backpressure)."""
+        return self._enqueue(event)
+
+    def put_event_sync(self, event: RawEvent) -> bool:
+        """Synchronous variant of ``put_event`` for use in protocol callbacks."""
+        return self._enqueue(event)
+
+    async def get_event(self) -> RawEvent | None:
+        """Get next event. Returns None when shutdown is signaled."""
+        while not self._stopped:
+            try:
+                return await asyncio.wait_for(self._queue.get(), timeout=0.5)
+            except TimeoutError:
+                continue
+        # Drain remaining events before returning None
+        try:
+            return self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return None
 
     @property
     def queue_depth(self) -> int:

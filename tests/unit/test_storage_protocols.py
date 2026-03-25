@@ -9,7 +9,8 @@ import seerflow.storage as storage_mod
 from seerflow.storage import AlertStore, EntityStore, LogStore, ModelStore
 
 if TYPE_CHECKING:
-    from seerflow.models.alert import Alert, FeedbackType
+    from seerflow.models._types import FeedbackType
+    from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
     from seerflow.models.query import AlertQuery, EntityRelation, EventQuery, Page, TimeRange
 

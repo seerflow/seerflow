@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from seerflow.config import ConfigError, SeerflowConfig, load_config
+from seerflow.config import ConfigError, SeerflowConfig, WebhookEndpointConfig, load_config
 
 
 class TestDefaultConfig:
@@ -205,5 +205,116 @@ class TestConfigValidation:
     def test_negative_port_raises(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
         yaml_file.write_text("dashboard_port: -1\n")
+        with pytest.raises(ConfigError, match="must be between 1 and 65535"):
+            load_config(str(yaml_file))
+
+
+class TestWebhookConfig:
+    def test_webhook_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  webhooks:\n"
+            "    - path: /ingest/github\n"
+            "      auth_header: X-Hub-Sig\n"
+            "      auth_token: secret123\n"
+            "      source_id: github\n"
+            "      field_mapping:\n"
+            "        message: action\n"
+            "        repo: repository.name\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert len(cfg.receivers.webhooks) == 1
+        wh = cfg.receivers.webhooks[0]
+        assert wh.path == "/ingest/github"
+        assert wh.auth_header == "X-Hub-Sig"
+        assert wh.auth_token == "secret123"
+        assert wh.source_id == "github"
+        assert wh.field_mapping == {"message": "action", "repo": "repository.name"}
+
+    def test_multiple_webhooks(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  webhooks:\n"
+            "    - path: /ingest/a\n"
+            "      source_id: a\n"
+            "    - path: /ingest/b\n"
+            "      source_id: b\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert len(cfg.receivers.webhooks) == 2
+        assert cfg.receivers.webhooks[0].source_id == "a"
+        assert cfg.receivers.webhooks[1].source_id == "b"
+
+    def test_no_webhooks_default_empty(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  syslog_enabled: true\n")
+        cfg = load_config(str(yaml_file))
+        assert cfg.receivers.webhooks == ()
+
+    def test_half_auth_raises(self) -> None:
+        with pytest.raises(ConfigError, match="auth_header and auth_token"):
+            WebhookEndpointConfig(auth_header="X-Token")
+
+    def test_webhook_env_var_interpolation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WH_SECRET", "env-secret")
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  webhooks:\n"
+            "    - path: /hook\n"
+            "      auth_header: X-Secret\n"
+            "      auth_token: ${WH_SECRET}\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert cfg.receivers.webhooks[0].auth_token == "env-secret"
+
+
+class TestReceiverConfigCompleteness:
+    def test_defaults_match_hardcoded(self) -> None:
+        cfg = load_config()
+        r = cfg.receivers
+        assert r.bind_addr == "0.0.0.0"  # noqa: S104
+        assert r.queue_maxsize == 10_000
+        assert r.webhook_enabled is False
+        assert r.webhook_port == 8081
+        assert r.file_checkpoint_dir == ""
+        assert r.file_debounce_ms == 1600
+        assert r.syslog_tcp_enabled is True
+        assert r.otlp_http_max_request_bytes == 4_194_304
+        assert r.otlp_grpc_max_workers == 4
+
+    def test_override_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "receivers:\n"
+            "  bind_addr: 127.0.0.1\n"
+            "  queue_maxsize: 5000\n"
+            "  webhook_enabled: true\n"
+            "  webhook_port: 9090\n"
+            "  file_checkpoint_dir: /tmp/checkpoints\n"
+            "  file_debounce_ms: 500\n"
+            "  syslog_tcp_enabled: false\n"
+            "  otlp_http_max_request_bytes: 1048576\n"
+            "  otlp_grpc_max_workers: 8\n"
+        )
+        cfg = load_config(str(yaml_file))
+        r = cfg.receivers
+        assert r.bind_addr == "127.0.0.1"
+        assert r.queue_maxsize == 5000
+        assert r.webhook_enabled is True
+        assert r.webhook_port == 9090
+        assert r.file_checkpoint_dir == "/tmp/checkpoints"
+        assert r.file_debounce_ms == 500
+        assert r.syslog_tcp_enabled is False
+        assert r.otlp_http_max_request_bytes == 1_048_576
+        assert r.otlp_grpc_max_workers == 8
+
+    def test_webhook_port_validated(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  webhook_port: 99999\n")
         with pytest.raises(ConfigError, match="must be between 1 and 65535"):
             load_config(str(yaml_file))
