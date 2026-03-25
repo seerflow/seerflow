@@ -4,7 +4,7 @@ A streaming, entity-centric log intelligence agent that detects operational fail
 
 ## Status
 
-**Pre-Alpha** (v0.1.0) -- Sprint 2 of 15 in progress.
+**Alpha** (v0.1.0) — Full ingestion + detection pipeline operational.
 
 [![CI](https://github.com/seerflow/seerflow/actions/workflows/ci.yml/badge.svg)](https://github.com/seerflow/seerflow/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/seerflow)](https://pypi.org/project/seerflow/)
@@ -14,17 +14,134 @@ A streaming, entity-centric log intelligence agent that detects operational fail
 ## Quick Start
 
 ```bash
-pip install seerflow
-```
-
-Or from source:
-
-```bash
+# Install from source
 git clone https://github.com/seerflow/seerflow.git
 cd seerflow
 uv sync
-uv run seerflow
+
+# Copy and edit the example config
+cp seerflow.example.yaml seerflow.yaml
+
+# Start the pipeline
+uv run python -m seerflow
 ```
+
+### Command Line
+
+```bash
+# Start with default config (seerflow.yaml in current directory)
+uv run python -m seerflow
+
+# Start with a specific config file
+uv run python -m seerflow --config /path/to/seerflow.yaml
+
+# Show version
+uv run python -m seerflow --version
+```
+
+### What It Does
+
+1. **Ingests** logs from multiple sources simultaneously (syslog, OTLP gRPC/HTTP, file tailing, webhooks)
+2. **Parses** each log line with Drain3 (template extraction) and regex entity extraction (IPs, users, hosts, files, domains, processes)
+3. **Scores** events using Half-Space Trees (streaming ML anomaly detection)
+4. **Thresholds** scores with biDSPOT (EVT-based auto-threshold -- no manual tuning)
+5. **Alerts** on anomalies with template, entities, and score details
+6. **Persists** all events to SQLite for later analysis
+
+### Example: Detect Anomalies in Syslog
+
+```yaml
+# seerflow.yaml
+receivers:
+  syslog_enabled: true
+  syslog_udp_port: 5514       # use high port to avoid root
+  otlp_grpc_enabled: false
+  otlp_http_enabled: false
+  webhook_enabled: false
+
+detection:
+  hst_window_size: 100         # lower for faster calibration
+  dspot:
+    calibration_window: 200
+    risk_level: 0.01           # more sensitive for testing
+```
+
+```bash
+# Terminal 1: Start Seerflow
+uv run python -m seerflow
+
+# Terminal 2: Send normal traffic
+for i in $(seq 1 300); do
+    echo "<134>1 2026-03-24T19:00:00Z web nginx $i - - GET /api/v$((i%5)) 200 ${i}ms" \
+        | nc -u -w1 127.0.0.1 5514
+done
+
+# Terminal 2: Send anomalies
+echo '<11>1 2026-03-24T19:01:00Z db postgres 999 - - FATAL connection limit exceeded 847/100' \
+    | nc -u -w1 127.0.0.1 5514
+```
+
+Output:
+```
+INFO Seerflow 0.1.0 starting
+INFO Receivers: syslog
+INFO Pipeline running — Ctrl+C to stop
+WARNING ANOMALY [syslog] score=0.952 threshold=0.009 dir=upper
+WARNING   template: [7] <*> <*> postgres <*> - - FATAL connection limit exceeded <*>
+WARNING   message:  <11>1 2026-03-24T19:01:00Z db postgres 999 - - FATAL connection limit exceeded 847/100
+WARNING   entities: 203.0.113.1
+```
+
+### Shutdown Summary
+
+Press Ctrl+C to see session stats:
+
+```
+INFO --- Session Summary ---
+INFO   Events processed: 312
+INFO   Anomalies detected: 10
+INFO   Unique templates: 7
+INFO   Duration: 45.3s
+INFO   Throughput: 7 events/sec
+INFO Seerflow stopped
+```
+
+## Configuration
+
+See [SETTINGS.md](SETTINGS.md) for the complete configuration reference.
+
+All settings are optional -- Seerflow runs with sensible defaults (zero-config).
+
+Key config sections:
+- **receivers** -- syslog, OTLP gRPC/HTTP, file tailing, webhooks (enable/disable + ports)
+- **detection** -- HST window size, DSPOT calibration, scoring weights
+- **storage** -- SQLite (default) or PostgreSQL
+- **alerting** -- dedup window, webhook/PagerDuty targets
+
+## Receivers
+
+| Receiver | Port | Protocol | Status |
+|----------|------|----------|--------|
+| Syslog UDP/TCP | 514 (5514) | RFC 5424/3164 | Done |
+| OTLP gRPC | 4317 | Protobuf | Done |
+| OTLP HTTP | 4318 | Protobuf + JSON | Done |
+| File tailing | -- | Glob + watchfiles | Done |
+| Webhooks | 8081 | JSON/form + auth | Done |
+
+## Detection Pipeline
+
+```
+Log Sources → Receivers → Drain3 Parser → Entity Extractor → HST Scorer → biDSPOT Threshold → Alert
+                                ↓                ↓                ↓              ↓
+                          template_id       IPs, users      anomaly score   is_anomaly?
+                          template_str      hosts, files    [0.0 - 1.0]    upper/lower
+                          template_params   domains, procs
+```
+
+- **Drain3**: Streaming log template extraction (120K msgs/sec)
+- **Half-Space Trees**: Online ML anomaly detection via River (constant time/memory)
+- **biDSPOT**: Bidirectional EVT auto-threshold (upper spikes + lower drops)
+- **DetectionEnsemble**: Orchestrates detectors + thresholds per source
 
 ## Development
 
@@ -38,149 +155,57 @@ uv sync
 uv run pytest
 
 # Run quality gates
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src/
-uv run bandit -r src/ -c pyproject.toml
-
-# Run all gates at once
 uv run ruff check . && uv run ruff format --check . && uv run mypy src/ && uv run bandit -r src/ -c pyproject.toml && uv run pytest --cov=src/seerflow --cov-fail-under=90
 ```
-
-### Benchmarks
-
-```bash
-# Run benchmarks and save baseline
-uv run pytest tests/benchmarks/ --benchmark-autosave
-
-# Compare current run against a saved baseline
-uv run pytest tests/benchmarks/ --benchmark-compare=0001
-
-# Compare against ALL saved baselines at once
-uv run pytest tests/benchmarks/ --benchmark-compare
-
-# Run only benchmarks (skip slow tests)
-uv run pytest tests/benchmarks/ -m "not slow"
-
-# Override minimum rounds (default 10, configured in pyproject.toml)
-uv run pytest tests/benchmarks/ --benchmark-min-rounds=20
-```
-
-The default `--benchmark-min-rounds=10` is configured in `pyproject.toml`. Increase it for tighter statistics on important runs (e.g., before a release). Lower it for faster local iteration.
-
-#### Saved benchmark runs
-
-Each `--benchmark-autosave` saves a JSON file to `.benchmarks/`. List them with:
-
-```bash
-ls .benchmarks/Linux-CPython-3.13-64bit/
-```
-
-Filename format: `{run_number}_{git_commit}_{date}_{time}_{dirty}.json`
-
-```
-0001_d55e6b2_20260321_202338_uncommited-changes.json   # run 1, dirty working tree
-0002_087b881_20260321_205430.json                       # run 2, clean commit
-```
-
-When you use `--benchmark-compare=0002`, the output shows two rows per test: `(0002_087b881)` (saved) vs `(NOW)` (current run), so you can see if performance changed.
-
-#### Reading benchmark output
-
-Each benchmark function processes **10,000 messages in a single call**. So when you see `Min 17.08 ms`, that means 10K syslog messages were parsed in 17.08 milliseconds (not one message).
-
-| Column | Meaning |
-|--------|---------|
-| **Min/Max/Mean** | Wall-clock time for one call that processes 10K messages. Lower is faster. `Min 17.08 ms` = 10K messages parsed in 17ms = ~585K msgs/sec |
-| **StdDev** | Standard deviation across rounds. Lower = more consistent performance |
-| **Rounds** | How many times pytest-benchmark called the function. Each round is one full 10K-message run. More rounds = more data points = tighter statistics. Minimum 10 rounds (configured in `pyproject.toml`). Fast tests get more rounds automatically (e.g., syslog parse ~17ms gets 50+ rounds; normalizer ~250ms gets exactly 10) |
-| **Iterations** | How many times the function is called within a single round. Stays at 1 here because each call is already slow enough to measure accurately (>1ms). pytest-benchmark would increase this for sub-microsecond functions |
-| **OPS** | Operations per second (`1 / Mean`). Each "operation" is one 10K-message run. To get messages/sec: OPS x 10,000. Example: OPS 56.14 = ~561K syslog parses/sec |
-| **IQR** | Interquartile range -- the spread of the middle 50% of measurements. More robust than StdDev when there are outliers |
-| **Outliers** | Format `A;B` where A = mild outliers (>1 StdDev from mean), B = extreme outliers (>1.5 IQR from quartiles) |
-
-**Values with parenthesized ratios** like `17.08 (1.0)` or `80.18 (4.69)`:
-- The number before the parenthesis is the **actual value** (e.g., 17.08 milliseconds)
-- `(1.0)` means this is the **fastest/best** in that column -- the baseline
-- `(4.69)` means this is **4.69x slower** than the baseline
-- Green-colored values = fastest. Red = slowest
-
-**Throughput cheat sheet:**
-
-| Benchmark | Mean | Throughput |
-|-----------|------|-----------|
-| Syslog parse | 17.8 ms | ~561K msgs/sec |
-| Drain parse | 83.3 ms | ~120K msgs/sec |
-| Entity extraction | 243.0 ms | ~41K msgs/sec |
-| Normalizer (full pipeline) | 253.0 ms | ~39.5K msgs/sec |
-
-#### Example output
-
-```
-Name (time in ms)                Min       Max      Mean    StdDev    Rounds  OPS
-test_parse_throughput (syslog)  17.08    19.52    17.81     0.54        57   56.14
-test_parse_throughput (drain)   80.18    92.50    83.34     3.43        11   12.00
-test_extraction_throughput     239.00   246.02   243.01     2.68        10    4.12
-test_normalize_throughput      247.86   263.30   252.99     6.29        10    3.95
-```
-
-**How to read this:**
-- **Syslog parse** finished 10K messages in 17.08ms best case (57 rounds of data). That's **~561K msgs/sec**. Very fast because it's pure string parsing with no ML.
-- **Drain parse** took 80.18ms best case for 10K messages (**~120K msgs/sec**). Slower because Drain3 maintains a template tree that grows with each unique pattern.
-- **Entity extraction** took 239ms for 10K messages (**~41K msgs/sec**). Runs 3 compiled regexes (IP, user, host) per message with deduplication.
-- **Normalizer** took 247ms for 10K messages (**~39.5K msgs/sec**). This is the full pipeline: decode bytes + Drain3 + entity extraction + build SeerflowEvent. It's the slowest because it composes all the above.
-- **Rounds 57 vs 10**: syslog is fast (~17ms/call), so pytest-benchmark ran it 57 times for tight statistics. Normalizer is slow (~250ms/call), so it ran exactly the minimum 10 rounds. More rounds = lower StdDev = more reliable Mean.
-- **OPS 56.14** means pytest-benchmark measured 56.14 calls/sec. Since each call processes 10K messages: 56.14 x 10,000 = 561K msgs/sec.
-
-#### Sync vs async benchmarks
-
-**4 sync benchmarks** (drain, entity, normalizer, syslog parse) use the `pytest-benchmark` fixture:
-- Support `--benchmark-autosave` and `--benchmark-compare`
-- Statistical analysis (mean, stddev, rounds, outliers)
-- Throughput floor assertions via `benchmark.stats["mean"]`
-
-**11 async benchmarks** (SQLite writes, queries, alerts, UDP receive) use manual `time.perf_counter()`:
-- Floor assertions catch regressions in CI (e.g., `assert rate >= 5000`)
-- Do not produce `pytest-benchmark` JSON data
-- Reason: the `benchmark` fixture calls functions in a tight loop, which is incompatible with asyncio event loops and aiosqlite connections
 
 ### Project Structure
 
 ```
 src/seerflow/
-    models/          # SeerflowEvent, Alert, query structs (msgspec)
-    config.py        # YAML config loader with env var interpolation
+    __main__.py      # CLI entry point (config → pipeline → detection → storage)
+    cli.py           # argparse (--config, --version)
+    config.py        # YAML config loader with ${ENV_VAR} interpolation
+    pipeline.py      # Pipeline builder + consumer loop
+    models/          # SeerflowEvent, Alert, entity structs (msgspec)
     storage/
         protocols.py # Protocol interfaces (LogStore, AlertStore, ModelStore, EntityStore)
         sqlite.py    # SQLite backend (WAL, FTS5, WriteBuffer)
     receivers/
         base.py      # RawEvent dataclass, Receiver protocol
-        manager.py   # ReceiverManager (bounded queue, backpressure)
-        syslog.py    # UDP/TCP syslog receiver (RFC 5424/3164)
+        manager.py   # ReceiverManager (bounded queue, backpressure, shutdown)
+        syslog.py    # UDP/TCP syslog (RFC 5424/3164)
+        otlp_grpc.py # OTLP gRPC receiver (protobuf LogRecord)
+        otlp_http.py # OTLP HTTP receiver (/v1/logs, protobuf + JSON)
+        file_tail.py # File tailing (glob, rotation, checkpoint)
+        webhook.py   # Webhooks (JSON/form, field mapping, auth)
     parsing/
-        _constants.py # Shared constants (MAX_MESSAGE_LEN, MAX_RAW_BYTES, etc.)
         drain.py     # Drain3 wrapper for template extraction
-        entities.py  # Regex entity extraction (IPs, users, hosts, files, domains)
-        normalizer.py # EventNormalizer: RawEvent -> SeerflowEvent
+        entities.py  # Regex entity extraction (6 types)
+        normalizer.py # EventNormalizer: RawEvent → SeerflowEvent
+    detection/
+        protocols.py # Detector Protocol (score, learn, serialize, deserialize)
+        hst.py       # Half-Space Trees detector (River)
+        threshold.py # biDSPOT auto-threshold (scipy GPD)
+        ensemble.py  # DetectionEnsemble orchestrator
 tests/
-    unit/            # Unit tests
-    integration/     # Integration tests (real SQLite)
-    benchmarks/      # Throughput benchmarks
+    unit/            # 670+ unit tests
+    integration/     # Integration tests (multi-source, real SQLite)
+    benchmarks/      # Throughput benchmarks (pytest-benchmark)
 ```
 
-## Architecture
+### Benchmarks
 
-```
-Log Sources -> Receivers -> EventNormalizer -> Detection -> Alerting
-                  |              |
-             RawEvent    SeerflowEvent
-             (bytes)     (canonical struct)
+```bash
+uv run pytest tests/benchmarks/ --benchmark-autosave
+uv run pytest tests/benchmarks/ --benchmark-compare
 ```
 
-- **Receivers**: Syslog (UDP/TCP), file tailing, OTel (planned)
-- **Parsing**: Drain3 template extraction + regex entity extraction
-- **Detection**: Half-Space Trees, Holt-Winters, Sigma rules (planned)
-- **Storage**: SQLite (default) or PostgreSQL (planned), Protocol-based interfaces
+| Component | Throughput |
+|-----------|-----------|
+| Syslog parse | ~561K msgs/sec |
+| Drain3 templates | ~120K msgs/sec |
+| Entity extraction | ~41K msgs/sec |
+| Full normalizer | ~39.5K msgs/sec |
 
 ## License
 
