@@ -4,7 +4,7 @@ A streaming, entity-centric log intelligence agent that detects operational fail
 
 ## Status
 
-**Alpha** (v0.1.0) — Full ingestion + detection pipeline operational.
+**Alpha** — Full ingestion + detection pipeline operational.
 
 [![CI](https://github.com/seerflow/seerflow/actions/workflows/ci.yml/badge.svg)](https://github.com/seerflow/seerflow/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/seerflow)](https://pypi.org/project/seerflow/)
