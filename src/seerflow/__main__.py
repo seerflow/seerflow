@@ -50,7 +50,7 @@ async def _run(config_path: str | None) -> None:
     if sys.platform != "win32":
         import signal
 
-        def _request_shutdown() -> None:
+        def _request_shutdown() -> None:  # pragma: no cover — called by OS signal only
             nonlocal _shutdown_task
             if _shutdown_task is None:
                 _shutdown_task = asyncio.create_task(pipeline.stop())
