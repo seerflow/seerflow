@@ -4,21 +4,32 @@ build-backend = "hatchling.build"
 
 [project]
 name = "seerflow"
-version = "0.1.0"
-description = "A streaming, entity-centric log intelligence agent that foresees operational failures and sees security threats hiding across your log sources"
+version = "0.2.0"
+description = "Streaming log intelligence agent — detects operational failures and security threats with online ML"
+readme = "README.md"
 requires-python = ">=3.13"
 license = "AGPL-3.0-only"
-authors = [{ name = "Fernando Flores" }]
+authors = [{ name = "Fernando Flores", email = "ferjflores@gmail.com" }]
+keywords = ["log-analysis", "anomaly-detection", "siem", "observability", "streaming", "machine-learning", "syslog", "opentelemetry"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Logging",
     "Topic :: System :: Monitoring",
     "Topic :: Security",
     "Typing :: Typed",
+    "Framework :: AsyncIO",
+    "Operating System :: OS Independent",
 ]
+
+[project.urls]
+Homepage = "https://github.com/seerflow/seerflow"
+Repository = "https://github.com/seerflow/seerflow"
+Issues = "https://github.com/seerflow/seerflow/issues"
+Documentation = "https://github.com/seerflow/seerflow/blob/main/SETTINGS.md"
 dependencies = [
     "aiohttp>=3.13.3",
     "aiosqlite>=0.22.1",
