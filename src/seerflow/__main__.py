@@ -78,7 +78,11 @@ async def _run(config_path: str | None) -> None:
     handler = _make_handler(ensemble, storage)
     await pipeline.run(handler)
 
-    # Flush remaining batch
+    # Flush remaining batch to storage
+    if hasattr(handler, "batch") and handler.batch:  # type: ignore[union-attr]
+        await storage.write_events(list(handler.batch))  # type: ignore[union-attr]
+        _log.info("Flushed %d remaining events to storage", len(handler.batch))  # type: ignore[union-attr]
+
     if hasattr(handler, "stats"):
         s = handler.stats  # type: ignore[union-attr]
         elapsed = time.time() - s["start_time"]
@@ -173,6 +177,7 @@ def _make_handler(
                 )
 
     handler.stats = stats  # type: ignore[attr-defined]
+    handler.batch = batch  # type: ignore[attr-defined]
     return handler
 
 
