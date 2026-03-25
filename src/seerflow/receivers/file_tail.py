@@ -359,12 +359,10 @@ class FileTailReceiver:
                     if has_added:
                         new_paths = self._expand_globs()
                         for new_path in new_paths:
-                            # Reset offset to 0 so the entire file content
-                            # is read on first detection (expand_globs sets
-                            # offset=st_size which would skip existing data).
-                            saved = self._offsets.get(new_path)
-                            if saved is not None:
-                                self._offsets[new_path] = FileOffset(offset=0, inode=saved.inode)
+                            # _expand_globs sets offset=st_size; reset to 0
+                            # to read entire file on first detection.
+                            saved = self._offsets[new_path]  # always set by _expand_globs
+                            self._offsets[new_path] = FileOffset(offset=0, inode=saved.inode)
                             try:
                                 await self._process_file(new_path)
                             except OSError as exc:
@@ -373,7 +371,7 @@ class FileTailReceiver:
                                     new_path,
                                     exc,
                                 )
-                            parent = str(Path(new_path).parent)
+                            parent = str(Path(new_path).parent.resolve())
                             if parent not in watch_dirs:
                                 watch_dirs.add(parent)
                                 restart_needed = True

@@ -918,14 +918,13 @@ class TestNewFileDetection:
         # Should be processed immediately, not deferred
         try:
             event = await asyncio.wait_for(mgr.get_event(), timeout=5.0)
-            assert event is not None
-            assert b"first line" in event.data
         finally:
             await receiver.stop()
+        assert event is not None
+        assert b"first line" in event.data
 
     async def test_recursive_false_prevents_subdir_watching(self, tmp_path: Path) -> None:
         """watchfiles should NOT recurse into subdirectories."""
-        # Create nested structure
         deep_dir = tmp_path / "sub1" / "sub2" / "sub3"
         deep_dir.mkdir(parents=True)
         log_file = tmp_path / "test.log"
@@ -941,13 +940,15 @@ class TestNewFileDetection:
         await receiver.start()
         await receiver.wait_ready()
 
-        # Append to the actual watched file
+        # Write into deep subdir — should produce NO event
+        (deep_dir / "deep.log").write_text("deep line\n")
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(mgr.get_event(), timeout=0.8)
+
+        # Write into watched top-level file — should produce an event
         with open(log_file, "a") as f:
             f.write("appended line\n")
 
-        try:
-            event = await asyncio.wait_for(mgr.get_event(), timeout=5.0)
-            assert event is not None
-            assert b"appended line" in event.data
-        finally:
-            await receiver.stop()
+        event = await asyncio.wait_for(mgr.get_event(), timeout=5.0)
+        assert b"appended line" in event.data
+        await receiver.stop()
