@@ -20,9 +20,15 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "aiohttp>=3.13.3",
     "aiosqlite>=0.22.1",
+    "drain3>=0.9.11",
+    "grpcio>=1.78.0",
     "msgspec>=0.20.0",
+    "opentelemetry-proto>=1.40.0",
     "pyyaml>=6.0.3",
+    "river>=0.23.0",
+    "watchfiles>=1.1.1",
 ]
 
 [project.scripts]
@@ -46,6 +52,8 @@ dev = [
     "pytest-cov>=6.0",
     "types-pyyaml>=6.0.12.20250915",
     "pytest-benchmark>=5.2.3",
+    "types-grpcio>=1.0.0.20251009",
+    "types-protobuf>=6.32.1.20260221",
 ]
 
 [tool.ruff]
@@ -74,7 +82,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S108"]
+"tests/**" = ["S101", "S105", "S106", "S108"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -91,7 +99,7 @@ check_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["drain3.*", "igraph.*", "river.*", "aiosqlite.*"]
+module = ["drain3.*", "igraph.*", "river.*", "aiosqlite.*", "scipy.*"]
 ignore_missing_imports = true
 
 [tool.bandit]
@@ -102,7 +110,7 @@ skips = ["B101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers -m 'not slow'"
+addopts = "-ra --strict-markers -m 'not slow' --benchmark-min-rounds=10"
 markers = [
     "benchmark: performance benchmarks",
     "slow: heavyweight benchmarks, run with pytest -m slow",

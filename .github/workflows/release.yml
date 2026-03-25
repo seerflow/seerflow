@@ -4,46 +4,18 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
 jobs:
-  release:
+  release-please:
+    name: Release Please
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: googleapis/release-please-action@v4
         with:
-          fetch-depth: 0  # full history for changelog generation
-
-      - name: Get version from pyproject.toml
-        id: version
-        run: |
-          VERSION=$(grep '^version' pyproject.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Check if tag exists
-        id: check
-        run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Generate changelog
-        if: steps.check.outputs.exists == 'false'
-        uses: orhun/git-cliff-action@v4
-        id: changelog
-        with:
-          config: cliff.toml
-          args: --latest --strip header
-
-      - name: Create release
-        if: steps.check.outputs.exists == 'false'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Seerflow ${{ steps.version.outputs.tag }}
-          body: ${{ steps.changelog.outputs.content }}
-          draft: false
-          prerelease: false
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

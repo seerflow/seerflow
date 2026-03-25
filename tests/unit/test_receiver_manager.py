@@ -160,6 +160,47 @@ class TestGracefulShutdown:
         await mgr.start()
         await mgr.stop()  # no error with empty receivers
 
+    async def test_get_event_returns_none_after_stop(self) -> None:
+        mgr = ReceiverManager()
+        await mgr.stop()
+        result = await mgr.get_event()
+        assert result is None
+
+    async def test_get_event_drains_before_none(self) -> None:
+        mgr = ReceiverManager()
+        event = RawEvent(
+            data=b"test", source_type="test", source_id="t", received_ns=0, metadata={}
+        )
+        await mgr.put_event(event)
+        await mgr.stop()
+        result = await mgr.get_event()
+        assert result is not None
+        assert result.data == b"test"
+        result2 = await mgr.get_event()
+        assert result2 is None
+
+    async def test_get_event_drains_multiple_before_none(self) -> None:
+        mgr = ReceiverManager()
+        for i in range(5):
+            event = RawEvent(
+                data=f"evt-{i}".encode(),
+                source_type="test",
+                source_id="t",
+                received_ns=i,
+                metadata={},
+            )
+            await mgr.put_event(event)
+        await mgr.stop()
+        drained = []
+        while True:
+            result = await mgr.get_event()
+            if result is None:
+                break
+            drained.append(result)
+        assert len(drained) == 5
+        assert drained[0].data == b"evt-0"
+        assert drained[4].data == b"evt-4"
+
 
 class TestExports:
     def test_imports(self) -> None:
@@ -172,4 +213,15 @@ class TestExports:
     def test_all(self) -> None:
         import seerflow.receivers as mod
 
-        assert set(mod.__all__) == {"RawEvent", "Receiver", "ReceiverManager"}
+        expected = {
+            "FileTailReceiver",
+            "OtlpGrpcReceiver",
+            "OtlpHttpReceiver",
+            "RawEvent",
+            "Receiver",
+            "ReceiverManager",
+            "SyslogReceiver",
+            "WebhookConfig",
+            "WebhookReceiver",
+        }
+        assert set(mod.__all__) == expected
