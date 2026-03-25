@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import TYPE_CHECKING
 
 import pytest
@@ -108,9 +107,12 @@ class TestRunLoop:
         # Should not raise
         await handler(event)
 
-    async def test_run_starts_and_stops_with_config(self, tmp_path: Path) -> None:
-        """_run() with a minimal config starts and stops cleanly."""
+    async def test_run_processes_event_and_stops(self, tmp_path: Path) -> None:
+        """_run() processes an event and stops cleanly via manager.stop()."""
+        from unittest.mock import patch
+
         from seerflow.__main__ import _run
+        from seerflow.receivers.base import RawEvent
 
         yaml_file = tmp_path / "seerflow.yaml"
         yaml_file.write_text(
@@ -121,11 +123,33 @@ class TestRunLoop:
             "  webhook_enabled: false\n"
         )
 
-        task = asyncio.create_task(_run(str(yaml_file)))
-        await asyncio.sleep(0.5)
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        # Patch build_pipeline to get a handle on the pipeline
+        built_pipeline = None
+
+        async def _capture_build(config):
+            nonlocal built_pipeline
+            from seerflow.pipeline import build_pipeline
+
+            built_pipeline = await build_pipeline(config)
+            return built_pipeline
+
+        with patch("seerflow.__main__.build_pipeline", side_effect=_capture_build):
+            task = asyncio.create_task(_run(str(yaml_file)))
+            # Wait for pipeline to be built
+            await asyncio.sleep(0.3)
+            assert built_pipeline is not None
+            # Inject event then stop
+            event = RawEvent(
+                data=b"cli test event",
+                source_type="test",
+                source_id="cli",
+                received_ns=1_700_000_000_000_000_000,
+                metadata={},
+            )
+            await built_pipeline.manager.put_event(event)
+            await asyncio.sleep(0.1)
+            await built_pipeline.stop()
+            await task  # should complete cleanly
 
     def test_main_with_nonexistent_config_raises(self) -> None:
         """main() with a bad config path should raise."""
