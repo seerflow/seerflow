@@ -75,7 +75,21 @@ async def _run(config_path: str | None) -> None:
             loop.add_signal_handler(sig, _request_shutdown)
 
     _log.info("Pipeline running — Ctrl+C to stop")
-    await pipeline.run(_make_handler(ensemble, storage))
+    handler = _make_handler(ensemble, storage)
+    await pipeline.run(handler)
+
+    # Flush remaining batch
+    if hasattr(handler, "stats"):
+        s = handler.stats  # type: ignore[union-attr]
+        elapsed = time.time() - s["start_time"]
+        _log.info("--- Session Summary ---")
+        _log.info("  Events processed: %d", s["events"])
+        _log.info("  Anomalies detected: %d", s["anomalies"])
+        _log.info("  Unique templates: %d", len(s["templates"]))
+        _log.info("  Duration: %.1fs", elapsed)
+        if elapsed > 0 and s["events"] > 0:
+            _log.info("  Throughput: %.0f events/sec", s["events"] / elapsed)
+
     await storage.close()
     _log.info("Seerflow stopped")
 
@@ -91,6 +105,7 @@ def _make_handler(
     extractor = EntityExtractor()
     batch: list[SeerflowEvent] = []
     batch_size = 50
+    stats = {"events": 0, "anomalies": 0, "templates": set(), "start_time": time.time()}
 
     async def handler(event: RawEvent) -> None:
         message = event.data.decode("utf-8", errors="replace")[:32768]
@@ -122,6 +137,10 @@ def _make_handler(
             batch.clear()
 
         result = ensemble.process_event(seerflow_event)
+        stats["events"] += 1
+        stats["templates"].add(template_id)
+        if result.is_anomaly:
+            stats["anomalies"] += 1
         _log.debug(
             "event tid=%d entities=%d score=%.4f thresh=%.4f src=%s",
             template_id,
@@ -153,6 +172,7 @@ def _make_handler(
                     ", ".join(entity_refs[:10]),
                 )
 
+    handler.stats = stats  # type: ignore[attr-defined]
     return handler
 
 
