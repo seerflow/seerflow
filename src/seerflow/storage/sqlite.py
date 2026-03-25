@@ -21,7 +21,7 @@ import aiosqlite
 import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
-from seerflow.models.alert import Alert, FeedbackType
+from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent
 from seerflow.models.query import AlertQuery, EventQuery, Page
 
@@ -29,6 +29,8 @@ _log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+
+    from seerflow.models._types import FeedbackType
 
 
 # ---------------------------------------------------------------------------
@@ -401,9 +403,11 @@ class SqliteBackend:
         if self._closed:
             return
         self._closed = True
-        if self._write_buffer is not None:
-            await self._write_buffer.close()
-        await self._conn.close()
+        try:
+            if self._write_buffer is not None:
+                await self._write_buffer.close()
+        finally:
+            await self._conn.close()
 
     async def write_events(self, events: list[SeerflowEvent]) -> None:
         """Buffer events for batched writing to SQLite."""
@@ -496,13 +500,19 @@ class SqliteBackend:
         # where clause assembled from hardcoded SQL fragments in _build_alert_query().
         # All user values are bound via params. No user data is interpolated.
         data_sql = (
-            f"SELECT a.data FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
+            f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
             f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
         )
         async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
             rows = await cursor.fetchall()
 
-        items = tuple(msgspec.msgpack.decode(row[0], type=Alert) for row in rows)
+        items = tuple(
+            msgspec.structs.replace(
+                msgspec.msgpack.decode(row[0], type=Alert),
+                dedup_count=row[1],
+            )
+            for row in rows
+        )
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
     async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None:

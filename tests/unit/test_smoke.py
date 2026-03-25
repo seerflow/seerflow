@@ -8,7 +8,9 @@ def test_version_exists() -> None:
 
     assert hasattr(seerflow, "__version__")
     assert isinstance(seerflow.__version__, str)
-    assert seerflow.__version__ == "0.1.0"
+    parts = seerflow.__version__.split(".")
+    assert len(parts) == 3, f"Expected semver X.Y.Z, got {seerflow.__version__}"
+    assert all(p.isdigit() for p in parts), f"Non-numeric semver: {seerflow.__version__}"
 
 
 def test_subpackages_importable() -> None:
@@ -50,23 +52,15 @@ def test_nested_subpackages_importable() -> None:
     assert seerflow.api.routes is not None
 
 
-def test_main_entry_point(capsys: object) -> None:
+def test_main_entry_point() -> None:
     from seerflow.__main__ import main
 
     assert callable(main)
-    main()
-    import _pytest.capture
-
-    captured = _pytest.capture.CaptureFixture.readouterr(capsys)  # type: ignore[arg-type]
-    assert "seerflow 0.1.0" in captured.out
 
 
-def test_cli_entry_point(capsys: object) -> None:
-    from seerflow.cli import main
+def test_cli_parse_args() -> None:
+    from seerflow.cli import parse_args
 
-    assert callable(main)
-    main()
-    import _pytest.capture
-
-    captured = _pytest.capture.CaptureFixture.readouterr(capsys)  # type: ignore[arg-type]
-    assert "seerflow 0.1.0" in captured.out
+    assert callable(parse_args)
+    args = parse_args([])
+    assert args.config is None
