@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "seerflow"
-version = "0.1.0"
+version = "0.2.0"
 description = "A streaming, entity-centric log intelligence agent that foresees operational failures and sees security threats hiding across your log sources"
 requires-python = ">=3.13"
 license = "AGPL-3.0-only"
