@@ -359,8 +359,10 @@ class FileTailReceiver:
                     if has_added:
                         new_paths = self._expand_globs()
                         for new_path in new_paths:
-                            # _expand_globs sets offset=st_size; reset to 0
-                            # to read entire file on first detection.
+                            # _expand_globs sets offset=st_size for new files, or
+                            # preserves a stale checkpoint offset for re-created files.
+                            # Either way, reset to 0 to read the full file on first
+                            # detection. _process_file handles inode mismatches.
                             saved = self._offsets[new_path]  # always set by _expand_globs
                             self._offsets[new_path] = FileOffset(offset=0, inode=saved.inode)
                             try:
