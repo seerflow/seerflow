@@ -469,17 +469,23 @@ class SqliteBackend:
             )
             for t in templates
         ]
-        await self._conn.executemany(_UPSERT_TEMPLATE_SQL, rows)
-        await self._conn.commit()
+        try:
+            await self._conn.executemany(_UPSERT_TEMPLATE_SQL, rows)
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("write_templates failed — %d templates not committed", len(rows))
+            raise
 
     async def get_templates(self, limit: int = 1000) -> list[TemplateInfo]:
         """Query templates sorted by event_count descending."""
+        clamped = min(max(limit, 1), 10000)
         sql = (
             "SELECT template_id, template_str, first_seen_ns, last_seen_ns,"
             " event_count, example_message FROM templates"
             " ORDER BY event_count DESC LIMIT ?"
         )
-        async with await self._conn.execute(sql, [limit]) as cursor:
+        async with await self._conn.execute(sql, [clamped]) as cursor:
             rows = await cursor.fetchall()
         return [TemplateInfo(*row) for row in rows]
 
