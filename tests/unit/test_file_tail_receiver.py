@@ -884,18 +884,12 @@ class TestGlobDirectorySkip:
 
         # Should be logged at DEBUG level (not WARNING or ERROR)
         debug_records = [
-            r
-            for r in caplog.records
-            if r.levelno == logging.DEBUG and "ghost.log" in r.message
+            r for r in caplog.records if r.levelno == logging.DEBUG and "ghost.log" in r.message
         ]
         warning_or_error = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING and "ghost.log" in r.message
+            r for r in caplog.records if r.levelno >= logging.WARNING and "ghost.log" in r.message
         ]
-        assert len(debug_records) >= 1, (
-            "Expected a DEBUG log for the inaccessible path"
-        )
+        assert len(debug_records) >= 1, "Expected a DEBUG log for the inaccessible path"
         assert len(warning_or_error) == 0, (
             "Inaccessible path should NOT be logged at WARNING or ERROR"
         )

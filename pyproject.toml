@@ -44,7 +44,7 @@ Issues = "https://github.com/seerflow/seerflow/issues"
 Documentation = "https://github.com/seerflow/seerflow/blob/main/SETTINGS.md"
 
 [project.scripts]
-seerflow = "seerflow.cli:main"
+seerflow = "seerflow.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/seerflow"]
