@@ -109,12 +109,26 @@ def _make_handler(
         )
         if result.is_anomaly:  # pragma: no cover — tested in test_detection_ensemble
             _log.warning(
-                "ANOMALY [%s] score=%.3f dir=%s src=%s",
+                "ANOMALY [%s] score=%.3f threshold=%.3f dir=%s",
                 result.source_type,
                 result.score,
+                result.upper_threshold,
                 result.anomaly_direction,
-                event.source_id,
             )
+            _log.warning(
+                "  template: [%d] %s",
+                template_id,
+                template_str[:120],
+            )
+            _log.warning(
+                "  message:  %s",
+                message[:200],
+            )
+            if entity_refs:
+                _log.warning(
+                    "  entities: %s",
+                    ", ".join(entity_refs[:10]),
+                )
 
     return handler
 
