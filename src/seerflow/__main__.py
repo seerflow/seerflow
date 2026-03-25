@@ -79,20 +79,22 @@ async def _run(config_path: str | None) -> None:
     await pipeline.run(handler)
 
     # Flush remaining batch to storage
-    if hasattr(handler, "batch") and handler.batch:  # type: ignore[union-attr]
-        await storage.write_events(list(handler.batch))  # type: ignore[union-attr]
-        _log.info("Flushed %d remaining events to storage", len(handler.batch))  # type: ignore[union-attr]
+    remaining_batch: list[SeerflowEvent] = getattr(handler, "batch", [])
+    if remaining_batch:
+        await storage.write_events(list(remaining_batch))
+        _log.info("Flushed %d remaining events to storage", len(remaining_batch))
 
-    if hasattr(handler, "stats"):
-        s = handler.stats  # type: ignore[union-attr]
-        elapsed = time.time() - s["start_time"]
+    get_stats = getattr(handler, "get_stats", None)
+    if get_stats is not None:
+        events, anomalies, templates, t0 = get_stats()
+        elapsed = time.time() - t0
         _log.info("--- Session Summary ---")
-        _log.info("  Events processed: %d", s["events"])
-        _log.info("  Anomalies detected: %d", s["anomalies"])
-        _log.info("  Unique templates: %d", len(s["templates"]))
+        _log.info("  Events processed: %d", events)
+        _log.info("  Anomalies detected: %d", anomalies)
+        _log.info("  Unique templates: %d", len(templates))
         _log.info("  Duration: %.1fs", elapsed)
-        if elapsed > 0 and s["events"] > 0:
-            _log.info("  Throughput: %.0f events/sec", s["events"] / elapsed)
+        if elapsed > 0 and events > 0:
+            _log.info("  Throughput: %.0f events/sec", events / elapsed)
 
     await storage.close()
     _log.info("Seerflow stopped")
@@ -109,7 +111,10 @@ def _make_handler(
     extractor = EntityExtractor()
     batch: list[SeerflowEvent] = []
     batch_size = 50
-    stats = {"events": 0, "anomalies": 0, "templates": set(), "start_time": time.time()}
+    event_count = 0
+    anomaly_count = 0
+    template_set: set[int] = set()
+    start_time = time.time()
 
     async def handler(event: RawEvent) -> None:
         message = event.data.decode("utf-8", errors="replace")[:32768]
@@ -141,10 +146,11 @@ def _make_handler(
             batch.clear()
 
         result = ensemble.process_event(seerflow_event)
-        stats["events"] += 1
-        stats["templates"].add(template_id)
+        nonlocal event_count, anomaly_count
+        event_count += 1
+        template_set.add(template_id)
         if result.is_anomaly:
-            stats["anomalies"] += 1
+            anomaly_count += 1
         _log.debug(
             "event tid=%d entities=%d score=%.4f thresh=%.4f src=%s",
             template_id,
@@ -176,8 +182,8 @@ def _make_handler(
                     ", ".join(entity_refs[:10]),
                 )
 
-    handler.stats = stats  # type: ignore[attr-defined]
     handler.batch = batch  # type: ignore[attr-defined]
+    handler.get_stats = lambda: (event_count, anomaly_count, template_set, start_time)  # type: ignore[attr-defined]
     return handler
 
 
