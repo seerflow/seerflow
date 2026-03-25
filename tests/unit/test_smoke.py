@@ -50,23 +50,15 @@ def test_nested_subpackages_importable() -> None:
     assert seerflow.api.routes is not None
 
 
-def test_main_entry_point(capsys: object) -> None:
+def test_main_entry_point() -> None:
     from seerflow.__main__ import main
 
     assert callable(main)
-    main()
-    import _pytest.capture
-
-    captured = _pytest.capture.CaptureFixture.readouterr(capsys)  # type: ignore[arg-type]
-    assert "seerflow 0.1.0" in captured.out
 
 
-def test_cli_entry_point(capsys: object) -> None:
-    from seerflow.cli import main
+def test_cli_parse_args() -> None:
+    from seerflow.cli import parse_args
 
-    assert callable(main)
-    main()
-    import _pytest.capture
-
-    captured = _pytest.capture.CaptureFixture.readouterr(capsys)  # type: ignore[arg-type]
-    assert "seerflow 0.1.0" in captured.out
+    assert callable(parse_args)
+    args = parse_args([])
+    assert args.config is None

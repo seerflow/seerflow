@@ -16,8 +16,8 @@ receivers:
 
   # Syslog receiver
   syslog_enabled: true                   # enable UDP + TCP syslog listener
-  syslog_udp_port: 514                   # UDP syslog port (RFC 3164/5424)
-  syslog_tcp_port: 601                   # TCP syslog port (RFC 6587)
+  syslog_udp_port: 5514                  # UDP syslog port (use 514 with root/cap_net_bind)
+  syslog_tcp_port: 5601                  # TCP syslog port (use 601 with root/cap_net_bind)
   syslog_tcp_enabled: true               # set false to disable TCP syslog while keeping UDP
 
   # OpenTelemetry gRPC receiver

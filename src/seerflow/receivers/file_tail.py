@@ -191,7 +191,10 @@ class FileTailReceiver:
             str(Path(r).resolve()) for r in allowed_log_roots
         )
         if file_paths and not allowed_log_roots:
-            _log.warning("No allowed_log_roots configured - file tailing has no path confinement")
+            _log.warning(
+                "No 'allowed_log_roots' set - file tailing can read any file. "
+                "Set allowed_log_roots in seerflow.yaml to restrict to specific directories"
+            )
         self._offsets: dict[str, FileOffset] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self._started = False
@@ -247,6 +250,45 @@ class FileTailReceiver:
                     if _is_path_allowed(k, self._allowed_log_roots)
                 }
         self._expand_globs()
+        if self._watched_files:
+            # Verify at least one matched file is readable
+            readable = [f for f in self._watched_files if os.access(f, os.R_OK)]
+            if not readable:
+                unreadable = list(self._watched_files)[:3]
+                msg = (
+                    f"Found {len(self._watched_files)} file(s) but none are readable "
+                    f"(e.g. {unreadable}). Run as root or adjust file permissions."
+                )
+                raise PermissionError(msg)
+            _log.info("Watching %d file(s):", len(readable))
+            for f in sorted(readable):
+                _log.info("  %s", f)
+            if len(readable) < len(self._watched_files):
+                skipped = len(self._watched_files) - len(readable)
+                _log.warning(
+                    "%d of %d matched files are not readable (skipped)",
+                    skipped,
+                    len(self._watched_files),
+                )
+        else:
+            # No files matched — check if parent dirs are accessible
+            any_accessible = False
+            for pattern in self._file_paths:
+                parent = Path(pattern).parent
+                if parent.is_dir() and os.access(str(parent), os.R_OK):
+                    any_accessible = True
+                    break
+            if not any_accessible:
+                msg = (
+                    f"No readable directories found for patterns {self._file_paths}. "
+                    "Check file permissions and allowed_log_roots."
+                )
+                raise PermissionError(msg)
+            _log.warning(
+                "No files match patterns %s — watching directories for new files. "
+                "Check that the file paths and extensions are correct.",
+                self._file_paths,
+            )
         self._started = True
         self._watcher_task = asyncio.create_task(self._watch_loop())
 

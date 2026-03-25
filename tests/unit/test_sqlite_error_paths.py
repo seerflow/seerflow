@@ -218,7 +218,7 @@ class TestReceiverManagerErrorPaths:
         mgr = ReceiverManager()
         mgr.register("bad", _FailStopReceiver())
         await mgr.start()
-        with caplog.at_level(logging.ERROR):
+        with caplog.at_level(logging.WARNING):
             await mgr.stop()
         assert "bad" in caplog.text or "stop exploded" in caplog.text
 

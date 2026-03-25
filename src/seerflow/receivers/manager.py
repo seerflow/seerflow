@@ -46,8 +46,23 @@ class ReceiverManager:
         for source_id, receiver in self._receivers.items():
             try:
                 await receiver.start()
+            except PermissionError as exc:
+                _log.error(
+                    "Failed to start receiver '%s': %s "
+                    "(hint: ports below 1024 require root or CAP_NET_BIND_SERVICE)",
+                    source_id,
+                    exc,
+                )
+                failed.append(source_id)
+            except OSError as exc:
+                _log.error(
+                    "Failed to start receiver '%s': %s",
+                    source_id,
+                    exc,
+                )
+                failed.append(source_id)
             except Exception:
-                _log.exception("Failed to start receiver %s", source_id)
+                _log.exception("Failed to start receiver '%s'", source_id)
                 failed.append(source_id)
         return failed
 
@@ -59,8 +74,10 @@ class ReceiverManager:
         for source_id, receiver in self._receivers.items():
             try:
                 await receiver.stop()
+            except PermissionError as exc:
+                _log.warning("Error stopping receiver '%s': %s", source_id, exc)
             except Exception:
-                _log.exception("Failed to stop receiver %s", source_id)
+                _log.warning("Error stopping receiver '%s'", source_id, exc_info=True)
 
     def _enqueue(self, event: RawEvent) -> bool:
         """Shared enqueue logic with backpressure warning."""
