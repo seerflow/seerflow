@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from seerflow import __version__
 from seerflow.cli import parse_args
-from seerflow.config import SeerflowConfig, load_config
+from seerflow.config import ReceiverConfig, SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.models import SeerflowEvent
 from seerflow.pipeline import build_pipeline
@@ -27,6 +27,10 @@ _log = logging.getLogger("seerflow")
 
 async def _run_with_config(config: SeerflowConfig) -> None:
     """Run the pipeline with a pre-built config."""
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     # Reconfigure at user's chosen level
     logging.getLogger().setLevel(getattr(logging, config.log_level, logging.INFO))
     # Suppress noisy third-party loggers
@@ -182,42 +186,27 @@ def _make_handler(
 
 async def _run(config_path: str | None) -> None:
     """Load config from path and run the pipeline."""
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-    )
     config = load_config(config_path)
     await _run_with_config(config)
 
 
 def _build_tail_config(paths: list[str], config_path: str | None = None) -> SeerflowConfig:
     """Build a SeerflowConfig for tail mode (file receivers only)."""
-    from seerflow.config import ReceiverConfig
-
-    if config_path is not None:
-        base = load_config(config_path)
-        return SeerflowConfig(
-            receivers=ReceiverConfig(
-                syslog_enabled=False,
-                otlp_grpc_enabled=False,
-                otlp_http_enabled=False,
-                webhook_enabled=False,
-                file_paths=tuple(paths),
-            ),
-            storage=base.storage,
-            detection=base.detection,
-            alerting=base.alerting,
-            llm=base.llm,
-            log_level=base.log_level,
-        )
+    base = load_config(config_path) if config_path is not None else SeerflowConfig()
+    tail_receivers = ReceiverConfig(
+        syslog_enabled=False,
+        otlp_grpc_enabled=False,
+        otlp_http_enabled=False,
+        webhook_enabled=False,
+        file_paths=tuple(paths),
+    )
     return SeerflowConfig(
-        receivers=ReceiverConfig(
-            syslog_enabled=False,
-            otlp_grpc_enabled=False,
-            otlp_http_enabled=False,
-            webhook_enabled=False,
-            file_paths=tuple(paths),
-        ),
+        receivers=tail_receivers,
+        storage=base.storage,
+        detection=base.detection,
+        alerting=base.alerting,
+        llm=base.llm,
+        log_level=base.log_level,
     )
 
 
@@ -226,11 +215,7 @@ def main() -> None:
     args = parse_args()
     try:
         if args.command == "tail":
-            logging.basicConfig(
-                level=logging.WARNING,
-                format="%(asctime)s %(name)s %(levelname)s %(message)s",
-            )
-            tail_config = _build_tail_config(args.paths, args.config)
+            tail_config = _build_tail_config(args.paths, config_path=args.config)
             asyncio.run(_run_with_config(tail_config))
         else:
             asyncio.run(_run(args.config))
