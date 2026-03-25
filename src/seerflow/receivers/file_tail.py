@@ -250,6 +250,23 @@ class FileTailReceiver:
                     if _is_path_allowed(k, self._allowed_log_roots)
                 }
         self._expand_globs()
+        # Check if at least one pattern parent directory is accessible
+        if not self._watched_files:
+            any_accessible = False
+            for pattern in self._file_paths:
+                parent = Path(pattern).parent
+                if parent.is_dir() and os.access(str(parent), os.R_OK):
+                    any_accessible = True
+                    break
+            if not any_accessible:
+                msg = (
+                    f"No readable directories found for patterns {self._file_paths}. "
+                    "Check file permissions and allowed_log_roots."
+                )
+                raise PermissionError(msg)
+            _log.info(
+                "No files match yet — watching parent directories for new files"
+            )
         self._started = True
         self._watcher_task = asyncio.create_task(self._watch_loop())
 

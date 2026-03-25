@@ -772,7 +772,7 @@ class TestConfinementWarning:
                 file_paths=(str(tmp_path / "*.log"),),
                 allowed_log_roots=(),
             )
-        assert any("confinement" in r.message.lower() for r in caplog.records)
+        assert any("allowed_log_roots" in r.message for r in caplog.records)
 
     def test_no_warning_with_allowed_roots(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -785,7 +785,7 @@ class TestConfinementWarning:
                 file_paths=(str(tmp_path / "*.log"),),
                 allowed_log_roots=(str(tmp_path),),
             )
-        assert not any("confinement" in r.message.lower() for r in caplog.records)
+        assert not any("allowed_log_roots" in r.message for r in caplog.records)
 
 
 class TestAllowedRootsResolvedAtInit:
