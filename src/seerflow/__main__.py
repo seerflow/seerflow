@@ -70,15 +70,32 @@ def _make_handler(
     ensemble: DetectionEnsemble,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection on each event."""
+    from seerflow.parsing import DrainParser, EntityExtractor
+
+    drain = DrainParser()
+    extractor = EntityExtractor()
 
     async def handler(event: RawEvent) -> None:
+        message = event.data.decode("utf-8", errors="replace")[:32768]
+
+        # Parse template via Drain3
+        template_id, template_str, template_params = drain.parse(message)
+
+        # Extract entities
+        entities = extractor.extract(message)
+        entity_refs = tuple(v for vals in entities.values() for v in vals)
+
         seerflow_event = SeerflowEvent(
             event_id=uuid.uuid4(),
             timestamp_ns=event.received_ns,
             observed_ns=time.time_ns(),
-            message=event.data.decode("utf-8", errors="replace")[:32768],
+            message=message,
             source_type=event.source_type,
             source_id=event.source_id,
+            template_id=template_id,
+            template_str=template_str,
+            template_params=template_params,
+            entity_refs=entity_refs,
         )
         result = ensemble.process_event(seerflow_event)
         if result.is_anomaly:  # pragma: no cover — tested in test_detection_ensemble
