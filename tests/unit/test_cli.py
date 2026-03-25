@@ -88,6 +88,8 @@ class TestRunLoop:
 
     async def test_make_handler_processes_event(self) -> None:
         """_make_handler creates a handler that processes events through ensemble."""
+        from unittest.mock import AsyncMock
+
         from seerflow.__main__ import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
@@ -95,7 +97,9 @@ class TestRunLoop:
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"test message",
