@@ -81,14 +81,19 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         await storage.write_events(list(remaining_batch))
         _log.info("Flushed %d remaining events to storage", len(remaining_batch))
 
+    # Flush remaining template metadata
     get_stats = getattr(handler, "get_stats", None)
     if get_stats is not None:
-        events, anomalies, templates, t0 = get_stats()
+        events, anomalies, template_meta, t0 = get_stats()
+        pending_templates = [t for t in template_meta.values() if t.event_count > 0]
+        if pending_templates:
+            await storage.write_templates(pending_templates)
+            _log.info("Flushed %d template updates to storage", len(pending_templates))
         elapsed = time.time() - t0
         _log.info("--- Session Summary ---")
         _log.info("  Events processed: %d", events)
         _log.info("  Anomalies detected: %d", anomalies)
-        _log.info("  Unique templates: %d", len(templates))
+        _log.info("  Unique templates: %d", len(template_meta))
         _log.info("  Duration: %.1fs", elapsed)
         if elapsed > 0 and events > 0:
             _log.info("  Throughput: %.0f events/sec", events / elapsed)

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import json
 import logging
 import time
@@ -78,8 +77,7 @@ def _sanitize_fts_query(query: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
-class TemplateInfo:
+class TemplateInfo(msgspec.Struct, frozen=True, gc=False):
     """Template metadata for the templates table."""
 
     template_id: int
@@ -251,6 +249,8 @@ _INSERT_ENTITY_EVENT_SQL = """\
 INSERT OR IGNORE INTO entity_events (entity_uuid, event_id, timestamp_ns)
 VALUES (?, ?, ?)"""
 
+# first_seen_ns and example_message are intentionally excluded from DO UPDATE SET —
+# they preserve the values from the original INSERT (first discovery).
 _UPSERT_TEMPLATE_SQL = """\
 INSERT INTO templates (
     template_id, template_str, first_seen_ns,
