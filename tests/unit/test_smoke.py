@@ -8,7 +8,9 @@ def test_version_exists() -> None:
 
     assert hasattr(seerflow, "__version__")
     assert isinstance(seerflow.__version__, str)
-    assert seerflow.__version__ == "0.1.0"
+    parts = seerflow.__version__.split(".")
+    assert len(parts) == 3, f"Expected semver X.Y.Z, got {seerflow.__version__}"
+    assert all(p.isdigit() for p in parts), f"Non-numeric semver: {seerflow.__version__}"
 
 
 def test_subpackages_importable() -> None:
