@@ -103,6 +103,7 @@ def _make_handler(
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.parsing import DrainParser, EntityExtractor
+    from seerflow.storage.sqlite import TemplateInfo
 
     drain = DrainParser()
     extractor = EntityExtractor()
@@ -110,7 +111,7 @@ def _make_handler(
     batch_size = 50
     event_count = 0
     anomaly_count = 0
-    template_set: set[int] = set()
+    template_meta: dict[int, TemplateInfo] = {}
     start_time = time.time()
 
     async def handler(event: RawEvent) -> None:
@@ -136,16 +137,53 @@ def _make_handler(
             entity_refs=entity_refs,
         )
 
+        # Track template metadata
+        if template_id != -1:
+            if template_id not in template_meta:
+                _log.info("New template discovered: [%d] %s", template_id, template_str[:120])
+                template_meta[template_id] = TemplateInfo(
+                    template_id=template_id,
+                    template_str=template_str,
+                    first_seen_ns=event.received_ns,
+                    last_seen_ns=event.received_ns,
+                    event_count=1,
+                    example_message=message[:500],
+                )
+            else:
+                existing = template_meta[template_id]
+                template_meta[template_id] = TemplateInfo(
+                    template_id=template_id,
+                    template_str=template_str,
+                    first_seen_ns=existing.first_seen_ns,
+                    last_seen_ns=event.received_ns,
+                    event_count=existing.event_count + 1,
+                    example_message=existing.example_message,
+                )
+
         # Persist to storage
         batch.append(seerflow_event)
         if len(batch) >= batch_size:
             await storage.write_events(list(batch))
             batch.clear()
+            # Flush template metadata
+            if template_meta:
+                pending = list(template_meta.values())
+                # Reset counts but keep tracking for new-discovery detection
+                for tid in template_meta:
+                    t = template_meta[tid]
+                    template_meta[tid] = TemplateInfo(
+                        template_id=t.template_id,
+                        template_str=t.template_str,
+                        first_seen_ns=t.first_seen_ns,
+                        last_seen_ns=t.last_seen_ns,
+                        event_count=0,
+                        example_message=t.example_message,
+                    )
+                await storage.write_templates(pending)
 
         result = ensemble.process_event(seerflow_event)
         nonlocal event_count, anomaly_count
         event_count += 1
-        template_set.add(template_id)
         if result.is_anomaly:
             anomaly_count += 1
         _log.debug(
@@ -180,7 +218,7 @@ def _make_handler(
                 )
 
     handler.batch = batch  # type: ignore[attr-defined]
-    handler.get_stats = lambda: (event_count, anomaly_count, template_set, start_time)  # type: ignore[attr-defined]
+    handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler
 
 

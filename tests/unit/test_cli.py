@@ -195,6 +195,77 @@ class TestRunLoop:
         assert len(templates) >= 1
         assert t0 > 0
 
+    async def test_handler_tracks_template_metadata(self) -> None:
+        """Handler flushes template metadata alongside events."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        mock_storage.write_templates = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        # Send 55 events to trigger one batch flush at 50
+        for i in range(55):
+            event = RawEvent(
+                data=f"event {i}".encode(),
+                source_type="test",
+                source_id="t",
+                received_ns=1_700_000_000_000_000_000 + i,
+                metadata={},
+            )
+            await handler(event)
+
+        # write_templates should have been called alongside write_events
+        mock_storage.write_templates.assert_called_once()
+        templates_arg = mock_storage.write_templates.call_args[0][0]
+        assert len(templates_arg) >= 1  # at least 1 template discovered
+        # Each template should be a TemplateInfo
+        from seerflow.storage.sqlite import TemplateInfo
+
+        for t in templates_arg:
+            assert isinstance(t, TemplateInfo)
+            assert t.template_id >= 0  # no -1 templates
+            assert t.event_count >= 1
+
+    async def test_handler_logs_new_template_discovery(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Handler logs INFO when a new template is discovered."""
+        import logging
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        mock_storage.write_templates = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        with caplog.at_level(logging.INFO, logger="seerflow"):
+            event = RawEvent(
+                data=b"Failed login from 10.0.1.5",
+                source_type="test",
+                source_id="t",
+                received_ns=1_700_000_000_000_000_000,
+                metadata={},
+            )
+            await handler(event)
+
+        new_template_logs = [r for r in caplog.records if "New template discovered" in r.message]
+        assert len(new_template_logs) >= 1
+
     def test_main_with_nonexistent_config_raises(self) -> None:
         """main() with a bad config path should raise."""
         from seerflow.__main__ import _run
