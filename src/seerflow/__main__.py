@@ -235,7 +235,7 @@ async def _run(config_path: str | None) -> None:
 
 def _build_tail_config(paths: list[str], config_path: str | None = None) -> SeerflowConfig:
     """Build a SeerflowConfig for tail mode (file receivers only)."""
-    base = load_config(config_path) if config_path is not None else SeerflowConfig()
+    base = load_config(config_path)
     tail_receivers = ReceiverConfig(
         syslog_enabled=False,
         otlp_grpc_enabled=False,
