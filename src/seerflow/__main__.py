@@ -39,6 +39,7 @@ async def _run(config_path: str | None) -> None:
     # Suppress noisy third-party loggers
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
     logging.getLogger("drain3").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
     _log.info("Seerflow %s starting", __version__)
 
