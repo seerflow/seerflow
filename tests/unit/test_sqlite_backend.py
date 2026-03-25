@@ -1034,3 +1034,111 @@ class TestProtocolConformance:
             assert isinstance(backend, ModelStoreProto)
         finally:
             await backend.close()
+
+
+class TestTemplateTable:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_write_templates_creates_records(self) -> None:
+        from seerflow.storage.sqlite import TemplateInfo
+
+        backend = await self._make_backend()
+        try:
+            templates = [
+                TemplateInfo(
+                    template_id=1,
+                    template_str="Login from <*>",
+                    first_seen_ns=1000,
+                    last_seen_ns=2000,
+                    event_count=5,
+                    example_message="Login from 10.0.1.1",
+                ),
+            ]
+            await backend.write_templates(templates)
+            result = await backend.get_templates()
+            assert len(result) == 1
+            assert result[0].template_id == 1
+            assert result[0].event_count == 5
+            assert result[0].template_str == "Login from <*>"
+            assert result[0].example_message == "Login from 10.0.1.1"
+        finally:
+            await backend.close()
+
+    async def test_write_templates_upsert_increments(self) -> None:
+        from seerflow.storage.sqlite import TemplateInfo
+
+        backend = await self._make_backend()
+        try:
+            t1 = TemplateInfo(
+                template_id=1,
+                template_str="Login from <*>",
+                first_seen_ns=1000,
+                last_seen_ns=2000,
+                event_count=3,
+                example_message="Login from 10.0.1.1",
+            )
+            await backend.write_templates([t1])
+            t2 = TemplateInfo(
+                template_id=1,
+                template_str="Login from <*>",
+                first_seen_ns=3000,
+                last_seen_ns=4000,
+                event_count=2,
+                example_message="Login from 10.0.1.2",
+            )
+            await backend.write_templates([t2])
+            result = await backend.get_templates()
+            assert result[0].event_count == 5  # 3 + 2
+            assert result[0].last_seen_ns == 4000
+            assert result[0].example_message == "Login from 10.0.1.1"  # preserved
+            assert result[0].first_seen_ns == 1000  # preserved
+        finally:
+            await backend.close()
+
+    async def test_write_templates_empty_is_noop(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.write_templates([])
+            result = await backend.get_templates()
+            assert len(result) == 0
+        finally:
+            await backend.close()
+
+    async def test_get_templates_sorted_by_count(self) -> None:
+        from seerflow.storage.sqlite import TemplateInfo
+
+        backend = await self._make_backend()
+        try:
+            templates = [
+                TemplateInfo(
+                    template_id=1,
+                    template_str="A",
+                    first_seen_ns=1,
+                    last_seen_ns=1,
+                    event_count=10,
+                    example_message="a",
+                ),
+                TemplateInfo(
+                    template_id=2,
+                    template_str="B",
+                    first_seen_ns=1,
+                    last_seen_ns=1,
+                    event_count=50,
+                    example_message="b",
+                ),
+                TemplateInfo(
+                    template_id=3,
+                    template_str="C",
+                    first_seen_ns=1,
+                    last_seen_ns=1,
+                    event_count=1,
+                    example_message="c",
+                ),
+            ]
+            await backend.write_templates(templates)
+            result = await backend.get_templates()
+            assert [t.template_id for t in result] == [2, 1, 3]
+        finally:
+            await backend.close()
