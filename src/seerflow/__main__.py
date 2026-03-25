@@ -42,11 +42,7 @@ async def _run(config_path: str | None) -> None:
     pipeline = await build_pipeline(config)
 
     # Startup banner — only list healthy receivers
-    receivers = [
-        sid
-        for sid, r in pipeline.manager._receivers.items()
-        if r.is_healthy()
-    ]
+    receivers = [sid for sid, r in pipeline.manager._receivers.items() if r.is_healthy()]
     _log.info("Receivers: %s", ", ".join(receivers) if receivers else "none")
 
     # Graceful shutdown via event (Unix only)
