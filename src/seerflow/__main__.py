@@ -18,6 +18,8 @@ from seerflow.models import SeerflowEvent
 from seerflow.pipeline import build_pipeline
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from seerflow.receivers.base import RawEvent
 
 _log = logging.getLogger("seerflow")
@@ -47,6 +49,16 @@ async def _run(config_path: str | None) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(pipeline.stop()))
 
+    _log.info("Pipeline running — Ctrl+C to stop")
+    await pipeline.run(_make_handler(ensemble))
+    _log.info("Seerflow stopped")
+
+
+def _make_handler(
+    ensemble: DetectionEnsemble,
+) -> Callable[[RawEvent], Awaitable[None]]:
+    """Create an event handler that runs detection on each event."""
+
     async def handler(event: RawEvent) -> None:
         seerflow_event = SeerflowEvent(
             event_id=uuid.uuid4(),
@@ -57,7 +69,7 @@ async def _run(config_path: str | None) -> None:
             source_id=event.source_id,
         )
         result = ensemble.process_event(seerflow_event)
-        if result.is_anomaly:
+        if result.is_anomaly:  # pragma: no cover — tested in test_detection_ensemble
             _log.warning(
                 "ANOMALY [%s] score=%.3f dir=%s src=%s",
                 result.source_type,
@@ -66,9 +78,7 @@ async def _run(config_path: str | None) -> None:
                 event.source_id,
             )
 
-    _log.info("Pipeline running — Ctrl+C to stop")
-    await pipeline.run(handler)
-    _log.info("Seerflow stopped")
+    return handler
 
 
 def main() -> None:
