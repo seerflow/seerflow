@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from seerflow.receivers.base import RawEvent
+    from seerflow.storage.sqlite import SqliteBackend
 
 _log = logging.getLogger("seerflow")
 
@@ -40,6 +41,16 @@ async def _run(config_path: str | None) -> None:
     logging.getLogger("drain3").setLevel(logging.WARNING)
 
     _log.info("Seerflow %s starting", __version__)
+
+    # Connect storage
+    from pathlib import Path
+
+    from seerflow.storage.sqlite import SqliteBackend
+
+    data_dir = Path(config.storage.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    storage = await SqliteBackend.connect(config.storage)
+    _log.info("Storage: %s", config.storage.sqlite_path)
 
     ensemble = DetectionEnsemble(config.detection)
     pipeline = await build_pipeline(config)
@@ -63,18 +74,22 @@ async def _run(config_path: str | None) -> None:
             loop.add_signal_handler(sig, _request_shutdown)
 
     _log.info("Pipeline running — Ctrl+C to stop")
-    await pipeline.run(_make_handler(ensemble))
+    await pipeline.run(_make_handler(ensemble, storage))
+    await storage.close()
     _log.info("Seerflow stopped")
 
 
 def _make_handler(
     ensemble: DetectionEnsemble,
+    storage: SqliteBackend,
 ) -> Callable[[RawEvent], Awaitable[None]]:
-    """Create an event handler that runs detection on each event."""
+    """Create an event handler that runs detection and persists events."""
     from seerflow.parsing import DrainParser, EntityExtractor
 
     drain = DrainParser()
     extractor = EntityExtractor()
+    batch: list[SeerflowEvent] = []
+    batch_size = 50
 
     async def handler(event: RawEvent) -> None:
         message = event.data.decode("utf-8", errors="replace")[:32768]
@@ -98,6 +113,13 @@ def _make_handler(
             template_params=template_params,
             entity_refs=entity_refs,
         )
+
+        # Persist to storage
+        batch.append(seerflow_event)
+        if len(batch) >= batch_size:
+            await storage.write_events(list(batch))
+            batch.clear()
+
         result = ensemble.process_event(seerflow_event)
         _log.debug(
             "event tid=%d entities=%d score=%.4f thresh=%.4f src=%s",
