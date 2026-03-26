@@ -5,17 +5,17 @@ CorrelationRule defines YAML-loaded cross-source correlation rules.
 SourceCondition defines per-source match conditions within a rule.
 """
 
-from __future__ import annotations
-
 import uuid
 from typing import TYPE_CHECKING
 
 import msgspec
 
+from seerflow.models._types import AlertType, EntityType, FeedbackType
+from seerflow.models.event import SeverityLevel
+
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionResult
-    from seerflow.models._types import AlertType, EntityType, FeedbackType
-    from seerflow.models.event import SeerflowEvent, SeverityLevel
+    from seerflow.models.event import SeerflowEvent
 
 
 class SourceCondition(msgspec.Struct, frozen=True):
@@ -97,7 +97,7 @@ class Alert(msgspec.Struct, frozen=True):
     feedback: FeedbackType = ""
 
 
-def create_ml_alert(event: SeerflowEvent, result: DetectionResult) -> Alert:
+def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
     """Create an ML anomaly Alert from a SeerflowEvent and DetectionResult.
 
     Uses the first entity from ``event.entity_refs`` as the primary entity.
