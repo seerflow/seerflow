@@ -129,6 +129,44 @@ class TestHoltWintersDetector:
         test_event = _make_event(timestamp_ns=base_ns + 20 * _BUCKET_NS)
         assert detector.score(test_event) == pytest.approx(restored.score(test_event), abs=1e-10)
 
+    def test_drop_detection(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        detector = HoltWintersDetector(seasonal_period=10)
+        base_ns = 1_700_000_000_000_000_000
+        # Train with steady 20 events per bucket for 15 buckets (past warmup)
+        for bucket in range(15):
+            ts = base_ns + bucket * _BUCKET_NS
+            for _ in range(20):
+                detector.learn(_make_event(timestamp_ns=ts))
+            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
+            detector._current_count -= 1  # undo extra learn
+
+        normal_score = detector.score(_make_event())
+
+        # Now inject silence: 0 events in one bucket (just trigger rollover)
+        silence_ts = base_ns + 16 * _BUCKET_NS
+        detector.learn(_make_event(timestamp_ns=silence_ts))
+        # Trigger rollover with only 1 event (near-silence)
+        detector.learn(_make_event(timestamp_ns=silence_ts + _BUCKET_NS))
+
+        drop_score = detector.score(_make_event(timestamp_ns=silence_ts + _BUCKET_NS))
+        assert drop_score > normal_score
+
+    def test_gap_bucket_handling(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        detector = HoltWintersDetector(seasonal_period=10)
+        base_ns = 1_700_000_000_000_000_000
+        # Process a few buckets
+        detector.learn(_make_event(timestamp_ns=base_ns))
+        detector.learn(_make_event(timestamp_ns=base_ns + _BUCKET_NS))
+        t_before = detector._t
+        # Skip 3 minutes (gap of 3 buckets)
+        detector.learn(_make_event(timestamp_ns=base_ns + 5 * _BUCKET_NS))
+        # Should have advanced by: 1 (bucket 1) + 3 (gap buckets)
+        assert detector._t >= t_before + 4
+
     def test_config_parameters_affect_behavior(self) -> None:
         from seerflow.detection.holtwinters import HoltWintersDetector
 
