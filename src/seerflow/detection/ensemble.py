@@ -74,6 +74,7 @@ class DetectionEnsemble:
                     alpha=self._config.hw_alpha,
                     beta=self._config.hw_beta,
                     gamma=self._config.hw_gamma,
+                    n_std=self._config.hw_n_std,
                 ),
             ]
         return self._detectors[source]

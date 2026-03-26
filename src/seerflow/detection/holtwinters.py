@@ -57,6 +57,16 @@ class HoltWintersDetector:
         gamma: float = 0.1,
         n_std: float = 3.0,
     ) -> None:
+        if seasonal_period < 2:
+            msg = f"seasonal_period must be >= 2, got {seasonal_period!r}"
+            raise ValueError(msg)
+        for name, val in (("alpha", alpha), ("beta", beta), ("gamma", gamma)):
+            if not (0.0 < val < 1.0):
+                msg = f"{name} must be in (0, 1), got {val!r}"
+                raise ValueError(msg)
+        if n_std <= 0.0:
+            msg = f"n_std must be positive, got {n_std!r}"
+            raise ValueError(msg)
         self._seasonal_period = seasonal_period
         self._alpha = alpha
         self._beta = beta
