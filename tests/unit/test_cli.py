@@ -307,6 +307,125 @@ class TestRunLoop:
                 main()
             assert exc.value.code == 0
 
+    async def test_handler_severity_from_metadata(self) -> None:
+        """Handler propagates seerflow_severity from RawEvent metadata."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.models.event import SeverityLevel
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        event = RawEvent(
+            data=b"kernel panic - not syncing",
+            source_type="syslog",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={"seerflow_severity": 4},  # ERROR
+        )
+        await handler(event)
+
+        written_event = mock_storage.write_events.call_args[0][0][0]
+        assert written_event.severity_id == SeverityLevel.ERROR
+
+    async def test_handler_severity_default_no_metadata(self) -> None:
+        """Handler defaults to INFORMATIONAL when no seerflow_severity in metadata."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.models.event import SeverityLevel
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        event = RawEvent(
+            data=b"normal log line",
+            source_type="file",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        await handler(event)
+
+        written_event = mock_storage.write_events.call_args[0][0][0]
+        assert written_event.severity_id == SeverityLevel.INFORMATIONAL
+
+    async def test_handler_entity_refs_derived_from_typed_fields(self) -> None:
+        """Handler populates entity_refs from related_ips + related_users + related_hosts."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        event = RawEvent(
+            data=b"Failed login from 192.168.1.1 by user root on host web01",
+            source_type="syslog",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        await handler(event)
+
+        written_event = mock_storage.write_events.call_args[0][0][0]
+        # entity_refs should be the concatenation of typed fields
+        assert written_event.entity_refs == (
+            written_event.related_ips + written_event.related_users + written_event.related_hosts
+        )
+        # At least IPs should be extracted
+        assert "192.168.1.1" in written_event.related_ips
+        assert len(written_event.entity_refs) > 0
+
+    async def test_handler_entity_refs_empty_for_plain_message(self) -> None:
+        """Handler leaves entity_refs empty when no entities found."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        event = RawEvent(
+            data=b"simple log message with no entities",
+            source_type="file",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        await handler(event)
+
+        written_event = mock_storage.write_events.call_args[0][0][0]
+        assert written_event.entity_refs == ()
+        assert written_event.related_ips == ()
+        assert written_event.related_users == ()
+        assert written_event.related_hosts == ()
+
 
 class TestTailSubcommand:
     def test_tail_parses_single_path(self) -> None:
