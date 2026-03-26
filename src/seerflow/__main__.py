@@ -248,6 +248,10 @@ def main() -> None:
         if args.command == "tail":
             tail_config = _build_tail_config(args.paths, config_path=args.config)
             asyncio.run(_run_with_config(tail_config))
+        elif args.command == "query":
+            from seerflow.query import run_query
+
+            asyncio.run(run_query(args))
         else:
             asyncio.run(_run(args.config))
     except KeyboardInterrupt:
