@@ -75,7 +75,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     handler = _make_handler(ensemble, storage)
     await pipeline.run(handler)
 
-    # Flush remaining template metadata (WriteBuffer.close() handles remaining events)
+    # Flush remaining template metadata.
+    # Event flushing is handled by WriteBuffer.close() inside storage.close() below.
     get_stats = getattr(handler, "get_stats", None)
     if get_stats is not None:
         events, anomalies, template_meta, t0 = get_stats()
@@ -164,9 +165,11 @@ def _make_handler(
         nonlocal event_count, anomaly_count
         event_count += 1
 
-        # Flush template metadata every 50 events
+        # Flush template metadata every 10 events
         if event_count % 10 == 0 and template_meta:
             pending = list(template_meta.values())
+            await storage.write_templates(pending)
+            # Reset counts only after successful write
             for tid in template_meta:
                 t = template_meta[tid]
                 template_meta[tid] = TemplateInfo(
@@ -177,7 +180,6 @@ def _make_handler(
                     event_count=0,
                     example_message=t.example_message,
                 )
-            await storage.write_templates(pending)
         if result.is_anomaly:
             anomaly_count += 1
         _log.debug(
