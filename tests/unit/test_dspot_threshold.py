@@ -214,7 +214,6 @@ class TestDSpotGPDEdgeCases:
     def test_gpd_fit_failure_returns_none(self) -> None:
         """When GPD fit fails, previous threshold is kept."""
         ds = _calibrated_detector()
-        initial_upper = ds._upper_z_q
         # Force excesses that would cause fit failure (all identical values)
         ds._upper_excesses = [0.0] * 20
         ds._refit_upper()

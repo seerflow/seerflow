@@ -149,12 +149,8 @@ class TestPipelineHandlerError:
         )
         pipeline = await build_pipeline(config)
         # Inject two events
-        ev1 = RawEvent(
-            data=b"bad", source_type="mock", source_id="m", received_ns=1, metadata={}
-        )
-        ev2 = RawEvent(
-            data=b"good", source_type="mock", source_id="m", received_ns=2, metadata={}
-        )
+        ev1 = RawEvent(data=b"bad", source_type="mock", source_id="m", received_ns=1, metadata={})
+        ev2 = RawEvent(data=b"good", source_type="mock", source_id="m", received_ns=2, metadata={})
         await pipeline.manager.put_event(ev1)
         await pipeline.manager.put_event(ev2)
 
