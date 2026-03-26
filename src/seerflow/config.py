@@ -96,6 +96,10 @@ class DetectionConfig:
     dspot_calibration_window: int = 1000
     dspot_risk_level: float = 0.0001
     dspot_initial_percentile: int = 98
+    hw_seasonal_period: int = 1440
+    hw_alpha: float = 0.3
+    hw_beta: float = 0.1
+    hw_gamma: float = 0.1
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
@@ -267,6 +271,10 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         dspot_calibration_window=dspot.get("calibration_window", 1000),
         dspot_risk_level=dspot.get("risk_level", 0.0001),
         dspot_initial_percentile=dspot.get("initial_percentile", 98),
+        hw_seasonal_period=data.get("hw_seasonal_period", 1440),
+        hw_alpha=data.get("hw_alpha", 0.3),
+        hw_beta=data.get("hw_beta", 0.1),
+        hw_gamma=data.get("hw_gamma", 0.1),
         weights_content=data.get("weights_content", 0.30),
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
