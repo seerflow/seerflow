@@ -105,6 +105,6 @@ class TestAlertPersistenceIntegration:
         result = await storage.query_alerts(AlertQuery(limit=10))
         # All 3 should dedup into 1 alert (same template_id + source_type)
         assert len(result.items) == 1
-        assert result.items[0].dedup_count >= 2
+        assert result.items[0].dedup_count == 3
 
         await storage.close()
