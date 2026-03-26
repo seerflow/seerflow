@@ -348,22 +348,39 @@ class FileTailReceiver:
                     *watch_dirs,
                     watch_filter=None,
                     debounce=self._debounce_ms,
+                    recursive=False,
+                    ignore_permission_denied=True,
                 ):
                     if not self._started:
                         return
                     # Check whether any change is an "added" event
                     has_added = any(ct == watchfiles.Change.added for ct, _ in changes)
+                    new_paths: set[str] = set()
                     if has_added:
                         new_paths = self._expand_globs()
                         for new_path in new_paths:
-                            parent = str(Path(new_path).parent)
+                            # _expand_globs sets offset=st_size for new files, or
+                            # preserves a stale checkpoint offset for re-created files.
+                            # Either way, reset to 0 to read the full file on first
+                            # detection. _process_file handles inode mismatches.
+                            saved = self._offsets[new_path]  # always set by _expand_globs
+                            self._offsets[new_path] = FileOffset(offset=0, inode=saved.inode)
+                            try:
+                                await self._process_file(new_path)
+                            except OSError as exc:
+                                _log.warning(
+                                    "IO error processing new file %s: %s",
+                                    new_path,
+                                    exc,
+                                )
+                            parent = str(Path(new_path).parent.resolve())
                             if parent not in watch_dirs:
                                 watch_dirs.add(parent)
                                 restart_needed = True
                     modified_paths: set[str] = set()
                     for _change_type, change_path in changes:
                         resolved = str(Path(change_path).resolve())
-                        if resolved in self._watched_files:
+                        if resolved in self._watched_files and resolved not in new_paths:
                             modified_paths.add(resolved)
                     for path_str in modified_paths:
                         try:

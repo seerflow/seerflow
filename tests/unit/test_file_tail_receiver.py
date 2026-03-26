@@ -893,3 +893,62 @@ class TestGlobDirectorySkip:
         assert len(warning_or_error) == 0, (
             "Inaccessible path should NOT be logged at WARNING or ERROR"
         )
+
+
+class TestNewFileDetection:
+    """S-130: Fix new file detection and recursive watch."""
+
+    async def test_new_file_processed_on_creation(self, tmp_path: Path) -> None:
+        """File created after startup is processed immediately."""
+        mgr = ReceiverManager(queue_maxsize=100)
+        log_file = tmp_path / "new.log"
+        # File does NOT exist yet
+        receiver = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+            debounce_ms=200,
+        )
+        await receiver.start()
+        await receiver.wait_ready()
+
+        # Create the file with content
+        log_file.write_text("first line\n")
+
+        # Should be processed immediately, not deferred
+        try:
+            event = await asyncio.wait_for(mgr.get_event(), timeout=5.0)
+        finally:
+            await receiver.stop()
+        assert event is not None
+        assert b"first line" in event.data
+
+    async def test_recursive_false_prevents_subdir_watching(self, tmp_path: Path) -> None:
+        """watchfiles should NOT recurse into subdirectories."""
+        deep_dir = tmp_path / "sub1" / "sub2" / "sub3"
+        deep_dir.mkdir(parents=True)
+        log_file = tmp_path / "test.log"
+        log_file.write_text("initial\n")
+
+        mgr = ReceiverManager(queue_maxsize=100)
+        receiver = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+            debounce_ms=200,
+        )
+        await receiver.start()
+        await receiver.wait_ready()
+
+        # Write into deep subdir — should produce NO event
+        (deep_dir / "deep.log").write_text("deep line\n")
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(mgr.get_event(), timeout=0.8)
+
+        # Write into watched top-level file — should produce an event
+        with open(log_file, "a") as f:
+            f.write("appended line\n")
+
+        event = await asyncio.wait_for(mgr.get_event(), timeout=5.0)
+        assert b"appended line" in event.data
+        await receiver.stop()
