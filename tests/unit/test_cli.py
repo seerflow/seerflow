@@ -426,6 +426,74 @@ class TestRunLoop:
         assert written_event.related_users == ()
         assert written_event.related_hosts == ()
 
+    async def test_handler_writes_alert_on_anomaly(self) -> None:
+        """Handler calls write_alert when ensemble detects anomaly."""
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        mock_storage.write_alert = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        anomaly_result = DetectionResult(
+            score=0.95,
+            upper_threshold=0.70,
+            lower_threshold=0.10,
+            is_anomaly=True,
+            anomaly_direction="upper",
+            source_type="syslog",
+        )
+        with patch.object(type(ensemble), "process_event", return_value=anomaly_result):
+            event = RawEvent(
+                data=b"kernel panic - not syncing",
+                source_type="syslog",
+                source_id="test",
+                received_ns=1_700_000_000_000_000_000,
+                metadata={"seerflow_severity": 5},
+            )
+            await handler(event)
+
+        mock_storage.write_alert.assert_called_once()
+        alert = mock_storage.write_alert.call_args[0][0]
+        assert alert.alert_type == "ml"
+        assert alert.risk_score == 0.95
+        assert alert.dedup_key.startswith("hst:")
+        assert alert.rule_name == "hst-anomaly"
+
+    async def test_handler_no_alert_on_normal_event(self) -> None:
+        """Handler does NOT call write_alert when no anomaly detected."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.__main__ import _make_handler
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        mock_storage.write_alert = AsyncMock()
+        handler = _make_handler(ensemble, mock_storage)
+
+        event = RawEvent(
+            data=b"normal log message",
+            source_type="file",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        await handler(event)
+
+        mock_storage.write_alert.assert_not_called()
+
 
 class TestTailSubcommand:
     def test_tail_parses_single_path(self) -> None:

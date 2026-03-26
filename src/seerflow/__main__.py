@@ -102,6 +102,7 @@ def _make_handler(
     storage: SqliteBackend,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
+    from seerflow.models.alert import create_ml_alert
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
 
@@ -207,6 +208,8 @@ def _make_handler(
                     "  entities: %s",
                     ", ".join(entity_refs[:10]),
                 )
+            alert = create_ml_alert(seerflow_event, result)
+            await storage.write_alert(alert)
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler

@@ -7,12 +7,13 @@ import uuid
 import msgspec
 import pytest
 
+from seerflow.detection.ensemble import DetectionResult
 from seerflow.models.alert import (
     Alert,
     CorrelationRule,
     SourceCondition,
 )
-from seerflow.models.event import SeverityLevel
+from seerflow.models.event import SeerflowEvent, SeverityLevel
 
 
 class TestAlertCreation:
@@ -244,3 +245,111 @@ class TestSourceCondition:
         cond = SourceCondition(source_type="x", conditions={})
         with pytest.raises(AttributeError):
             cond.source_type = "y"  # type: ignore[misc]
+
+
+class TestCreateMlAlert:
+    """Tests for create_ml_alert factory function."""
+
+    def _make_event(
+        self,
+        *,
+        template_id: int = 5,
+        source_type: str = "syslog",
+        timestamp_ns: int = 1_700_000_000_000_000_000,
+        severity_id: SeverityLevel = SeverityLevel.ERROR,
+        entity_refs: tuple[str, ...] = ("192.168.1.1", "root"),
+    ) -> SeerflowEvent:
+        return SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=timestamp_ns,
+            observed_ns=timestamp_ns + 1000,
+            severity_id=severity_id,
+            message="test anomaly event",
+            source_type=source_type,
+            template_id=template_id,
+            entity_refs=entity_refs,
+        )
+
+    def _make_result(
+        self,
+        *,
+        score: float = 0.85,
+        upper_threshold: float = 0.70,
+        is_anomaly: bool = True,
+        anomaly_direction: str = "upper",
+    ) -> DetectionResult:
+        return DetectionResult(
+            score=score,
+            upper_threshold=upper_threshold,
+            lower_threshold=0.1,
+            is_anomaly=is_anomaly,
+            anomaly_direction=anomaly_direction,
+            source_type="syslog",
+        )
+
+    def test_creates_alert_with_correct_fields(self) -> None:
+        from seerflow.models.alert import create_ml_alert
+
+        event = self._make_event()
+        result = self._make_result()
+        alert = create_ml_alert(event, result)
+
+        assert alert.alert_type == "ml"
+        assert alert.rule_name == "hst-anomaly"
+        assert alert.timestamp_ns == event.timestamp_ns
+        assert alert.severity_id == event.severity_id
+        assert alert.risk_score == result.score
+        assert alert.contributing_events == (event.event_id,)
+        assert "0.850" in alert.description
+        assert "0.700" in alert.description
+        assert "upper" in alert.description
+
+    def test_alert_id_is_uuid5_format(self) -> None:
+        from seerflow.models.alert import create_ml_alert
+
+        event = self._make_event()
+        result = self._make_result()
+        alert = create_ml_alert(event, result)
+
+        parsed = uuid.UUID(alert.alert_id)
+        assert parsed.version == 5
+
+    def test_alert_id_is_deterministic(self) -> None:
+        from seerflow.models.alert import create_ml_alert
+
+        event = self._make_event()
+        result = self._make_result()
+        alert1 = create_ml_alert(event, result)
+        alert2 = create_ml_alert(event, result)
+
+        assert alert1.alert_id == alert2.alert_id
+
+    def test_dedup_key_format(self) -> None:
+        from seerflow.models.alert import create_ml_alert
+
+        event = self._make_event(template_id=42, source_type="otlp")
+        result = self._make_result()
+        alert = create_ml_alert(event, result)
+
+        assert alert.dedup_key == "hst:42:otlp"
+
+    def test_empty_entity_refs(self) -> None:
+        from seerflow.models.alert import create_ml_alert
+
+        event = self._make_event(entity_refs=())
+        result = self._make_result()
+        alert = create_ml_alert(event, result)
+
+        assert alert.entity_uuid == ""
+        assert alert.entity_value == ""
+        assert alert.entity_type == "ip"
+
+    def test_first_entity_used(self) -> None:
+        from seerflow.models.alert import create_ml_alert
+
+        event = self._make_event(entity_refs=("10.0.0.1", "admin", "web01"))
+        result = self._make_result()
+        alert = create_ml_alert(event, result)
+
+        assert alert.entity_uuid == "10.0.0.1"
+        assert alert.entity_value == "10.0.0.1"
