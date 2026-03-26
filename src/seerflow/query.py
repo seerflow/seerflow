@@ -12,13 +12,11 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import argparse
-from typing import TYPE_CHECKING
-
 import msgspec.json
 
 if TYPE_CHECKING:
+    import argparse
+
     from seerflow.storage.sqlite import SqliteBackend
 
 
@@ -82,9 +80,13 @@ async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> 
 
     time_range = None
     if args.last:
-        now_ns = time.time_ns()
-        duration_ns = parse_duration(args.last)
-        time_range = TimeRange(start_ns=now_ns - duration_ns, end_ns=now_ns)
+        try:
+            now_ns = time.time_ns()
+            duration_ns = parse_duration(args.last)
+            time_range = TimeRange(start_ns=now_ns - duration_ns, end_ns=now_ns)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return
 
     query = EventQuery(
         time_range=time_range,
@@ -138,9 +140,13 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
 
     time_range = None
     if args.last:
-        now_ns = time.time_ns()
-        duration_ns = parse_duration(args.last)
-        time_range = TimeRange(start_ns=now_ns - duration_ns, end_ns=now_ns)
+        try:
+            now_ns = time.time_ns()
+            duration_ns = parse_duration(args.last)
+            time_range = TimeRange(start_ns=now_ns - duration_ns, end_ns=now_ns)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return
 
     query = AlertQuery(
         time_range=time_range,
@@ -245,5 +251,8 @@ async def run_query(args: argparse.Namespace) -> None:
             await run_query_alerts(storage, args)
         elif args.query_type == "templates":
             await run_query_templates(storage, args)
+        else:
+            msg = f"Unknown query_type: {args.query_type!r}"
+            raise ValueError(msg)
     finally:
         await storage.close()
