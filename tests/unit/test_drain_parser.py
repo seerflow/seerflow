@@ -99,6 +99,14 @@ class TestDrainParser:
         tid, _template, _params = parser.parse(long_msg)
         assert tid > 0  # still works, just truncated
 
+    def test_invalid_max_clusters_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_clusters"):
+            DrainParser(max_clusters=0)
+
+    def test_invalid_max_clusters_negative_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_clusters"):
+            DrainParser(max_clusters=-5)
+
 
 class TestParamExtraction:
     def test_basic_extraction(self) -> None:
@@ -116,6 +124,28 @@ class TestParamExtraction:
     def test_length_mismatch(self) -> None:
         params = _extract_params("short", "longer template here")
         assert params == ()
+
+
+class TestDrainGetState:
+    def test_get_state_returns_bytes(self) -> None:
+        parser = DrainParser()
+        parser.parse("some log message here")
+        state = parser.get_state()
+        assert isinstance(state, bytes)
+        assert len(state) > 0
+
+    def test_get_state_none_raises(self) -> None:
+        """get_state raises RuntimeError if save_state produces no output."""
+        from unittest.mock import patch
+
+        parser = DrainParser()
+        parser.parse("test message")
+        # save_state writes to persistence.state, then we read it.
+        # Patch save_state to be a no-op so state stays None.
+        with patch.object(parser._miner, "save_state"):
+            parser._persistence.state = None
+            with pytest.raises(RuntimeError, match="save_state produced no output"):
+                parser.get_state()
 
 
 class TestExports:

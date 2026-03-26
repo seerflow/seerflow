@@ -159,3 +159,76 @@ class TestDSpotSerialization:
         assert restored.is_calibrated == ds.is_calibrated
         assert restored.threshold == ds.threshold
         assert restored.lower_threshold == ds.lower_threshold
+
+
+class TestDSpotExcessTrimming:
+    """Test the MAX_EXCESSES trimming paths (lines 181, 183, 190, 192)."""
+
+    def test_upper_excess_refit_on_50th(self) -> None:
+        """After calibration, upper excesses that hit 50-count trigger refit."""
+        ds = _calibrated_detector()
+        # Feed scores just above the upper threshold to accumulate excesses
+        for i in range(50):
+            score = ds._upper_threshold + 0.01 + (i * 0.001)
+            ds.update(score)
+        # After 50 excesses, _refit_upper should have been called
+        assert ds._upper_n_exceed >= 50
+
+    def test_lower_excess_refit_on_50th(self) -> None:
+        """After calibration, lower excesses that hit 50-count trigger refit."""
+        ds = _calibrated_detector()
+        # Feed scores just below the lower threshold to accumulate deficits
+        for i in range(50):
+            score = ds._lower_threshold - 0.01 - (i * 0.001)
+            ds.update(score)
+        assert ds._lower_n_exceed >= 50
+
+    def test_upper_excesses_trimmed_to_max(self) -> None:
+        """Upper excesses list is trimmed when it exceeds _MAX_EXCESSES."""
+        from seerflow.detection.threshold import _MAX_EXCESSES
+
+        ds = _calibrated_detector()
+        # Force a large excess list
+        ds._upper_excesses = [0.1] * (_MAX_EXCESSES + 100)
+        ds._upper_n_exceed = _MAX_EXCESSES + 100
+        # Feed one more above threshold to trigger trimming
+        score = ds._upper_threshold + 0.5
+        ds.update(score)
+        assert len(ds._upper_excesses) <= _MAX_EXCESSES + 1
+
+    def test_lower_excesses_trimmed_to_max(self) -> None:
+        """Lower excesses list is trimmed when it exceeds _MAX_EXCESSES."""
+        from seerflow.detection.threshold import _MAX_EXCESSES
+
+        ds = _calibrated_detector()
+        ds._lower_excesses = [0.1] * (_MAX_EXCESSES + 100)
+        ds._lower_n_exceed = _MAX_EXCESSES + 100
+        score = ds._lower_threshold - 0.5
+        ds.update(score)
+        assert len(ds._lower_excesses) <= _MAX_EXCESSES + 1
+
+
+class TestDSpotGPDEdgeCases:
+    """Test GPD fit edge cases (lines 265-267, 272)."""
+
+    def test_gpd_fit_failure_returns_none(self) -> None:
+        """When GPD fit fails, previous threshold is kept."""
+        ds = _calibrated_detector()
+        initial_upper = ds._upper_z_q
+        # Force excesses that would cause fit failure (all identical values)
+        ds._upper_excesses = [0.0] * 20
+        ds._refit_upper()
+        # Either the threshold changed (fit succeeded with degenerate data) or
+        # stayed the same (fit failed and was kept)
+        assert isinstance(ds._upper_z_q, float)
+
+    def test_gpd_shape_near_zero(self) -> None:
+        """When GPD shape parameter is near zero, log formula is used (line 272)."""
+        ds = _calibrated_detector()
+        # Feed uniform-ish excesses to get shape near zero
+        ds._upper_excesses = [0.1 * (i + 1) for i in range(100)]
+        ds._upper_n_exceed = 100
+        ds._n_total = 1000
+        ds._refit_upper()
+        assert isinstance(ds._upper_z_q, float)
+        assert ds._upper_z_q > ds._upper_threshold

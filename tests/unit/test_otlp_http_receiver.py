@@ -186,6 +186,86 @@ class TestOtlpHttpReceiverIngest:
             await receiver.stop()
 
 
+class TestOtlpHttpReceiverEdgeCases:
+    async def test_start_is_idempotent(self) -> None:
+        """Second start() call is a no-op (line 71)."""
+        mgr = ReceiverManager()
+        receiver = OtlpHttpReceiver(mgr, source_id="otlp-http-test", port=0)
+        await receiver.start()
+        await receiver.start()  # no-op
+        assert receiver.is_healthy()
+        await receiver.stop()
+
+    async def test_stop_without_start(self) -> None:
+        """Stop before start does not crash (line 99)."""
+        mgr = ReceiverManager()
+        receiver = OtlpHttpReceiver(mgr, source_id="otlp-http-test", port=0)
+        await receiver.stop()
+        assert not receiver.is_healthy()
+
+    async def test_stop_is_idempotent(self) -> None:
+        """Second stop() call is a no-op."""
+        mgr = ReceiverManager()
+        receiver = OtlpHttpReceiver(mgr, source_id="otlp-http-test", port=0)
+        await receiver.start()
+        await receiver.stop()
+        await receiver.stop()  # no-op
+        assert not receiver.is_healthy()
+
+    async def test_malformed_json_400(self) -> None:
+        """Malformed JSON body returns 400 (lines 136-138)."""
+        mgr = ReceiverManager()
+        receiver = OtlpHttpReceiver(mgr, source_id="otlp-http-test", port=0)
+        await receiver.start()
+        try:
+            port = receiver.actual_port
+            async with aiohttp.ClientSession() as session:
+                resp = await session.post(
+                    f"http://127.0.0.1:{port}/v1/logs",
+                    data=b"{not valid json at all!!!}",
+                    headers={"Content-Type": "application/json"},
+                )
+                assert resp.status == 400
+        finally:
+            await receiver.stop()
+
+    async def test_protobuf_trailing_bytes_400(self) -> None:
+        """Protobuf with trailing bytes returns 400 (line 126)."""
+        mgr = ReceiverManager()
+        receiver = OtlpHttpReceiver(mgr, source_id="otlp-http-test", port=0)
+        await receiver.start()
+        try:
+            port = receiver.actual_port
+            request = _make_export_request(num_records=1)
+            body = request.SerializeToString()
+            # Append trailing bytes
+            body_with_trailing = body + b"\xff\xfe\xfd"
+            async with aiohttp.ClientSession() as session:
+                resp = await session.post(
+                    f"http://127.0.0.1:{port}/v1/logs",
+                    data=body_with_trailing,
+                    headers={"Content-Type": "application/x-protobuf"},
+                )
+                assert resp.status == 400
+        finally:
+            await receiver.stop()
+
+    async def test_start_socket_error_propagates(self) -> None:
+        """When socket bind fails, exception propagates (lines 84-87)."""
+        mgr = ReceiverManager()
+        # Start first receiver to occupy a port
+        receiver1 = OtlpHttpReceiver(mgr, source_id="r1", port=0)
+        await receiver1.start()
+        occupied_port = receiver1.actual_port
+        try:
+            # Try to bind second receiver to same port
+            receiver2 = OtlpHttpReceiver(mgr, source_id="r2", port=occupied_port)
+            with pytest.raises(OSError):
+                await receiver2.start()
+        finally:
+            await receiver1.stop()
+
+
 class TestOtlpHttpReceiverConfig:
     async def test_configurable_port(self) -> None:
         mgr = ReceiverManager()
