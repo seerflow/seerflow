@@ -5,12 +5,17 @@ CorrelationRule defines YAML-loaded cross-source correlation rules.
 SourceCondition defines per-source match conditions within a rule.
 """
 
+from __future__ import annotations
+
 import uuid
+from typing import TYPE_CHECKING
 
 import msgspec
 
-from seerflow.models._types import AlertType, EntityType, FeedbackType
-from seerflow.models.event import SeverityLevel
+if TYPE_CHECKING:
+    from seerflow.detection.ensemble import DetectionResult
+    from seerflow.models._types import AlertType, EntityType, FeedbackType
+    from seerflow.models.event import SeerflowEvent, SeverityLevel
 
 
 class SourceCondition(msgspec.Struct, frozen=True):
@@ -90,3 +95,35 @@ class Alert(msgspec.Struct, frozen=True):
     dedup_key: str = ""
     dedup_count: int = 1
     feedback: FeedbackType = ""
+
+
+def create_ml_alert(event: SeerflowEvent, result: DetectionResult) -> Alert:
+    """Create an ML anomaly Alert from a SeerflowEvent and DetectionResult.
+
+    Uses the first entity from ``event.entity_refs`` as the primary entity.
+    If no entities are present, entity fields default to empty strings.
+    """
+    entity_refs = event.entity_refs
+    return Alert(
+        alert_id=str(
+            uuid.uuid5(
+                uuid.NAMESPACE_DNS,
+                f"hst:{event.template_id}:{event.source_type}:{event.timestamp_ns}",
+            )
+        ),
+        alert_type="ml",
+        timestamp_ns=event.timestamp_ns,
+        severity_id=event.severity_id,
+        rule_name="hst-anomaly",
+        description=(
+            f"Anomaly detected: score={result.score:.3f} "
+            f"threshold={result.upper_threshold:.3f} "
+            f"direction={result.anomaly_direction}"
+        ),
+        entity_uuid=entity_refs[0] if entity_refs else "",
+        entity_value=entity_refs[0] if entity_refs else "",
+        entity_type="ip",
+        contributing_events=(event.event_id,),
+        risk_score=result.score,
+        dedup_key=f"hst:{event.template_id}:{event.source_type}",
+    )
