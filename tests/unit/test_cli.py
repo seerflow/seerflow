@@ -211,7 +211,7 @@ class TestRunLoop:
         mock_storage.write_templates = AsyncMock()
         handler = _make_handler(ensemble, mock_storage)
 
-        # Send 55 events — template flush triggers at event_count % 50 == 0
+        # Send 55 events — template flush triggers at event_count % 10 == 0
         for i in range(55):
             event = RawEvent(
                 data=f"event {i}".encode(),
@@ -222,8 +222,8 @@ class TestRunLoop:
             )
             await handler(event)
 
-        # write_templates called at event 50
-        mock_storage.write_templates.assert_called_once()
+        # write_templates called at events 10, 20, 30, 40, 50
+        assert mock_storage.write_templates.call_count == 5
         templates_arg = mock_storage.write_templates.call_args[0][0]
         assert len(templates_arg) >= 1  # at least 1 template discovered
         # Each template should be a TemplateInfo

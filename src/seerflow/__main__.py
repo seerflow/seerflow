@@ -165,7 +165,7 @@ def _make_handler(
         event_count += 1
 
         # Flush template metadata every 50 events
-        if event_count % 50 == 0 and template_meta:
+        if event_count % 10 == 0 and template_meta:
             pending = list(template_meta.values())
             for tid in template_meta:
                 t = template_meta[tid]
