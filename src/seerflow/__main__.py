@@ -6,14 +6,14 @@ import asyncio
 import logging
 import sys
 import time
-import uuid
 from typing import TYPE_CHECKING
+
+import msgspec.structs
 
 from seerflow import __version__
 from seerflow.cli import parse_args
 from seerflow.config import ReceiverConfig, SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
-from seerflow.models import SeerflowEvent
 from seerflow.pipeline import build_pipeline
 
 if TYPE_CHECKING:
@@ -102,56 +102,51 @@ def _make_handler(
     storage: SqliteBackend,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
-    from seerflow.parsing import DrainParser, EntityExtractor
+    from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
 
-    drain = DrainParser()
-    extractor = EntityExtractor()
+    normalizer = EventNormalizer()
     event_count = 0
     anomaly_count = 0
     template_meta: dict[int, TemplateInfo] = {}
     start_time = time.time()
 
     async def handler(event: RawEvent) -> None:
-        message = event.data.decode("utf-8", errors="replace")[:32768]
+        seerflow_event = normalizer.normalize(event)
 
-        # Parse template via Drain3
-        template_id, template_str, template_params = drain.parse(message)
-
-        # Extract entities
-        entities = extractor.extract(message)
-        entity_refs = tuple(v for vals in entities.values() for v in vals)
-
-        seerflow_event = SeerflowEvent(
-            event_id=uuid.uuid4(),
-            timestamp_ns=event.received_ns,
-            observed_ns=time.time_ns(),
-            message=message,
-            source_type=event.source_type,
-            source_id=event.source_id,
-            template_id=template_id,
-            template_str=template_str,
-            template_params=template_params,
-            entity_refs=entity_refs,
+        # Derive entity_refs for HST entity_count + storage compatibility
+        entity_refs = (
+            seerflow_event.related_ips
+            + seerflow_event.related_users
+            + seerflow_event.related_hosts
         )
+        if entity_refs:
+            seerflow_event = msgspec.structs.replace(
+                seerflow_event,
+                entity_refs=entity_refs,
+            )
 
         # Track template metadata
-        if template_id != -1:
-            if template_id not in template_meta:
-                _log.info("New template discovered: [%d] %s", template_id, template_str[:120])
-                template_meta[template_id] = TemplateInfo(
-                    template_id=template_id,
-                    template_str=template_str,
+        if seerflow_event.template_id != -1:
+            if seerflow_event.template_id not in template_meta:
+                _log.info(
+                    "New template discovered: [%d] %s",
+                    seerflow_event.template_id,
+                    seerflow_event.template_str[:120],
+                )
+                template_meta[seerflow_event.template_id] = TemplateInfo(
+                    template_id=seerflow_event.template_id,
+                    template_str=seerflow_event.template_str,
                     first_seen_ns=event.received_ns,
                     last_seen_ns=event.received_ns,
                     event_count=1,
-                    example_message=message[:500],
+                    example_message=seerflow_event.message[:500],
                 )
             else:
-                existing = template_meta[template_id]
-                template_meta[template_id] = TemplateInfo(
-                    template_id=template_id,
-                    template_str=template_str,
+                existing = template_meta[seerflow_event.template_id]
+                template_meta[seerflow_event.template_id] = TemplateInfo(
+                    template_id=seerflow_event.template_id,
+                    template_str=seerflow_event.template_str,
                     first_seen_ns=existing.first_seen_ns,
                     last_seen_ns=event.received_ns,
                     event_count=existing.event_count + 1,
@@ -184,7 +179,7 @@ def _make_handler(
             anomaly_count += 1
         _log.debug(
             "event tid=%d entities=%d score=%.4f thresh=%.4f src=%s",
-            template_id,
+            seerflow_event.template_id,
             len(entity_refs),
             result.score,
             result.upper_threshold,
@@ -200,12 +195,12 @@ def _make_handler(
             )
             _log.warning(
                 "  template: [%d] %s",
-                template_id,
-                template_str[:120],
+                seerflow_event.template_id,
+                seerflow_event.template_str[:120],
             )
             _log.warning(
                 "  message:  %s",
-                message[:200],
+                seerflow_event.message[:200],
             )
             if entity_refs:
                 _log.warning(
