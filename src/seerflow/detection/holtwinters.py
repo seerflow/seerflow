@@ -98,6 +98,8 @@ class HoltWintersDetector:
         if bucket == self._current_bucket:
             self._current_count += 1
             return
+        if bucket < self._current_bucket:
+            return  # Drop late-arriving event; do not regress bucket pointer
         # Bucket rolled over — process completed bucket(s)
         self._update(float(self._current_count))
         # Handle gap buckets (missed minutes)
