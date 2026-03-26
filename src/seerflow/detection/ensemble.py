@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.detection.hst import HSTDetector
 from seerflow.detection.threshold import DSpotThreshold
 
@@ -67,6 +68,13 @@ class DetectionEnsemble:
                 HSTDetector(
                     n_trees=self._config.hst_n_trees,
                     window_size=self._config.hst_window_size,
+                ),
+                HoltWintersDetector(
+                    seasonal_period=self._config.hw_seasonal_period,
+                    alpha=self._config.hw_alpha,
+                    beta=self._config.hw_beta,
+                    gamma=self._config.hw_gamma,
+                    n_std=self._config.hw_n_std,
                 ),
             ]
         return self._detectors[source]
