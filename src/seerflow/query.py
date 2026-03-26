@@ -88,13 +88,17 @@ async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> 
             print(f"Error: {exc}", file=sys.stderr)
             return
 
-    query = EventQuery(
-        time_range=time_range,
-        template_id=args.template,
-        source_type=args.source,
-        severity_min=args.severity,
-        limit=args.limit,
-    )
+    try:
+        query = EventQuery(
+            time_range=time_range,
+            template_id=args.template,
+            source_type=args.source,
+            severity_min=args.severity,
+            limit=args.limit,
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return
     result = await storage.query_events(query)
 
     if not result.items:
@@ -148,12 +152,16 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
             print(f"Error: {exc}", file=sys.stderr)
             return
 
-    query = AlertQuery(
-        time_range=time_range,
-        alert_type=args.type,
-        severity_min=args.severity,
-        limit=args.limit,
-    )
+    try:
+        query = AlertQuery(
+            time_range=time_range,
+            alert_type=args.type,
+            severity_min=args.severity,
+            limit=args.limit,
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return
     result = await storage.query_alerts(query)
 
     if not result.items:
