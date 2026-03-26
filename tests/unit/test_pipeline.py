@@ -132,3 +132,95 @@ class TestAutoEnable:
             await pipeline.stop()
         finally:
             os.unlink(tmp_path)
+
+
+class TestPipelineHandlerError:
+    """Test the handler exception path (lines 46-47)."""
+
+    async def test_handler_exception_logged_and_continues(self) -> None:
+        """When handler raises, pipeline logs error and processes next event."""
+        config = SeerflowConfig(
+            receivers=ReceiverConfig(
+                syslog_enabled=False,
+                otlp_grpc_enabled=False,
+                otlp_http_enabled=False,
+                webhook_enabled=False,
+            )
+        )
+        pipeline = await build_pipeline(config)
+        # Inject two events
+        ev1 = RawEvent(data=b"bad", source_type="mock", source_id="m", received_ns=1, metadata={})
+        ev2 = RawEvent(data=b"good", source_type="mock", source_id="m", received_ns=2, metadata={})
+        await pipeline.manager.put_event(ev1)
+        await pipeline.manager.put_event(ev2)
+
+        processed: list[RawEvent] = []
+        call_count = 0
+
+        async def handler(e: RawEvent) -> None:
+            nonlocal call_count
+            call_count += 1
+            if e.data == b"bad":
+                msg = "deliberate test error"
+                raise ValueError(msg)
+            processed.append(e)
+            await pipeline.stop()
+
+        await pipeline.run(handler)
+        assert call_count == 2
+        assert len(processed) == 1
+        assert processed[0].data == b"good"
+
+
+class TestBuildPipelineFailures:
+    """Test partial/total receiver start failure paths (lines 142-147)."""
+
+    async def test_partial_failure_continues(self) -> None:
+        """When one receiver fails to start, pipeline continues with others."""
+        from unittest.mock import AsyncMock
+
+        from seerflow.receivers.manager import ReceiverManager
+
+        mgr = ReceiverManager()
+        # Register a good receiver (mock)
+        good_receiver = AsyncMock()
+        good_receiver.start = AsyncMock()
+        good_receiver.stop = AsyncMock()
+        good_receiver.is_healthy = lambda: True
+        mgr.register("good", good_receiver)
+
+        # Register a bad receiver that fails on start
+        bad_receiver = AsyncMock()
+        bad_receiver.start = AsyncMock(side_effect=OSError("bind failed"))
+        bad_receiver.stop = AsyncMock()
+        mgr.register("bad", bad_receiver)
+
+        failed = await mgr.start()
+        assert "bad" in failed
+        assert "good" not in failed
+
+    async def test_all_receivers_fail_raises(self) -> None:
+        """When all receivers fail to start, build_pipeline raises RuntimeError."""
+        from unittest.mock import AsyncMock, patch
+
+        config = SeerflowConfig(
+            receivers=ReceiverConfig(
+                syslog_enabled=True,
+                syslog_udp_port=0,
+                syslog_tcp_port=0,
+                otlp_grpc_enabled=False,
+                otlp_http_enabled=False,
+                webhook_enabled=False,
+            )
+        )
+        # Patch ReceiverManager.start to simulate all failing
+        with patch.object(
+            __import__("seerflow.receivers.manager", fromlist=["ReceiverManager"]).ReceiverManager,
+            "start",
+            new_callable=AsyncMock,
+            return_value=["syslog"],
+        ):
+            import pytest
+
+            with pytest.raises(RuntimeError, match="All receivers failed to start"):
+                await build_pipeline(config)

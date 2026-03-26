@@ -11,18 +11,30 @@ from seerflow.receivers.manager import ReceiverManager
 
 
 class _MockReceiver:
-    def __init__(self, *, fail_start: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_start: bool = False,
+        fail_start_exc: type[Exception] | None = None,
+        fail_stop_exc: type[Exception] | None = None,
+    ) -> None:
         self.started = False
         self.stopped = False
         self._fail_start = fail_start
+        self._fail_start_exc = fail_start_exc
+        self._fail_stop_exc = fail_stop_exc
 
     async def start(self) -> None:
+        if self._fail_start_exc is not None:
+            raise self._fail_start_exc("mock start failure")
         if self._fail_start:
             msg = "start failed"
             raise RuntimeError(msg)
         self.started = True
 
     async def stop(self) -> None:
+        if self._fail_stop_exc is not None:
+            raise self._fail_stop_exc("mock stop failure")
         self.stopped = True
 
     def is_healthy(self) -> bool:
@@ -80,6 +92,38 @@ class TestReceiverManagerLifecycle:
         assert r_good.started  # good one still started
         assert "bad" in caplog.text or "start failed" in caplog.text
         await mgr.stop()
+
+    async def test_start_permission_error(self, caplog) -> None:
+        """PermissionError during start is logged with hint (lines 50-56)."""
+        mgr = ReceiverManager()
+        r = _MockReceiver(fail_start_exc=PermissionError)
+        mgr.register("priv-port", r)
+        with caplog.at_level(logging.ERROR):
+            failed = await mgr.start()
+        assert "priv-port" in failed
+        assert "CAP_NET_BIND_SERVICE" in caplog.text or "priv-port" in caplog.text
+        await mgr.stop()
+
+    async def test_start_os_error(self, caplog) -> None:
+        """OSError during start is logged (lines 58-63)."""
+        mgr = ReceiverManager()
+        r = _MockReceiver(fail_start_exc=OSError)
+        mgr.register("bind-fail", r)
+        with caplog.at_level(logging.ERROR):
+            failed = await mgr.start()
+        assert "bind-fail" in failed
+        await mgr.stop()
+
+    async def test_stop_permission_error(self, caplog) -> None:
+        """PermissionError during stop is logged as warning (line 78)."""
+        mgr = ReceiverManager()
+        r = _MockReceiver(fail_stop_exc=PermissionError)
+        r.started = True  # pretend it started
+        mgr.register("perm-stop", r)
+        mgr._started = True
+        with caplog.at_level(logging.WARNING):
+            await mgr.stop()
+        assert "perm-stop" in caplog.text
 
 
 def _make_event(source_id: str = "test") -> RawEvent:

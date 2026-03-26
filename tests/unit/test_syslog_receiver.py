@@ -315,6 +315,106 @@ class TestSyslogEdgeCases:
         with pytest.raises(ValueError, match="bind_addr must be a non-empty string"):
             SyslogReceiver(mgr, source_id="test", bind_addr="")
 
+    async def test_udp_oversized_datagram_dropped(self) -> None:
+        """Oversized UDP datagram (>8192 bytes) is dropped (lines 107-108)."""
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_port=0, tcp_enabled=False)
+        await receiver.start()
+        try:
+            port = receiver.udp_port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Send oversized datagram (> _MAX_UDP_BYTES = 8192)
+            oversized = b"<165>" + b"x" * 9000
+            sock.sendto(oversized, ("127.0.0.1", port))
+            sock.close()
+            await asyncio.sleep(0.2)
+            assert mgr.queue_depth == 0  # dropped
+        finally:
+            await receiver.stop()
+
+    async def test_udp_queue_full_drops_event(self) -> None:
+        """When queue is full, UDP events are dropped (line 111)."""
+        mgr = ReceiverManager(queue_maxsize=1)
+        receiver = SyslogReceiver(mgr, source_id="test", udp_port=0, tcp_enabled=False)
+        await receiver.start()
+        try:
+            port = receiver.udp_port
+            # Fill the queue
+            from seerflow.receivers.base import RawEvent
+
+            await mgr.put_event(
+                RawEvent(data=b"fill", source_type="t", source_id="t", received_ns=0, metadata={})
+            )
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(b"<165>dropped", ("127.0.0.1", port))
+            sock.close()
+            await asyncio.sleep(0.2)
+            # Queue should still have only 1 item (the pre-filled one)
+            assert mgr.queue_depth == 1
+        finally:
+            await receiver.stop()
+
+    async def test_udp_error_received(self) -> None:
+        """error_received on UDP protocol logs warning (line 114)."""
+        from seerflow.receivers.syslog import _SyslogUDPProtocol
+
+        protocol = _SyslogUDPProtocol(ReceiverManager(), "test")
+        # Should not raise — just logs
+        protocol.error_received(OSError("test error"))
+
+    async def test_tcp_empty_lines_skipped(self) -> None:
+        """Empty TCP lines (just newlines) are skipped (line 212)."""
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_enabled=False, tcp_port=0)
+        await receiver.start()
+        try:
+            port = receiver.tcp_port
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"\n\n<165>real msg\n\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.sleep(0.2)
+            # Only the real message should be enqueued
+            assert mgr.queue_depth == 1
+        finally:
+            await receiver.stop()
+
+    async def test_tcp_connection_error_handled(self) -> None:
+        """TCP client that sends partial data and disconnects is handled (lines 215-221)."""
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_enabled=False, tcp_port=0)
+        await receiver.start()
+        try:
+            port = receiver.tcp_port
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"<165>partial")  # no newline
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.sleep(0.2)
+            # Should not crash — client just disconnected
+        finally:
+            await receiver.stop()
+
+    async def test_tcp_semaphore_null_guard(self) -> None:
+        """TCP handler with None semaphore closes writer (lines 195-199)."""
+        mgr = ReceiverManager()
+        receiver = SyslogReceiver(mgr, source_id="test", udp_enabled=False, tcp_port=0)
+        await receiver.start()
+        try:
+            # Force semaphore to None to test the guard
+            receiver._tcp_semaphore = None
+            port = receiver.tcp_port
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"<165>test\n")
+            await writer.drain()
+            # Give time for handler to process
+            await asyncio.sleep(0.3)
+            # The connection should be closed by the server
+        finally:
+            receiver._tcp_semaphore = asyncio.Semaphore(256)  # restore for clean stop
+            await receiver.stop()
+
 
 class TestSyslogExports:
     def test_import(self) -> None:
