@@ -75,13 +75,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     handler = _make_handler(ensemble, storage)
     await pipeline.run(handler)
 
-    # Flush remaining batch to storage
-    remaining_batch: list[SeerflowEvent] = getattr(handler, "batch", [])
-    if remaining_batch:
-        await storage.write_events(list(remaining_batch))
-        _log.info("Flushed %d remaining events to storage", len(remaining_batch))
-
-    # Flush remaining template metadata
+    # Flush remaining template metadata.
+    # Event flushing is handled by WriteBuffer.close() inside storage.close() below.
     get_stats = getattr(handler, "get_stats", None)
     if get_stats is not None:
         events, anomalies, template_meta, t0 = get_stats()
@@ -112,8 +107,6 @@ def _make_handler(
 
     drain = DrainParser()
     extractor = EntityExtractor()
-    batch: list[SeerflowEvent] = []
-    batch_size = 50
     event_count = 0
     anomaly_count = 0
     template_meta: dict[int, TemplateInfo] = {}
@@ -165,30 +158,28 @@ def _make_handler(
                     example_message=existing.example_message,
                 )
 
-        # Persist to storage
-        batch.append(seerflow_event)
-        if len(batch) >= batch_size:
-            await storage.write_events(list(batch))
-            batch.clear()
-            # Flush template metadata
-            if template_meta:
-                pending = list(template_meta.values())
-                # Reset counts but keep tracking for new-discovery detection
-                for tid in template_meta:
-                    t = template_meta[tid]
-                    template_meta[tid] = TemplateInfo(
-                        template_id=t.template_id,
-                        template_str=t.template_str,
-                        first_seen_ns=t.first_seen_ns,
-                        last_seen_ns=t.last_seen_ns,
-                        event_count=0,
-                        example_message=t.example_message,
-                    )
-                await storage.write_templates(pending)
+        # Persist to storage (WriteBuffer handles batching + 100ms timer flush)
+        await storage.write_events([seerflow_event])
 
         result = ensemble.process_event(seerflow_event)
         nonlocal event_count, anomaly_count
         event_count += 1
+
+        # Flush template metadata every 10 events
+        if event_count % 10 == 0 and template_meta:
+            pending = list(template_meta.values())
+            await storage.write_templates(pending)
+            # Reset counts only after successful write
+            for tid in template_meta:
+                t = template_meta[tid]
+                template_meta[tid] = TemplateInfo(
+                    template_id=t.template_id,
+                    template_str=t.template_str,
+                    first_seen_ns=t.first_seen_ns,
+                    last_seen_ns=t.last_seen_ns,
+                    event_count=0,
+                    example_message=t.example_message,
+                )
         if result.is_anomaly:
             anomaly_count += 1
         _log.debug(
@@ -222,7 +213,6 @@ def _make_handler(
                     ", ".join(entity_refs[:10]),
                 )
 
-    handler.batch = batch  # type: ignore[attr-defined]
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler
 
