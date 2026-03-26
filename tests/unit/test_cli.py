@@ -155,8 +155,8 @@ class TestRunLoop:
             await built_pipeline.stop()
             await task  # should complete cleanly
 
-    async def test_handler_batch_flush_and_stats(self) -> None:
-        """Handler flushes batch at 50 events and tracks stats."""
+    async def test_handler_per_event_write_and_stats(self) -> None:
+        """Handler writes each event individually (WriteBuffer handles batching)."""
         from unittest.mock import AsyncMock
 
         from seerflow.__main__ import _make_handler
@@ -170,9 +170,10 @@ class TestRunLoop:
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
+        mock_storage.write_templates = AsyncMock()
         handler = _make_handler(ensemble, mock_storage)
 
-        # Send 55 events — should trigger one batch flush at 50
+        # Send 55 events — each should call write_events individually
         for i in range(55):
             event = RawEvent(
                 data=f"event {i}".encode(),
@@ -183,9 +184,8 @@ class TestRunLoop:
             )
             await handler(event)
 
-        # Batch should have flushed once (50 events), 5 remaining
-        mock_storage.write_events.assert_called_once()
-        assert len(handler.batch) == 5  # type: ignore[union-attr]
+        # write_events called once per event (WriteBuffer handles batching)
+        assert mock_storage.write_events.call_count == 55
 
         # Stats should be accessible
         get_stats = handler.get_stats  # type: ignore[union-attr]
@@ -211,7 +211,7 @@ class TestRunLoop:
         mock_storage.write_templates = AsyncMock()
         handler = _make_handler(ensemble, mock_storage)
 
-        # Send 55 events to trigger one batch flush at 50
+        # Send 55 events — template flush triggers at event_count % 50 == 0
         for i in range(55):
             event = RawEvent(
                 data=f"event {i}".encode(),
@@ -222,7 +222,7 @@ class TestRunLoop:
             )
             await handler(event)
 
-        # write_templates should have been called alongside write_events
+        # write_templates called at event 50
         mock_storage.write_templates.assert_called_once()
         templates_arg = mock_storage.write_templates.call_args[0][0]
         assert len(templates_arg) >= 1  # at least 1 template discovered
