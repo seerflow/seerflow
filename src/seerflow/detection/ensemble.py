@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
+import statistics
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -44,7 +45,15 @@ class DetectionEnsemble:
     on first event for each source_type.
     """
 
-    __slots__ = ("_config", "_detectors", "_eviction_count", "_max_sources", "_thresholds")
+    __slots__ = (
+        "_config",
+        "_detectors",
+        "_eviction_count",
+        "_max_sources",
+        "_score_windows",
+        "_thresholds",
+        "_weights",
+    )
 
     _MAX_SOURCES_CEILING = 10_000
 
@@ -60,13 +69,53 @@ class DetectionEnsemble:
         self._detectors: OrderedDict[str, list[Detector]] = OrderedDict()
         self._thresholds: OrderedDict[str, DSpotThreshold] = OrderedDict()
         self._eviction_count: int = 0
+        self._score_windows: OrderedDict[str, list[deque[float]]] = OrderedDict()
+        self._weights: tuple[float, ...] = (
+            config.weights_content,
+            config.weights_volume,
+            config.weights_pattern,
+            config.weights_sequence,
+        )
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
         """Score, learn, and threshold-check a single event."""
         source = event.source_type or "default"
         detectors = self._get_detectors(source)
         scores = [d.score(event) for d in detectors]
-        combined = sum(scores) / len(scores) if scores else 0.0
+
+        # --- Blended scoring pipeline ---
+        # 1. Get/create per-detector score windows for this source
+        if source not in self._score_windows:
+            self._score_windows[source] = [deque(maxlen=100) for _ in range(len(detectors))]
+        else:
+            self._score_windows.move_to_end(source)
+        windows = self._score_windows[source]
+
+        # 2. Z-normalize (or use raw during warmup)
+        z_scores: list[float] = []
+        for i, raw in enumerate(scores):
+            windows[i].append(raw)
+            if len(windows[i]) >= 2:
+                mean = statistics.mean(windows[i])
+                std = max(statistics.stdev(windows[i]), 1e-10)
+                z_scores.append((raw - mean) / std)
+            else:
+                z_scores.append(raw)
+
+        # 3. Weighted average
+        weights = self._weights[: len(z_scores)]
+        weight_sum = sum(weights)
+        if weight_sum > 0:
+            combined = sum(z * w for z, w in zip(z_scores, weights, strict=False)) / weight_sum
+        else:
+            combined = 0.0
+
+        # 4. Signal amplification
+        converging = sum(1 for z in z_scores if z > 1.0)
+        if converging >= 3:
+            combined *= 2.0
+        elif converging >= 2:
+            combined *= 1.5
         for d in detectors:
             d.learn(event)
         threshold = self._get_threshold(source)
@@ -88,6 +137,7 @@ class DetectionEnsemble:
         if len(self._detectors) >= self._max_sources:
             evicted_source, _ = self._detectors.popitem(last=False)
             self._thresholds.pop(evicted_source, None)
+            self._score_windows.pop(evicted_source, None)
             self._eviction_count += 1
         self._detectors[source] = [
             HSTDetector(
