@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from seerflow.config import ConfigError, SeerflowConfig, WebhookEndpointConfig, load_config
+from seerflow.config import (
+    ConfigError,
+    SeerflowConfig,
+    WebhookEndpointConfig,
+    _build_detection,
+    load_config,
+)
 
 
 class TestDefaultConfig:
@@ -318,3 +324,95 @@ class TestReceiverConfigCompleteness:
         yaml_file.write_text("receivers:\n  webhook_port: 99999\n")
         with pytest.raises(ConfigError, match="must be between 1 and 65535"):
             load_config(str(yaml_file))
+
+
+class TestDetectionValidation:
+    def test_invalid_weight_negative(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"weights_content": -0.5})
+
+    def test_invalid_weight_nan(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"weights_content": float("nan")})
+
+    def test_invalid_weight_inf(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"weights_volume": float("inf")})
+
+    def test_invalid_model_save_interval(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"model_save_interval_seconds": 0})
+
+    def test_invalid_model_save_interval_negative(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"model_save_interval_seconds": -1})
+
+    def test_invalid_markov_max_entities_too_high(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"markov_max_entities": 200_000})
+
+    def test_invalid_markov_max_entities_zero(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"markov_max_entities": 0})
+
+    def test_invalid_max_sources_zero(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"max_sources": 0})
+
+    def test_invalid_max_sources_too_high(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"max_sources": 20_000})
+
+    def test_invalid_cusum_ema_alpha_zero(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"cusum_ema_alpha": 0.0})
+
+    def test_invalid_cusum_ema_alpha_one(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"cusum_ema_alpha": 1.0})
+
+    def test_invalid_cusum_warmup_buckets_zero(self) -> None:
+        with pytest.raises(ConfigError):
+            _build_detection({"cusum_warmup_buckets": 0})
+
+    def test_nested_hw_config(self) -> None:
+        config = _build_detection({"hw": {"seasonal_period": 720, "alpha": 0.5}})
+        assert config.hw_seasonal_period == 720
+        assert config.hw_alpha == 0.5
+
+    def test_flat_hw_config_backward_compat(self) -> None:
+        config = _build_detection({"hw_seasonal_period": 720})
+        assert config.hw_seasonal_period == 720
+
+    def test_nested_hw_takes_priority_over_flat(self) -> None:
+        config = _build_detection({"hw": {"seasonal_period": 720}, "hw_seasonal_period": 999})
+        assert config.hw_seasonal_period == 720
+
+    def test_nested_cusum_config(self) -> None:
+        config = _build_detection(
+            {"cusum": {"drift": 1.0, "ema_alpha": 0.2, "warmup_buckets": 10}}
+        )
+        assert config.cusum_drift == 1.0
+        assert config.cusum_ema_alpha == 0.2
+        assert config.cusum_warmup_buckets == 10
+
+    def test_flat_cusum_config_backward_compat(self) -> None:
+        config = _build_detection({"cusum_drift": 2.0, "cusum_threshold": 8.0})
+        assert config.cusum_drift == 2.0
+        assert config.cusum_threshold == 8.0
+
+    def test_nested_markov_config(self) -> None:
+        config = _build_detection({"markov": {"max_entities": 500, "min_events": 50}})
+        assert config.markov_max_entities == 500
+        assert config.markov_min_events == 50
+
+    def test_flat_markov_config_backward_compat(self) -> None:
+        config = _build_detection({"markov_max_entities": 2000})
+        assert config.markov_max_entities == 2000
+
+    def test_defaults_are_valid(self) -> None:
+        config = _build_detection({})
+        assert config.hw_seasonal_period == 1440
+        assert config.cusum_ema_alpha == 0.1
+        assert config.cusum_warmup_buckets == 30
+        assert config.weights_content == 0.30

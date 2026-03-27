@@ -43,8 +43,8 @@ class TestSaveAllState:
         assert count >= 10  # at least detectors + thresholds
         assert storage.save_state.call_count >= 11  # manifest + detectors + thresholds
 
-        # Verify manifest was saved
-        manifest_call = storage.save_state.call_args_list[0]
+        # Verify manifest was saved last
+        manifest_call = storage.save_state.call_args_list[-1]
         assert manifest_call[0][0] == "ensemble:manifest"
 
     async def test_save_returns_count(self) -> None:
@@ -196,3 +196,47 @@ class TestLoadAllState:
         count = await ensemble.load_all_state(storage)
         assert count == 0
         assert "syslog" in ensemble._detectors  # detectors created but not loaded
+
+
+class TestPersistenceHardening:
+    async def test_manifest_written_last(self) -> None:
+        """Manifest is the last key saved."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event())
+
+        storage = AsyncMock()
+        storage.save_state = AsyncMock()
+        await ensemble.save_all_state(storage)
+
+        # Last call should be the manifest
+        last_call = storage.save_state.call_args_list[-1]
+        assert last_call[0][0] == "ensemble:manifest"
+
+    async def test_manifest_truncated_on_load(self) -> None:
+        """Manifest with more sources than max_sources is truncated."""
+        import msgspec.json
+
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(hw_seasonal_period=10, max_sources=2)
+        ensemble = DetectionEnsemble(config)
+
+        # Manifest with 5 sources but max_sources=2
+        manifest = msgspec.json.encode(["s1", "s2", "s3", "s4", "s5"])
+        storage = AsyncMock()
+
+        async def fake_load(key: str) -> bytes | None:
+            if key == "ensemble:manifest":
+                return manifest
+            return None
+
+        storage.load_state = AsyncMock(side_effect=fake_load)
+
+        await ensemble.load_all_state(storage)
+        # Only first 2 sources should be loaded
+        assert len(ensemble._detectors) <= 2

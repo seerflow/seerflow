@@ -7,6 +7,7 @@ are used (zero-config first run per NFR-006).
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -103,6 +104,8 @@ class DetectionConfig:
     hw_n_std: float = 3.0
     cusum_drift: float = 0.5
     cusum_threshold: float = 5.0
+    cusum_ema_alpha: float = 0.1
+    cusum_warmup_buckets: int = 30
     markov_smoothing: float = 1e-6
     markov_min_events: int = 100
     markov_max_entities: int = 1000
@@ -271,24 +274,72 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     return cfg
 
 
+def _validate_detection_config(config: DetectionConfig) -> None:
+    """Validate all numeric bounds in DetectionConfig; raise ConfigError if invalid."""
+    weight_fields = (
+        ("weights_content", config.weights_content),
+        ("weights_volume", config.weights_volume),
+        ("weights_sequence", config.weights_sequence),
+        ("weights_pattern", config.weights_pattern),
+    )
+    for name, value in weight_fields:
+        if not math.isfinite(value):
+            msg = f"detection.{name} must be finite, got {value!r}"
+            raise ConfigError(msg)
+        if value < 0.0:
+            msg = f"detection.{name} must be >= 0.0, got {value!r}"
+            raise ConfigError(msg)
+
+    if config.model_save_interval_seconds < 1:
+        msg = (
+            f"detection.model_save_interval_seconds must be >= 1, "
+            f"got {config.model_save_interval_seconds!r}"
+        )
+        raise ConfigError(msg)
+
+    if config.markov_max_entities < 1 or config.markov_max_entities > 100_000:
+        msg = (
+            f"detection.markov_max_entities must be between 1 and 100_000, "
+            f"got {config.markov_max_entities!r}"
+        )
+        raise ConfigError(msg)
+
+    if config.max_sources < 1 or config.max_sources > 10_000:
+        msg = f"detection.max_sources must be between 1 and 10_000, got {config.max_sources!r}"
+        raise ConfigError(msg)
+
+    if not (0.0 < config.cusum_ema_alpha < 1.0):
+        msg = f"detection.cusum_ema_alpha must be in (0, 1), got {config.cusum_ema_alpha!r}"
+        raise ConfigError(msg)
+
+    if config.cusum_warmup_buckets < 1:
+        msg = f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
+        raise ConfigError(msg)
+
+
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     dspot = data.get("dspot", {})
-    return DetectionConfig(
+    hw = data.get("hw", {})
+    cusum = data.get("cusum", {})
+    markov = data.get("markov", {})
+    config = DetectionConfig(
         hst_window_size=data.get("hst_window_size", 1000),
         hst_n_trees=data.get("hst_n_trees", 25),
         dspot_calibration_window=dspot.get("calibration_window", 1000),
         dspot_risk_level=dspot.get("risk_level", 0.0001),
         dspot_initial_percentile=dspot.get("initial_percentile", 98),
-        hw_seasonal_period=data.get("hw_seasonal_period", 1440),
-        hw_alpha=data.get("hw_alpha", 0.3),
-        hw_beta=data.get("hw_beta", 0.1),
-        hw_gamma=data.get("hw_gamma", 0.1),
-        hw_n_std=data.get("hw_n_std", 3.0),
-        cusum_drift=data.get("cusum_drift", 0.5),
-        cusum_threshold=data.get("cusum_threshold", 5.0),
-        markov_smoothing=data.get("markov_smoothing", 1e-6),
-        markov_min_events=data.get("markov_min_events", 100),
-        markov_max_entities=data.get("markov_max_entities", 1000),
+        hw_seasonal_period=hw.get("seasonal_period", data.get("hw_seasonal_period", 1440)),
+        hw_alpha=hw.get("alpha", data.get("hw_alpha", 0.3)),
+        hw_beta=hw.get("beta", data.get("hw_beta", 0.1)),
+        hw_gamma=hw.get("gamma", data.get("hw_gamma", 0.1)),
+        hw_n_std=hw.get("n_std", data.get("hw_n_std", 3.0)),
+        cusum_drift=cusum.get("drift", data.get("cusum_drift", 0.5)),
+        cusum_threshold=cusum.get("threshold", data.get("cusum_threshold", 5.0)),
+        cusum_ema_alpha=cusum.get("ema_alpha", data.get("cusum_ema_alpha", 0.1)),
+        cusum_warmup_buckets=cusum.get("warmup_buckets", data.get("cusum_warmup_buckets", 30)),
+        markov_smoothing=markov.get("smoothing", data.get("markov_smoothing", 1e-6)),
+        markov_min_events=markov.get("min_events", data.get("markov_min_events", 100)),
+        markov_max_entities=markov.get("max_entities", data.get("markov_max_entities", 1000)),
         max_sources=data.get("max_sources", 256),
         model_save_interval_seconds=data.get("model_save_interval_seconds", 300),
         weights_content=data.get("weights_content", 0.30),
@@ -296,6 +347,8 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_sequence=data.get("weights_sequence", 0.25),
         weights_pattern=data.get("weights_pattern", 0.20),
     )
+    _validate_detection_config(config)
+    return config
 
 
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:

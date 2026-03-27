@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+import msgspec
 import msgspec.msgpack
 
 if TYPE_CHECKING:
@@ -18,6 +19,23 @@ if TYPE_CHECKING:
 
 _BUCKET_NS = 60 * 1_000_000_000  # 1 minute in nanoseconds
 _MAX_GAP_FILL = 100  # cap gap-fill to avoid O(n) stalls on large time jumps
+
+
+class _CUSUMState(msgspec.Struct):
+    """Typed schema for CUSUM serialized state."""
+
+    drift: float
+    threshold: float
+    ema_alpha: float
+    warmup_buckets: int
+    g_upper: float
+    g_lower: float
+    running_mean: float
+    running_var: float
+    last_score: float
+    current_bucket: int
+    current_count: int
+    t: int
 
 
 class CUSUMDetector:
@@ -162,16 +180,28 @@ class CUSUMDetector:
 
     def deserialize(self, data: bytes) -> None:
         """Restore model state from msgpack bytes."""
-        state: dict = msgspec.msgpack.decode(data)  # type: ignore[type-arg]
-        self._drift = state["drift"]
-        self._threshold = state["threshold"]
-        self._ema_alpha = state["ema_alpha"]
-        self._warmup_buckets = state["warmup_buckets"]
-        self._g_upper = state["g_upper"]
-        self._g_lower = state["g_lower"]
-        self._running_mean = state["running_mean"]
-        self._running_var = state["running_var"]
-        self._last_score = state["last_score"]
-        self._current_bucket = state["current_bucket"]
-        self._current_count = state["current_count"]
-        self._t = state["t"]
+        state = msgspec.msgpack.decode(data, type=_CUSUMState)
+        if state.drift <= 0.0:
+            msg = f"Invalid drift in state: {state.drift}"
+            raise ValueError(msg)
+        if state.threshold <= 0.0:
+            msg = f"Invalid threshold in state: {state.threshold}"
+            raise ValueError(msg)
+        if not (0.0 < state.ema_alpha < 1.0):
+            msg = f"Invalid ema_alpha in state: {state.ema_alpha}"
+            raise ValueError(msg)
+        if state.running_var < 0.0:
+            msg = f"Invalid running_var in state: {state.running_var}"
+            raise ValueError(msg)
+        self._drift = state.drift
+        self._threshold = state.threshold
+        self._ema_alpha = state.ema_alpha
+        self._warmup_buckets = state.warmup_buckets
+        self._g_upper = state.g_upper
+        self._g_lower = state.g_lower
+        self._running_mean = state.running_mean
+        self._running_var = state.running_var
+        self._last_score = state.last_score
+        self._current_bucket = state.current_bucket
+        self._current_count = state.current_count
+        self._t = state.t

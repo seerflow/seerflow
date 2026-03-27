@@ -12,6 +12,7 @@ import statistics
 from collections import deque
 from typing import TYPE_CHECKING
 
+import msgspec
 import msgspec.msgpack
 
 if TYPE_CHECKING:
@@ -19,6 +20,25 @@ if TYPE_CHECKING:
 
 _BUCKET_NS = 60 * 1_000_000_000  # 1 minute in nanoseconds
 _MAX_RESIDUALS = 100
+
+
+class _HWState(msgspec.Struct):
+    """Typed schema for HoltWinters serialized state."""
+
+    seasonal_period: int
+    alpha: float
+    beta: float
+    gamma: float
+    n_std: float
+    level: float
+    trend: float
+    seasonals: list[float]
+    residuals: list[float]
+    current_bucket: int
+    current_count: int
+    t: int
+    last_score: float
+    initialized: bool
 
 
 class HoltWintersDetector:
@@ -171,18 +191,35 @@ class HoltWintersDetector:
 
     def deserialize(self, data: bytes) -> None:
         """Restore model state from msgpack bytes."""
-        state: dict = msgspec.msgpack.decode(data)  # type: ignore[type-arg]
-        self._seasonal_period = state["seasonal_period"]
-        self._alpha = state["alpha"]
-        self._beta = state["beta"]
-        self._gamma = state["gamma"]
-        self._n_std = state["n_std"]
-        self._level = state["level"]
-        self._trend = state["trend"]
-        self._seasonals = state["seasonals"]
-        self._residuals = deque(state["residuals"], maxlen=_MAX_RESIDUALS)
-        self._current_bucket = state["current_bucket"]
-        self._current_count = state["current_count"]
-        self._t = state["t"]
-        self._last_score = state["last_score"]
-        self._initialized = state["initialized"]
+        state = msgspec.msgpack.decode(data, type=_HWState)
+        # Validate invariants
+        if state.seasonal_period < 2:
+            msg = f"Invalid seasonal_period in state: {state.seasonal_period}"
+            raise ValueError(msg)
+        for name, val in [("alpha", state.alpha), ("beta", state.beta), ("gamma", state.gamma)]:
+            if not (0.0 < val < 1.0):
+                msg = f"Invalid {name} in state: {val}"
+                raise ValueError(msg)
+        if state.n_std <= 0.0:
+            msg = f"Invalid n_std in state: {state.n_std}"
+            raise ValueError(msg)
+        if len(state.seasonals) != state.seasonal_period:
+            msg = (
+                f"Seasonals length {len(state.seasonals)} "
+                f"!= seasonal_period {state.seasonal_period}"
+            )
+            raise ValueError(msg)
+        self._seasonal_period = state.seasonal_period
+        self._alpha = state.alpha
+        self._beta = state.beta
+        self._gamma = state.gamma
+        self._n_std = state.n_std
+        self._level = state.level
+        self._trend = state.trend
+        self._seasonals = state.seasonals
+        self._residuals = deque(state.residuals, maxlen=_MAX_RESIDUALS)
+        self._current_bucket = state.current_bucket
+        self._current_count = state.current_count
+        self._t = state.t
+        self._last_score = state.last_score
+        self._initialized = state.initialized

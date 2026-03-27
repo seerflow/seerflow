@@ -200,3 +200,14 @@ class TestCUSUMDetector:
         # Skip 3 minutes
         detector.learn(_make_event(timestamp_ns=base_ns + 5 * _BUCKET_NS))
         assert detector._t >= t_before + 4
+
+    def test_deserialize_rejects_invalid_state(self) -> None:
+        from seerflow.detection.cusum import CUSUMDetector
+
+        detector = CUSUMDetector()
+        # Corrupt: drift=0.0
+        detector._drift = 0.0
+        data = detector.serialize()
+        fresh = CUSUMDetector()
+        with pytest.raises(ValueError):
+            fresh.deserialize(data)

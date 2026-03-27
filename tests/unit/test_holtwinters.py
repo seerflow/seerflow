@@ -173,3 +173,14 @@ class TestHoltWintersDetector:
         d1 = HoltWintersDetector(seasonal_period=10, alpha=0.9)
         d2 = HoltWintersDetector(seasonal_period=10, alpha=0.1)
         assert d1._alpha != d2._alpha
+
+    def test_deserialize_rejects_invalid_state(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        detector = HoltWintersDetector(seasonal_period=10)
+        # Corrupt: alpha=2.0 (outside 0-1)
+        detector._alpha = 2.0
+        data = detector.serialize()
+        fresh = HoltWintersDetector(seasonal_period=10)
+        with pytest.raises(ValueError):
+            fresh.deserialize(data)

@@ -109,12 +109,6 @@ class DetectionEnsemble:
     _MAX_SOURCES_CEILING = 10_000
 
     def __init__(self, config: DetectionConfig) -> None:
-        if config.max_sources < 1 or config.max_sources > self._MAX_SOURCES_CEILING:
-            msg = (
-                f"max_sources must be between 1 and {self._MAX_SOURCES_CEILING}, "
-                f"got {config.max_sources}"
-            )
-            raise ValueError(msg)
         self._config = config
         self._max_sources = config.max_sources
         self._detectors: OrderedDict[str, list[Detector]] = OrderedDict()
@@ -130,7 +124,8 @@ class DetectionEnsemble:
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
         """Score, learn, and threshold-check a single event."""
-        source = (event.source_type or "default")[:_MAX_SOURCE_KEY_LEN]
+        raw_source = (event.source_type or "default").replace("\x00", "")
+        source = raw_source[:_MAX_SOURCE_KEY_LEN] or "default"
         detectors = self._get_detectors(source)
         scores = [d.score(event) for d in detectors]
         scores = [s if math.isfinite(s) else 0.0 for s in scores]
@@ -207,6 +202,8 @@ class DetectionEnsemble:
             CUSUMDetector(
                 drift=self._config.cusum_drift,
                 threshold=self._config.cusum_threshold,
+                ema_alpha=self._config.cusum_ema_alpha,
+                warmup_buckets=self._config.cusum_warmup_buckets,
             ),
             MarkovDetector(
                 smoothing=self._config.markov_smoothing,
@@ -241,10 +238,6 @@ class DetectionEnsemble:
     async def save_all_state(self, storage: ModelStore) -> int:
         """Serialize all detector + threshold state to storage. Returns count saved."""
         sources = list(self._detectors.keys())
-        await storage.save_state(
-            "ensemble:manifest",
-            msgspec.json.encode(sources),
-        )
         count = 0
         for source in sources:
             detectors = self._detectors[source]
@@ -265,6 +258,10 @@ class DetectionEnsemble:
                     msgspec.json.encode([acc.to_dict() for acc in window_state]),
                 )
                 count += 1
+        await storage.save_state(
+            "ensemble:manifest",
+            msgspec.json.encode(sources),
+        )
         return count
 
     async def load_all_state(self, storage: ModelStore) -> int:
@@ -278,8 +275,15 @@ class DetectionEnsemble:
                 type=list[str],
             )
         except Exception:
-            _log.warning("Corrupt ensemble manifest — starting fresh")
+            _log.warning("Corrupt ensemble manifest — starting fresh", exc_info=True)
             return 0
+        if len(sources) > self._max_sources:
+            _log.warning(
+                "Manifest has %d sources (max %d) — truncating",
+                len(sources),
+                self._max_sources,
+            )
+            sources = sources[: self._max_sources]
         count = 0
         for source in sources:
             try:
@@ -295,6 +299,7 @@ class DetectionEnsemble:
                                 "Corrupt model state for det:%s:%d — fresh model",
                                 source,
                                 i,
+                                exc_info=True,
                             )
                 thresh_data = await storage.load_state(f"thresh:{source}")
                 if thresh_data is not None:
@@ -307,6 +312,7 @@ class DetectionEnsemble:
                         _log.warning(
                             "Corrupt threshold for %s — fresh threshold",
                             source,
+                            exc_info=True,
                         )
                 windows_data = await storage.load_state(f"windows:{source}")
                 if windows_data is not None:
@@ -320,7 +326,11 @@ class DetectionEnsemble:
                         ]
                         count += 1
                     except Exception:
-                        _log.warning("Corrupt window state for %s — fresh windows", source)
+                        _log.warning(
+                            "Corrupt window state for %s — fresh windows",
+                            source,
+                            exc_info=True,
+                        )
             except Exception:
-                _log.warning("Invalid source %r in manifest — skipping", source)
+                _log.warning("Invalid source %r in manifest — skipping", source, exc_info=True)
         return count
