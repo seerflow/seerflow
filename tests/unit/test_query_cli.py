@@ -652,6 +652,44 @@ class TestRunQuery:
         assert "No templates found" in captured.out
 
 
+class TestQueryValidation:
+    async def test_invalid_alert_type_prints_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        args = argparse.Namespace(last=None, type="invalid", severity=None, limit=50, json=False)
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+        assert "unknown alert type" in captured.err
+        await storage.close()
+
+    async def test_invalid_severity_prints_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.query import run_query_events
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        args = argparse.Namespace(
+            last=None, template=None, source=None, severity=99, limit=50, json=False
+        )
+        await run_query_events(storage, args)
+        captured = capsys.readouterr()
+        assert "--severity must be between 0 and 6" in captured.err
+        await storage.close()
+
+
 class TestMainDispatch:
     def test_main_dispatches_query(self) -> None:
         """main() dispatches to run_query for query subcommand."""

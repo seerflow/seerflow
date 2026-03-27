@@ -18,7 +18,7 @@ class TestAlertPersistenceIntegration:
 
     async def test_anomaly_creates_queryable_alert(self, tmp_path: Path) -> None:
         """Anomaly detection → alert persisted → queryable via query_alerts."""
-        from seerflow.__main__ import _make_handler
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import AlertQuery
@@ -67,7 +67,7 @@ class TestAlertPersistenceIntegration:
 
     async def test_dedup_increments_count(self, tmp_path: Path) -> None:
         """Two anomalies with same template+source → dedup_count >= 2."""
-        from seerflow.__main__ import _make_handler
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import AlertQuery

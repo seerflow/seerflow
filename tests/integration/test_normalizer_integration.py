@@ -76,7 +76,7 @@ class TestHandlerNormalizerIntegration:
 
     async def test_syslog_severity_propagates_to_storage(self, tmp_path: Path) -> None:
         """Syslog event with severity metadata -> handler -> storage -> correct severity_id."""
-        from seerflow.__main__ import _make_handler
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import EventQuery
@@ -109,7 +109,7 @@ class TestHandlerNormalizerIntegration:
 
     async def test_file_tail_defaults_to_informational(self, tmp_path: Path) -> None:
         """File tail event (no metadata) -> handler -> storage -> INFORMATIONAL."""
-        from seerflow.__main__ import _make_handler
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import EventQuery
@@ -141,7 +141,7 @@ class TestHandlerNormalizerIntegration:
 
     async def test_entity_refs_round_trip_to_storage(self, tmp_path: Path) -> None:
         """Event with entities -> handler -> storage -> entity_refs persisted."""
-        from seerflow.__main__ import _make_handler
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import EventQuery
