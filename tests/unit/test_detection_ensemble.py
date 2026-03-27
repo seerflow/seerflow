@@ -393,16 +393,17 @@ class TestEnsembleHardening:
         assert math.isfinite(result.score)
 
     def test_source_type_truncated(self) -> None:
-        """Long source_type is truncated to 256 chars."""
+        """Long source_type is truncated to 248 chars."""
         from seerflow.config import DetectionConfig
-        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.detection.ensemble import _MAX_SOURCE_KEY_LEN, DetectionEnsemble
 
         config = DetectionConfig(hw_seasonal_period=10)
         ensemble = DetectionEnsemble(config)
         long_source = "x" * 500
         ensemble.process_event(_make_event(source_type=long_source))
         keys = list(ensemble._detectors.keys())
-        assert all(len(k) <= 256 for k in keys)
+        assert all(len(k) <= _MAX_SOURCE_KEY_LEN for k in keys)
+        assert all(len(k) == _MAX_SOURCE_KEY_LEN for k in keys)
 
     def test_welford_accumulator_mean(self) -> None:
         """Welford produces correct mean."""
@@ -431,3 +432,21 @@ class TestEnsembleHardening:
         assert acc.stdev() == 0.0
         acc.update(5.0)
         assert acc.stdev() == 0.0
+
+    @pytest.mark.parametrize(
+        "bad_state",
+        [
+            {"n": -1, "mean": 0.0, "m2": 0.0},
+            {"n": 0, "mean": 0.0, "m2": 1.0},
+            {"n": 1, "mean": 5.0, "m2": 0.5},
+            {"n": 2, "mean": float("nan"), "m2": 0.0},
+            {"n": 2, "mean": 0.0, "m2": float("inf")},
+            {"n": 2, "mean": 0.0, "m2": -1.0},
+        ],
+    )
+    def test_welford_from_dict_rejects_invalid(self, bad_state: dict) -> None:
+        """from_dict rejects invalid Welford state."""
+        from seerflow.detection.ensemble import _WelfordAccumulator
+
+        with pytest.raises(ValueError):
+            _WelfordAccumulator.from_dict(bad_state)

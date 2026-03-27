@@ -61,7 +61,13 @@ class _WelfordAccumulator:
         n = int(d["n"])
         mean = float(d["mean"])
         m2 = float(d["m2"])
-        if n < 0 or m2 < 0.0 or not math.isfinite(mean) or not math.isfinite(m2):
+        if (
+            n < 0
+            or m2 < 0.0
+            or not math.isfinite(mean)
+            or not math.isfinite(m2)
+            or (n <= 1 and m2 != 0.0)
+        ):
             msg = f"Invalid Welford state: n={n}, mean={mean}, m2={m2}"
             raise ValueError(msg)
         acc._n = n
