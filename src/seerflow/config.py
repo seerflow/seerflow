@@ -107,6 +107,7 @@ class DetectionConfig:
     markov_min_events: int = 100
     markov_max_entities: int = 1000
     max_sources: int = 256
+    model_save_interval_seconds: int = 300
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
@@ -289,6 +290,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         markov_min_events=data.get("markov_min_events", 100),
         markov_max_entities=data.get("markov_max_entities", 1000),
         max_sources=data.get("max_sources", 256),
+        model_save_interval_seconds=data.get("model_save_interval_seconds", 300),
         weights_content=data.get("weights_content", 0.30),
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),

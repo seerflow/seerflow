@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
+
+import msgspec.json
 
 from seerflow.detection.cusum import CUSUMDetector
 from seerflow.detection.holtwinters import HoltWintersDetector
@@ -16,6 +19,9 @@ if TYPE_CHECKING:
     from seerflow.config import DetectionConfig
     from seerflow.detection.protocols import Detector
     from seerflow.models import SeerflowEvent
+    from seerflow.storage.protocols import ModelStore
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,3 +134,70 @@ class DetectionEnsemble:
             "max_sources": self._max_sources,
             "eviction_count": self._eviction_count,
         }
+
+    async def save_all_state(self, storage: ModelStore) -> int:
+        """Serialize all detector + threshold state to storage. Returns count saved."""
+        sources = list(self._detectors.keys())
+        await storage.save_state(
+            "ensemble:manifest",
+            msgspec.json.encode(sources),
+        )
+        count = 0
+        for source in sources:
+            detectors = self._detectors[source]
+            for i, det in enumerate(detectors):
+                await storage.save_state(f"det:{source}:{i}", det.serialize())
+                count += 1
+            thresh = self._thresholds.get(source)
+            if thresh is not None:
+                await storage.save_state(
+                    f"thresh:{source}",
+                    thresh.serialize(),
+                )
+                count += 1
+        return count
+
+    async def load_all_state(self, storage: ModelStore) -> int:
+        """Restore detector state from storage. Returns count loaded."""
+        manifest_bytes = await storage.load_state("ensemble:manifest")
+        if manifest_bytes is None:
+            return 0
+        try:
+            sources: list[str] = msgspec.json.decode(
+                manifest_bytes,
+                type=list[str],
+            )
+        except Exception:
+            _log.warning("Corrupt ensemble manifest — starting fresh")
+            return 0
+        count = 0
+        for source in sources:
+            try:
+                detectors = self._get_detectors(source)
+                for i, det in enumerate(detectors):
+                    data = await storage.load_state(f"det:{source}:{i}")
+                    if data is not None:
+                        try:
+                            det.deserialize(data)
+                            count += 1
+                        except Exception:
+                            _log.warning(
+                                "Corrupt model state for det:%s:%d — fresh model",
+                                source,
+                                i,
+                            )
+                thresh_data = await storage.load_state(f"thresh:{source}")
+                if thresh_data is not None:
+                    try:
+                        self._thresholds[source] = DSpotThreshold.deserialize(
+                            thresh_data,
+                        )
+                        count += 1
+                    except Exception:
+                        _log.warning(
+                            "Corrupt threshold for %s — fresh threshold",
+                            source,
+                        )
+            except Exception:
+                _log.warning("Invalid source %r in manifest — skipping", source)
+        return count
