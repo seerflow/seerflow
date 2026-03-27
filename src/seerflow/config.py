@@ -101,6 +101,8 @@ class DetectionConfig:
     hw_beta: float = 0.1
     hw_gamma: float = 0.1
     hw_n_std: float = 3.0
+    cusum_drift: float = 0.5
+    cusum_threshold: float = 5.0
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
@@ -277,6 +279,8 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         hw_beta=data.get("hw_beta", 0.1),
         hw_gamma=data.get("hw_gamma", 0.1),
         hw_n_std=data.get("hw_n_std", 3.0),
+        cusum_drift=data.get("cusum_drift", 0.5),
+        cusum_threshold=data.get("cusum_threshold", 5.0),
         weights_content=data.get("weights_content", 0.30),
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
