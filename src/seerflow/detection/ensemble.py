@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from seerflow.detection.cusum import CUSUMDetector
 from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.detection.hst import HSTDetector
 from seerflow.detection.threshold import DSpotThreshold
@@ -75,6 +76,10 @@ class DetectionEnsemble:
                     beta=self._config.hw_beta,
                     gamma=self._config.hw_gamma,
                     n_std=self._config.hw_n_std,
+                ),
+                CUSUMDetector(
+                    drift=self._config.cusum_drift,
+                    threshold=self._config.cusum_threshold,
                 ),
             ]
         return self._detectors[source]
