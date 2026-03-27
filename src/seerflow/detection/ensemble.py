@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-_MAX_SOURCE_KEY_LEN = 256
+_MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
 
 
 class _WelfordAccumulator:
@@ -58,9 +58,15 @@ class _WelfordAccumulator:
     @staticmethod
     def from_dict(d: dict[str, float | int]) -> _WelfordAccumulator:
         acc = _WelfordAccumulator()
-        acc._n = int(d["n"])
-        acc._mean = float(d["mean"])
-        acc._m2 = float(d["m2"])
+        n = int(d["n"])
+        mean = float(d["mean"])
+        m2 = float(d["m2"])
+        if n < 0 or m2 < 0.0 or not math.isfinite(mean) or not math.isfinite(m2):
+            msg = f"Invalid Welford state: n={n}, mean={mean}, m2={m2}"
+            raise ValueError(msg)
+        acc._n = n
+        acc._mean = mean
+        acc._m2 = m2
         return acc
 
 
