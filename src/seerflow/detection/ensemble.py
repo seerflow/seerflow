@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -37,12 +38,14 @@ class DetectionEnsemble:
     on first event for each source_type.
     """
 
-    __slots__ = ("_config", "_detectors", "_thresholds")
+    __slots__ = ("_config", "_detectors", "_eviction_count", "_max_sources", "_thresholds")
 
     def __init__(self, config: DetectionConfig) -> None:
         self._config = config
-        self._detectors: dict[str, list[Detector]] = {}
-        self._thresholds: dict[str, DSpotThreshold] = {}
+        self._max_sources = config.max_sources
+        self._detectors: OrderedDict[str, list[Detector]] = OrderedDict()
+        self._thresholds: OrderedDict[str, DSpotThreshold] = OrderedDict()
+        self._eviction_count: int = 0
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
         """Score, learn, and threshold-check a single event."""
@@ -65,37 +68,53 @@ class DetectionEnsemble:
 
     def _get_detectors(self, source: str) -> list[Detector]:
         """Return (or create) the detector list for *source*."""
-        if source not in self._detectors:
-            self._detectors[source] = [
-                HSTDetector(
-                    n_trees=self._config.hst_n_trees,
-                    window_size=self._config.hst_window_size,
-                ),
-                HoltWintersDetector(
-                    seasonal_period=self._config.hw_seasonal_period,
-                    alpha=self._config.hw_alpha,
-                    beta=self._config.hw_beta,
-                    gamma=self._config.hw_gamma,
-                    n_std=self._config.hw_n_std,
-                ),
-                CUSUMDetector(
-                    drift=self._config.cusum_drift,
-                    threshold=self._config.cusum_threshold,
-                ),
-                MarkovDetector(
-                    smoothing=self._config.markov_smoothing,
-                    min_events=self._config.markov_min_events,
-                    max_entities=self._config.markov_max_entities,
-                ),
-            ]
+        if source in self._detectors:
+            self._detectors.move_to_end(source)
+            return self._detectors[source]
+        if len(self._detectors) >= self._max_sources:
+            evicted_source, _ = self._detectors.popitem(last=False)
+            self._thresholds.pop(evicted_source, None)
+            self._eviction_count += 1
+        self._detectors[source] = [
+            HSTDetector(
+                n_trees=self._config.hst_n_trees,
+                window_size=self._config.hst_window_size,
+            ),
+            HoltWintersDetector(
+                seasonal_period=self._config.hw_seasonal_period,
+                alpha=self._config.hw_alpha,
+                beta=self._config.hw_beta,
+                gamma=self._config.hw_gamma,
+                n_std=self._config.hw_n_std,
+            ),
+            CUSUMDetector(
+                drift=self._config.cusum_drift,
+                threshold=self._config.cusum_threshold,
+            ),
+            MarkovDetector(
+                smoothing=self._config.markov_smoothing,
+                min_events=self._config.markov_min_events,
+                max_entities=self._config.markov_max_entities,
+            ),
+        ]
         return self._detectors[source]
 
     def _get_threshold(self, source: str) -> DSpotThreshold:
         """Return (or create) the DSPOT threshold for *source*."""
-        if source not in self._thresholds:
-            self._thresholds[source] = DSpotThreshold(
-                calibration_window=self._config.dspot_calibration_window,
-                risk_level=self._config.dspot_risk_level,
-                initial_percentile=self._config.dspot_initial_percentile,
-            )
+        if source in self._thresholds:
+            self._thresholds.move_to_end(source)
+            return self._thresholds[source]
+        self._thresholds[source] = DSpotThreshold(
+            calibration_window=self._config.dspot_calibration_window,
+            risk_level=self._config.dspot_risk_level,
+            initial_percentile=self._config.dspot_initial_percentile,
+        )
         return self._thresholds[source]
+
+    def get_stats(self) -> dict[str, int]:
+        """Return operational statistics about the ensemble."""
+        return {
+            "source_count": len(self._detectors),
+            "max_sources": self._max_sources,
+            "eviction_count": self._eviction_count,
+        }

@@ -159,3 +159,89 @@ class TestEnsembleWithMarkov:
         result = ensemble.process_event(_make_event())
         assert isinstance(result.score, float)
         assert 0.0 <= result.score <= 1.0
+
+
+class TestEnsembleLRU:
+    def test_source_eviction_when_exceeding_max(self) -> None:
+        """Oldest source evicted when max_sources exceeded."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(max_sources=3, hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        # Process 4 sources (exceeds max_sources=3)
+        for i in range(4):
+            ensemble.process_event(_make_event(source_type=f"source-{i}"))
+        # source-0 should be evicted (oldest)
+        assert "source-0" not in ensemble._detectors
+        assert "source-0" not in ensemble._thresholds
+        assert "source-3" in ensemble._detectors
+        assert len(ensemble._detectors) == 3
+
+    def test_active_source_not_evicted(self) -> None:
+        """Recently accessed source survives eviction."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(max_sources=3, hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        # Create 3 sources
+        for i in range(3):
+            ensemble.process_event(_make_event(source_type=f"source-{i}"))
+        # Re-access source-0 (moves to end of LRU)
+        ensemble.process_event(_make_event(source_type="source-0"))
+        # Add source-3 → should evict source-1 (now the oldest)
+        ensemble.process_event(_make_event(source_type="source-3"))
+        assert "source-0" in ensemble._detectors  # re-accessed, survived
+        assert "source-1" not in ensemble._detectors  # oldest, evicted
+
+    def test_threshold_dict_stays_in_sync(self) -> None:
+        """_thresholds evicted in sync with _detectors."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(max_sources=2, hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="a"))
+        ensemble.process_event(_make_event(source_type="b"))
+        ensemble.process_event(_make_event(source_type="c"))
+        assert set(ensemble._detectors.keys()) == set(ensemble._thresholds.keys())
+        assert len(ensemble._thresholds) == 2
+
+
+class TestEnsembleStats:
+    def test_get_stats_returns_counts(self) -> None:
+        """get_stats returns source_count, max_sources, eviction_count."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(max_sources=10, hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog"))
+        ensemble.process_event(_make_event(source_type="file"))
+        stats = ensemble.get_stats()
+        assert stats["source_count"] == 2
+        assert stats["max_sources"] == 10
+        assert stats["eviction_count"] == 0
+
+    def test_eviction_count_increments(self) -> None:
+        """Eviction counter tracks total evictions."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(max_sources=2, hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        for i in range(5):
+            ensemble.process_event(_make_event(source_type=f"s-{i}"))
+        stats = ensemble.get_stats()
+        assert stats["eviction_count"] == 3  # 5 sources - 2 max = 3 evictions
+
+    def test_default_max_sources(self) -> None:
+        """Default max_sources is 256."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig()
+        ensemble = DetectionEnsemble(config)
+        stats = ensemble.get_stats()
+        assert stats["max_sources"] == 256
