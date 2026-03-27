@@ -73,33 +73,39 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     handler = _make_handler(ensemble, storage, save_interval_ns=save_interval_ns)
     await pipeline.run(handler)
 
-    # Flush remaining template metadata.
-    # Event flushing is handled by WriteBuffer.close() inside storage.close() below.
-    get_stats = getattr(handler, "get_stats", None)
-    if get_stats is not None:
-        events, anomalies, template_meta, t0 = get_stats()
-        pending_templates = [t for t in template_meta.values() if t.event_count > 0]
-        if pending_templates:
-            await storage.write_templates(pending_templates)
-            _log.info("Flushed %d template updates to storage", len(pending_templates))
-        elapsed = time.time() - t0
-        _log.info("--- Session Summary ---")
-        _log.info("  Events processed: %d", events)
-        _log.info("  Anomalies detected: %d", anomalies)
-        _log.info("  Unique templates: %d", len(template_meta))
-        _log.info("  Duration: %.1fs", elapsed)
-        if elapsed > 0 and events > 0:
-            _log.info("  Throughput: %.0f events/sec", events / elapsed)
-
     try:
-        saved = await ensemble.save_all_state(storage)
-        if saved > 0:
-            _log.info("Final save: %d model states persisted", saved)
-    except Exception:
-        _log.warning("Final model save failed", exc_info=True)
+        # Flush remaining template metadata.
+        # Event flushing is handled by WriteBuffer.close() inside storage.close().
+        get_stats = getattr(handler, "get_stats", None)
+        if get_stats is not None:
+            events, anomalies, template_meta, t0 = get_stats()
+            pending_templates = [
+                t for t in template_meta.values() if t.event_count > 0
+            ]
+            if pending_templates:
+                await storage.write_templates(pending_templates)
+                _log.info(
+                    "Flushed %d template updates to storage",
+                    len(pending_templates),
+                )
+            elapsed = time.time() - t0
+            _log.info("--- Session Summary ---")
+            _log.info("  Events processed: %d", events)
+            _log.info("  Anomalies detected: %d", anomalies)
+            _log.info("  Unique templates: %d", len(template_meta))
+            _log.info("  Duration: %.1fs", elapsed)
+            if elapsed > 0 and events > 0:
+                _log.info("  Throughput: %.0f events/sec", events / elapsed)
 
-    await storage.close()
-    _log.info("Seerflow stopped")
+        try:
+            saved = await ensemble.save_all_state(storage)
+            if saved > 0:
+                _log.info("Final save: %d model states persisted", saved)
+        except Exception:
+            _log.warning("Final model save failed", exc_info=True)
+    finally:
+        await storage.close()
+        _log.info("Seerflow stopped")
 
 
 async def _run(config_path: str | None) -> None:
