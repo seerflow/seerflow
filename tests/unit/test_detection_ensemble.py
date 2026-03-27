@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import statistics
 import uuid
 
 import pytest
@@ -346,3 +348,105 @@ class TestEnsembleStats:
         ensemble = DetectionEnsemble(config)
         stats = ensemble.get_stats()
         assert stats["max_sources"] == 256
+
+
+class TestEnsembleHardening:
+    def test_nan_score_replaced_with_zero(self) -> None:
+        """NaN from a detector is replaced with 0.0."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        class _NanDetector:
+            def score(self, event: object) -> float:
+                return float("nan")
+
+            def learn(self, event: object) -> None:
+                pass
+
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=500)
+        ensemble = DetectionEnsemble(config)
+        # Process one event to create detectors
+        ensemble.process_event(_make_event())
+        # Replace HST (index 0) with a stub that always returns NaN
+        ensemble._detectors["syslog"][0] = _NanDetector()  # type: ignore[assignment]
+        result = ensemble.process_event(_make_event())
+        assert math.isfinite(result.score)
+
+    def test_inf_score_replaced_with_zero(self) -> None:
+        """Inf from a detector is replaced with 0.0."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        class _InfDetector:
+            def score(self, event: object) -> float:
+                return float("inf")
+
+            def learn(self, event: object) -> None:
+                pass
+
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=500)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event())
+        # Replace HST (index 0) with a stub that always returns Inf
+        ensemble._detectors["syslog"][0] = _InfDetector()  # type: ignore[assignment]
+        result = ensemble.process_event(_make_event())
+        assert math.isfinite(result.score)
+
+    def test_source_type_truncated(self) -> None:
+        """Long source_type is truncated to 248 chars."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import _MAX_SOURCE_KEY_LEN, DetectionEnsemble
+
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        long_source = "x" * 500
+        ensemble.process_event(_make_event(source_type=long_source))
+        keys = list(ensemble._detectors.keys())
+        assert all(len(k) <= _MAX_SOURCE_KEY_LEN for k in keys)
+        assert all(len(k) == _MAX_SOURCE_KEY_LEN for k in keys)
+
+    def test_welford_accumulator_mean(self) -> None:
+        """Welford produces correct mean."""
+        from seerflow.detection.ensemble import _WelfordAccumulator
+
+        acc = _WelfordAccumulator()
+        for v in [1.0, 2.0, 3.0, 4.0, 5.0]:
+            acc.update(v)
+        assert acc.mean() == pytest.approx(3.0)
+
+    def test_welford_accumulator_stdev(self) -> None:
+        """Welford produces correct stdev matching statistics module."""
+        from seerflow.detection.ensemble import _WelfordAccumulator
+
+        acc = _WelfordAccumulator()
+        values = [1.0, 2.0, 3.0, 4.0, 5.0]
+        for v in values:
+            acc.update(v)
+        assert acc.stdev() == pytest.approx(statistics.stdev(values), abs=1e-10)
+
+    def test_welford_warmup_zero_stdev(self) -> None:
+        """Welford with < 2 samples returns stdev 0.0."""
+        from seerflow.detection.ensemble import _WelfordAccumulator
+
+        acc = _WelfordAccumulator()
+        assert acc.stdev() == 0.0
+        acc.update(5.0)
+        assert acc.stdev() == 0.0
+
+    @pytest.mark.parametrize(
+        "bad_state",
+        [
+            {"n": -1, "mean": 0.0, "m2": 0.0},
+            {"n": 0, "mean": 0.0, "m2": 1.0},
+            {"n": 1, "mean": 5.0, "m2": 0.5},
+            {"n": 2, "mean": float("nan"), "m2": 0.0},
+            {"n": 2, "mean": 0.0, "m2": float("inf")},
+            {"n": 2, "mean": 0.0, "m2": -1.0},
+        ],
+    )
+    def test_welford_from_dict_rejects_invalid(self, bad_state: dict) -> None:
+        """from_dict rejects invalid Welford state."""
+        from seerflow.detection.ensemble import _WelfordAccumulator
+
+        with pytest.raises(ValueError):
+            _WelfordAccumulator.from_dict(bad_state)
