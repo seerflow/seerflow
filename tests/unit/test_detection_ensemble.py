@@ -90,13 +90,13 @@ class TestDetectionEnsemble:
 
 
 class TestEnsembleWithHoltWinters:
-    def test_ensemble_creates_three_detectors(self) -> None:
+    def test_ensemble_creates_four_detectors(self) -> None:
         config = DetectionConfig(hw_seasonal_period=10)
         ensemble = DetectionEnsemble(config)
         ensemble.process_event(_make_event())
-        assert len(ensemble._detectors["syslog"]) == 3
+        assert len(ensemble._detectors["syslog"]) == 4
 
-    def test_ensemble_score_averages_three_detectors(self) -> None:
+    def test_ensemble_score_averages_four_detectors(self) -> None:
         config = DetectionConfig(
             hst_window_size=50,
             hst_n_trees=10,
@@ -110,16 +110,42 @@ class TestEnsembleWithHoltWinters:
 
 
 class TestEnsembleWithCUSUM:
-    def test_ensemble_creates_three_detectors(self) -> None:
+    def test_ensemble_creates_four_detectors(self) -> None:
         from seerflow.config import DetectionConfig
         from seerflow.detection.ensemble import DetectionEnsemble
 
         config = DetectionConfig(hw_seasonal_period=10)
         ensemble = DetectionEnsemble(config)
         ensemble.process_event(_make_event())
-        assert len(ensemble._detectors["syslog"]) == 3
+        assert len(ensemble._detectors["syslog"]) == 4
 
-    def test_ensemble_score_with_three_detectors(self) -> None:
+    def test_ensemble_score_with_four_detectors(self) -> None:
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(
+            hst_window_size=50,
+            hst_n_trees=10,
+            hw_seasonal_period=10,
+            dspot_calibration_window=200,
+        )
+        ensemble = DetectionEnsemble(config)
+        result = ensemble.process_event(_make_event())
+        assert isinstance(result.score, float)
+        assert 0.0 <= result.score <= 1.0
+
+
+class TestEnsembleWithMarkov:
+    def test_ensemble_creates_four_detectors(self) -> None:
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event())
+        assert len(ensemble._detectors["syslog"]) == 4
+
+    def test_ensemble_score_with_four_detectors(self) -> None:
         from seerflow.config import DetectionConfig
         from seerflow.detection.ensemble import DetectionEnsemble
 

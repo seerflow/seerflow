@@ -103,6 +103,9 @@ class DetectionConfig:
     hw_n_std: float = 3.0
     cusum_drift: float = 0.5
     cusum_threshold: float = 5.0
+    markov_smoothing: float = 1e-6
+    markov_min_events: int = 100
+    markov_max_entities: int = 1000
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
@@ -281,6 +284,9 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         hw_n_std=data.get("hw_n_std", 3.0),
         cusum_drift=data.get("cusum_drift", 0.5),
         cusum_threshold=data.get("cusum_threshold", 5.0),
+        markov_smoothing=data.get("markov_smoothing", 1e-6),
+        markov_min_events=data.get("markov_min_events", 100),
+        markov_max_entities=data.get("markov_max_entities", 1000),
         weights_content=data.get("weights_content", 0.30),
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
