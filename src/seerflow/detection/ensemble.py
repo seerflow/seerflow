@@ -92,15 +92,16 @@ class DetectionEnsemble:
         windows = self._score_windows[source]
 
         # 2. Z-normalize (or use raw during warmup)
+        # Compute z-score from historical window BEFORE adding current score
         z_scores: list[float] = []
         for i, raw in enumerate(scores):
-            windows[i].append(raw)
             if len(windows[i]) >= 2:
                 mean = statistics.mean(windows[i])
                 std = max(statistics.stdev(windows[i]), 1e-10)
                 z_scores.append((raw - mean) / std)
             else:
                 z_scores.append(raw)
+            windows[i].append(raw)  # append AFTER normalization
 
         # 3. Weighted average
         weights = self._weights[: len(z_scores)]
