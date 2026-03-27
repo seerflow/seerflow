@@ -42,8 +42,7 @@ class _EntityModel:
         m = _EntityModel()
         m.prev_template = d["prev_template"]
         m.transitions = {
-            int(k): {int(k2): int(v2) for k2, v2 in v.items()}
-            for k, v in d["transitions"].items()
+            int(k): {int(k2): int(v2) for k2, v2 in v.items()} for k, v in d["transitions"].items()
         }
         m.total_from = {int(k): v for k, v in d["total_from"].items()}
         m.event_count = d["event_count"]
