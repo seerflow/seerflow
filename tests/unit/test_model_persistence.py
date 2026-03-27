@@ -171,6 +171,7 @@ class TestLoadAllState:
 
         storage.load_state = AsyncMock(side_effect=fake_load)
         count = await ensemble.load_all_state(storage)
+        assert count == 0  # threshold failed, nothing else to load
         assert "syslog" in ensemble._detectors
 
     async def test_missing_detector_key_skipped(self) -> None:

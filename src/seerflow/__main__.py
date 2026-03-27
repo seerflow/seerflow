@@ -225,9 +225,15 @@ def _make_handler(
         if event_count % 100 == 0 and event_count > 0:
             now_ns = time.time_ns()
             if now_ns - last_save_ns >= save_interval_ns:
-                saved = await ensemble.save_all_state(storage)
-                _log.info("Periodic save: %d model states", saved)
-                last_save_ns = now_ns
+                try:
+                    saved = await ensemble.save_all_state(storage)
+                    _log.info("Periodic save: %d model states", saved)
+                    last_save_ns = now_ns
+                except Exception:
+                    _log.warning(
+                        "Periodic model save failed — will retry",
+                        exc_info=True,
+                    )
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler
