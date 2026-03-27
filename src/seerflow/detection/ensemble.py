@@ -44,7 +44,10 @@ class DetectionEnsemble:
 
     def __init__(self, config: DetectionConfig) -> None:
         if config.max_sources < 1 or config.max_sources > self._MAX_SOURCES_CEILING:
-            msg = f"max_sources must be between 1 and {self._MAX_SOURCES_CEILING}, got {config.max_sources}"
+            msg = (
+                f"max_sources must be between 1 and {self._MAX_SOURCES_CEILING}, "
+                f"got {config.max_sources}"
+            )
             raise ValueError(msg)
         self._config = config
         self._max_sources = config.max_sources
@@ -105,9 +108,11 @@ class DetectionEnsemble:
         return self._detectors[source]
 
     def _get_threshold(self, source: str) -> DSpotThreshold:
-        """Return (or create) the DSPOT threshold for *source*."""
+        """Return (or create) the DSPOT threshold for *source*.
+
+        Eviction is driven by _get_detectors, not here.
+        """
         if source in self._thresholds:
-            self._thresholds.move_to_end(source)
             return self._thresholds[source]
         self._thresholds[source] = DSpotThreshold(
             calibration_window=self._config.dspot_calibration_window,
