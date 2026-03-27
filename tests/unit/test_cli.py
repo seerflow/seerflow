@@ -90,9 +90,9 @@ class TestRunLoop:
         """_make_handler creates a handler that processes events through ensemble."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -159,9 +159,9 @@ class TestRunLoop:
         """Handler writes each event individually (WriteBuffer handles batching)."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig(
@@ -199,9 +199,9 @@ class TestRunLoop:
         """Handler flushes template metadata alongside events."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -241,9 +241,9 @@ class TestRunLoop:
         import logging
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -268,8 +268,8 @@ class TestRunLoop:
 
     def test_main_with_nonexistent_config_raises(self) -> None:
         """main() with a bad config path should raise."""
-        from seerflow.pipeline.run import _run
         from seerflow.config import ConfigError
+        from seerflow.pipeline.run import _run
 
         with pytest.raises(ConfigError, match="not found"):
             asyncio.run(_run("/nonexistent/path.yaml"))
@@ -311,10 +311,10 @@ class TestRunLoop:
         """Handler propagates seerflow_severity from RawEvent metadata."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.event import SeverityLevel
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -339,10 +339,10 @@ class TestRunLoop:
         """Handler defaults to INFORMATIONAL when no seerflow_severity in metadata."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.event import SeverityLevel
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -367,9 +367,9 @@ class TestRunLoop:
         """Handler populates entity_refs from related_ips + related_users + related_hosts."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -400,9 +400,9 @@ class TestRunLoop:
         """Handler leaves entity_refs empty when no entities found."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -430,9 +430,9 @@ class TestRunLoop:
         """Handler calls write_alert when ensemble detects anomaly."""
         from unittest.mock import AsyncMock, patch
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -471,9 +471,9 @@ class TestRunLoop:
         """Handler does NOT call write_alert when no anomaly detected."""
         from unittest.mock import AsyncMock
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -498,9 +498,9 @@ class TestRunLoop:
         """write_alert failure is caught and logged, pipeline continues."""
         from unittest.mock import AsyncMock, patch
 
-        from seerflow.pipeline.handler import _make_handler
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
+        from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
