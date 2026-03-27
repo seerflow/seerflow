@@ -79,9 +79,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         get_stats = getattr(handler, "get_stats", None)
         if get_stats is not None:
             events, anomalies, template_meta, t0 = get_stats()
-            pending_templates = [
-                t for t in template_meta.values() if t.event_count > 0
-            ]
+            pending_templates = [t for t in template_meta.values() if t.event_count > 0]
             if pending_templates:
                 await storage.write_templates(pending_templates)
                 _log.info(
