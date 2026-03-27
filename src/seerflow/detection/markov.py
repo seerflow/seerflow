@@ -106,8 +106,10 @@ class MarkovDetector:
         count = model.transitions.get(prev, {}).get(curr, 0)
         total = model.total_from.get(prev, 0)
         vocab = max(len(model.total_from), 1)
-        prob = (count + self._smoothing) / (total + self._smoothing * vocab)
-        max_log = -math.log(self._smoothing / (self._smoothing * vocab))
+        denom = total + self._smoothing * vocab
+        prob = (count + self._smoothing) / denom
+        # Max surprisal: unseen transition with current training volume
+        max_log = -math.log(self._smoothing / denom)
         if max_log <= 0.0:
             return 0.0
         return min(-math.log(prob) / max_log, 1.0)
