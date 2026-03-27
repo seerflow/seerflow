@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from seerflow.models import SeerflowEvent
 
 _BUCKET_NS = 60 * 1_000_000_000  # 1 minute in nanoseconds
+_MAX_GAP_FILL = 100  # cap gap-fill to avoid O(n) stalls on large time jumps
 
 
 class CUSUMDetector:
@@ -99,7 +100,7 @@ class CUSUMDetector:
         self._update(float(self._current_count))
         # Handle gap buckets
         gap = bucket - self._current_bucket - 1
-        for _ in range(min(gap, 100)):
+        for _ in range(min(gap, _MAX_GAP_FILL)):
             self._update(0.0)
         self._current_bucket = bucket
         self._current_count = 1
@@ -125,8 +126,8 @@ class CUSUMDetector:
             self._last_score = 0.0
             return
 
-        # Standardize
-        z = (count - self._running_mean) / running_std
+        # Standardize using pre-update mean (predict-then-update pattern)
+        z = (count - prev_mean) / running_std
 
         # Bidirectional CUSUM
         self._g_upper = max(0.0, self._g_upper + z - self._drift)
