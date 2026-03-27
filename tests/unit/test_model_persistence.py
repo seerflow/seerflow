@@ -58,7 +58,7 @@ class TestSaveAllState:
         storage = AsyncMock()
         storage.save_state = AsyncMock()
         count = await ensemble.save_all_state(storage)
-        assert count == 5  # 4 detectors + 1 threshold for 1 source
+        assert count == 6  # 4 detectors + 1 threshold + 1 score window for 1 source
 
 
 class TestLoadAllState:

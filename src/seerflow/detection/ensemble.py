@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-import statistics
-from collections import OrderedDict, deque
+import math
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -23,6 +23,45 @@ if TYPE_CHECKING:
     from seerflow.storage.protocols import ModelStore
 
 _log = logging.getLogger(__name__)
+
+_MAX_SOURCE_KEY_LEN = 256
+
+
+class _WelfordAccumulator:
+    """Online mean/variance via Welford's algorithm. O(1) per update."""
+
+    __slots__ = ("_m2", "_mean", "_n")
+
+    def __init__(self) -> None:
+        self._n: int = 0
+        self._mean: float = 0.0
+        self._m2: float = 0.0
+
+    def update(self, x: float) -> None:
+        self._n += 1
+        delta = x - self._mean
+        self._mean += delta / self._n
+        delta2 = x - self._mean
+        self._m2 += delta * delta2
+
+    def mean(self) -> float:
+        return self._mean
+
+    def stdev(self) -> float:
+        if self._n < 2:
+            return 0.0
+        return math.sqrt(self._m2 / (self._n - 1))
+
+    def to_dict(self) -> dict[str, float | int]:
+        return {"n": self._n, "mean": self._mean, "m2": self._m2}
+
+    @staticmethod
+    def from_dict(d: dict[str, float | int]) -> _WelfordAccumulator:
+        acc = _WelfordAccumulator()
+        acc._n = int(d["n"])
+        acc._mean = float(d["mean"])
+        acc._m2 = float(d["m2"])
+        return acc
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +108,7 @@ class DetectionEnsemble:
         self._detectors: OrderedDict[str, list[Detector]] = OrderedDict()
         self._thresholds: OrderedDict[str, DSpotThreshold] = OrderedDict()
         self._eviction_count: int = 0
-        self._score_windows: OrderedDict[str, list[deque[float]]] = OrderedDict()
+        self._score_windows: OrderedDict[str, list[_WelfordAccumulator]] = OrderedDict()
         self._weights: tuple[float, ...] = (
             config.weights_content,
             config.weights_volume,
@@ -79,14 +118,15 @@ class DetectionEnsemble:
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
         """Score, learn, and threshold-check a single event."""
-        source = event.source_type or "default"
+        source = (event.source_type or "default")[:_MAX_SOURCE_KEY_LEN]
         detectors = self._get_detectors(source)
         scores = [d.score(event) for d in detectors]
+        scores = [s if math.isfinite(s) else 0.0 for s in scores]
 
         # --- Blended scoring pipeline ---
         # 1. Get/create per-detector score windows for this source
         if source not in self._score_windows:
-            self._score_windows[source] = [deque(maxlen=100) for _ in range(len(detectors))]
+            self._score_windows[source] = [_WelfordAccumulator() for _ in range(len(detectors))]
         else:
             self._score_windows.move_to_end(source)
         windows = self._score_windows[source]
@@ -95,13 +135,13 @@ class DetectionEnsemble:
         # Compute z-score from historical window BEFORE adding current score
         z_scores: list[float] = []
         for i, raw in enumerate(scores):
-            if len(windows[i]) >= 2:
-                mean = statistics.mean(windows[i])
-                std = max(statistics.stdev(windows[i]), 1e-10)
-                z_scores.append((raw - mean) / std)
+            acc = windows[i]
+            if acc._n >= 2:
+                std = max(acc.stdev(), 1e-10)
+                z_scores.append((raw - acc.mean()) / std)
             else:
                 z_scores.append(raw)
-            windows[i].append(raw)  # append AFTER normalization
+            acc.update(raw)  # append AFTER normalization
 
         # 3. Weighted average
         weights = self._weights[: len(z_scores)]
@@ -206,6 +246,13 @@ class DetectionEnsemble:
                     thresh.serialize(),
                 )
                 count += 1
+            window_state = self._score_windows.get(source)
+            if window_state is not None:
+                await storage.save_state(
+                    f"windows:{source}",
+                    msgspec.json.encode([acc.to_dict() for acc in window_state]),
+                )
+                count += 1
         return count
 
     async def load_all_state(self, storage: ModelStore) -> int:
@@ -249,6 +296,18 @@ class DetectionEnsemble:
                             "Corrupt threshold for %s — fresh threshold",
                             source,
                         )
+                windows_data = await storage.load_state(f"windows:{source}")
+                if windows_data is not None:
+                    try:
+                        acc_dicts: list[dict[str, float | int]] = msgspec.json.decode(
+                            windows_data,
+                            type=list[dict[str, float | int]],
+                        )
+                        self._score_windows[source] = [
+                            _WelfordAccumulator.from_dict(d) for d in acc_dicts
+                        ]
+                    except Exception:
+                        _log.warning("Corrupt window state for %s — fresh windows", source)
             except Exception:
                 _log.warning("Invalid source %r in manifest — skipping", source)
         return count
