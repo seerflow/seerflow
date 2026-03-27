@@ -40,7 +40,12 @@ class DetectionEnsemble:
 
     __slots__ = ("_config", "_detectors", "_eviction_count", "_max_sources", "_thresholds")
 
+    _MAX_SOURCES_CEILING = 10_000
+
     def __init__(self, config: DetectionConfig) -> None:
+        if config.max_sources < 1 or config.max_sources > self._MAX_SOURCES_CEILING:
+            msg = f"max_sources must be between 1 and {self._MAX_SOURCES_CEILING}, got {config.max_sources}"
+            raise ValueError(msg)
         self._config = config
         self._max_sources = config.max_sources
         self._detectors: OrderedDict[str, list[Detector]] = OrderedDict()
