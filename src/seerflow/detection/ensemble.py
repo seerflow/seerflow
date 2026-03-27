@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from seerflow.detection.cusum import CUSUMDetector
 from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.detection.hst import HSTDetector
+from seerflow.detection.markov import MarkovDetector
 from seerflow.detection.threshold import DSpotThreshold
 
 if TYPE_CHECKING:
@@ -80,6 +81,11 @@ class DetectionEnsemble:
                 CUSUMDetector(
                     drift=self._config.cusum_drift,
                     threshold=self._config.cusum_threshold,
+                ),
+                MarkovDetector(
+                    smoothing=self._config.markov_smoothing,
+                    min_events=self._config.markov_min_events,
+                    max_entities=self._config.markov_max_entities,
                 ),
             ]
         return self._detectors[source]
