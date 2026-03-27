@@ -90,13 +90,13 @@ class TestDetectionEnsemble:
 
 
 class TestEnsembleWithHoltWinters:
-    def test_ensemble_creates_two_detectors(self) -> None:
+    def test_ensemble_creates_three_detectors(self) -> None:
         config = DetectionConfig(hw_seasonal_period=10)
         ensemble = DetectionEnsemble(config)
         ensemble.process_event(_make_event())
         assert len(ensemble._detectors["syslog"]) == 3
 
-    def test_ensemble_score_averages_two_detectors(self) -> None:
+    def test_ensemble_score_averages_three_detectors(self) -> None:
         config = DetectionConfig(
             hst_window_size=50,
             hst_n_trees=10,
