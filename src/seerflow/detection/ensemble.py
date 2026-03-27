@@ -172,29 +172,32 @@ class DetectionEnsemble:
             return 0
         count = 0
         for source in sources:
-            detectors = self._get_detectors(source)
-            for i, det in enumerate(detectors):
-                data = await storage.load_state(f"det:{source}:{i}")
-                if data is not None:
+            try:
+                detectors = self._get_detectors(source)
+                for i, det in enumerate(detectors):
+                    data = await storage.load_state(f"det:{source}:{i}")
+                    if data is not None:
+                        try:
+                            det.deserialize(data)
+                            count += 1
+                        except Exception:
+                            _log.warning(
+                                "Corrupt model state for det:%s:%d — fresh model",
+                                source,
+                                i,
+                            )
+                thresh_data = await storage.load_state(f"thresh:{source}")
+                if thresh_data is not None:
                     try:
-                        det.deserialize(data)
+                        self._thresholds[source] = DSpotThreshold.deserialize(
+                            thresh_data,
+                        )
                         count += 1
                     except Exception:
                         _log.warning(
-                            "Corrupt model state for det:%s:%d — fresh model",
+                            "Corrupt threshold for %s — fresh threshold",
                             source,
-                            i,
                         )
-            thresh_data = await storage.load_state(f"thresh:{source}")
-            if thresh_data is not None:
-                try:
-                    self._thresholds[source] = DSpotThreshold.deserialize(
-                        thresh_data,
-                    )
-                    count += 1
-                except Exception:
-                    _log.warning(
-                        "Corrupt threshold for %s — fresh threshold",
-                        source,
-                    )
+            except Exception:
+                _log.warning("Invalid source %r in manifest — skipping", source)
         return count

@@ -51,9 +51,12 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     _log.info("Storage: %s", config.storage.sqlite_path)
 
     ensemble = DetectionEnsemble(config.detection)
-    loaded = await ensemble.load_all_state(storage)
-    if loaded > 0:
-        _log.info("Restored %d model states from storage", loaded)
+    try:
+        loaded = await ensemble.load_all_state(storage)
+        if loaded > 0:
+            _log.info("Restored %d model states from storage", loaded)
+    except Exception:
+        _log.warning("Failed to restore model state — starting fresh", exc_info=True)
     pipeline = await build_pipeline(config)
 
     # Startup banner — only list healthy receivers
@@ -97,9 +100,12 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         if elapsed > 0 and events > 0:
             _log.info("  Throughput: %.0f events/sec", events / elapsed)
 
-    saved = await ensemble.save_all_state(storage)
-    if saved > 0:
-        _log.info("Final save: %d model states persisted", saved)
+    try:
+        saved = await ensemble.save_all_state(storage)
+        if saved > 0:
+            _log.info("Final save: %d model states persisted", saved)
+    except Exception:
+        _log.warning("Final model save failed", exc_info=True)
 
     await storage.close()
     _log.info("Seerflow stopped")
