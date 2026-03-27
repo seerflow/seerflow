@@ -51,6 +51,9 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     _log.info("Storage: %s", config.storage.sqlite_path)
 
     ensemble = DetectionEnsemble(config.detection)
+    loaded = await ensemble.load_all_state(storage)
+    if loaded > 0:
+        _log.info("Restored %d model states from storage", loaded)
     pipeline = await build_pipeline(config)
 
     # Startup banner — only list healthy receivers
@@ -72,7 +75,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
             loop.add_signal_handler(sig, _request_shutdown)
 
     _log.info("Pipeline running — Ctrl+C to stop")
-    handler = _make_handler(ensemble, storage)
+    save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
+    handler = _make_handler(ensemble, storage, save_interval_ns=save_interval_ns)
     await pipeline.run(handler)
 
     # Flush remaining template metadata.
@@ -93,6 +97,10 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         if elapsed > 0 and events > 0:
             _log.info("  Throughput: %.0f events/sec", events / elapsed)
 
+    saved = await ensemble.save_all_state(storage)
+    if saved > 0:
+        _log.info("Final save: %d model states persisted", saved)
+
     await storage.close()
     _log.info("Seerflow stopped")
 
@@ -100,6 +108,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
 def _make_handler(
     ensemble: DetectionEnsemble,
     storage: SqliteBackend,
+    save_interval_ns: int = 300_000_000_000,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.models.alert import create_ml_alert
@@ -111,6 +120,7 @@ def _make_handler(
     anomaly_count = 0
     template_meta: dict[int, TemplateInfo] = {}
     start_time = time.time()
+    last_save_ns = time.time_ns()
 
     async def handler(event: RawEvent) -> None:
         seerflow_event = normalizer.normalize(event)
@@ -158,7 +168,7 @@ def _make_handler(
         await storage.write_events([seerflow_event])
 
         result = ensemble.process_event(seerflow_event)
-        nonlocal event_count, anomaly_count
+        nonlocal event_count, anomaly_count, last_save_ns
         event_count += 1
 
         # Flush template metadata every 10 events
@@ -210,6 +220,14 @@ def _make_handler(
                 )
             alert = create_ml_alert(seerflow_event, result)
             await storage.write_alert(alert)
+
+        # Periodic model state save
+        if event_count % 100 == 0 and event_count > 0:
+            now_ns = time.time_ns()
+            if now_ns - last_save_ns >= save_interval_ns:
+                saved = await ensemble.save_all_state(storage)
+                _log.info("Periodic save: %d model states", saved)
+                last_save_ns = now_ns
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler
