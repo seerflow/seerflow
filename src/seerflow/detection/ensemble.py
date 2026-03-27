@@ -306,6 +306,7 @@ class DetectionEnsemble:
                         self._score_windows[source] = [
                             _WelfordAccumulator.from_dict(d) for d in acc_dicts
                         ]
+                        count += 1
                     except Exception:
                         _log.warning("Corrupt window state for %s — fresh windows", source)
             except Exception:
