@@ -41,7 +41,10 @@ class _EntityModel:
     def from_dict(d: dict[str, Any]) -> _EntityModel:
         m = _EntityModel()
         m.prev_template = d["prev_template"]
-        m.transitions = {int(k): v for k, v in d["transitions"].items()}
+        m.transitions = {
+            int(k): {int(k2): int(v2) for k2, v2 in v.items()}
+            for k, v in d["transitions"].items()
+        }
         m.total_from = {int(k): v for k, v in d["total_from"].items()}
         m.event_count = d["event_count"]
         return m
@@ -91,6 +94,8 @@ class MarkovDetector:
         entity = event.entity_refs[0] if event.entity_refs else None
         if entity is None or event.template_id == -1:
             return 0.0
+        # Read-only lookup — does not create or touch LRU position.
+        # learn() always follows score() in the ensemble pipeline.
         model = self._models.get(entity)
         if model is None:
             return 0.0
