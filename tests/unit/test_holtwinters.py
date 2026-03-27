@@ -26,6 +26,15 @@ def _make_event(
     )
 
 
+def _send_events(detector: object, count: int, timestamp_ns: int) -> None:
+    """Send count events at the given timestamp (same bucket)."""
+    from seerflow.detection.holtwinters import HoltWintersDetector
+
+    assert isinstance(detector, HoltWintersDetector)
+    for _ in range(count):
+        detector.learn(_make_event(timestamp_ns=timestamp_ns))
+
+
 class TestHoltWintersDetector:
     def test_score_returns_float_in_range(self) -> None:
         from seerflow.detection.holtwinters import HoltWintersDetector
@@ -76,15 +85,11 @@ class TestHoltWintersDetector:
 
         detector = HoltWintersDetector(seasonal_period=10)
         base_ns = 1_700_000_000_000_000_000
-        # Train with steady 5 events per bucket for 15 buckets (past warmup)
-        for bucket in range(15):
+        # Train with steady 5 events per bucket for 16 buckets (past warmup)
+        # Each bucket's rollover is triggered naturally by the next bucket's events
+        for bucket in range(16):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(5):
-                detector.learn(_make_event(timestamp_ns=ts))
-            # Force bucket rollover by sending event to next bucket
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            # Undo the extra count in the next bucket
-            detector._current_count -= 1
+            _send_events(detector, 5, ts)
 
         normal_score = detector.score(_make_event())
 
@@ -111,12 +116,9 @@ class TestHoltWintersDetector:
         detector = HoltWintersDetector(seasonal_period=10)
         base_ns = 1_700_000_000_000_000_000
         # Train with some data
-        for bucket in range(15):
+        for bucket in range(16):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(5):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 5, ts)
 
         data = detector.serialize()
         assert isinstance(data, bytes)
@@ -134,13 +136,11 @@ class TestHoltWintersDetector:
 
         detector = HoltWintersDetector(seasonal_period=10)
         base_ns = 1_700_000_000_000_000_000
-        # Train with steady 20 events per bucket for 15 buckets (past warmup)
-        for bucket in range(15):
+        # Train with steady 20 events per bucket for 16 buckets (past warmup)
+        # Rollover is triggered naturally when events arrive in the next bucket
+        for bucket in range(16):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(20):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1  # undo extra learn
+            _send_events(detector, 20, ts)
 
         normal_score = detector.score(_make_event())
 

@@ -26,6 +26,15 @@ def _make_event(
     )
 
 
+def _send_events(detector: object, count: int, timestamp_ns: int) -> None:
+    """Send count events at the given timestamp (same bucket)."""
+    from seerflow.detection.cusum import CUSUMDetector
+
+    assert isinstance(detector, CUSUMDetector)
+    for _ in range(count):
+        detector.learn(_make_event(timestamp_ns=timestamp_ns))
+
+
 class TestCUSUMDetector:
     def test_score_returns_float_in_range(self) -> None:
         from seerflow.detection.cusum import CUSUMDetector
@@ -40,13 +49,10 @@ class TestCUSUMDetector:
 
         detector = CUSUMDetector(warmup_buckets=30)
         base_ns = 1_700_000_000_000_000_000
-        # Process 10 buckets (less than warmup=30)
-        for i in range(10):
+        # Process 11 buckets (less than warmup=30); bucket 10 triggers rollover for 0-9
+        for i in range(11):
             ts = base_ns + i * _BUCKET_NS
-            for _ in range(5):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 5, ts)
         assert detector.score(_make_event()) == 0.0
 
     def test_upward_shift_detection(self) -> None:
@@ -54,23 +60,18 @@ class TestCUSUMDetector:
 
         detector = CUSUMDetector(warmup_buckets=10, drift=0.5, threshold=3.0)
         base_ns = 1_700_000_000_000_000_000
-        # Establish baseline: 10 events per bucket for 15 buckets
-        for bucket in range(15):
+        # Establish baseline: 10 events per bucket for 16 buckets
+        # Bucket 15 triggers rollover for bucket 14, completing the baseline
+        for bucket in range(16):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(10):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 10, ts)
 
         baseline_score = detector.score(_make_event())
 
         # Sustained upward shift: 30 events per bucket for 10 buckets
-        for bucket in range(15, 25):
+        for bucket in range(16, 26):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(30):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 30, ts)
 
         shift_score = detector.score(_make_event())
         assert shift_score > baseline_score
@@ -80,23 +81,18 @@ class TestCUSUMDetector:
 
         detector = CUSUMDetector(warmup_buckets=10, drift=0.5, threshold=3.0)
         base_ns = 1_700_000_000_000_000_000
-        # Establish baseline: 20 events per bucket for 15 buckets
-        for bucket in range(15):
+        # Establish baseline: 20 events per bucket for 16 buckets
+        # Bucket 15 triggers rollover for bucket 14, completing the baseline
+        for bucket in range(16):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(20):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 20, ts)
 
         baseline_score = detector.score(_make_event())
 
         # Sustained downward shift: 2 events per bucket for 10 buckets
-        for bucket in range(15, 25):
+        for bucket in range(16, 26):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(2):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 2, ts)
 
         shift_score = detector.score(_make_event())
         assert shift_score > baseline_score
@@ -106,25 +102,24 @@ class TestCUSUMDetector:
 
         detector = CUSUMDetector(warmup_buckets=10, drift=0.5, threshold=2.0)
         base_ns = 1_700_000_000_000_000_000
-        # Establish baseline
-        for bucket in range(15):
+        # Establish baseline: 10 events per bucket for 16 buckets
+        for bucket in range(16):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(10):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 10, ts)
 
-        # Force a large shift to trigger reset
-        for bucket in range(15, 30):
-            ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(100):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+        # Inject a massive one-bucket spike (1000 events) that is guaranteed to
+        # exceed threshold=2.0 and trigger a hard reset in that single _update().
+        spike_ts = base_ns + 16 * _BUCKET_NS
+        _send_events(detector, 1000, spike_ts)
 
-        # After sustained shift, g should have reset at some point
-        # Score should be lower than 1.0 after reset + adaptation
-        assert detector._g_upper < detector._threshold or detector._g_lower < detector._threshold
+        # Flush the spike bucket by sending one event to bucket 17.
+        # This triggers _update(1000) → score >= 1.0 → reset → _g_upper = _g_lower = 0.0.
+        detector.learn(_make_event(timestamp_ns=spike_ts + _BUCKET_NS))
+
+        # After the reset, _g values must be exactly 0.0 before bucket 17 accumulates.
+        # Bucket 17 is now the current (open) bucket with count=1 — not yet flushed.
+        assert detector._g_upper == 0.0
+        assert detector._g_lower == 0.0
 
     def test_implements_detector_protocol(self) -> None:
         from seerflow.detection.cusum import CUSUMDetector
@@ -138,12 +133,9 @@ class TestCUSUMDetector:
 
         detector = CUSUMDetector(warmup_buckets=10)
         base_ns = 1_700_000_000_000_000_000
-        for bucket in range(15):
+        for bucket in range(16):
             ts = base_ns + bucket * _BUCKET_NS
-            for _ in range(5):
-                detector.learn(_make_event(timestamp_ns=ts))
-            detector.learn(_make_event(timestamp_ns=ts + _BUCKET_NS))
-            detector._current_count -= 1
+            _send_events(detector, 5, ts)
 
         data = detector.serialize()
         assert isinstance(data, bytes)

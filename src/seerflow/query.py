@@ -26,6 +26,7 @@ _UNIT_TO_NS: dict[str, int] = {
     "h": 3_600_000_000_000,
     "d": 24 * 3_600_000_000_000,
 }
+_VALID_ALERT_TYPES = {"ml", "sigma", "correlation", "ueba", "ioc"}
 
 
 def parse_duration(s: str) -> int:
@@ -77,6 +78,13 @@ def format_table(headers: list[str], rows: list[list[str]]) -> str:
 async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> None:
     """Execute event query and print results."""
     from seerflow.models.query import EventQuery, TimeRange
+
+    if args.severity is not None and not (0 <= args.severity <= 6):
+        print(
+            f"Error: --severity must be between 0 and 6, got {args.severity}",
+            file=sys.stderr,
+        )
+        return
 
     time_range = None
     if args.last:
@@ -141,6 +149,21 @@ async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> 
 async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> None:
     """Execute alert query and print results."""
     from seerflow.models.query import AlertQuery, TimeRange
+
+    if args.type is not None and args.type not in _VALID_ALERT_TYPES:
+        print(
+            f"Error: unknown alert type '{args.type}'. "
+            f"Valid: {', '.join(sorted(_VALID_ALERT_TYPES))}",
+            file=sys.stderr,
+        )
+        return
+
+    if args.severity is not None and not (0 <= args.severity <= 6):
+        print(
+            f"Error: --severity must be between 0 and 6, got {args.severity}",
+            file=sys.stderr,
+        )
+        return
 
     time_range = None
     if args.last:
