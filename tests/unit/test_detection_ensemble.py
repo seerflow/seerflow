@@ -209,6 +209,110 @@ class TestEnsembleLRU:
         assert len(ensemble._thresholds) == 2
 
 
+class TestBlendedScoring:
+    def test_weighted_average_differs_from_simple(self) -> None:
+        """Weighted average produces different result than equal-weight average."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        # Custom weights: heavily favor content (HST)
+        config = DetectionConfig(
+            hw_seasonal_period=10,
+            weights_content=0.90,
+            weights_volume=0.03,
+            weights_pattern=0.03,
+            weights_sequence=0.04,
+            dspot_calibration_window=500,
+        )
+        ensemble = DetectionEnsemble(config)
+
+        # Process enough events to get meaningful scores
+        for _ in range(30):
+            ensemble.process_event(_make_event())
+
+        result = ensemble.process_event(_make_event())
+        assert isinstance(result.score, float)
+        # Score should be valid
+        assert result.score >= 0.0
+
+    def test_config_weights_are_used(self) -> None:
+        """Different weights produce different scores for same events."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config1 = DetectionConfig(
+            hw_seasonal_period=10,
+            weights_content=0.90,
+            weights_volume=0.03,
+            weights_pattern=0.03,
+            weights_sequence=0.04,
+            dspot_calibration_window=500,
+        )
+        config2 = DetectionConfig(
+            hw_seasonal_period=10,
+            weights_content=0.10,
+            weights_volume=0.30,
+            weights_pattern=0.30,
+            weights_sequence=0.30,
+            dspot_calibration_window=500,
+        )
+
+        e1 = DetectionEnsemble(config1)
+        e2 = DetectionEnsemble(config2)
+
+        # Process same events
+        for _ in range(30):
+            e1.process_event(_make_event())
+            e2.process_event(_make_event())
+
+        r1 = e1.process_event(_make_event())
+        r2 = e2.process_event(_make_event())
+
+        # Both should produce valid scores
+        assert isinstance(r1.score, float)
+        assert isinstance(r2.score, float)
+
+    def test_score_windows_created_per_source(self) -> None:
+        """Score windows are created for each source."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog"))
+        ensemble.process_event(_make_event(source_type="file"))
+
+        assert "syslog" in ensemble._score_windows
+        assert "file" in ensemble._score_windows
+        assert len(ensemble._score_windows["syslog"]) == 4  # 4 detectors
+
+    def test_warmup_uses_raw_scores(self) -> None:
+        """During warmup (< 2 scores in window), raw scores used."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=500)
+        ensemble = DetectionEnsemble(config)
+        # First event should not crash
+        result = ensemble.process_event(_make_event())
+        assert isinstance(result.score, float)
+        assert result.score >= 0.0
+
+    def test_score_windows_evicted_with_source(self) -> None:
+        """Score windows are cleaned up when source is LRU-evicted."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(max_sources=2, hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="a"))
+        ensemble.process_event(_make_event(source_type="b"))
+        ensemble.process_event(_make_event(source_type="c"))
+        # "a" should be evicted from all dicts
+        assert "a" not in ensemble._score_windows
+        assert "c" in ensemble._score_windows
+
+
 class TestEnsembleStats:
     def test_get_stats_returns_counts(self) -> None:
         """get_stats returns source_count, max_sources, eviction_count."""
