@@ -281,21 +281,30 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     return cfg
 
 
+def _require_finite_positive(field: str, value: float) -> None:
+    """Raise ConfigError if *value* is not finite or not > 0."""
+    if not math.isfinite(value) or value <= 0.0:
+        raise ConfigError(f"detection.{field} must be finite and > 0, got {value!r}")
+
+
+def _require_open_unit(field: str, value: float) -> None:
+    """Raise ConfigError if *value* is not in the open interval (0, 1)."""
+    if not (0.0 < value < 1.0):
+        raise ConfigError(f"detection.{field} must be in (0, 1), got {value!r}")
+
+
 def _validate_detection_config(config: DetectionConfig) -> None:
     """Validate all numeric bounds in DetectionConfig; raise ConfigError if invalid."""
-    weight_fields = (
+    for name, value in (
         ("weights_content", config.weights_content),
         ("weights_volume", config.weights_volume),
         ("weights_sequence", config.weights_sequence),
         ("weights_pattern", config.weights_pattern),
-    )
-    for name, value in weight_fields:
+    ):
         if not math.isfinite(value):
-            msg = f"detection.{name} must be finite, got {value!r}"
-            raise ConfigError(msg)
+            raise ConfigError(f"detection.{name} must be finite, got {value!r}")
         if value < 0.0:
-            msg = f"detection.{name} must be >= 0.0, got {value!r}"
-            raise ConfigError(msg)
+            raise ConfigError(f"detection.{name} must be >= 0.0, got {value!r}")
 
     if config.model_save_interval_seconds < 1:
         msg = (
@@ -312,45 +321,27 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         raise ConfigError(msg)
 
     if config.max_sources < 1 or config.max_sources > 10_000:
-        msg = f"detection.max_sources must be between 1 and 10_000, got {config.max_sources!r}"
-        raise ConfigError(msg)
+        raise ConfigError(
+            f"detection.max_sources must be between 1 and 10_000, got {config.max_sources!r}"
+        )
 
-    if not (0.0 < config.cusum_ema_alpha < 1.0):
-        msg = f"detection.cusum_ema_alpha must be in (0, 1), got {config.cusum_ema_alpha!r}"
-        raise ConfigError(msg)
-
+    _require_open_unit("cusum_ema_alpha", config.cusum_ema_alpha)
     if config.cusum_warmup_buckets < 1:
-        msg = f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
-        raise ConfigError(msg)
+        raise ConfigError(
+            f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
+        )
+    _require_finite_positive("cusum_drift", config.cusum_drift)
+    _require_finite_positive("cusum_threshold", config.cusum_threshold)
 
-    if not math.isfinite(config.cusum_drift) or config.cusum_drift <= 0.0:
-        msg = f"detection.cusum_drift must be finite and > 0, got {config.cusum_drift!r}"
-        raise ConfigError(msg)
-
-    if not math.isfinite(config.cusum_threshold) or config.cusum_threshold <= 0.0:
-        msg = f"detection.cusum_threshold must be finite and > 0, got {config.cusum_threshold!r}"
-        raise ConfigError(msg)
-
-    for name, val in (
-        ("hw_alpha", config.hw_alpha),
-        ("hw_beta", config.hw_beta),
-        ("hw_gamma", config.hw_gamma),
-    ):
-        if not (0.0 < val < 1.0):
-            msg = f"detection.{name} must be in (0, 1), got {val!r}"
-            raise ConfigError(msg)
-
-    if not math.isfinite(config.hw_n_std) or config.hw_n_std <= 0.0:
-        msg = f"detection.hw_n_std must be finite and > 0, got {config.hw_n_std!r}"
-        raise ConfigError(msg)
-
+    for name in ("hw_alpha", "hw_beta", "hw_gamma"):
+        _require_open_unit(name, getattr(config, name))
+    _require_finite_positive("hw_n_std", config.hw_n_std)
     if config.hw_seasonal_period < 2:
-        msg = f"detection.hw_seasonal_period must be >= 2, got {config.hw_seasonal_period!r}"
-        raise ConfigError(msg)
+        raise ConfigError(
+            f"detection.hw_seasonal_period must be >= 2, got {config.hw_seasonal_period!r}"
+        )
 
-    if not math.isfinite(config.markov_smoothing) or config.markov_smoothing <= 0.0:
-        msg = f"detection.markov_smoothing must be finite and > 0, got {config.markov_smoothing!r}"
-        raise ConfigError(msg)
+    _require_finite_positive("markov_smoothing", config.markov_smoothing)
 
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
