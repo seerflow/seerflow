@@ -115,6 +115,7 @@ class DetectionConfig:
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
     weights_pattern: float = 0.20
+    sigma_rules_dirs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -355,6 +356,11 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     hw = data.get("hw", {})
     cusum = data.get("cusum", {})
     markov = data.get("markov", {})
+    raw_sigma_dirs = data.get("sigma_rules_dirs", ())
+    if isinstance(raw_sigma_dirs, list):
+        sigma_rules_dirs = tuple(str(d) for d in raw_sigma_dirs)
+    else:
+        sigma_rules_dirs = ()
     config = DetectionConfig(
         hst_window_size=data.get("hst_window_size", 1000),
         hst_n_trees=data.get("hst_n_trees", 25),
@@ -379,6 +385,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
         weights_pattern=data.get("weights_pattern", 0.20),
+        sigma_rules_dirs=sigma_rules_dirs,
     )
     _validate_detection_config(config)
     return config
