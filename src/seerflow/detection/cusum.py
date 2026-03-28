@@ -162,20 +162,20 @@ class CUSUMDetector:
 
     def serialize(self) -> bytes:
         """Serialize model state to msgpack bytes."""
-        state = {
-            "drift": self._drift,
-            "threshold": self._threshold,
-            "ema_alpha": self._ema_alpha,
-            "warmup_buckets": self._warmup_buckets,
-            "g_upper": self._g_upper,
-            "g_lower": self._g_lower,
-            "running_mean": self._running_mean,
-            "running_var": self._running_var,
-            "last_score": self._last_score,
-            "current_bucket": self._current_bucket,
-            "current_count": self._current_count,
-            "t": self._t,
-        }
+        state = _CUSUMState(
+            drift=self._drift,
+            threshold=self._threshold,
+            ema_alpha=self._ema_alpha,
+            warmup_buckets=self._warmup_buckets,
+            g_upper=self._g_upper,
+            g_lower=self._g_lower,
+            running_mean=self._running_mean,
+            running_var=self._running_var,
+            last_score=self._last_score,
+            current_bucket=self._current_bucket,
+            current_count=self._current_count,
+            t=self._t,
+        )
         return msgspec.msgpack.encode(state)
 
     def deserialize(self, data: bytes) -> None:
@@ -193,6 +193,15 @@ class CUSUMDetector:
         if state.running_var < 0.0:
             msg = f"Invalid running_var in state: {state.running_var}"
             raise ValueError(msg)
+        for field_name, field_val in (
+            ("g_upper", state.g_upper),
+            ("g_lower", state.g_lower),
+            ("running_mean", state.running_mean),
+            ("last_score", state.last_score),
+        ):
+            if not math.isfinite(field_val):
+                msg = f"Non-finite {field_name} in state: {field_val}"
+                raise ValueError(msg)
         self._drift = state.drift
         self._threshold = state.threshold
         self._ema_alpha = state.ema_alpha

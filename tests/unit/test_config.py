@@ -280,8 +280,8 @@ class TestWebhookConfig:
 
 
 class TestReceiverConfigCompleteness:
-    def test_defaults_match_hardcoded(self) -> None:
-        cfg = load_config()
+    def test_defaults_match_hardcoded(self, tmp_path: Path) -> None:
+        cfg = load_config(None, search_dir=tmp_path)
         r = cfg.receivers
         assert r.bind_addr == "0.0.0.0"  # noqa: S104
         assert r.queue_maxsize == 10_000

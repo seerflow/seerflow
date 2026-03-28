@@ -106,8 +106,6 @@ class DetectionEnsemble:
         "_weights",
     )
 
-    _MAX_SOURCES_CEILING = 10_000
-
     def __init__(self, config: DetectionConfig) -> None:
         self._config = config
         self._max_sources = config.max_sources

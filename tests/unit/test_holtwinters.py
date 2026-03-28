@@ -174,13 +174,53 @@ class TestHoltWintersDetector:
         d2 = HoltWintersDetector(seasonal_period=10, alpha=0.1)
         assert d1._alpha != d2._alpha
 
-    def test_deserialize_rejects_invalid_state(self) -> None:
+    def test_deserialize_rejects_invalid_alpha(self) -> None:
         from seerflow.detection.holtwinters import HoltWintersDetector
 
         detector = HoltWintersDetector(seasonal_period=10)
-        # Corrupt: alpha=2.0 (outside 0-1)
         detector._alpha = 2.0
         data = detector.serialize()
         fresh = HoltWintersDetector(seasonal_period=10)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="alpha"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_invalid_seasonal_period(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        detector = HoltWintersDetector(seasonal_period=10)
+        detector._seasonal_period = 1
+        detector._seasonals = [0.0]
+        data = detector.serialize()
+        fresh = HoltWintersDetector(seasonal_period=10)
+        with pytest.raises(ValueError, match="seasonal_period"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_invalid_n_std(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        detector = HoltWintersDetector(seasonal_period=10)
+        detector._n_std = -1.0
+        data = detector.serialize()
+        fresh = HoltWintersDetector(seasonal_period=10)
+        with pytest.raises(ValueError, match="n_std"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_mismatched_seasonals(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        detector = HoltWintersDetector(seasonal_period=10)
+        detector._seasonals = [0.0] * 5  # wrong length
+        data = detector.serialize()
+        fresh = HoltWintersDetector(seasonal_period=10)
+        with pytest.raises(ValueError, match="Seasonals length"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_nan_level(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        detector = HoltWintersDetector(seasonal_period=10)
+        detector._level = float("nan")
+        data = detector.serialize()
+        fresh = HoltWintersDetector(seasonal_period=10)
+        with pytest.raises(ValueError, match="level"):
             fresh.deserialize(data)

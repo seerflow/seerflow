@@ -53,7 +53,7 @@ class WebhookEndpointConfig:
 
     path: str = "/ingest/webhook"
     auth_header: str = ""
-    auth_token: str = ""
+    auth_token: str = field(default="", repr=False)
     field_mapping: dict[str, str] = field(default_factory=dict)
     source_id: str = "webhook"
 
@@ -123,7 +123,7 @@ class AlertingConfig:
 
     dedup_window_seconds: int = 900
     webhooks: tuple[dict[str, Any], ...] = ()
-    pagerduty_routing_key: str = ""
+    pagerduty_routing_key: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
