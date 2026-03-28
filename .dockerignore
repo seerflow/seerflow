@@ -15,6 +15,7 @@ bmad/
 scripts/
 images/
 *.md
+!README.md
 seerflow.yaml
 seerflow.db
 .envrc
