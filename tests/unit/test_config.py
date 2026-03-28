@@ -410,6 +410,22 @@ class TestDetectionValidation:
         config = _build_detection({"markov_max_entities": 2000})
         assert config.markov_max_entities == 2000
 
+    def test_invalid_cusum_drift_zero(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_drift"):
+            _build_detection({"cusum": {"drift": 0.0}})
+
+    def test_invalid_cusum_drift_negative(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_drift"):
+            _build_detection({"cusum": {"drift": -1.0}})
+
+    def test_invalid_cusum_threshold_zero(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_threshold"):
+            _build_detection({"cusum": {"threshold": 0.0}})
+
+    def test_invalid_cusum_threshold_negative(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_threshold"):
+            _build_detection({"cusum": {"threshold": -5.0}})
+
     def test_defaults_are_valid(self) -> None:
         config = _build_detection({})
         assert config.hw_seasonal_period == 1440

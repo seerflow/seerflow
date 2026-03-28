@@ -316,6 +316,14 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         msg = f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
         raise ConfigError(msg)
 
+    if config.cusum_drift <= 0.0:
+        msg = f"detection.cusum_drift must be > 0, got {config.cusum_drift!r}"
+        raise ConfigError(msg)
+
+    if config.cusum_threshold <= 0.0:
+        msg = f"detection.cusum_threshold must be > 0, got {config.cusum_threshold!r}"
+        raise ConfigError(msg)
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     dspot = data.get("dspot", {})
