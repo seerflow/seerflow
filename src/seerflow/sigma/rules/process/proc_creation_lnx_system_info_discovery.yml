@@ -1,0 +1,33 @@
+title: Linux System Information Discovery Via Command Line
+id: b8e0c673-3f8b-4a12-9c2e-4e3a6c8d5f91
+status: test
+description: |
+    Detects execution of common system information discovery commands often
+    used by adversaries during the reconnaissance phase after initial access.
+references:
+    - https://attack.mitre.org/techniques/T1033/
+    - https://attack.mitre.org/techniques/T1082/
+    - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1033/T1033.md
+author: Seerflow
+date: 2026-03-28
+tags:
+    - attack.discovery
+    - attack.t1033
+    - attack.t1082
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection:
+        CommandLine|contains:
+            - 'whoami'
+            - 'id -'
+            - 'uname -a'
+            - 'hostname -'
+            - 'cat /etc/os-release'
+            - 'cat /etc/passwd'
+    condition: selection
+falsepositives:
+    - Legitimate system administration
+    - Monitoring scripts
+level: low

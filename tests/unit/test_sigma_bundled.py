@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from seerflow.sigma.bundled import get_bundled_rule_paths
+from seerflow.sigma.engine import SigmaEngine
 
 
 class TestBundledRuleDiscovery:
@@ -22,3 +23,49 @@ class TestBundledRuleDiscovery:
         paths = get_bundled_rule_paths()
         for p in paths:
             assert p.exists(), f"Rule file does not exist: {p}"
+
+
+class TestBundledRuleCount:
+    def test_at_least_50_rules_bundled(self) -> None:
+        paths = get_bundled_rule_paths()
+        assert len(paths) >= 50, f"Only {len(paths)} rules bundled, need >= 50"
+
+    def test_rules_in_expected_categories(self) -> None:
+        paths = get_bundled_rule_paths()
+        categories = {p.parent.name for p in paths}
+        assert "linux" in categories
+        assert "process" in categories
+        assert "web" in categories
+        assert "dns" in categories
+
+
+class TestSigmaEngineLoadBundled:
+    def test_load_bundled_populates_engine(self) -> None:
+        engine = SigmaEngine()
+        engine.load_bundled()
+        assert engine.rule_count >= 50
+
+    def test_load_bundled_all_rules_compile(self) -> None:
+        """Every bundled rule must compile without errors."""
+        engine = SigmaEngine()
+        engine.load_bundled()
+        # If any rule failed to compile, it would be skipped and
+        # rule_count would be less than the number of files
+        paths = get_bundled_rule_paths()
+        assert engine.rule_count == len(paths), (
+            f"{len(paths) - engine.rule_count} rules failed to compile"
+        )
+
+    def test_bundled_rule_matches_crafted_event(self) -> None:
+        """At least one bundled rule fires on a whoami event."""
+        from tests.helpers import make_event
+
+        engine = SigmaEngine()
+        engine.load_bundled()
+        event = make_event(
+            message="bash -c whoami",
+            log_source_category="process_creation",
+            log_source_product="linux",
+        )
+        alerts = engine.evaluate(event)
+        assert len(alerts) >= 1

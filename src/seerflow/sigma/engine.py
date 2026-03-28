@@ -93,6 +93,17 @@ class SigmaEngine:
             len(self._index),
         )
 
+    def load_bundled(self) -> None:
+        """Load all bundled SigmaHQ rules from the package.
+
+        Convenience method for zero-config startup. Equivalent to::
+
+            engine.load_rules(get_bundled_rule_paths())
+        """
+        from seerflow.sigma.bundled import get_bundled_rule_paths
+
+        self.load_rules(get_bundled_rule_paths())
+
     def evaluate(self, event: SeerflowEvent) -> list[Alert]:
         """Evaluate event against applicable rules using logsource dispatch.
 
