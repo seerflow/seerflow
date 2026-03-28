@@ -36,6 +36,9 @@ COPY --from=builder /app/.venv /app/.venv
 # Put the venv on PATH so "seerflow" command is available
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Create data directory with correct ownership before switching to non-root
+RUN mkdir -p /app/data && chown nobody:nogroup /app/data
+
 # Run as non-root
 USER nobody
 

@@ -7,7 +7,7 @@ services:
       - "4318:4318"    # OTLP HTTP
       - "514:514/udp"  # syslog
     volumes:
-      - ./seerflow.yaml:/app/seerflow.yaml:ro
+      - ./seerflow.yaml:/app/seerflow.yaml:ro  # optional — omit for zero-config defaults
       - seerflow-data:/app/data
     restart: unless-stopped
     depends_on:
