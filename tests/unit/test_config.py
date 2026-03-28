@@ -549,4 +549,10 @@ class TestSigmaRulesDirsConfig:
         yaml_file = tmp_path / "seerflow.yaml"
         yaml_file.write_text("detection:\n  sigma_rules_dirs:\n    - /path/one\n    - 12345\n")
         cfg = load_config(str(yaml_file))
-        assert all(isinstance(d, str) for d in cfg.detection.sigma_rules_dirs)
+        assert cfg.detection.sigma_rules_dirs == ("/path/one", "12345")
+
+    def test_sigma_rules_dirs_scalar_raises_config_error(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  sigma_rules_dirs: /etc/rules\n")
+        with pytest.raises(ConfigError, match="sigma_rules_dirs must be a list"):
+            load_config(str(yaml_file))

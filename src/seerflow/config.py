@@ -359,8 +359,12 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     raw_sigma_dirs = data.get("sigma_rules_dirs", ())
     if isinstance(raw_sigma_dirs, list):
         sigma_rules_dirs = tuple(str(d) for d in raw_sigma_dirs)
-    else:
+    elif raw_sigma_dirs == ():
         sigma_rules_dirs = ()
+    else:
+        raise ConfigError(
+            f"detection.sigma_rules_dirs must be a list, got {type(raw_sigma_dirs).__name__!r}"
+        )
     config = DetectionConfig(
         hst_window_size=data.get("hst_window_size", 1000),
         hst_n_trees=data.get("hst_n_trees", 25),

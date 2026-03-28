@@ -67,7 +67,7 @@ class TestDiscoverCustomRules:
     def test_symlink_followed_with_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Symlinks in rule directories are followed with a log warning."""
+        """Symlinks in rule directories are followed with an info log."""
         real_dir = tmp_path / "real"
         real_dir.mkdir()
         (real_dir / "rule.yml").write_text(
