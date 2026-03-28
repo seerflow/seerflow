@@ -39,6 +39,23 @@ uv run python -m seerflow --config /path/to/seerflow.yaml start
 uv run python -m seerflow --version
 ```
 
+### Docker
+
+```bash
+# Build and run with SQLite defaults (zero config)
+docker compose up -d
+
+# Run with PostgreSQL (set password first)
+export POSTGRES_PASSWORD=your-secure-password
+docker compose --profile postgres up -d
+
+# Or run standalone from a registry image
+docker run -p 8080:8080 -p 4317:4317 -p 514:514/udp seerflow/seerflow
+
+# Mount a custom config
+docker run -v ./seerflow.yaml:/app/seerflow.yaml:ro seerflow/seerflow
+```
+
 ### What It Does
 
 1. **Ingests** logs from multiple sources simultaneously (syslog, OTLP gRPC/HTTP, file tailing, webhooks)
