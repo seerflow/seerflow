@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 import msgspec.json
 
+from seerflow.sigma.attack import format_tactic, format_technique
+
 if TYPE_CHECKING:
     import argparse
 
@@ -181,11 +183,26 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
             alert_type=args.type,
             severity_min=args.severity,
             limit=args.limit,
+            tactic=getattr(args, "tactic", None),
+            technique=getattr(args, "technique", None),
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return
     result = await storage.query_alerts(query)
+
+    # Post-decode filtering for tactic/technique (stored in msgpack BLOB)
+    if query.tactic or query.technique:
+        filtered = []
+        for a in result.items:
+            if query.tactic and query.tactic not in a.mitre_tactics:
+                continue
+            if query.technique and query.technique not in a.mitre_techniques:
+                continue
+            filtered.append(a)
+        result = type(result)(
+            items=tuple(filtered), total=len(filtered), page=result.page, limit=result.limit
+        )
 
     if not result.items:
         print("No alerts found.")
@@ -201,6 +218,8 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
                     "severity": a.severity_id.name,
                     "score": round(a.risk_score, 3),
                     "rule": a.rule_name,
+                    "tactics": [format_tactic(t) for t in a.mitre_tactics],
+                    "techniques": [format_technique(t) for t in a.mitre_techniques],
                     "dedup_count": a.dedup_count,
                     "description": a.description,
                 }
@@ -211,7 +230,7 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
         print()
         return
 
-    headers = ["TIMESTAMP", "TYPE", "SEVERITY", "SCORE", "RULE", "DEDUP", "DESCRIPTION"]
+    headers = ["TIMESTAMP", "TYPE", "SEVERITY", "SCORE", "RULE", "TACTICS", "TECHNIQUES", "DEDUP"]
     rows = [
         [
             format_timestamp(a.timestamp_ns),
@@ -219,8 +238,9 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
             a.severity_id.name,
             f"{a.risk_score:.3f}",
             a.rule_name,
+            ", ".join(format_tactic(t) for t in a.mitre_tactics) or "-",
+            ", ".join(format_technique(t) for t in a.mitre_techniques) or "-",
             str(a.dedup_count),
-            a.description[:50],
         ]
         for a in result.items
     ]

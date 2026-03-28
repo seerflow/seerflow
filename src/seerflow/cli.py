@@ -29,6 +29,12 @@ def _add_query_subparsers(subparsers: argparse._SubParsersAction) -> None:  # ty
     al.add_argument("--severity", type=int, default=None, help="Minimum severity (0-6)")
     al.add_argument("--limit", type=int, default=50, help="Max results (default: 50)")
     al.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+    al.add_argument(
+        "--tactic", type=str, default=None, help="Filter by ATT&CK tactic (e.g., discovery)"
+    )
+    al.add_argument(
+        "--technique", type=str, default=None, help="Filter by ATT&CK technique (e.g., t1033)"
+    )
 
     # --- query templates ---
     tpl = query_sub.add_parser("templates", help="Query Drain3 templates")

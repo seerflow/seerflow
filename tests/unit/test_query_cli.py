@@ -176,6 +176,25 @@ class TestQueryArgparse:
         args = parse_args(["query", "alerts", "--type", "ml"])
         assert args.type == "ml"
 
+    def test_query_alerts_tactic(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "alerts", "--tactic", "discovery"])
+        assert args.tactic == "discovery"
+
+    def test_query_alerts_technique(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "alerts", "--technique", "t1033"])
+        assert args.technique == "t1033"
+
+    def test_query_alerts_tactic_default_none(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "alerts"])
+        assert args.tactic is None
+        assert args.technique is None
+
     def test_query_templates_defaults(self) -> None:
         from seerflow.cli import parse_args
 
@@ -361,7 +380,9 @@ class TestRunQueryAlerts:
         )
         await storage.write_alert(alert)
 
-        args = argparse.Namespace(last=None, type=None, severity=None, limit=50, json=False)
+        args = argparse.Namespace(
+            last=None, type=None, severity=None, limit=50, json=False, tactic=None, technique=None
+        )
         await run_query_alerts(storage, args)
         captured = capsys.readouterr()
 
@@ -404,10 +425,13 @@ class TestRunQueryAlerts:
         )
         await storage.write_alert(alert)
 
-        args = argparse.Namespace(last="1h", type=None, severity=None, limit=50, json=False)
+        args = argparse.Namespace(
+            last="1h", type=None, severity=None, limit=50, json=False, tactic=None, technique=None
+        )
         await run_query_alerts(storage, args)
         captured = capsys.readouterr()
-        assert "recent alert" in captured.out
+        assert "hst-anomaly" in captured.out
+        assert "1 alert(s) total" in captured.out
 
         await storage.close()
 
@@ -443,7 +467,9 @@ class TestRunQueryAlerts:
         )
         await storage.write_alert(alert)
 
-        args = argparse.Namespace(last=None, type=None, severity=None, limit=50, json=True)
+        args = argparse.Namespace(
+            last=None, type=None, severity=None, limit=50, json=True, tactic=None, technique=None
+        )
         await run_query_alerts(storage, args)
         captured = capsys.readouterr()
         parsed = json.loads(captured.out)
@@ -466,10 +492,276 @@ class TestRunQueryAlerts:
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
 
-        args = argparse.Namespace(last=None, type=None, severity=None, limit=50, json=False)
+        args = argparse.Namespace(
+            last=None, type=None, severity=None, limit=50, json=False, tactic=None, technique=None
+        )
         await run_query_alerts(storage, args)
         captured = capsys.readouterr()
         assert "No alerts found" in captured.out
+
+        await storage.close()
+
+    async def test_alerts_table_shows_tactics_and_techniques(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Alert table output includes TACTICS and TECHNIQUES columns."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert = Alert(
+            alert_id="alert-tactic",
+            alert_type="sigma",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="recon-rule",
+            description="Discovery detected",
+            entity_uuid="ent-1",
+            entity_value="10.0.0.1",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            mitre_tactics=("discovery",),
+            mitre_techniques=("t1033",),
+            risk_score=0.70,
+            dedup_key="sigma:recon",
+        )
+        await storage.write_alert(alert)
+
+        args = argparse.Namespace(
+            last=None, type=None, severity=None, limit=50, json=False, tactic=None, technique=None
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+
+        assert "TACTICS" in captured.out
+        assert "TECHNIQUES" in captured.out
+        assert "Discovery (TA0007)" in captured.out
+        assert "T1033" in captured.out
+
+        await storage.close()
+
+    async def test_alerts_json_includes_tactics_and_techniques(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Alert JSON output includes formatted tactics and techniques."""
+        import argparse
+        import json
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert = Alert(
+            alert_id="alert-json-tactic",
+            alert_type="sigma",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.ERROR,
+            rule_name="lateral-rule",
+            description="Lateral movement",
+            entity_uuid="ent-2",
+            entity_value="10.0.0.2",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            mitre_tactics=("lateral_movement",),
+            mitre_techniques=("t1021.001",),
+            risk_score=0.90,
+            dedup_key="sigma:lateral",
+        )
+        await storage.write_alert(alert)
+
+        args = argparse.Namespace(
+            last=None, type=None, severity=None, limit=50, json=True, tactic=None, technique=None
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+
+        assert parsed[0]["tactics"] == ["Lateral Movement (TA0008)"]
+        assert parsed[0]["techniques"] == ["T1021.001"]
+
+        await storage.close()
+
+    async def test_alerts_tactic_filter(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--tactic filter only returns alerts matching the given tactic."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert_disco = Alert(
+            alert_id="alert-disco",
+            alert_type="sigma",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="disco-rule",
+            description="Discovery alert",
+            entity_uuid="ent-1",
+            entity_value="10.0.0.1",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            mitre_tactics=("discovery",),
+            risk_score=0.60,
+            dedup_key="sigma:disco",
+        )
+        alert_exec = Alert(
+            alert_id="alert-exec",
+            alert_type="sigma",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.ERROR,
+            rule_name="exec-rule",
+            description="Execution alert",
+            entity_uuid="ent-2",
+            entity_value="10.0.0.2",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            mitre_tactics=("execution",),
+            risk_score=0.80,
+            dedup_key="sigma:exec",
+        )
+        await storage.write_alert(alert_disco)
+        await storage.write_alert(alert_exec)
+
+        args = argparse.Namespace(
+            last=None,
+            type=None,
+            severity=None,
+            limit=50,
+            json=False,
+            tactic="discovery",
+            technique=None,
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+
+        assert "disco-rule" in captured.out
+        assert "exec-rule" not in captured.out
+
+        await storage.close()
+
+    async def test_alerts_technique_filter(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--technique filter only returns alerts matching the given technique."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert_t1033 = Alert(
+            alert_id="alert-t1033",
+            alert_type="sigma",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="whoami-rule",
+            description="whoami detected",
+            entity_uuid="ent-1",
+            entity_value="10.0.0.1",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            mitre_techniques=("t1033",),
+            risk_score=0.60,
+            dedup_key="sigma:t1033",
+        )
+        alert_other = Alert(
+            alert_id="alert-t1059",
+            alert_type="sigma",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.ERROR,
+            rule_name="scripting-rule",
+            description="scripting detected",
+            entity_uuid="ent-2",
+            entity_value="10.0.0.2",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            mitre_techniques=("t1059",),
+            risk_score=0.80,
+            dedup_key="sigma:t1059",
+        )
+        await storage.write_alert(alert_t1033)
+        await storage.write_alert(alert_other)
+
+        args = argparse.Namespace(
+            last=None,
+            type=None,
+            severity=None,
+            limit=50,
+            json=False,
+            tactic=None,
+            technique="t1033",
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+
+        assert "whoami-rule" in captured.out
+        assert "scripting-rule" not in captured.out
+
+        await storage.close()
+
+    async def test_alerts_empty_tactics_shows_dash(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Alert with no tactics/techniques shows '-' in table output."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert = Alert(
+            alert_id="alert-no-mitre",
+            alert_type="ml",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="hst-anomaly",
+            description="Anomaly detected",
+            entity_uuid="ent-1",
+            entity_value="10.0.0.1",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            risk_score=0.85,
+            dedup_key="hst:5:syslog-nomt",
+        )
+        await storage.write_alert(alert)
+
+        args = argparse.Namespace(
+            last=None, type=None, severity=None, limit=50, json=False, tactic=None, technique=None
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+
+        # Both TACTICS and TECHNIQUES should show '-' for an alert with no mitre data
+        assert "-" in captured.out
 
         await storage.close()
 
@@ -616,6 +908,8 @@ class TestRunQuery:
             severity=None,
             limit=50,
             json=False,
+            tactic=None,
+            technique=None,
         )
         with patch("seerflow.config.load_config", return_value=config):
             from seerflow.query import run_query
@@ -664,7 +958,15 @@ class TestQueryValidation:
 
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
-        args = argparse.Namespace(last=None, type="invalid", severity=None, limit=50, json=False)
+        args = argparse.Namespace(
+            last=None,
+            type="invalid",
+            severity=None,
+            limit=50,
+            json=False,
+            tactic=None,
+            technique=None,
+        )
         await run_query_alerts(storage, args)
         captured = capsys.readouterr()
         assert "unknown alert type" in captured.err

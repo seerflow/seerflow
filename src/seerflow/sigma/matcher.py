@@ -26,6 +26,7 @@ from sigma.conditions import (
 from sigma.types import SigmaString, SpecialChars
 
 from seerflow.models.event import SeverityLevel
+from seerflow.sigma.attack import is_valid_tactic
 from seerflow.sigma.pipeline import TUPLE_FIELDS
 
 if TYPE_CHECKING:
@@ -106,6 +107,12 @@ def _extract_attack_tags(
         if name.startswith("t") and len(name) > 1 and name[1:2].isdigit():
             techniques.append(name)
         else:
+            if not is_valid_tactic(name):
+                logger.warning(
+                    "Unknown ATT&CK tactic '%s' in rule '%s'",
+                    name,
+                    rule.title or "Untitled",
+                )
             tactics.append(name)
     return tuple(tactics), tuple(techniques)
 
