@@ -163,7 +163,7 @@ def _create_sigma_alert(compiled: CompiledRule, event: SeerflowEvent) -> Alert:
         description=compiled.description,
         entity_uuid=entity_refs[0] if entity_refs else "",
         entity_value=entity_refs[0] if entity_refs else "",
-        entity_type="ip",
+        entity_type="ip",  # TODO(S-028): infer from matched fields
         contributing_events=(event.event_id,),
         mitre_tactics=compiled.attack_tactics,
         mitre_techniques=compiled.attack_techniques,

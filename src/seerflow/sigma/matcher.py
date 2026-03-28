@@ -56,13 +56,22 @@ _SIGMA_LEVEL_MAP: dict[str | None, SeverityLevel] = {
 }
 
 
+_regex_cache: dict[int, re.Pattern[str]] = {}
+
+
 def _sigma_string_to_regex(s: SigmaString) -> re.Pattern[str]:
     """Convert a pySigma SigmaString (with wildcards) to a compiled regex.
 
     ``SigmaString.s`` is a list of ``str | SpecialChars`` parts.
     ``WILDCARD_MULTI`` -> ``.*``, ``WILDCARD_SINGLE`` -> ``.``.
     The regex is anchored (``^...$``) and case-insensitive.
+    Results are cached by ``id(s)`` — safe because SigmaString objects
+    live on compiled rules and are never mutated after parsing.
     """
+    key = id(s)
+    cached = _regex_cache.get(key)
+    if cached is not None:
+        return cached
     parts: list[str] = []
     for piece in s.s:
         if isinstance(piece, str):
@@ -72,7 +81,9 @@ def _sigma_string_to_regex(s: SigmaString) -> re.Pattern[str]:
         elif piece == SpecialChars.WILDCARD_SINGLE:
             parts.append(".")
     pattern = "^" + "".join(parts) + "$"
-    return re.compile(pattern, re.IGNORECASE | re.DOTALL)
+    result = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+    _regex_cache[key] = result
+    return result
 
 
 def _extract_attack_tags(
@@ -184,6 +195,7 @@ def match_event(compiled: CompiledRule, event: dict[str, Any]) -> bool:
     (``ConditionFieldEqualsValueExpression``) against the event.
     """
     rule = compiled._rule
-    for sigma_condition in rule.detection.parsed_condition:
-        return _eval_node(sigma_condition.parsed, event)
-    return False
+    conditions = rule.detection.parsed_condition
+    if not conditions:
+        return False
+    return all(_eval_node(c.parsed, event) for c in conditions)
