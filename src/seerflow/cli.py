@@ -51,6 +51,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.required = True
+
+    subparsers.add_parser("start", help="Start the Seerflow pipeline")
+
     tail_parser = subparsers.add_parser("tail", help="Monitor log files (no config needed)")
     tail_parser.add_argument("paths", nargs="+", help="File paths or glob patterns")
 

@@ -12,7 +12,11 @@ def main() -> None:
     """CLI entry point."""
     args = parse_args()
     try:
-        if args.command == "tail":
+        if args.command == "start":
+            from seerflow.pipeline.run import _run
+
+            asyncio.run(_run(args.config))
+        elif args.command == "tail":
             from seerflow.pipeline.run import _run_with_config
             from seerflow.pipeline.tail import _build_tail_config
 
@@ -23,9 +27,7 @@ def main() -> None:
 
             asyncio.run(run_query(args))
         else:
-            from seerflow.pipeline.run import _run
-
-            asyncio.run(_run(args.config))
+            raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:
         sys.exit(0)
 

@@ -20,11 +20,11 @@ class TestCLIArgs:
         assert exc.value.code == 0
 
     def test_config_flag(self) -> None:
-        args = parse_args(["--config", "/path/to/config.yaml"])
+        args = parse_args(["--config", "/path/to/config.yaml", "start"])
         assert args.config == "/path/to/config.yaml"
 
     def test_default_no_config(self) -> None:
-        args = parse_args([])
+        args = parse_args(["start"])
         assert args.config is None
 
     def test_unknown_flag_exits(self) -> None:
@@ -275,13 +275,13 @@ class TestRunLoop:
             asyncio.run(_run("/nonexistent/path.yaml"))
 
     def test_main_calls_parse_args_and_run(self) -> None:
-        """main() wires parse_args → asyncio.run(_run)."""
+        """main() wires parse_args → asyncio.run(_run) for 'start' command."""
         import argparse
         from unittest.mock import MagicMock, patch
 
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None, command=None)
+        mock_args = argparse.Namespace(config=None, command="start")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.__main__.asyncio") as mock_asyncio,
@@ -297,7 +297,7 @@ class TestRunLoop:
 
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None, command=None)
+        mock_args = argparse.Namespace(config=None, command="start")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.__main__.asyncio") as mock_asyncio,
@@ -529,6 +529,25 @@ class TestRunLoop:
             await handler(event)  # Should not raise
 
 
+class TestStartSubcommand:
+    def test_start_subcommand(self) -> None:
+        """The 'start' subcommand should parse successfully."""
+        args = parse_args(["start"])
+        assert args.command == "start"
+
+    def test_start_with_config(self) -> None:
+        """The 'start' subcommand accepts --config."""
+        args = parse_args(["--config", "/tmp/test.yaml", "start"])
+        assert args.command == "start"
+        assert args.config == "/tmp/test.yaml"
+
+    def test_no_subcommand_shows_help(self) -> None:
+        """Running seerflow with no subcommand should exit with error code 2."""
+        with pytest.raises(SystemExit) as exc:
+            parse_args([])
+        assert exc.value.code == 2
+
+
 class TestTailSubcommand:
     def test_tail_parses_single_path(self) -> None:
         args = parse_args(["tail", "/var/log/syslog"])
@@ -544,9 +563,10 @@ class TestTailSubcommand:
         assert args.paths == ["/var/log/syslog"]
         assert args.config == "my.yaml"
 
-    def test_default_command_is_none(self) -> None:
-        args = parse_args([])
-        assert args.command is None
+    def test_no_subcommand_exits(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            parse_args([])
+        assert exc.value.code == 2
 
     def test_tail_no_paths_exits(self) -> None:
         with pytest.raises(SystemExit) as exc:

@@ -1,0 +1,35 @@
+services:
+  seerflow:
+    build: .
+    ports:
+      - "8080:8080"    # HTTP API
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+      - "514:514/udp"  # syslog
+    volumes:
+      - ./seerflow.yaml:/app/seerflow.yaml:ro  # optional — omit for zero-config defaults
+      - seerflow-data:/app/data
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: seerflow
+      POSTGRES_USER: seerflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or environment}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seerflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  seerflow-data:
+  pgdata:

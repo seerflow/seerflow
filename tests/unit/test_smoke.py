@@ -62,5 +62,6 @@ def test_cli_parse_args() -> None:
     from seerflow.cli import parse_args
 
     assert callable(parse_args)
-    args = parse_args([])
+    args = parse_args(["start"])
+    assert args.command == "start"
     assert args.config is None
