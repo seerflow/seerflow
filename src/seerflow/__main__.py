@@ -26,6 +26,8 @@ def main() -> None:
             from seerflow.query import run_query
 
             asyncio.run(run_query(args))
+        else:
+            raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:
         sys.exit(0)
 

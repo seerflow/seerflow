@@ -542,9 +542,10 @@ class TestStartSubcommand:
         assert args.config == "/tmp/test.yaml"
 
     def test_no_subcommand_shows_help(self) -> None:
-        """Running seerflow with no subcommand should exit with error."""
-        with pytest.raises(SystemExit):
+        """Running seerflow with no subcommand should exit with error code 2."""
+        with pytest.raises(SystemExit) as exc:
             parse_args([])
+        assert exc.value.code == 2
 
 
 class TestTailSubcommand:

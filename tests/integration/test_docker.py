@@ -30,24 +30,28 @@ def _docker(
 
 
 @pytest.fixture(scope="module", autouse=True)
-def built_image() -> str:
+def built_image() -> None:
     """Build the Docker image once for all tests in this module."""
     result = _docker(["build", "-t", IMAGE_NAME, "."], timeout=600)
     assert result.returncode == 0, f"Docker build failed:\n{result.stderr}"
-    return IMAGE_NAME
 
 
 class TestDockerImage:
     def test_image_size_under_200mb(self) -> None:
         """Compressed image size must be under 200MB."""
-        result = subprocess.run(  # noqa: S603
-            ["bash", "-c", f"docker save {IMAGE_NAME} | gzip | wc -c"],  # noqa: S607
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=300,
+        save = subprocess.Popen(  # noqa: S603
+            ["docker", "save", IMAGE_NAME],  # noqa: S607
+            stdout=subprocess.PIPE,
         )
-        compressed_bytes = int(result.stdout.strip())
+        gzip_proc = subprocess.Popen(
+            ["gzip"],  # noqa: S607
+            stdin=save.stdout,
+            stdout=subprocess.PIPE,
+        )
+        assert save.stdout is not None
+        save.stdout.close()
+        compressed, _ = gzip_proc.communicate(timeout=300)
+        compressed_bytes = len(compressed)
         max_bytes = MAX_IMAGE_SIZE_MB * 1024 * 1024
         assert compressed_bytes < max_bytes, (
             f"Compressed image is {compressed_bytes / (1024 * 1024):.0f}MB, "
@@ -72,7 +76,9 @@ class TestDockerImage:
     def test_tini_is_pid_1(self) -> None:
         """tini must be the init process (PID 1)."""
         result = _docker(["run", "--rm", IMAGE_NAME, "cat", "/proc/1/cmdline"])
-        assert "tini" in result.stdout
+        # /proc/1/cmdline uses NUL bytes as argument separators
+        cmdline = result.stdout.replace("\x00", " ").strip()
+        assert "tini" in cmdline, f"Expected tini as PID 1, got: {cmdline!r}"
 
     def test_ports_exposed(self) -> None:
         """Image must expose 8080/tcp, 4317/tcp, 4318/tcp, 514/udp."""

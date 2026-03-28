@@ -18,7 +18,7 @@ services:
     environment:
       POSTGRES_DB: seerflow
       POSTGRES_USER: seerflow
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seerflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or environment}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

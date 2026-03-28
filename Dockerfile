@@ -6,7 +6,7 @@ FROM python:3.13-slim AS builder
 WORKDIR /app
 
 # Install uv from the official image (no pip needed in builder)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /usr/local/bin/uv
 
 # Copy dependency files first for layer caching
 COPY pyproject.toml uv.lock README.md ./
@@ -29,9 +29,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only the venv and source from builder (no uv, no build tools)
+# Copy only the venv from builder (no uv, no build tools, no source —
+# the package is installed as a wheel inside .venv/lib/python3.13/site-packages/)
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/src /app/src
 
 # Put the venv on PATH so "seerflow" command is available
 ENV PATH="/app/.venv/bin:$PATH"
