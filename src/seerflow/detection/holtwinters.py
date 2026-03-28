@@ -8,10 +8,12 @@ NOT thread-safe — create one instance per source (the ensemble handles this).
 
 from __future__ import annotations
 
+import math
 import statistics
 from collections import deque
 from typing import TYPE_CHECKING
 
+import msgspec
 import msgspec.msgpack
 
 if TYPE_CHECKING:
@@ -19,6 +21,25 @@ if TYPE_CHECKING:
 
 _BUCKET_NS = 60 * 1_000_000_000  # 1 minute in nanoseconds
 _MAX_RESIDUALS = 100
+
+
+class _HWState(msgspec.Struct):
+    """Typed schema for HoltWinters serialized state."""
+
+    seasonal_period: int
+    alpha: float
+    beta: float
+    gamma: float
+    n_std: float
+    level: float
+    trend: float
+    seasonals: list[float]
+    residuals: list[float]
+    current_bucket: int
+    current_count: int
+    t: int
+    last_score: float
+    initialized: bool
 
 
 class HoltWintersDetector:
@@ -151,38 +172,66 @@ class HoltWintersDetector:
 
     def serialize(self) -> bytes:
         """Serialize model state to msgpack bytes."""
-        state = {
-            "seasonal_period": self._seasonal_period,
-            "alpha": self._alpha,
-            "beta": self._beta,
-            "gamma": self._gamma,
-            "n_std": self._n_std,
-            "level": self._level,
-            "trend": self._trend,
-            "seasonals": self._seasonals,
-            "residuals": list(self._residuals),
-            "current_bucket": self._current_bucket,
-            "current_count": self._current_count,
-            "t": self._t,
-            "last_score": self._last_score,
-            "initialized": self._initialized,
-        }
+        state = _HWState(
+            seasonal_period=self._seasonal_period,
+            alpha=self._alpha,
+            beta=self._beta,
+            gamma=self._gamma,
+            n_std=self._n_std,
+            level=self._level,
+            trend=self._trend,
+            seasonals=self._seasonals,
+            residuals=list(self._residuals),
+            current_bucket=self._current_bucket,
+            current_count=self._current_count,
+            t=self._t,
+            last_score=self._last_score,
+            initialized=self._initialized,
+        )
         return msgspec.msgpack.encode(state)
 
     def deserialize(self, data: bytes) -> None:
         """Restore model state from msgpack bytes."""
-        state: dict = msgspec.msgpack.decode(data)  # type: ignore[type-arg]
-        self._seasonal_period = state["seasonal_period"]
-        self._alpha = state["alpha"]
-        self._beta = state["beta"]
-        self._gamma = state["gamma"]
-        self._n_std = state["n_std"]
-        self._level = state["level"]
-        self._trend = state["trend"]
-        self._seasonals = state["seasonals"]
-        self._residuals = deque(state["residuals"], maxlen=_MAX_RESIDUALS)
-        self._current_bucket = state["current_bucket"]
-        self._current_count = state["current_count"]
-        self._t = state["t"]
-        self._last_score = state["last_score"]
-        self._initialized = state["initialized"]
+        state = msgspec.msgpack.decode(data, type=_HWState)
+        # Validate invariants
+        if state.seasonal_period < 2:
+            msg = f"Invalid seasonal_period in state: {state.seasonal_period}"
+            raise ValueError(msg)
+        for name, val in [("alpha", state.alpha), ("beta", state.beta), ("gamma", state.gamma)]:
+            if not (0.0 < val < 1.0):
+                msg = f"Invalid {name} in state: {val}"
+                raise ValueError(msg)
+        if state.n_std <= 0.0:
+            msg = f"Invalid n_std in state: {state.n_std}"
+            raise ValueError(msg)
+        if len(state.seasonals) != state.seasonal_period:
+            msg = (
+                f"Seasonals length {len(state.seasonals)} "
+                f"!= seasonal_period {state.seasonal_period}"
+            )
+            raise ValueError(msg)
+        for field_name, field_val in (
+            ("level", state.level),
+            ("trend", state.trend),
+            ("last_score", state.last_score),
+        ):
+            if not math.isfinite(field_val):
+                msg = f"Non-finite {field_name} in state: {field_val}"
+                raise ValueError(msg)
+        if any(not math.isfinite(s) for s in state.seasonals):
+            msg = "Non-finite value in seasonals"
+            raise ValueError(msg)
+        self._seasonal_period = state.seasonal_period
+        self._alpha = state.alpha
+        self._beta = state.beta
+        self._gamma = state.gamma
+        self._n_std = state.n_std
+        self._level = state.level
+        self._trend = state.trend
+        self._seasonals = state.seasonals
+        self._residuals = deque(state.residuals, maxlen=_MAX_RESIDUALS)
+        self._current_bucket = state.current_bucket
+        self._current_count = state.current_count
+        self._t = state.t
+        self._last_score = state.last_score
+        self._initialized = state.initialized

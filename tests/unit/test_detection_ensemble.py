@@ -450,3 +450,15 @@ class TestEnsembleHardening:
 
         with pytest.raises(ValueError):
             _WelfordAccumulator.from_dict(bad_state)
+
+    def test_null_byte_stripped_from_source(self) -> None:
+        """Null bytes in source_type are stripped."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="sys\x00log"))
+        keys = list(ensemble._detectors.keys())
+        assert "syslog" in keys
+        assert "\x00" not in keys[0]

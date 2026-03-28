@@ -200,3 +200,53 @@ class TestCUSUMDetector:
         # Skip 3 minutes
         detector.learn(_make_event(timestamp_ns=base_ns + 5 * _BUCKET_NS))
         assert detector._t >= t_before + 4
+
+    def test_deserialize_rejects_invalid_drift(self) -> None:
+        from seerflow.detection.cusum import CUSUMDetector
+
+        detector = CUSUMDetector()
+        detector._drift = 0.0
+        data = detector.serialize()
+        fresh = CUSUMDetector()
+        with pytest.raises(ValueError, match="drift"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_invalid_threshold(self) -> None:
+        from seerflow.detection.cusum import CUSUMDetector
+
+        detector = CUSUMDetector()
+        detector._threshold = -1.0
+        data = detector.serialize()
+        fresh = CUSUMDetector()
+        with pytest.raises(ValueError, match="threshold"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_invalid_ema_alpha(self) -> None:
+        from seerflow.detection.cusum import CUSUMDetector
+
+        detector = CUSUMDetector()
+        detector._ema_alpha = 1.5
+        data = detector.serialize()
+        fresh = CUSUMDetector()
+        with pytest.raises(ValueError, match="ema_alpha"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_negative_running_var(self) -> None:
+        from seerflow.detection.cusum import CUSUMDetector
+
+        detector = CUSUMDetector()
+        detector._running_var = -0.5
+        data = detector.serialize()
+        fresh = CUSUMDetector()
+        with pytest.raises(ValueError, match="running_var"):
+            fresh.deserialize(data)
+
+    def test_deserialize_rejects_nan_g_upper(self) -> None:
+        from seerflow.detection.cusum import CUSUMDetector
+
+        detector = CUSUMDetector()
+        detector._g_upper = float("nan")
+        data = detector.serialize()
+        fresh = CUSUMDetector()
+        with pytest.raises(ValueError, match="g_upper"):
+            fresh.deserialize(data)
