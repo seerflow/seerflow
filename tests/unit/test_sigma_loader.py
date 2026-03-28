@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from seerflow.sigma.engine import SigmaEngine
 from seerflow.sigma.loader import discover_custom_rules
+from tests.helpers import make_event
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -94,3 +96,76 @@ class TestDiscoverCustomRules:
         """Empty dirs list returns empty result."""
         result = discover_custom_rules([])
         assert result == []
+
+
+class TestSigmaEngineLoadCustom:
+    def test_load_custom_with_valid_dir(self, tmp_path: Path) -> None:
+        """Custom rules are loaded into the engine."""
+        rule = tmp_path / "custom_rule.yml"
+        rule.write_text(
+            "title: Custom Test Rule\n"
+            "status: test\n"
+            "logsource:\n"
+            "  category: process_creation\n"
+            "  product: linux\n"
+            "detection:\n"
+            "  sel:\n"
+            "    CommandLine|contains: custom-payload\n"
+            "  condition: sel\n"
+            "level: high\n"
+        )
+        engine = SigmaEngine()
+        engine.load_custom([str(tmp_path)])
+        assert engine.rule_count == 1
+
+    def test_load_custom_with_nonexistent_dir(self) -> None:
+        """Non-existent directory doesn't crash the engine."""
+        engine = SigmaEngine()
+        engine.load_custom(["/nonexistent/path"])
+        assert engine.rule_count == 0
+
+    def test_bundled_plus_custom(self, tmp_path: Path) -> None:
+        """Custom rules load alongside bundled rules."""
+        rule = tmp_path / "extra.yml"
+        rule.write_text(
+            "title: Extra Rule\n"
+            "status: test\n"
+            "logsource:\n"
+            "  category: test\n"
+            "detection:\n"
+            "  sel:\n"
+            "    CommandLine|contains: extra-test\n"
+            "  condition: sel\n"
+            "level: low\n"
+        )
+        engine = SigmaEngine()
+        engine.load_bundled()
+        bundled_count = engine.rule_count
+        engine.load_custom([str(tmp_path)])
+        assert engine.rule_count == bundled_count + 1
+
+    def test_custom_rule_fires_on_event(self, tmp_path: Path) -> None:
+        """A custom rule can match and produce an alert."""
+        rule = tmp_path / "detect_foobar.yml"
+        rule.write_text(
+            "title: Detect Foobar\n"
+            "status: test\n"
+            "logsource:\n"
+            "  category: process_creation\n"
+            "  product: linux\n"
+            "detection:\n"
+            "  sel:\n"
+            "    CommandLine|contains: foobar\n"
+            "  condition: sel\n"
+            "level: critical\n"
+        )
+        engine = SigmaEngine()
+        engine.load_custom([str(tmp_path)])
+        event = make_event(
+            message="bash -c foobar",
+            log_source_category="process_creation",
+            log_source_product="linux",
+        )
+        alerts = engine.evaluate(event)
+        assert len(alerts) == 1
+        assert alerts[0].rule_name == "Detect Foobar"
