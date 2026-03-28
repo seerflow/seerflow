@@ -473,6 +473,30 @@ class TestDetectionValidation:
         with pytest.raises(ConfigError, match="hw_seasonal_period"):
             _build_detection({"hw": {"seasonal_period": 1}})
 
+    def test_invalid_cusum_drift_nan(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_drift"):
+            _build_detection({"cusum": {"drift": float("nan")}})
+
+    def test_invalid_cusum_threshold_inf(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_threshold"):
+            _build_detection({"cusum": {"threshold": float("inf")}})
+
+    def test_invalid_hw_n_std_inf(self) -> None:
+        with pytest.raises(ConfigError, match="hw_n_std"):
+            _build_detection({"hw": {"n_std": float("inf")}})
+
+    def test_invalid_markov_smoothing_zero(self) -> None:
+        with pytest.raises(ConfigError, match="markov_smoothing"):
+            _build_detection({"markov": {"smoothing": 0.0}})
+
+    def test_invalid_markov_smoothing_negative(self) -> None:
+        with pytest.raises(ConfigError, match="markov_smoothing"):
+            _build_detection({"markov": {"smoothing": -1e-6}})
+
+    def test_invalid_markov_smoothing_inf(self) -> None:
+        with pytest.raises(ConfigError, match="markov_smoothing"):
+            _build_detection({"markov": {"smoothing": float("inf")}})
+
     def test_defaults_are_valid(self) -> None:
         config = _build_detection({})
         assert config.hw_seasonal_period == 1440
