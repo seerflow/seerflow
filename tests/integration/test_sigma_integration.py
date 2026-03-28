@@ -40,7 +40,8 @@ class TestSigmaIntegration:
             log_source_product="linux",
         )
         alerts = engine.evaluate(event)
-        assert len(alerts) >= 1  # at least whoami rule matches
+        assert len(alerts) == 1  # whoami rule matches; SSH rule is authentication logsource
+        assert alerts[0].rule_name == "Whoami Execution"
 
     def test_no_rules_no_crash(self) -> None:
         """Engine with no rules produces no alerts and no errors."""

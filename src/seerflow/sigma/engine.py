@@ -167,5 +167,8 @@ def _create_sigma_alert(compiled: CompiledRule, event: SeerflowEvent) -> Alert:
         contributing_events=(event.event_id,),
         mitre_tactics=compiled.attack_tactics,
         mitre_techniques=compiled.attack_techniques,
-        dedup_key=f"sigma:{compiled.rule_name}:{event.source_type}",
+        dedup_key=(
+            f"sigma:{compiled.rule_name}:{event.source_type}"
+            f":{entity_refs[0] if entity_refs else ''}"
+        ),
     )

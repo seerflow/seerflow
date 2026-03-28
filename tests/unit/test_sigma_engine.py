@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import pytest
@@ -101,7 +102,6 @@ class TestSigmaEngineEvaluate:
 
     def test_alert_id_is_uuid5(self, engine: SigmaEngine) -> None:
         """Alert IDs should be deterministic UUID5 strings."""
-        import uuid
 
         event = make_event(
             message="bash -c whoami",

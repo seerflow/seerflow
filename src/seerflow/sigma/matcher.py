@@ -21,6 +21,7 @@ from sigma.conditions import (
     ConditionFieldEqualsValueExpression,
     ConditionNOT,
     ConditionOR,
+    ConditionValueExpression,
 )
 from sigma.types import SigmaString, SpecialChars
 
@@ -174,6 +175,15 @@ def _eval_node(node: Any, event: dict[str, Any]) -> bool:
         if field in TUPLE_FIELDS and isinstance(event_value, tuple):
             return value in event_value
         return bool(event_value == value)
+
+    if isinstance(node, ConditionValueExpression):
+        # Keyword condition (no field) — substring search in message
+        value = node.value
+        message = str(event.get("message", ""))
+        if isinstance(value, SigmaString):
+            plain = str(value)
+            return plain.lower() in message.lower()
+        return str(value).lower() in message.lower()
 
     if isinstance(node, ConditionAND):
         return all(_eval_node(arg, event) for arg in node.args)

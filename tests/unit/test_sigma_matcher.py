@@ -255,3 +255,105 @@ class TestMatchEvent:
         """)
         with pytest.raises(AttributeError):
             cr.rule_name = "changed"  # type: ignore[misc]
+
+
+class TestMatcherCoverage:
+    """Additional tests for uncovered branches."""
+
+    def test_wildcard_single_character(self) -> None:
+        """WILDCARD_SINGLE (?) should match exactly one character."""
+        cr = _make_compiled("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                sel:
+                    CommandLine: "whoam?"
+                condition: sel
+            level: medium
+        """)
+        assert match_event(cr, {"message": "whoami"}) is True
+        assert match_event(cr, {"message": "whoamX"}) is True
+        assert match_event(cr, {"message": "whoam"}) is False
+
+    def test_non_attack_tags_ignored(self) -> None:
+        """Tags with namespace != 'attack' should not appear in tactics/techniques."""
+        from sigma.rule import SigmaRule
+
+        from seerflow.sigma.matcher import compile_rule
+
+        rule = SigmaRule.from_yaml("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                sel:
+                    message: test
+                condition: sel
+            level: medium
+            tags:
+                - attack.discovery
+                - cve.2021-44228
+                - custom.tag
+        """)
+        from seerflow.sigma.pipeline import seerflow_pipeline
+
+        seerflow_pipeline().apply(rule)
+        cr = compile_rule(rule)
+        assert "discovery" in cr.attack_tactics
+        assert len(cr.attack_techniques) == 0
+
+    def test_numeric_field_value(self) -> None:
+        """Integer values (e.g., EventID: 4625) should match via direct equality."""
+        cr = _make_compiled("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                sel:
+                    EventID: 4625
+                condition: sel
+            level: medium
+        """)
+        assert match_event(cr, {"template_id": 4625}) is True
+        assert match_event(cr, {"template_id": 9999}) is False
+
+    def test_keyword_condition(self) -> None:
+        """Keyword conditions (no field) should search in message."""
+        cr = _make_compiled("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                keywords:
+                    - "error"
+                    - "failed"
+                condition: keywords
+            level: medium
+        """)
+        assert match_event(cr, {"message": "an error occurred"}) is True
+        assert match_event(cr, {"message": "operation failed"}) is True
+        assert match_event(cr, {"message": "all good"}) is False
+
+    def test_empty_parsed_conditions(self) -> None:
+        """A rule with no parsed conditions should return False."""
+        from unittest.mock import MagicMock
+
+        from seerflow.sigma.matcher import CompiledRule
+
+        mock_rule = MagicMock()
+        mock_rule.detection.parsed_condition = []
+        cr = CompiledRule(
+            rule_name="test",
+            description="",
+            severity=SeverityLevel.INFORMATIONAL,
+            attack_tactics=(),
+            attack_techniques=(),
+            logsource_key=("", "", ""),
+            _rule=mock_rule,
+        )
+        assert match_event(cr, {"message": "test"}) is False
