@@ -23,17 +23,17 @@ uv sync
 cp seerflow.example.yaml seerflow.yaml
 
 # Start the pipeline
-uv run python -m seerflow
+uv run python -m seerflow start
 ```
 
 ### Command Line
 
 ```bash
 # Start with default config (seerflow.yaml in current directory)
-uv run python -m seerflow
+uv run python -m seerflow start
 
 # Start with a specific config file
-uv run python -m seerflow --config /path/to/seerflow.yaml
+uv run python -m seerflow --config /path/to/seerflow.yaml start
 
 # Show version
 uv run python -m seerflow --version
@@ -68,7 +68,7 @@ detection:
 
 ```bash
 # Terminal 1: Start Seerflow
-uv run python -m seerflow
+uv run python -m seerflow start
 
 # Terminal 2: Send normal traffic
 for i in $(seq 1 300); do
