@@ -325,6 +325,44 @@ class TestReceiverConfigCompleteness:
         with pytest.raises(ConfigError, match="must be between 1 and 65535"):
             load_config(str(yaml_file))
 
+    def test_invalid_queue_maxsize_zero(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  queue_maxsize: 0\n")
+        with pytest.raises(ConfigError, match="queue_maxsize"):
+            load_config(str(yaml_file))
+
+    def test_invalid_otlp_http_max_request_bytes_zero(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  otlp_http_max_request_bytes: 0\n")
+        with pytest.raises(ConfigError, match="otlp_http_max_request_bytes"):
+            load_config(str(yaml_file))
+
+    def test_file_paths_coerced_to_strings(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  file_paths:\n    - /var/log/app.log\n    - 12345\n")
+        cfg = load_config(str(yaml_file))
+        assert all(isinstance(p, str) for p in cfg.receivers.file_paths)
+        assert cfg.receivers.file_paths[1] == "12345"
+
+    def test_allowed_log_roots_coerced_to_strings(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  allowed_log_roots:\n    - /var/log\n    - 9999\n")
+        cfg = load_config(str(yaml_file))
+        assert all(isinstance(r, str) for r in cfg.receivers.allowed_log_roots)
+        assert cfg.receivers.allowed_log_roots[1] == "9999"
+
+    def test_invalid_queue_maxsize_negative(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  queue_maxsize: -5\n")
+        with pytest.raises(ConfigError, match="queue_maxsize"):
+            load_config(str(yaml_file))
+
+    def test_invalid_otlp_http_max_request_bytes_negative(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  otlp_http_max_request_bytes: -1\n")
+        with pytest.raises(ConfigError, match="otlp_http_max_request_bytes"):
+            load_config(str(yaml_file))
+
 
 class TestDetectionValidation:
     def test_invalid_weight_negative(self) -> None:
@@ -409,6 +447,82 @@ class TestDetectionValidation:
     def test_flat_markov_config_backward_compat(self) -> None:
         config = _build_detection({"markov_max_entities": 2000})
         assert config.markov_max_entities == 2000
+
+    def test_invalid_cusum_drift_zero(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_drift"):
+            _build_detection({"cusum": {"drift": 0.0}})
+
+    def test_invalid_cusum_drift_negative(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_drift"):
+            _build_detection({"cusum": {"drift": -1.0}})
+
+    def test_invalid_cusum_threshold_zero(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_threshold"):
+            _build_detection({"cusum": {"threshold": 0.0}})
+
+    def test_invalid_cusum_threshold_negative(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_threshold"):
+            _build_detection({"cusum": {"threshold": -5.0}})
+
+    def test_invalid_hw_alpha_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_alpha"):
+            _build_detection({"hw": {"alpha": 0.0}})
+
+    def test_invalid_hw_alpha_one(self) -> None:
+        with pytest.raises(ConfigError, match="hw_alpha"):
+            _build_detection({"hw": {"alpha": 1.0}})
+
+    def test_invalid_hw_beta_negative(self) -> None:
+        with pytest.raises(ConfigError, match="hw_beta"):
+            _build_detection({"hw": {"beta": -0.1}})
+
+    def test_invalid_hw_beta_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_beta"):
+            _build_detection({"hw": {"beta": 0.0}})
+
+    def test_invalid_hw_gamma_over_one(self) -> None:
+        with pytest.raises(ConfigError, match="hw_gamma"):
+            _build_detection({"hw": {"gamma": 1.5}})
+
+    def test_invalid_hw_gamma_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_gamma"):
+            _build_detection({"hw": {"gamma": 0.0}})
+
+    def test_invalid_hw_n_std_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_n_std"):
+            _build_detection({"hw": {"n_std": 0.0}})
+
+    def test_invalid_hw_n_std_negative(self) -> None:
+        with pytest.raises(ConfigError, match="hw_n_std"):
+            _build_detection({"hw": {"n_std": -1.0}})
+
+    def test_invalid_hw_seasonal_period_one(self) -> None:
+        with pytest.raises(ConfigError, match="hw_seasonal_period"):
+            _build_detection({"hw": {"seasonal_period": 1}})
+
+    def test_invalid_cusum_drift_nan(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_drift"):
+            _build_detection({"cusum": {"drift": float("nan")}})
+
+    def test_invalid_cusum_threshold_inf(self) -> None:
+        with pytest.raises(ConfigError, match="cusum_threshold"):
+            _build_detection({"cusum": {"threshold": float("inf")}})
+
+    def test_invalid_hw_n_std_inf(self) -> None:
+        with pytest.raises(ConfigError, match="hw_n_std"):
+            _build_detection({"hw": {"n_std": float("inf")}})
+
+    def test_invalid_markov_smoothing_zero(self) -> None:
+        with pytest.raises(ConfigError, match="markov_smoothing"):
+            _build_detection({"markov": {"smoothing": 0.0}})
+
+    def test_invalid_markov_smoothing_negative(self) -> None:
+        with pytest.raises(ConfigError, match="markov_smoothing"):
+            _build_detection({"markov": {"smoothing": -1e-6}})
+
+    def test_invalid_markov_smoothing_inf(self) -> None:
+        with pytest.raises(ConfigError, match="markov_smoothing"):
+            _build_detection({"markov": {"smoothing": float("inf")}})
 
     def test_defaults_are_valid(self) -> None:
         config = _build_detection({})

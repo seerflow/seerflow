@@ -219,10 +219,10 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
 def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     file_paths = data.get("file_paths", ())
     if isinstance(file_paths, list):
-        file_paths = tuple(file_paths)
+        file_paths = tuple(str(p) for p in file_paths)
     allowed_log_roots = data.get("allowed_log_roots", ())
     if isinstance(allowed_log_roots, list):
-        allowed_log_roots = tuple(allowed_log_roots)
+        allowed_log_roots = tuple(str(r) for r in allowed_log_roots)
     raw_webhooks = data.get("webhooks", ())
     if isinstance(raw_webhooks, list):
         webhook_configs: list[WebhookEndpointConfig] = []
@@ -271,24 +271,40 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     _require_valid_port("receivers.otlp_grpc_port", cfg.otlp_grpc_port)
     _require_valid_port("receivers.otlp_http_port", cfg.otlp_http_port)
     _require_valid_port("receivers.webhook_port", cfg.webhook_port)
+    if cfg.queue_maxsize < 1:
+        raise ConfigError(f"receivers.queue_maxsize must be >= 1, got {cfg.queue_maxsize!r}")
+    if cfg.otlp_http_max_request_bytes < 1:
+        raise ConfigError(
+            f"receivers.otlp_http_max_request_bytes must be >= 1, "
+            f"got {cfg.otlp_http_max_request_bytes!r}"
+        )
     return cfg
+
+
+def _require_finite_positive(field: str, value: float) -> None:
+    """Raise ConfigError if *value* is not finite or not > 0."""
+    if not math.isfinite(value) or value <= 0.0:
+        raise ConfigError(f"{field} must be finite and > 0, got {value!r}")
+
+
+def _require_open_unit(field: str, value: float) -> None:
+    """Raise ConfigError if *value* is not in the open interval (0, 1)."""
+    if not (0.0 < value < 1.0):
+        raise ConfigError(f"{field} must be in (0, 1), got {value!r}")
 
 
 def _validate_detection_config(config: DetectionConfig) -> None:
     """Validate all numeric bounds in DetectionConfig; raise ConfigError if invalid."""
-    weight_fields = (
+    for name, value in (
         ("weights_content", config.weights_content),
         ("weights_volume", config.weights_volume),
         ("weights_sequence", config.weights_sequence),
         ("weights_pattern", config.weights_pattern),
-    )
-    for name, value in weight_fields:
+    ):
         if not math.isfinite(value):
-            msg = f"detection.{name} must be finite, got {value!r}"
-            raise ConfigError(msg)
+            raise ConfigError(f"detection.{name} must be finite, got {value!r}")
         if value < 0.0:
-            msg = f"detection.{name} must be >= 0.0, got {value!r}"
-            raise ConfigError(msg)
+            raise ConfigError(f"detection.{name} must be >= 0.0, got {value!r}")
 
     if config.model_save_interval_seconds < 1:
         msg = (
@@ -305,19 +321,36 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         raise ConfigError(msg)
 
     if config.max_sources < 1 or config.max_sources > 10_000:
-        msg = f"detection.max_sources must be between 1 and 10_000, got {config.max_sources!r}"
-        raise ConfigError(msg)
+        raise ConfigError(
+            f"detection.max_sources must be between 1 and 10_000, got {config.max_sources!r}"
+        )
 
-    if not (0.0 < config.cusum_ema_alpha < 1.0):
-        msg = f"detection.cusum_ema_alpha must be in (0, 1), got {config.cusum_ema_alpha!r}"
-        raise ConfigError(msg)
-
+    _require_open_unit("detection.cusum_ema_alpha", config.cusum_ema_alpha)
     if config.cusum_warmup_buckets < 1:
-        msg = f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
-        raise ConfigError(msg)
+        raise ConfigError(
+            f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
+        )
+    _require_finite_positive("detection.cusum_drift", config.cusum_drift)
+    _require_finite_positive("detection.cusum_threshold", config.cusum_threshold)
+
+    for name in ("hw_alpha", "hw_beta", "hw_gamma"):
+        _require_open_unit(f"detection.{name}", getattr(config, name))
+    _require_finite_positive("detection.hw_n_std", config.hw_n_std)
+    if config.hw_seasonal_period < 2:
+        raise ConfigError(
+            f"detection.hw_seasonal_period must be >= 2, got {config.hw_seasonal_period!r}"
+        )
+
+    _require_finite_positive("detection.markov_smoothing", config.markov_smoothing)
 
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
+    """Build DetectionConfig from a YAML ``detection:`` section.
+
+    Precedence for detector sub-params (HW, CUSUM, Markov):
+    nested key wins over flat key, flat key wins over hardcoded default.
+    Example: ``hw.alpha`` > ``hw_alpha`` > ``0.3``.
+    """
     dspot = data.get("dspot", {})
     hw = data.get("hw", {})
     cusum = data.get("cusum", {})
