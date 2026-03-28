@@ -10,7 +10,10 @@ services:
       - ./seerflow.yaml:/app/seerflow.yaml:ro
       - seerflow-data:/app/data
     restart: unless-stopped
-    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
 
   postgres:
     image: postgres:16-alpine
