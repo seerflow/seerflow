@@ -64,6 +64,13 @@ class TestDiscoverCustomRules:
         result = discover_custom_rules([str(dir1), str(dir2)])
         assert len(result) == 2
 
+    def test_file_path_not_directory(self, tmp_path: Path) -> None:
+        """A file path (not a directory) is skipped with warning."""
+        file_path = tmp_path / "not_a_dir.yml"
+        file_path.write_text("content")
+        result = discover_custom_rules([str(file_path)])
+        assert result == []
+
     def test_symlink_followed_with_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
