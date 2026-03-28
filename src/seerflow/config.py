@@ -324,6 +324,23 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         msg = f"detection.cusum_threshold must be > 0, got {config.cusum_threshold!r}"
         raise ConfigError(msg)
 
+    for name, val in (
+        ("hw_alpha", config.hw_alpha),
+        ("hw_beta", config.hw_beta),
+        ("hw_gamma", config.hw_gamma),
+    ):
+        if not (0.0 < val < 1.0):
+            msg = f"detection.{name} must be in (0, 1), got {val!r}"
+            raise ConfigError(msg)
+
+    if config.hw_n_std <= 0.0:
+        msg = f"detection.hw_n_std must be > 0, got {config.hw_n_std!r}"
+        raise ConfigError(msg)
+
+    if config.hw_seasonal_period < 2:
+        msg = f"detection.hw_seasonal_period must be >= 2, got {config.hw_seasonal_period!r}"
+        raise ConfigError(msg)
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     dspot = data.get("dspot", {})

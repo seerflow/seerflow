@@ -426,6 +426,34 @@ class TestDetectionValidation:
         with pytest.raises(ConfigError, match="cusum_threshold"):
             _build_detection({"cusum": {"threshold": -5.0}})
 
+    def test_invalid_hw_alpha_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_alpha"):
+            _build_detection({"hw": {"alpha": 0.0}})
+
+    def test_invalid_hw_alpha_one(self) -> None:
+        with pytest.raises(ConfigError, match="hw_alpha"):
+            _build_detection({"hw": {"alpha": 1.0}})
+
+    def test_invalid_hw_beta_negative(self) -> None:
+        with pytest.raises(ConfigError, match="hw_beta"):
+            _build_detection({"hw": {"beta": -0.1}})
+
+    def test_invalid_hw_gamma_over_one(self) -> None:
+        with pytest.raises(ConfigError, match="hw_gamma"):
+            _build_detection({"hw": {"gamma": 1.5}})
+
+    def test_invalid_hw_n_std_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_n_std"):
+            _build_detection({"hw": {"n_std": 0.0}})
+
+    def test_invalid_hw_n_std_negative(self) -> None:
+        with pytest.raises(ConfigError, match="hw_n_std"):
+            _build_detection({"hw": {"n_std": -1.0}})
+
+    def test_invalid_hw_seasonal_period_one(self) -> None:
+        with pytest.raises(ConfigError, match="hw_seasonal_period"):
+            _build_detection({"hw": {"seasonal_period": 1}})
+
     def test_defaults_are_valid(self) -> None:
         config = _build_detection({})
         assert config.hw_seasonal_period == 1440
