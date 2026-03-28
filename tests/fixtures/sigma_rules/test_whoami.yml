@@ -1,0 +1,14 @@
+title: Whoami Execution
+status: test
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection:
+        CommandLine|contains: whoami
+    condition: selection
+level: medium
+tags:
+    - attack.discovery
+    - attack.t1033
+description: Detects execution of whoami command

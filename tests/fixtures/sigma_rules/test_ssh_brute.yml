@@ -1,0 +1,15 @@
+title: SSH Brute Force Attempt
+status: test
+logsource:
+    category: authentication
+    product: linux
+    service: sshd
+detection:
+    selection:
+        CommandLine|contains: "Failed password"
+    condition: selection
+level: high
+tags:
+    - attack.credential_access
+    - attack.t1110.001
+description: Detects SSH brute force login attempts
