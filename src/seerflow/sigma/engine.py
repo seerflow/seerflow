@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Stable namespace for deterministic alert IDs (uuid5).
+# DO NOT CHANGE in production — changing this invalidates all existing
+# alert IDs and breaks deduplication across restarts.
 _NAMESPACE_SIGMA = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 
@@ -69,6 +71,11 @@ class SigmaEngine:
         """Load, compile, and index Sigma rules from YAML file paths.
 
         Invalid rules are logged as warnings and skipped.
+
+        Security: callers must ensure paths are within a trusted directory.
+        This method does not enforce path boundaries — it reads whatever
+        paths are given. Use S-030's validated rule loading for user-supplied
+        rule directories.
         """
         for path in paths:
             try:

@@ -57,7 +57,7 @@ _SIGMA_LEVEL_MAP: dict[str | None, SeverityLevel] = {
 }
 
 
-_regex_cache: dict[int, re.Pattern[str]] = {}
+_regex_cache: dict[str, re.Pattern[str]] = {}
 
 
 def _sigma_string_to_regex(s: SigmaString) -> re.Pattern[str]:
@@ -66,24 +66,29 @@ def _sigma_string_to_regex(s: SigmaString) -> re.Pattern[str]:
     ``SigmaString.s`` is a list of ``str | SpecialChars`` parts.
     ``WILDCARD_MULTI`` -> ``.*``, ``WILDCARD_SINGLE`` -> ``.``.
     The regex is anchored (``^...$``) and case-insensitive.
-    Results are cached by ``id(s)`` — safe because SigmaString objects
-    live on compiled rules and are never mutated after parsing.
+    Adjacent ``WILDCARD_MULTI`` tokens are collapsed to prevent ReDoS.
+    Results are cached by pattern string (not by object id, which can
+    alias after garbage collection).
     """
-    key = id(s)
-    cached = _regex_cache.get(key)
-    if cached is not None:
-        return cached
     parts: list[str] = []
+    prev_was_wildcard_multi = False
     for piece in s.s:
         if isinstance(piece, str):
             parts.append(re.escape(piece))
+            prev_was_wildcard_multi = False
         elif piece == SpecialChars.WILDCARD_MULTI:
-            parts.append(".*")
+            if not prev_was_wildcard_multi:
+                parts.append(".*")
+                prev_was_wildcard_multi = True
         elif piece == SpecialChars.WILDCARD_SINGLE:
             parts.append(".")
+            prev_was_wildcard_multi = False
     pattern = "^" + "".join(parts) + "$"
+    cached = _regex_cache.get(pattern)
+    if cached is not None:
+        return cached
     result = re.compile(pattern, re.IGNORECASE | re.DOTALL)
-    _regex_cache[key] = result
+    _regex_cache[pattern] = result
     return result
 
 
