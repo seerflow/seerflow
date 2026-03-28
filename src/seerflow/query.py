@@ -183,8 +183,8 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
             alert_type=args.type,
             severity_min=args.severity,
             limit=args.limit,
-            tactic=getattr(args, "tactic", None),
-            technique=getattr(args, "technique", None),
+            tactic=args.tactic,
+            technique=args.technique,
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
