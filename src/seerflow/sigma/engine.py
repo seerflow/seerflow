@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from sigma.rule import SigmaRule
 
 from seerflow.models.alert import Alert
+from seerflow.sigma.bundled import get_bundled_rule_paths
 from seerflow.sigma.matcher import CompiledRule, compile_rule, match_event
 from seerflow.sigma.pipeline import seerflow_pipeline
 
@@ -100,8 +101,6 @@ class SigmaEngine:
 
             engine.load_rules(get_bundled_rule_paths())
         """
-        from seerflow.sigma.bundled import get_bundled_rule_paths
-
         self.load_rules(get_bundled_rule_paths())
 
     def evaluate(self, event: SeerflowEvent) -> list[Alert]:

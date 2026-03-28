@@ -13,16 +13,15 @@ def get_bundled_rule_paths() -> list[Path]:
     ``seerflow.sigma.rules`` and its subdirectories (linux/, process/,
     web/, dns/, network/).
 
-    Returns absolute ``Path`` objects so they can be passed directly
-    to ``SigmaEngine.load_rules()``.
+    Returns ``Path`` objects. For standard pip installs (including wheels),
+    the package is extracted to site-packages as real files on disk.
     """
     rules_pkg = importlib.resources.files("seerflow.sigma.rules")
     paths: list[Path] = []
     for item in rules_pkg.iterdir():
-        item_path = Path(str(item))
-        if item_path.is_dir():
-            for yml in item_path.glob("*.yml"):
-                paths.append(yml)
-        elif item_path.suffix == ".yml":
-            paths.append(item_path)
+        if not item.is_dir() or item.name.startswith("_"):
+            continue
+        for sub in item.iterdir():
+            if sub.is_file() and sub.name.endswith(".yml"):
+                paths.append(Path(str(sub)))
     return sorted(paths)

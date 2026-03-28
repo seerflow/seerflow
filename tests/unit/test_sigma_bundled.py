@@ -6,6 +6,7 @@ from pathlib import Path
 
 from seerflow.sigma.bundled import get_bundled_rule_paths
 from seerflow.sigma.engine import SigmaEngine
+from tests.helpers import make_event
 
 
 class TestBundledRuleDiscovery:
@@ -21,6 +22,7 @@ class TestBundledRuleDiscovery:
 
     def test_all_paths_exist(self) -> None:
         paths = get_bundled_rule_paths()
+        assert len(paths) > 0, "No bundled rules found"
         for p in paths:
             assert p.exists(), f"Rule file does not exist: {p}"
 
@@ -37,6 +39,7 @@ class TestBundledRuleCount:
         assert "process" in categories
         assert "web" in categories
         assert "dns" in categories
+        assert "network" in categories
 
 
 class TestSigmaEngineLoadBundled:
@@ -49,8 +52,6 @@ class TestSigmaEngineLoadBundled:
         """Every bundled rule must compile without errors."""
         engine = SigmaEngine()
         engine.load_bundled()
-        # If any rule failed to compile, it would be skipped and
-        # rule_count would be less than the number of files
         paths = get_bundled_rule_paths()
         assert engine.rule_count == len(paths), (
             f"{len(paths) - engine.rule_count} rules failed to compile"
@@ -58,8 +59,6 @@ class TestSigmaEngineLoadBundled:
 
     def test_bundled_rule_matches_crafted_event(self) -> None:
         """At least one bundled rule fires on a whoami event."""
-        from tests.helpers import make_event
-
         engine = SigmaEngine()
         engine.load_bundled()
         event = make_event(
