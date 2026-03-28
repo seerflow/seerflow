@@ -58,6 +58,8 @@ class AlertQuery:
     alert_type: AlertType | None = None
     severity_min: int | None = None
     entity_uuid: str | None = None
+    tactic: str | None = None
+    technique: str | None = None
     page: int = 1
     limit: int = 100
 

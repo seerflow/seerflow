@@ -6,6 +6,7 @@ Provides ``seerflow query events|alerts|templates`` subcommands.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import sys
 import time
@@ -13,6 +14,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import msgspec.json
+
+from seerflow.sigma.attack import format_tactic, format_technique
 
 if TYPE_CHECKING:
     import argparse
@@ -158,6 +161,16 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
         )
         return
 
+    if args.tactic is not None:
+        from seerflow.sigma.attack import TACTICS, is_valid_tactic
+
+        if not is_valid_tactic(args.tactic):
+            print(
+                f"Error: unknown tactic '{args.tactic}'. Valid: {', '.join(sorted(TACTICS))}",
+                file=sys.stderr,
+            )
+            return
+
     if args.severity is not None and not (0 <= args.severity <= 6):
         print(
             f"Error: --severity must be between 0 and 6, got {args.severity}",
@@ -181,11 +194,26 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
             alert_type=args.type,
             severity_min=args.severity,
             limit=args.limit,
+            tactic=args.tactic,
+            technique=args.technique,
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return
     result = await storage.query_alerts(query)
+
+    # Post-decode filtering for tactic/technique (stored in msgpack BLOB,
+    # not SQL-queryable). Applied over the fetched page only — results may
+    # be fewer than limit when many non-matching alerts exist.
+    if query.tactic or query.technique:
+        filtered = []
+        for a in result.items:
+            if query.tactic and query.tactic not in a.mitre_tactics:
+                continue
+            if query.technique and query.technique not in a.mitre_techniques:
+                continue
+            filtered.append(a)
+        result = dataclasses.replace(result, items=tuple(filtered), total=len(filtered))
 
     if not result.items:
         print("No alerts found.")
@@ -201,6 +229,8 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
                     "severity": a.severity_id.name,
                     "score": round(a.risk_score, 3),
                     "rule": a.rule_name,
+                    "tactics": [format_tactic(t) for t in a.mitre_tactics],
+                    "techniques": [format_technique(t) for t in a.mitre_techniques],
                     "dedup_count": a.dedup_count,
                     "description": a.description,
                 }
@@ -211,7 +241,17 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
         print()
         return
 
-    headers = ["TIMESTAMP", "TYPE", "SEVERITY", "SCORE", "RULE", "DEDUP", "DESCRIPTION"]
+    headers = [
+        "TIMESTAMP",
+        "TYPE",
+        "SEVERITY",
+        "SCORE",
+        "RULE",
+        "TACTICS",
+        "TECHNIQUES",
+        "DEDUP",
+        "DESCRIPTION",
+    ]
     rows = [
         [
             format_timestamp(a.timestamp_ns),
@@ -219,8 +259,10 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
             a.severity_id.name,
             f"{a.risk_score:.3f}",
             a.rule_name,
+            ", ".join(format_tactic(t) for t in a.mitre_tactics) or "-",
+            ", ".join(format_technique(t) for t in a.mitre_techniques) or "-",
             str(a.dedup_count),
-            a.description[:50],
+            a.description[:40],
         ]
         for a in result.items
     ]

@@ -357,3 +357,34 @@ class TestMatcherCoverage:
             _rule=mock_rule,
         )
         assert match_event(cr, {"message": "test"}) is False
+
+
+class TestAttackTagValidation:
+    def test_unknown_tactic_logged_as_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Unknown ATT&CK tactic names produce a log warning."""
+        import logging
+
+        from sigma.rule import SigmaRule
+
+        from seerflow.sigma.matcher import compile_rule
+        from seerflow.sigma.pipeline import seerflow_pipeline
+
+        rule = SigmaRule.from_yaml("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                sel:
+                    message: test
+                condition: sel
+            level: medium
+            tags:
+                - attack.not_a_real_tactic
+                - attack.t1033
+        """)
+        seerflow_pipeline().apply(rule)
+        with caplog.at_level(logging.WARNING, logger="seerflow.sigma.matcher"):
+            cr = compile_rule(rule)
+        assert "not_a_real_tactic" in caplog.text
+        assert "not_a_real_tactic" in cr.attack_tactics
