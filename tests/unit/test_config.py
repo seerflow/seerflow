@@ -344,6 +344,25 @@ class TestReceiverConfigCompleteness:
         assert all(isinstance(p, str) for p in cfg.receivers.file_paths)
         assert cfg.receivers.file_paths[1] == "12345"
 
+    def test_allowed_log_roots_coerced_to_strings(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  allowed_log_roots:\n    - /var/log\n    - 9999\n")
+        cfg = load_config(str(yaml_file))
+        assert all(isinstance(r, str) for r in cfg.receivers.allowed_log_roots)
+        assert cfg.receivers.allowed_log_roots[1] == "9999"
+
+    def test_invalid_queue_maxsize_negative(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  queue_maxsize: -5\n")
+        with pytest.raises(ConfigError, match="queue_maxsize"):
+            load_config(str(yaml_file))
+
+    def test_invalid_otlp_http_max_request_bytes_negative(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  otlp_http_max_request_bytes: -1\n")
+        with pytest.raises(ConfigError, match="otlp_http_max_request_bytes"):
+            load_config(str(yaml_file))
+
 
 class TestDetectionValidation:
     def test_invalid_weight_negative(self) -> None:
@@ -457,9 +476,17 @@ class TestDetectionValidation:
         with pytest.raises(ConfigError, match="hw_beta"):
             _build_detection({"hw": {"beta": -0.1}})
 
+    def test_invalid_hw_beta_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_beta"):
+            _build_detection({"hw": {"beta": 0.0}})
+
     def test_invalid_hw_gamma_over_one(self) -> None:
         with pytest.raises(ConfigError, match="hw_gamma"):
             _build_detection({"hw": {"gamma": 1.5}})
+
+    def test_invalid_hw_gamma_zero(self) -> None:
+        with pytest.raises(ConfigError, match="hw_gamma"):
+            _build_detection({"hw": {"gamma": 0.0}})
 
     def test_invalid_hw_n_std_zero(self) -> None:
         with pytest.raises(ConfigError, match="hw_n_std"):

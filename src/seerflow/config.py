@@ -284,13 +284,13 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
 def _require_finite_positive(field: str, value: float) -> None:
     """Raise ConfigError if *value* is not finite or not > 0."""
     if not math.isfinite(value) or value <= 0.0:
-        raise ConfigError(f"detection.{field} must be finite and > 0, got {value!r}")
+        raise ConfigError(f"{field} must be finite and > 0, got {value!r}")
 
 
 def _require_open_unit(field: str, value: float) -> None:
     """Raise ConfigError if *value* is not in the open interval (0, 1)."""
     if not (0.0 < value < 1.0):
-        raise ConfigError(f"detection.{field} must be in (0, 1), got {value!r}")
+        raise ConfigError(f"{field} must be in (0, 1), got {value!r}")
 
 
 def _validate_detection_config(config: DetectionConfig) -> None:
@@ -325,23 +325,23 @@ def _validate_detection_config(config: DetectionConfig) -> None:
             f"detection.max_sources must be between 1 and 10_000, got {config.max_sources!r}"
         )
 
-    _require_open_unit("cusum_ema_alpha", config.cusum_ema_alpha)
+    _require_open_unit("detection.cusum_ema_alpha", config.cusum_ema_alpha)
     if config.cusum_warmup_buckets < 1:
         raise ConfigError(
             f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
         )
-    _require_finite_positive("cusum_drift", config.cusum_drift)
-    _require_finite_positive("cusum_threshold", config.cusum_threshold)
+    _require_finite_positive("detection.cusum_drift", config.cusum_drift)
+    _require_finite_positive("detection.cusum_threshold", config.cusum_threshold)
 
     for name in ("hw_alpha", "hw_beta", "hw_gamma"):
-        _require_open_unit(name, getattr(config, name))
-    _require_finite_positive("hw_n_std", config.hw_n_std)
+        _require_open_unit(f"detection.{name}", getattr(config, name))
+    _require_finite_positive("detection.hw_n_std", config.hw_n_std)
     if config.hw_seasonal_period < 2:
         raise ConfigError(
             f"detection.hw_seasonal_period must be >= 2, got {config.hw_seasonal_period!r}"
         )
 
-    _require_finite_positive("markov_smoothing", config.markov_smoothing)
+    _require_finite_positive("detection.markov_smoothing", config.markov_smoothing)
 
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
