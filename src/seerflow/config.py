@@ -115,7 +115,7 @@ class DetectionConfig:
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
     weights_pattern: float = 0.20
-    sigma_rules_dirs: tuple[str, ...] = ()
+    sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

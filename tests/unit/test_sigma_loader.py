@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from seerflow.sigma.engine import SigmaEngine
@@ -9,8 +10,6 @@ from seerflow.sigma.loader import discover_custom_rules
 from tests.helpers import make_event
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
 
@@ -102,6 +101,31 @@ class TestDiscoverCustomRules:
     def test_empty_dirs_list(self) -> None:
         """Empty dirs list returns empty result."""
         result = discover_custom_rules([])
+        assert result == []
+
+    def test_unreadable_dir_skipped(self, tmp_path: Path) -> None:
+        """Unreadable directory is skipped with warning."""
+        unreadable = tmp_path / "locked"
+        unreadable.mkdir()
+        (unreadable / "rule.yml").write_text("title: T\n")
+        unreadable.chmod(0o000)
+        try:
+            result = discover_custom_rules([str(unreadable)])
+            assert result == []
+        finally:
+            unreadable.chmod(0o755)
+
+    def test_rglob_oserror_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OSError during rglob is caught and directory is skipped."""
+        valid_dir = tmp_path / "rules"
+        valid_dir.mkdir()
+        (valid_dir / "rule.yml").write_text("title: T\n")
+
+        def _rglob_raises(self: Path, pattern: str) -> list[Path]:
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(Path, "rglob", _rglob_raises)
+        result = discover_custom_rules([str(valid_dir)])
         assert result == []
 
 
