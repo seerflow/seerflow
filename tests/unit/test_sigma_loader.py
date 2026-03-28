@@ -121,7 +121,7 @@ class TestDiscoverCustomRules:
         valid_dir.mkdir()
         (valid_dir / "rule.yml").write_text("title: T\n")
 
-        def _rglob_raises(self: Path, pattern: str) -> list[Path]:
+        def _rglob_raises(self: Path, pattern: str, **kwargs: object) -> list[Path]:
             raise OSError("permission denied")
 
         monkeypatch.setattr(Path, "rglob", _rglob_raises)
