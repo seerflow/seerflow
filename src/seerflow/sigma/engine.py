@@ -103,6 +103,17 @@ class SigmaEngine:
         """
         self.load_rules(get_bundled_rule_paths())
 
+    def load_custom(self, dirs: Sequence[str]) -> None:
+        """Load custom Sigma rules from operator-specified directories.
+
+        Validates directories, discovers ``.yml`` files, and loads them
+        via ``load_rules()``. Invalid directories and rules are logged
+        as warnings and skipped.
+        """
+        from seerflow.sigma.loader import discover_custom_rules
+
+        self.load_rules(discover_custom_rules(dirs))
+
     def evaluate(self, event: SeerflowEvent) -> list[Alert]:
         """Evaluate event against applicable rules using logsource dispatch.
 

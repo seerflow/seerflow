@@ -530,3 +530,29 @@ class TestDetectionValidation:
         assert config.cusum_ema_alpha == 0.1
         assert config.cusum_warmup_buckets == 30
         assert config.weights_content == 0.30
+
+
+class TestSigmaRulesDirsConfig:
+    def test_default_is_empty_tuple(self) -> None:
+        config = _build_detection({})
+        assert config.sigma_rules_dirs == ()
+
+    def test_sigma_rules_dirs_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "detection:\n  sigma_rules_dirs:\n    - /etc/seerflow/rules\n    - /opt/rules\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert cfg.detection.sigma_rules_dirs == ("/etc/seerflow/rules", "/opt/rules")
+
+    def test_sigma_rules_dirs_coerced_to_strings(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  sigma_rules_dirs:\n    - /path/one\n    - 12345\n")
+        cfg = load_config(str(yaml_file))
+        assert cfg.detection.sigma_rules_dirs == ("/path/one", "12345")
+
+    def test_sigma_rules_dirs_scalar_raises_config_error(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  sigma_rules_dirs: /etc/rules\n")
+        with pytest.raises(ConfigError, match="sigma_rules_dirs must be a list"):
+            load_config(str(yaml_file))
