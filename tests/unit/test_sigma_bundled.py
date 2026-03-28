@@ -53,6 +53,9 @@ class TestSigmaEngineLoadBundled:
         engine = SigmaEngine()
         engine.load_bundled()
         paths = get_bundled_rule_paths()
+        assert len(paths) >= 50, (
+            f"Only {len(paths)} rules discovered — package data may be missing"
+        )
         assert engine.rule_count == len(paths), (
             f"{len(paths) - engine.rule_count} rules failed to compile"
         )
