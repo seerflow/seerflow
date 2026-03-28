@@ -1,1 +1,1 @@
-"""Sigma rule engine: pySigma evaluation, SigmaHQ rules."""
+"""Sigma rule engine for deterministic detection of known attack patterns."""
