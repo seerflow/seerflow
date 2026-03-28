@@ -42,12 +42,14 @@ _FIELD_MAPPING: dict[str | None, str | list[str]] = {
 }
 
 # Fields that are tuples on SeerflowEvent and need contains-matching
-TUPLE_FIELDS: frozenset[str] = frozenset({
-    "related_ips",
-    "related_users",
-    "related_hosts",
-    "related_hashes",
-})
+TUPLE_FIELDS: frozenset[str] = frozenset(
+    {
+        "related_ips",
+        "related_users",
+        "related_hosts",
+        "related_hashes",
+    }
+)
 
 
 def seerflow_pipeline() -> ProcessingPipeline:
