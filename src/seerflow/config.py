@@ -219,10 +219,10 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
 def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     file_paths = data.get("file_paths", ())
     if isinstance(file_paths, list):
-        file_paths = tuple(file_paths)
+        file_paths = tuple(str(p) for p in file_paths)
     allowed_log_roots = data.get("allowed_log_roots", ())
     if isinstance(allowed_log_roots, list):
-        allowed_log_roots = tuple(allowed_log_roots)
+        allowed_log_roots = tuple(str(r) for r in allowed_log_roots)
     raw_webhooks = data.get("webhooks", ())
     if isinstance(raw_webhooks, list):
         webhook_configs: list[WebhookEndpointConfig] = []
@@ -271,6 +271,13 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     _require_valid_port("receivers.otlp_grpc_port", cfg.otlp_grpc_port)
     _require_valid_port("receivers.otlp_http_port", cfg.otlp_http_port)
     _require_valid_port("receivers.webhook_port", cfg.webhook_port)
+    if cfg.queue_maxsize < 1:
+        raise ConfigError(f"receivers.queue_maxsize must be >= 1, got {cfg.queue_maxsize!r}")
+    if cfg.otlp_http_max_request_bytes < 1:
+        raise ConfigError(
+            f"receivers.otlp_http_max_request_bytes must be >= 1, "
+            f"got {cfg.otlp_http_max_request_bytes!r}"
+        )
     return cfg
 
 
@@ -343,6 +350,12 @@ def _validate_detection_config(config: DetectionConfig) -> None:
 
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
+    """Build DetectionConfig from a YAML ``detection:`` section.
+
+    Precedence for detector sub-params (HW, CUSUM, Markov):
+    nested key wins over flat key, flat key wins over hardcoded default.
+    Example: ``hw.alpha`` > ``hw_alpha`` > ``0.3``.
+    """
     dspot = data.get("dspot", {})
     hw = data.get("hw", {})
     cusum = data.get("cusum", {})

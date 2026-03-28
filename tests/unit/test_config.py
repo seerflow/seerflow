@@ -325,6 +325,25 @@ class TestReceiverConfigCompleteness:
         with pytest.raises(ConfigError, match="must be between 1 and 65535"):
             load_config(str(yaml_file))
 
+    def test_invalid_queue_maxsize_zero(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  queue_maxsize: 0\n")
+        with pytest.raises(ConfigError, match="queue_maxsize"):
+            load_config(str(yaml_file))
+
+    def test_invalid_otlp_http_max_request_bytes_zero(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  otlp_http_max_request_bytes: 0\n")
+        with pytest.raises(ConfigError, match="otlp_http_max_request_bytes"):
+            load_config(str(yaml_file))
+
+    def test_file_paths_coerced_to_strings(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("receivers:\n  file_paths:\n    - /var/log/app.log\n    - 12345\n")
+        cfg = load_config(str(yaml_file))
+        assert all(isinstance(p, str) for p in cfg.receivers.file_paths)
+        assert cfg.receivers.file_paths[1] == "12345"
+
 
 class TestDetectionValidation:
     def test_invalid_weight_negative(self) -> None:
