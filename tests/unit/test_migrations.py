@@ -116,3 +116,46 @@ class TestRunMigrations:
             finally:
                 MIGRATIONS.clear()
                 MIGRATIONS.update(original)
+
+
+class TestSqliteBackendMigration:
+    @pytest.mark.asyncio()
+    async def test_backend_connect_runs_migrations(self, tmp_path: object) -> None:
+        """SqliteBackend.connect() applies pending migrations on startup."""
+        from seerflow.config import StorageConfig
+        from seerflow.storage.migrations import get_schema_version
+        from seerflow.storage.sqlite import SqliteBackend
+
+        config = StorageConfig(
+            data_dir=str(tmp_path),
+            sqlite_path=str(tmp_path / "test.db"),  # type: ignore[operator]
+        )
+        storage = await SqliteBackend.connect(config)
+        try:
+            version = await get_schema_version(storage._conn)
+            assert version >= 1
+        finally:
+            await storage.close()
+
+    @pytest.mark.asyncio()
+    async def test_backend_reconnect_no_duplicate_migrations(self, tmp_path: object) -> None:
+        """Reconnecting to an existing database does not re-run migrations."""
+        from seerflow.config import StorageConfig
+        from seerflow.storage.migrations import get_schema_version
+        from seerflow.storage.sqlite import SqliteBackend
+
+        config = StorageConfig(
+            data_dir=str(tmp_path),
+            sqlite_path=str(tmp_path / "test.db"),  # type: ignore[operator]
+        )
+        # First connect — applies migrations
+        storage1 = await SqliteBackend.connect(config)
+        await storage1.close()
+
+        # Second connect — should not re-run
+        storage2 = await SqliteBackend.connect(config)
+        try:
+            version = await get_schema_version(storage2._conn)
+            assert version == 1  # still at 1, not 2
+        finally:
+            await storage2.close()

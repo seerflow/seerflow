@@ -427,6 +427,12 @@ class SqliteBackend:
             for pragma in _PRAGMAS:
                 await conn.execute(pragma)
             await _init_schema(conn)
+
+            from seerflow.storage.migrations import run_migrations
+
+            applied = await run_migrations(conn)
+            if applied > 0:
+                _log.info("Applied %d schema migration(s)", applied)
         except Exception:
             await conn.close()
             raise
