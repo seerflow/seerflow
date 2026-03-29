@@ -89,6 +89,7 @@ All settings are optional — sensible defaults apply when omitted.
 | `dspot.calibration_window` | int | `1000` | Minimum events required before DSPOT auto-threshold activates. |
 | `dspot.risk_level` | float | `0.0001` | Target false-positive rate for DSPOT (1 alert per 10,000 normal events). |
 | `dspot.initial_percentile` | int | `98` | Percentile used to seed the initial DSPOT threshold. |
+| `sigma_rules_dirs` | list[string] | `[]` | Additional directories containing custom Sigma rule YAML files. Loaded alongside the 63 bundled rules. |
 | `weights_content` | float | `0.30` | Blend weight for the content (Half-Space Trees) anomaly score. |
 | `weights_volume` | float | `0.25` | Blend weight for the volume (Holt-Winters) anomaly score. |
 | `weights_sequence` | float | `0.25` | Blend weight for the sequence (Markov chain) anomaly score. |

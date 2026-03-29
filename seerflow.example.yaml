@@ -54,6 +54,11 @@ receivers:
   #   - /home
 
 detection:
+  # Sigma rules — 63 bundled rules loaded automatically; add custom directories below
+  # sigma_rules_dirs:
+  #   - /etc/seerflow/sigma-rules
+  #   - /opt/custom-rules
+
   hst_window_size: 1000
   hst_n_trees: 25
   dspot:
