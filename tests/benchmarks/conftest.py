@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     import pytest
     from _pytest.terminal import TerminalReporter
 
+    from seerflow.models._types import AlertType
+
 _BENCHMARK_GUIDE = """\
 
 ================================ seerflow benchmark guide ================================
@@ -64,7 +66,7 @@ def make_event(
 
 def make_alert(
     *,
-    alert_type: str = "ml",
+    alert_type: AlertType = "ml",
     message: str = "bench alert",
     entity_uuid: str = "entity-aaa",
     dedup_key: str = "",
