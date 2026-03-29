@@ -68,9 +68,20 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, _request_shutdown)
 
+    # Load Sigma rules
+    from seerflow.sigma.engine import SigmaEngine
+
+    sigma_engine = SigmaEngine()
+    sigma_engine.load_bundled()
+    if config.detection.sigma_rules_dirs:
+        sigma_engine.load_custom(list(config.detection.sigma_rules_dirs))
+    _log.info("Sigma: %d rules loaded", sigma_engine.rule_count)
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
-    handler = _make_handler(ensemble, storage, save_interval_ns=save_interval_ns)
+    handler = _make_handler(
+        ensemble, storage, save_interval_ns=save_interval_ns, sigma_engine=sigma_engine
+    )
     await pipeline.run(handler)
 
     try:
