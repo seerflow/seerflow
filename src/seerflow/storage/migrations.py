@@ -14,10 +14,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import aiosqlite
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-
-    import aiosqlite
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ async def _migrate_v1_bootstrap(conn: aiosqlite.Connection) -> None:
     """
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS schema_version (
-            version    INTEGER NOT NULL,
+            version    INTEGER NOT NULL UNIQUE,
             applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
         )
     """)
@@ -48,7 +48,10 @@ async def get_schema_version(conn: aiosqlite.Connection) -> int:
         async with conn.execute("SELECT MAX(version) FROM schema_version") as cursor:
             row = await cursor.fetchone()
             return row[0] if row and row[0] is not None else 0
-    except Exception:
+    except aiosqlite.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return 0
+        logger.warning("Unexpected error reading schema_version", exc_info=True)
         return 0
 
 
