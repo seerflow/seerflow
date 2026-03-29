@@ -1,10 +1,10 @@
 # Seerflow
 
-A streaming, entity-centric log intelligence agent that detects operational failures and security threats across log sources. Combines traditional ML (fast, cheap) for bulk detection with LLMs (accurate, explanatory) for edge cases and root cause analysis.
+A streaming, entity-centric log intelligence agent that detects operational failures and security threats across log sources. Combines traditional ML (fast, cheap) for bulk detection with Sigma rules (3,000+ community detections) for known threat patterns.
 
 ## Status
 
-**Alpha** — Full ingestion + detection pipeline operational.
+**Alpha** — Full ingestion + detection + Sigma rules pipeline operational.
 
 [![CI](https://github.com/seerflow/seerflow/actions/workflows/ci.yml/badge.svg)](https://github.com/seerflow/seerflow/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/seerflow)](https://pypi.org/project/seerflow/)
@@ -60,10 +60,11 @@ docker run -v ./seerflow.yaml:/app/seerflow.yaml:ro seerflow/seerflow
 
 1. **Ingests** logs from multiple sources simultaneously (syslog, OTLP gRPC/HTTP, file tailing, webhooks)
 2. **Parses** each log line with Drain3 (template extraction) and regex entity extraction (IPs, users, hosts, files, domains, processes)
-3. **Scores** events using Half-Space Trees (streaming ML anomaly detection)
+3. **Scores** events with an ML ensemble: Half-Space Trees (content), Holt-Winters (volume), CUSUM (change), Markov chains (sequence) -- blended with z-normalization
 4. **Thresholds** scores with biDSPOT (EVT-based auto-threshold -- no manual tuning)
-5. **Alerts** on anomalies with template, entities, and score details
-6. **Persists** all events to SQLite for later analysis
+5. **Evaluates** 63 bundled Sigma rules (Linux, web, DNS, process, network) with MITRE ATT&CK tagging
+6. **Alerts** on anomalies and Sigma matches with template, entities, and score details
+7. **Persists** all events, alerts, and ML model state to SQLite for later analysis
 
 ### Example: Detect Anomalies in Syslog
 
@@ -100,7 +101,7 @@ echo '<11>1 2026-03-24T19:01:00Z db postgres 999 - - FATAL connection limit exce
 
 Output:
 ```
-INFO Seerflow 0.1.0 starting
+INFO Seerflow 0.3.0 starting
 INFO Receivers: syslog
 INFO Pipeline running — Ctrl+C to stop
 WARNING ANOMALY [syslog] score=0.952 threshold=0.009 dir=upper
@@ -131,7 +132,7 @@ All settings are optional -- Seerflow runs with sensible defaults (zero-config).
 
 Key config sections:
 - **receivers** -- syslog, OTLP gRPC/HTTP, file tailing, webhooks (enable/disable + ports)
-- **detection** -- HST window size, DSPOT calibration, scoring weights
+- **detection** -- HST window size, DSPOT calibration, scoring weights, custom Sigma rule directories
 - **storage** -- SQLite (default) or PostgreSQL
 - **alerting** -- dedup window, webhook/PagerDuty targets
 
@@ -148,17 +149,21 @@ Key config sections:
 ## Detection Pipeline
 
 ```
-Log Sources → Receivers → Drain3 Parser → Entity Extractor → HST Scorer → biDSPOT Threshold → Alert
+Log Sources → Receivers → Drain3 Parser → Entity Extractor → ML Ensemble → Sigma Rules → Alert
                                 ↓                ↓                ↓              ↓
-                          template_id       IPs, users      anomaly score   is_anomaly?
-                          template_str      hosts, files    [0.0 - 1.0]    upper/lower
+                          template_id       IPs, users      blended score   ATT&CK tags
+                          template_str      hosts, files    [0.0 - 1.0]    tactic/technique
                           template_params   domains, procs
 ```
 
 - **Drain3**: Streaming log template extraction (120K msgs/sec)
-- **Half-Space Trees**: Online ML anomaly detection via River (constant time/memory)
+- **Half-Space Trees**: Content anomaly detection via River (constant time/memory)
+- **Holt-Winters**: Volume anomaly detection (trend + seasonal decomposition)
+- **CUSUM**: Change-point detection (bidirectional cumulative sum)
+- **Markov Chains**: Sequence anomaly detection (per-entity transition matrices)
 - **biDSPOT**: Bidirectional EVT auto-threshold (upper spikes + lower drops)
-- **DetectionEnsemble**: Orchestrates detectors + thresholds per source
+- **DetectionEnsemble**: Orchestrates all detectors + blended scoring per source
+- **Sigma Engine**: 63 bundled SigmaHQ rules with logsource-indexed dispatch + custom rule directories
 
 ## Development
 
@@ -172,7 +177,7 @@ uv sync
 uv run pytest
 
 # Run quality gates
-uv run ruff check . && uv run ruff format --check . && uv run mypy src/ && uv run bandit -r src/ -c pyproject.toml && uv run pytest --cov=src/seerflow --cov-fail-under=90
+uv run ruff check . && uv run ruff format --check . && uv run mypy src/ && uv run bandit -r src/ -c pyproject.toml && uv run pytest --cov=src/seerflow --cov-fail-under=95
 ```
 
 ### Project Structure
@@ -182,11 +187,11 @@ src/seerflow/
     __main__.py      # CLI entry point (config → pipeline → detection → storage)
     cli.py           # argparse (--config, --version)
     config.py        # YAML config loader with ${ENV_VAR} interpolation
-    pipeline.py      # Pipeline builder + consumer loop
     models/          # SeerflowEvent, Alert, entity structs (msgspec)
     storage/
         protocols.py # Protocol interfaces (LogStore, AlertStore, ModelStore, EntityStore)
         sqlite.py    # SQLite backend (WAL, FTS5, WriteBuffer)
+        migrations.py # Schema versioning + forward-only migration runner
     receivers/
         base.py      # RawEvent dataclass, Receiver protocol
         manager.py   # ReceiverManager (bounded queue, backpressure, shutdown)
@@ -197,17 +202,28 @@ src/seerflow/
         webhook.py   # Webhooks (JSON/form, field mapping, auth)
     parsing/
         drain.py     # Drain3 wrapper for template extraction
-        entities.py  # Regex entity extraction (6 types)
+        entities.py  # Regex entity extraction (6 types, params-aware tagging)
         normalizer.py # EventNormalizer: RawEvent → SeerflowEvent
     detection/
         protocols.py # Detector Protocol (score, learn, serialize, deserialize)
         hst.py       # Half-Space Trees detector (River)
         threshold.py # biDSPOT auto-threshold (scipy GPD)
-        ensemble.py  # DetectionEnsemble orchestrator
+        ensemble.py  # DetectionEnsemble orchestrator (4 detectors + blended scoring)
+    sigma/
+        engine.py    # SigmaEngine: rule loading, logsource dispatch, evaluation
+        matcher.py   # Custom detection matcher (condition tree walker, regex cache)
+        pipeline.py  # pySigma processing pipeline (22 field mappings)
+        attack.py    # MITRE ATT&CK tactic/technique extraction
+        bundled.py   # Bundled rule path discovery (importlib.resources)
+        loader.py    # Custom rule directory discovery + validation
+        rules/       # 63 curated SigmaHQ YAML rules (linux, web, dns, process, network)
+    pipeline/
+        handler.py   # Event handler: parse → detect → sigma → store
+        run.py       # Pipeline runner (config → receivers → handler → storage)
 tests/
-    unit/            # 670+ unit tests
-    integration/     # Integration tests (multi-source, real SQLite)
-    benchmarks/      # Throughput benchmarks (pytest-benchmark)
+    unit/            # 1000+ unit tests
+    integration/     # Integration tests (multi-source, E2E pipeline, real SQLite)
+    benchmarks/      # Throughput benchmarks (pytest-benchmark, CI history tracking)
 ```
 
 ### Benchmarks
@@ -223,6 +239,7 @@ uv run pytest tests/benchmarks/ --benchmark-compare
 | Drain3 templates | ~120K msgs/sec |
 | Entity extraction | ~41K msgs/sec |
 | Full normalizer | ~39.5K msgs/sec |
+| **Full pipeline** (parse + ML + Sigma + storage) | **~1,800 events/sec** |
 
 ## License
 
