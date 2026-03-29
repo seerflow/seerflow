@@ -125,15 +125,26 @@ def _make_handler(
                 seerflow_event.template_id,
                 seerflow_event.template_str[:120],
             )
-            _log.warning(
+            _log.debug(
                 "  message:  %s",
                 seerflow_event.message[:200],
             )
-            if entity_refs:
-                _log.warning(
-                    "  entities: %s",
-                    ", ".join(entity_refs[:10]),
-                )
+
+            # Type-prefixed entity logging for safe, structured triage.
+            # Strip newlines/ANSI to prevent log injection from crafted input.
+            def _safe(v: str) -> str:
+                return v.replace("\n", "").replace("\r", "").replace("\x1b", "")
+
+            entity_parts: list[str] = []
+            for label, vals in (
+                ("IPs", seerflow_event.related_ips),
+                ("Users", seerflow_event.related_users),
+                ("Hosts", seerflow_event.related_hosts),
+            ):
+                if vals:
+                    entity_parts.append(f"{label}: {', '.join(_safe(v) for v in vals[:5])}")
+            if entity_parts:
+                _log.warning("  entities: %s", ", ".join(entity_parts))
             alert = create_ml_alert(seerflow_event, result)
             try:
                 await storage.write_alert(alert)
