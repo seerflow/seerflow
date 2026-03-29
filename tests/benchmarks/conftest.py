@@ -5,16 +5,11 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-import pytest
-
-from seerflow.config import StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
-from seerflow.storage.sqlite import SqliteBackend
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
+    import pytest
     from _pytest.terminal import TerminalReporter
 
 _BENCHMARK_GUIDE = """\
@@ -32,7 +27,6 @@ _BENCHMARK_GUIDE = """\
 
   Colors: green = fastest, red = slowest
   Outliers A;B: A = mild (>1 StdDev), B = extreme (>1.5 IQR)
-  Async benchmarks use manual timing -- see README for details
 ==========================================================================================
 """
 
@@ -90,12 +84,3 @@ def make_alert(
         contributing_events=(uuid.uuid4(),),
         dedup_key=dedup_key or str(uuid.uuid4()),
     )
-
-
-@pytest.fixture
-async def backend() -> AsyncIterator[SqliteBackend]:
-    """Create an in-memory SqliteBackend for benchmarks."""
-    config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
-    b = await SqliteBackend.connect(config)
-    yield b
-    await b.close()
