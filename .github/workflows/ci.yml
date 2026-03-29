@@ -9,6 +9,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required by benchmark-action auto-push to gh-pages
     steps:
       - uses: actions/checkout@v6
 
@@ -77,7 +79,7 @@ jobs:
 
       - name: Store benchmark result
         if: github.ref == 'refs/heads/dev'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c  # v1.9.0
         with:
           tool: 'pytest'
           output-file-path: benchmark-results.json
