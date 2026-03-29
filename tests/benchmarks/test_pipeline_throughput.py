@@ -241,9 +241,11 @@ class TestPipelineBenchmarkFixture:
         """
         events = generate_events(_BATCH_SIZE)
 
-        benchmark.pedantic(_run_sync, args=(events, tmp_path), rounds=3, warmup_rounds=1)
+        benchmark.pedantic(  # type: ignore[no-untyped-call]
+            _run_sync, args=(events, tmp_path), rounds=3, warmup_rounds=1
+        )
 
-        mean_time = benchmark.stats["mean"]
+        mean_time = benchmark.stats["mean"]  # type: ignore[index]
         rate = _BATCH_SIZE / mean_time if mean_time > 0 else float("inf")
         print(f"\nThroughput: {rate:,.0f} events/sec (target: 10,000)")  # noqa: T201
 
