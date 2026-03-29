@@ -52,3 +52,38 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+      - name: Run benchmarks
+        run: |
+          uv run pytest tests/benchmarks/ -m benchmark --benchmark-only \
+            --benchmark-json=benchmark-results.json \
+            --benchmark-columns=min,max,mean,rounds -q
+
+      - name: Benchmark summary
+        if: success()
+        run: |
+          echo "## Benchmark Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results.json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for b in data.get('benchmarks', []):
+              name = b['name']
+              mean = b['stats']['mean'] * 1000
+              print(f'{name}: {mean:.1f}ms mean')
+          " >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store benchmark result
+        if: github.ref == 'refs/heads/dev'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'pytest'
+          output-file-path: benchmark-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '110%'
+          comment-on-alert: true
+          fail-on-alert: false
+          benchmark-data-dir-path: 'benchmarks'
