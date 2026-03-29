@@ -30,7 +30,7 @@ from seerflow.storage.sqlite import SqliteBackend
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = [pytest.mark.e2e, pytest.mark.asyncio]
+pytestmark = pytest.mark.e2e
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,12 @@ def _raw(message: str, source_type: str = "syslog") -> RawEvent:
         received_ns=time.time_ns(),
         metadata={},
     )
+
+
+async def _flush(storage: SqliteBackend) -> None:
+    """Flush the write buffer so events/alerts are queryable."""
+    if storage._write_buffer is not None:
+        await storage._write_buffer.flush()
 
 
 # Normal syslog messages (RFC 5424 format) for ML warmup
@@ -126,8 +132,7 @@ class TestE2EPipeline:
         for msg in _ATTACK_MESSAGES:
             await handler(_raw(msg))  # type: ignore[operator]
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await _flush(storage)
 
         result = await storage.query_events(EventQuery(limit=100))
         assert result.total >= len(_NORMAL_MESSAGES) + len(_ATTACK_MESSAGES)
@@ -142,8 +147,7 @@ class TestE2EPipeline:
         for msg in _NORMAL_MESSAGES[:20]:
             await handler(_raw(msg))  # type: ignore[operator]
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await _flush(storage)
 
         result = await storage.query_events(EventQuery(limit=20))
         templated = [e for e in result.items if e.template_id != -1]
@@ -159,8 +163,7 @@ class TestE2EPipeline:
         for msg in _NORMAL_MESSAGES:
             await handler(_raw(msg))  # type: ignore[operator]
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await _flush(storage)
 
         result = await storage.query_events(EventQuery(limit=100))
         # Verify at least 50 events were processed by the ensemble (no crash).
@@ -183,8 +186,7 @@ class TestE2EPipeline:
         for msg in _ATTACK_MESSAGES:
             await handler(_raw(msg))  # type: ignore[operator]
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await _flush(storage)
 
         # Verify events were stored (pipeline did not crash)
         result = await storage.query_events(EventQuery(limit=20))
@@ -195,7 +197,9 @@ class TestE2EPipeline:
         alert_result = await storage.query_alerts(AlertQuery(alert_type="sigma", limit=50))
         # When normaliser is updated to set logsource fields, change to:
         #   assert alert_result.total >= 1
-        assert alert_result.total >= 0  # documents known gap
+        assert alert_result.total == 0, (
+            "Expected 0 sigma alerts until EventNormalizer sets logsource fields"
+        )
 
     async def test_multi_source_events(
         self,
@@ -209,8 +213,7 @@ class TestE2EPipeline:
             msg = f"<134>1 2026-03-28T12:00:00Z host app 1 - - Normal log from {source}"
             await handler(_raw(msg, source_type=source))  # type: ignore[operator]
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await _flush(storage)
 
         result = await storage.query_events(EventQuery(limit=10))
         stored_sources = {e.source_type for e in result.items}
@@ -229,13 +232,7 @@ class TestE2EPipeline:
         for msg in _ATTACK_MESSAGES:
             await handler(_raw(msg))  # type: ignore[operator]
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
-
-        # Query all alerts (ML anomalies + sigma).  During warmup the
-        # ensemble may or may not flag anomalies, so >= 0 is acceptable.
-        result = await storage.query_alerts(AlertQuery(limit=50))
-        assert result.total >= 0
+        await _flush(storage)
 
         # If any sigma alerts exist, verify their type.
         sigma_result = await storage.query_alerts(AlertQuery(alert_type="sigma", limit=50))
@@ -253,8 +250,7 @@ class TestE2EPipeline:
         for msg in _NORMAL_MESSAGES + _ATTACK_MESSAGES:
             await handler(_raw(msg))  # type: ignore[operator]
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await _flush(storage)
         elapsed = time.time() - start
 
         assert elapsed < 30.0, f"Pipeline took {elapsed:.1f}s, budget is 30s"
