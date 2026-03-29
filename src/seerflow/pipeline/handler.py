@@ -129,14 +129,20 @@ def _make_handler(
                 "  message:  %s",
                 seerflow_event.message[:200],
             )
-            # Type-prefixed entity logging for safe, structured triage
+
+            # Type-prefixed entity logging for safe, structured triage.
+            # Strip newlines/ANSI to prevent log injection from crafted input.
+            def _safe(v: str) -> str:
+                return v.replace("\n", "").replace("\r", "").replace("\x1b", "")
+
             entity_parts: list[str] = []
-            if seerflow_event.related_ips:
-                entity_parts.append(f"IPs: {', '.join(seerflow_event.related_ips[:5])}")
-            if seerflow_event.related_users:
-                entity_parts.append(f"Users: {', '.join(seerflow_event.related_users[:5])}")
-            if seerflow_event.related_hosts:
-                entity_parts.append(f"Hosts: {', '.join(seerflow_event.related_hosts[:5])}")
+            for label, vals in (
+                ("IPs", seerflow_event.related_ips),
+                ("Users", seerflow_event.related_users),
+                ("Hosts", seerflow_event.related_hosts),
+            ):
+                if vals:
+                    entity_parts.append(f"{label}: {', '.join(_safe(v) for v in vals[:5])}")
             if entity_parts:
                 _log.warning("  entities: %s", ", ".join(entity_parts))
             alert = create_ml_alert(seerflow_event, result)
