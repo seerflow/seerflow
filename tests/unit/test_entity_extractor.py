@@ -279,6 +279,23 @@ class TestExtractTagged:
         with pytest.raises(AttributeError):
             entity.value = "changed"  # type: ignore[misc]
 
+    def test_empty_params_tags_unknown(self) -> None:
+        """Explicit empty params tuple tags all entities as unknown."""
+        extractor = EntityExtractor()
+        result = extractor.extract_tagged("Login from 10.0.0.1", params=())
+        assert result["ip"][0].source == "unknown"
+
+    def test_entity_in_both_param_and_template_tagged_param(self) -> None:
+        """Entity in both param and static text is tagged param (conservative)."""
+        extractor = EntityExtractor()
+        result = extractor.extract_tagged(
+            "Server 10.0.0.1 blocked 10.0.0.1",
+            params=("10.0.0.1",),
+        )
+        ips = result["ip"]
+        assert len(ips) >= 1
+        assert ips[0].source == "param"
+
     def test_backward_compat_extract_unchanged(self) -> None:
         """Original extract() still returns dict[str, list[str]]."""
         extractor = EntityExtractor()
