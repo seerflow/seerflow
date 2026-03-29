@@ -34,7 +34,8 @@ class TestFeatureExtraction:
 
         event = _make_event(
             template_id=42,
-            entity_refs=("ent1", "ent2"),
+            related_ips=("10.0.0.1", "10.0.0.2"),
+            related_users=("admin",),
             severity_id=SeverityLevel.ERROR,
             template_params=("p1", "p2", "p3"),
             message="hello world",
@@ -42,7 +43,7 @@ class TestFeatureExtraction:
         features = _extract_features(event)
 
         assert features["tid_42"] == 1.0
-        assert features["entity_count"] == 2.0
+        assert features["entity_count"] == 3.0  # 2 IPs + 1 user
         assert features["severity"] == float(SeverityLevel.ERROR.value)
         assert features["param_count"] == 3.0
         assert features["msg_length"] == float(len("hello world"))
