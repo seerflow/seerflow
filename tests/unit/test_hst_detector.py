@@ -103,7 +103,6 @@ class TestHSTDetector:
             template_id=1,
             severity_id=SeverityLevel.INFORMATIONAL,
             message="Normal operation completed",
-            entity_refs=(),
             template_params=(),
         )
 
@@ -120,7 +119,8 @@ class TestHSTDetector:
                 "CRITICAL FAILURE: kernel panic in module xyz with stack overflow "
                 "and memory corruption detected across multiple subsystems"
             ),
-            entity_refs=("e1", "e2", "e3", "e4", "e5"),
+            related_ips=("10.0.0.1", "10.0.0.2", "10.0.0.3"),
+            related_users=("root", "admin"),
             template_params=("p1", "p2", "p3", "p4", "p5", "p6", "p7"),
         )
         anomalous_score = detector.score(anomalous_event)
