@@ -119,7 +119,7 @@ skips = ["B101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e' --benchmark-min-rounds=10"
+addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
 markers = [
     "benchmark: performance benchmarks",
     "docker: integration tests requiring Docker daemon",

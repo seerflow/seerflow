@@ -150,6 +150,7 @@ cython_debug/
 # Project-specific
 .idea/
 .benchmarks/
+benchmark-results.json
 seerflow.yaml
 *.db
 *.db-shm
