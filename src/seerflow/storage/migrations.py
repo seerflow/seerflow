@@ -51,8 +51,7 @@ async def get_schema_version(conn: aiosqlite.Connection) -> int:
     except aiosqlite.OperationalError as exc:
         if "no such table" in str(exc).lower():
             return 0
-        logger.warning("Unexpected error reading schema_version", exc_info=True)
-        return 0
+        raise  # do not mask unexpected DB errors
 
 
 async def run_migrations(conn: aiosqlite.Connection) -> int:
