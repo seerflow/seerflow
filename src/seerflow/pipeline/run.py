@@ -68,14 +68,19 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, _request_shutdown)
 
-    # Load Sigma rules
+    # Load Sigma rules — degrade gracefully if loading fails
     from seerflow.sigma.engine import SigmaEngine
 
-    sigma_engine = SigmaEngine()
-    sigma_engine.load_bundled()
-    if config.detection.sigma_rules_dirs:
-        sigma_engine.load_custom(list(config.detection.sigma_rules_dirs))
-    _log.info("Sigma: %d rules loaded", sigma_engine.rule_count)
+    sigma_engine: SigmaEngine | None = None
+    try:
+        _sigma = SigmaEngine()
+        _sigma.load_bundled()
+        if config.detection.sigma_rules_dirs:
+            _sigma.load_custom(list(config.detection.sigma_rules_dirs))
+        _log.info("Sigma: %d rules loaded", _sigma.rule_count)
+        sigma_engine = _sigma
+    except Exception:
+        _log.warning("Sigma rule loading failed — running without Sigma detection", exc_info=True)
 
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000

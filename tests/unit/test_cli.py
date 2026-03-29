@@ -266,6 +266,69 @@ class TestRunLoop:
         new_template_logs = [r for r in caplog.records if "New template discovered" in r.message]
         assert len(new_template_logs) >= 1
 
+    async def test_handler_with_sigma_engine_writes_alerts(self) -> None:
+        """When sigma_engine returns alerts, handler writes them to storage."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.models.alert import Alert
+        from seerflow.pipeline.handler import _make_handler
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+        mock_storage.write_alert = AsyncMock()
+
+        mock_alert = MagicMock(spec=Alert)
+        mock_sigma = MagicMock()
+        mock_sigma.evaluate.return_value = [mock_alert]
+
+        handler = _make_handler(ensemble, mock_storage, sigma_engine=mock_sigma)
+
+        event = RawEvent(
+            data=b"test message",
+            source_type="syslog",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        await handler(event)
+
+        mock_sigma.evaluate.assert_called_once()
+        mock_storage.write_alert.assert_called()
+
+    async def test_handler_sigma_evaluate_failure_does_not_crash(self) -> None:
+        """If sigma_engine.evaluate() raises, the handler logs and continues."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from seerflow.config import SeerflowConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.pipeline.handler import _make_handler
+        from seerflow.receivers.base import RawEvent
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock_storage = AsyncMock()
+        mock_storage.write_events = AsyncMock()
+
+        mock_sigma = MagicMock()
+        mock_sigma.evaluate.side_effect = RuntimeError("sigma broke")
+
+        handler = _make_handler(ensemble, mock_storage, sigma_engine=mock_sigma)
+
+        event = RawEvent(
+            data=b"test message",
+            source_type="syslog",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        # Should not raise despite sigma failure
+        await handler(event)
+
     def test_main_with_nonexistent_config_raises(self) -> None:
         """main() with a bad config path should raise."""
         from seerflow.config import ConfigError
