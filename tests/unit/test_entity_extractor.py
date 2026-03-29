@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from seerflow.parsing.entities import (
     EntityExtractor,
+    TaggedEntity,
     _extract_domains,
     _extract_files,
     _extract_hosts,
@@ -227,3 +230,74 @@ class TestProcessExtraction:
     def test_syslog_requires_colon_or_whitespace(self) -> None:
         result = _extract_processes("sshd[1234]: login failed")
         assert "sshd:1234" in result
+
+
+class TestExtractTagged:
+    def test_with_params_tags_entities(self) -> None:
+        """Entities found in params are tagged 'param', others 'template'."""
+        extractor = EntityExtractor()
+        result = extractor.extract_tagged(
+            "Failed login for user admin from 10.0.0.1",
+            params=("admin", "10.0.0.1"),
+        )
+        ips = result["ip"]
+        assert len(ips) == 1
+        assert ips[0].value == "10.0.0.1"
+        assert ips[0].source == "param"
+
+        users = result["user"]
+        assert len(users) == 1
+        assert users[0].value == "admin"
+        assert users[0].source == "param"
+
+    def test_without_params_tags_unknown(self) -> None:
+        """Without params, all entities tagged 'unknown'."""
+        extractor = EntityExtractor()
+        result = extractor.extract_tagged("Login from 10.0.0.1")
+        ips = result["ip"]
+        assert len(ips) == 1
+        assert ips[0].source == "unknown"
+
+    def test_static_entity_tagged_template(self) -> None:
+        """Entity NOT in params is tagged 'template'."""
+        extractor = EntityExtractor()
+        result = extractor.extract_tagged(
+            "Server 192.168.1.1 login from 10.0.0.1",
+            params=("10.0.0.1",),
+        )
+        ips = result["ip"]
+        param_ips = [e for e in ips if e.source == "param"]
+        template_ips = [e for e in ips if e.source == "template"]
+        assert len(param_ips) == 1
+        assert param_ips[0].value == "10.0.0.1"
+        assert len(template_ips) == 1
+        assert template_ips[0].value == "192.168.1.1"
+
+    def test_tagged_entity_is_frozen(self) -> None:
+        """TaggedEntity is immutable."""
+        entity = TaggedEntity(value="10.0.0.1", source="param")
+        with pytest.raises(AttributeError):
+            entity.value = "changed"  # type: ignore[misc]
+
+    def test_empty_params_tags_unknown(self) -> None:
+        """Explicit empty params tuple tags all entities as unknown."""
+        extractor = EntityExtractor()
+        result = extractor.extract_tagged("Login from 10.0.0.1", params=())
+        assert result["ip"][0].source == "unknown"
+
+    def test_entity_in_both_param_and_template_tagged_param(self) -> None:
+        """Entity in both param and static text is tagged param (conservative)."""
+        extractor = EntityExtractor()
+        result = extractor.extract_tagged(
+            "Server 10.0.0.1 blocked 10.0.0.1",
+            params=("10.0.0.1",),
+        )
+        ips = result["ip"]
+        assert len(ips) >= 1
+        assert ips[0].source == "param"
+
+    def test_backward_compat_extract_unchanged(self) -> None:
+        """Original extract() still returns dict[str, list[str]]."""
+        extractor = EntityExtractor()
+        result = extractor.extract("Login from 10.0.0.1 by admin")
+        assert isinstance(result["ip"][0], str)

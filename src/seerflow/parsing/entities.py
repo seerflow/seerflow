@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
 from seerflow.parsing._constants import MAX_ENTITIES_PER_TYPE, MAX_MESSAGE_LEN
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+@dataclass(frozen=True, slots=True)
+class TaggedEntity:
+    """An extracted entity with source tagging."""
+
+    value: str
+    source: Literal["param", "template", "unknown"]
+
 
 _ALL_ENTITY_TYPES = frozenset({"ip", "user", "host", "file", "domain", "process"})
 
@@ -188,3 +198,30 @@ class EntityExtractor:
         if len(message) > MAX_MESSAGE_LEN:
             message = message[:MAX_MESSAGE_LEN]
         return {name: fn(message)[:MAX_ENTITIES_PER_TYPE] for name, fn in self._extractors.items()}
+
+    def extract_tagged(
+        self, message: str, *, params: tuple[str, ...] = ()
+    ) -> dict[str, list[TaggedEntity]]:
+        """Extract entities with source tagging.
+
+        When *params* (from DrainParser) are provided, entities whose values
+        appear in any param are tagged ``"param"``; others ``"template"``.
+        Without params, all entities are tagged ``"unknown"``.
+        """
+        raw = self.extract(message)
+        if not params:
+            return {
+                name: [TaggedEntity(value=v, source="unknown") for v in values]
+                for name, values in raw.items()
+            }
+        param_set = frozenset(params)
+        return {
+            name: [
+                TaggedEntity(
+                    value=v,
+                    source="param" if v in param_set else "template",
+                )
+                for v in values
+            ]
+            for name, values in raw.items()
+        }
