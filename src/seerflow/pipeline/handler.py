@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.receivers.base import RawEvent
+    from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.sqlite import SqliteBackend
 
 _log = logging.getLogger("seerflow")
@@ -22,6 +23,7 @@ def _make_handler(
     ensemble: DetectionEnsemble,
     storage: SqliteBackend,
     save_interval_ns: int = 300_000_000_000,
+    sigma_engine: SigmaEngine | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.models.alert import create_ml_alert
@@ -137,6 +139,18 @@ def _make_handler(
                 await storage.write_alert(alert)
             except Exception:
                 _log.warning("Alert write failed", exc_info=True)
+
+        # Sigma rule evaluation
+        if sigma_engine is not None:
+            try:
+                sigma_alerts = sigma_engine.evaluate(seerflow_event)
+                for sigma_alert in sigma_alerts:
+                    try:
+                        await storage.write_alert(sigma_alert)
+                    except Exception:
+                        _log.warning("Sigma alert write failed", exc_info=True)
+            except Exception:
+                _log.warning("Sigma evaluation failed", exc_info=True)
 
         # Periodic model state save
         if event_count % 100 == 0 and event_count > 0:
