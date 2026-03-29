@@ -75,8 +75,8 @@ class EventNormalizer:
         # Template extraction
         template_id, template_str, template_params = self._parser.parse(message)
 
-        # Entity extraction
-        entities = self._extractor.extract(message)
+        # Entity extraction (params-aware tagging)
+        tagged = self._extractor.extract_tagged(message, params=template_params)
 
         return SeerflowEvent(
             event_id=uuid.uuid4(),
@@ -89,7 +89,7 @@ class EventNormalizer:
             template_id=template_id,
             template_str=template_str,
             template_params=template_params,
-            related_ips=tuple(entities.get("ip", [])),
-            related_users=tuple(entities.get("user", [])),
-            related_hosts=tuple(entities.get("host", [])),
+            related_ips=tuple(e.value for e in tagged.get("ip", [])),
+            related_users=tuple(e.value for e in tagged.get("user", [])),
+            related_hosts=tuple(e.value for e in tagged.get("host", [])),
         )
