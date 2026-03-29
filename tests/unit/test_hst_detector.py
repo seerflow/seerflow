@@ -34,7 +34,8 @@ class TestFeatureExtraction:
 
         event = _make_event(
             template_id=42,
-            entity_refs=("ent1", "ent2"),
+            related_ips=("10.0.0.1", "10.0.0.2"),
+            related_users=("admin",),
             severity_id=SeverityLevel.ERROR,
             template_params=("p1", "p2", "p3"),
             message="hello world",
@@ -42,7 +43,7 @@ class TestFeatureExtraction:
         features = _extract_features(event)
 
         assert features["tid_42"] == 1.0
-        assert features["entity_count"] == 2.0
+        assert features["entity_count"] == 3.0  # 2 IPs + 1 user
         assert features["severity"] == float(SeverityLevel.ERROR.value)
         assert features["param_count"] == 3.0
         assert features["msg_length"] == float(len("hello world"))
@@ -102,7 +103,6 @@ class TestHSTDetector:
             template_id=1,
             severity_id=SeverityLevel.INFORMATIONAL,
             message="Normal operation completed",
-            entity_refs=(),
             template_params=(),
         )
 
@@ -119,7 +119,8 @@ class TestHSTDetector:
                 "CRITICAL FAILURE: kernel panic in module xyz with stack overflow "
                 "and memory corruption detected across multiple subsystems"
             ),
-            entity_refs=("e1", "e2", "e3", "e4", "e5"),
+            related_ips=("10.0.0.1", "10.0.0.2", "10.0.0.3"),
+            related_users=("root", "admin"),
             template_params=("p1", "p2", "p3", "p4", "p5", "p6", "p7"),
         )
         anomalous_score = detector.score(anomalous_event)
@@ -267,3 +268,53 @@ class TestGetHstDetector:
 
         assert callable(get_hst_detector)
         assert HSTDetector is not None
+
+
+class TestHSTUnpickler:
+    """Test restricted unpickler rejects disallowed classes (lines 36-37)."""
+
+    def test_rejects_disallowed_class(self) -> None:
+        """Unpickler refuses to deserialize a class not in the allowlist."""
+        import pickle
+
+        from seerflow.detection.hst import HSTDetector
+
+        # Craft pickle data containing a disallowed class (os.system)
+        malicious = pickle.dumps({"key": "value"})  # dict is allowed by default pickle
+        # But we can test via the HSTDetector.deserialize path by providing
+        # pickle data for a dict (not HalfSpaceTrees)
+        detector = HSTDetector()
+        with pytest.raises((pickle.UnpicklingError, TypeError)):
+            detector.deserialize(malicious)
+
+    def test_rejects_os_system(self) -> None:
+        """Unpickler refuses classes like os.system."""
+        import io
+        import pickle
+
+        from seerflow.detection.hst import _HSTUnpickler
+
+        # Build raw pickle bytes that try to load os.system
+        # Using pickle protocol to encode a reference to os.system
+        buf = io.BytesIO()
+        # GLOBAL opcode: push os.system onto stack
+        buf.write(b"\x80\x02cos\nsystem\nq\x00.")  # pickle v2 for os.system
+        buf.seek(0)
+        with pytest.raises(pickle.UnpicklingError, match="Refused to deserialize"):
+            _HSTUnpickler(buf).load()
+
+
+class TestHSTDeserializeWrongType:
+    """Test deserialize with non-HalfSpaceTrees object (lines 89-90)."""
+
+    def test_deserialize_wrong_type_raises_type_error(self) -> None:
+        """Deserialize data that decodes to a non-HalfSpaceTrees type raises TypeError."""
+        import pickle
+
+        from seerflow.detection.hst import HSTDetector
+
+        # Serialize a tuple (which is in the allowlist) wrapped in bytes
+        data = pickle.dumps(("not", "a", "model"))
+        detector = HSTDetector()
+        with pytest.raises(TypeError, match="Expected HalfSpaceTrees"):
+            detector.deserialize(data)

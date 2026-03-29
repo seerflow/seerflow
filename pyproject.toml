@@ -4,21 +4,27 @@ build-backend = "hatchling.build"
 
 [project]
 name = "seerflow"
-version = "0.2.0"
-description = "A streaming, entity-centric log intelligence agent that foresees operational failures and sees security threats hiding across your log sources"
+version = "0.3.0"
+description = "Streaming log intelligence agent — detects operational failures and security threats with online ML"
+readme = "README.md"
 requires-python = ">=3.13"
 license = "AGPL-3.0-only"
-authors = [{ name = "Fernando Flores" }]
+authors = [{ name = "Fernando Flores", email = "ferjflores@gmail.com" }]
+keywords = ["log-analysis", "anomaly-detection", "siem", "observability", "streaming", "machine-learning", "syslog", "opentelemetry"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Logging",
     "Topic :: System :: Monitoring",
     "Topic :: Security",
     "Typing :: Typed",
+    "Framework :: AsyncIO",
+    "Operating System :: OS Independent",
 ]
+
 dependencies = [
     "aiohttp>=3.13.3",
     "aiosqlite>=0.22.1",
@@ -26,18 +32,20 @@ dependencies = [
     "grpcio>=1.78.0",
     "msgspec>=0.20.0",
     "opentelemetry-proto>=1.40.0",
+    "pysigma>=1.2.0",
     "pyyaml>=6.0.3",
     "river>=0.23.0",
     "watchfiles>=1.1.1",
 ]
 
-[project.scripts]
-seerflow = "seerflow.cli:main"
-
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
 Repository = "https://github.com/seerflow/seerflow"
 Issues = "https://github.com/seerflow/seerflow/issues"
+Documentation = "https://github.com/seerflow/seerflow/blob/main/SETTINGS.md"
+
+[project.scripts]
+seerflow = "seerflow.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/seerflow"]
@@ -54,6 +62,7 @@ dev = [
     "pytest-benchmark>=5.2.3",
     "types-grpcio>=1.0.0.20251009",
     "types-protobuf>=6.32.1.20260221",
+    "pre-commit>=4.5.1",
 ]
 
 [tool.ruff]
@@ -110,9 +119,11 @@ skips = ["B101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers -m 'not slow' --benchmark-min-rounds=10"
+addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
 markers = [
     "benchmark: performance benchmarks",
+    "docker: integration tests requiring Docker daemon",
+    "e2e: end-to-end pipeline integration tests",
     "slow: heavyweight benchmarks, run with pytest -m slow",
 ]
 
@@ -121,7 +132,7 @@ source = ["src/seerflow"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 90
+fail_under = 95
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

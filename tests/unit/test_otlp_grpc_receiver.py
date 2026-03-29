@@ -159,6 +159,41 @@ class TestOtlpGrpcReceiverIngest:
             await receiver.stop()
 
 
+class TestOtlpGrpcReceiverEdgeCases:
+    async def test_bind_failure_raises_os_error(self) -> None:
+        """When gRPC server fails to bind, OSError is raised (lines 114-115)."""
+        from unittest.mock import MagicMock, patch
+
+        mgr = ReceiverManager()
+        receiver = OtlpGrpcReceiver(mgr, source_id="test", port=0)
+
+        # Mock grpc.server to return a server that reports bind failure (port=0)
+        mock_server = MagicMock()
+        mock_server.add_insecure_port.return_value = 0  # 0 means bind failed
+        with (
+            patch("seerflow.receivers.otlp_grpc.grpc.server", return_value=mock_server),
+            pytest.raises(OSError, match="failed to bind"),
+        ):
+            await receiver.start()
+
+    async def test_server_start_exception_stops_server(self) -> None:
+        """When server.start() fails, server.stop(0) is called (lines 118-120)."""
+        from unittest.mock import MagicMock, patch
+
+        mgr = ReceiverManager()
+        receiver = OtlpGrpcReceiver(mgr, source_id="test", port=0)
+
+        mock_server = MagicMock()
+        mock_server.add_insecure_port.return_value = 50051  # bind succeeds
+        mock_server.start.side_effect = RuntimeError("start failed")
+        with (
+            patch("seerflow.receivers.otlp_grpc.grpc.server", return_value=mock_server),
+            pytest.raises(RuntimeError, match="start failed"),
+        ):
+            await receiver.start()
+        mock_server.stop.assert_called_once_with(0)
+
+
 class TestOtlpGrpcReceiverConfig:
     async def test_configurable_port(self) -> None:
         mgr = ReceiverManager()

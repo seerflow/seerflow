@@ -42,7 +42,9 @@ def _extract_features(event: SeerflowEvent) -> dict[str, float]:
     """Extract feature vector from SeerflowEvent for HST input."""
     return {
         f"tid_{event.template_id}": 1.0,
-        "entity_count": float(len(event.entity_refs)),
+        "entity_count": float(
+            len(event.related_ips) + len(event.related_users) + len(event.related_hosts)
+        ),
         "severity": float(event.severity_id.value),
         "param_count": float(len(event.template_params)),
         "msg_length": float(len(event.message)),

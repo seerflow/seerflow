@@ -7,6 +7,7 @@ are used (zero-config first run per NFR-006).
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -52,7 +53,7 @@ class WebhookEndpointConfig:
 
     path: str = "/ingest/webhook"
     auth_header: str = ""
-    auth_token: str = ""
+    auth_token: str = field(default="", repr=False)
     field_mapping: dict[str, str] = field(default_factory=dict)
     source_id: str = "webhook"
 
@@ -96,10 +97,25 @@ class DetectionConfig:
     dspot_calibration_window: int = 1000
     dspot_risk_level: float = 0.0001
     dspot_initial_percentile: int = 98
+    hw_seasonal_period: int = 1440
+    hw_alpha: float = 0.3
+    hw_beta: float = 0.1
+    hw_gamma: float = 0.1
+    hw_n_std: float = 3.0
+    cusum_drift: float = 0.5
+    cusum_threshold: float = 5.0
+    cusum_ema_alpha: float = 0.1
+    cusum_warmup_buckets: int = 30
+    markov_smoothing: float = 1e-6
+    markov_min_events: int = 100
+    markov_max_entities: int = 1000
+    max_sources: int = 256
+    model_save_interval_seconds: int = 300
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
     weights_pattern: float = 0.20
+    sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -108,7 +124,7 @@ class AlertingConfig:
 
     dedup_window_seconds: int = 900
     webhooks: tuple[dict[str, Any], ...] = ()
-    pagerduty_routing_key: str = ""
+    pagerduty_routing_key: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -204,10 +220,10 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
 def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     file_paths = data.get("file_paths", ())
     if isinstance(file_paths, list):
-        file_paths = tuple(file_paths)
+        file_paths = tuple(str(p) for p in file_paths)
     allowed_log_roots = data.get("allowed_log_roots", ())
     if isinstance(allowed_log_roots, list):
-        allowed_log_roots = tuple(allowed_log_roots)
+        allowed_log_roots = tuple(str(r) for r in allowed_log_roots)
     raw_webhooks = data.get("webhooks", ())
     if isinstance(raw_webhooks, list):
         webhook_configs: list[WebhookEndpointConfig] = []
@@ -256,22 +272,127 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     _require_valid_port("receivers.otlp_grpc_port", cfg.otlp_grpc_port)
     _require_valid_port("receivers.otlp_http_port", cfg.otlp_http_port)
     _require_valid_port("receivers.webhook_port", cfg.webhook_port)
+    if cfg.queue_maxsize < 1:
+        raise ConfigError(f"receivers.queue_maxsize must be >= 1, got {cfg.queue_maxsize!r}")
+    if cfg.otlp_http_max_request_bytes < 1:
+        raise ConfigError(
+            f"receivers.otlp_http_max_request_bytes must be >= 1, "
+            f"got {cfg.otlp_http_max_request_bytes!r}"
+        )
     return cfg
 
 
+def _require_finite_positive(field: str, value: float) -> None:
+    """Raise ConfigError if *value* is not finite or not > 0."""
+    if not math.isfinite(value) or value <= 0.0:
+        raise ConfigError(f"{field} must be finite and > 0, got {value!r}")
+
+
+def _require_open_unit(field: str, value: float) -> None:
+    """Raise ConfigError if *value* is not in the open interval (0, 1)."""
+    if not (0.0 < value < 1.0):
+        raise ConfigError(f"{field} must be in (0, 1), got {value!r}")
+
+
+def _validate_detection_config(config: DetectionConfig) -> None:
+    """Validate all numeric bounds in DetectionConfig; raise ConfigError if invalid."""
+    for name, value in (
+        ("weights_content", config.weights_content),
+        ("weights_volume", config.weights_volume),
+        ("weights_sequence", config.weights_sequence),
+        ("weights_pattern", config.weights_pattern),
+    ):
+        if not math.isfinite(value):
+            raise ConfigError(f"detection.{name} must be finite, got {value!r}")
+        if value < 0.0:
+            raise ConfigError(f"detection.{name} must be >= 0.0, got {value!r}")
+
+    if config.model_save_interval_seconds < 1:
+        msg = (
+            f"detection.model_save_interval_seconds must be >= 1, "
+            f"got {config.model_save_interval_seconds!r}"
+        )
+        raise ConfigError(msg)
+
+    if config.markov_max_entities < 1 or config.markov_max_entities > 100_000:
+        msg = (
+            f"detection.markov_max_entities must be between 1 and 100_000, "
+            f"got {config.markov_max_entities!r}"
+        )
+        raise ConfigError(msg)
+
+    if config.max_sources < 1 or config.max_sources > 10_000:
+        raise ConfigError(
+            f"detection.max_sources must be between 1 and 10_000, got {config.max_sources!r}"
+        )
+
+    _require_open_unit("detection.cusum_ema_alpha", config.cusum_ema_alpha)
+    if config.cusum_warmup_buckets < 1:
+        raise ConfigError(
+            f"detection.cusum_warmup_buckets must be >= 1, got {config.cusum_warmup_buckets!r}"
+        )
+    _require_finite_positive("detection.cusum_drift", config.cusum_drift)
+    _require_finite_positive("detection.cusum_threshold", config.cusum_threshold)
+
+    for name in ("hw_alpha", "hw_beta", "hw_gamma"):
+        _require_open_unit(f"detection.{name}", getattr(config, name))
+    _require_finite_positive("detection.hw_n_std", config.hw_n_std)
+    if config.hw_seasonal_period < 2:
+        raise ConfigError(
+            f"detection.hw_seasonal_period must be >= 2, got {config.hw_seasonal_period!r}"
+        )
+
+    _require_finite_positive("detection.markov_smoothing", config.markov_smoothing)
+
+
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
+    """Build DetectionConfig from a YAML ``detection:`` section.
+
+    Precedence for detector sub-params (HW, CUSUM, Markov):
+    nested key wins over flat key, flat key wins over hardcoded default.
+    Example: ``hw.alpha`` > ``hw_alpha`` > ``0.3``.
+    """
     dspot = data.get("dspot", {})
-    return DetectionConfig(
+    hw = data.get("hw", {})
+    cusum = data.get("cusum", {})
+    markov = data.get("markov", {})
+    raw_sigma_dirs = data.get("sigma_rules_dirs", ())
+    if isinstance(raw_sigma_dirs, list):
+        sigma_rules_dirs = tuple(str(d) for d in raw_sigma_dirs)
+    elif raw_sigma_dirs == ():
+        sigma_rules_dirs = ()
+    else:
+        raise ConfigError(
+            f"detection.sigma_rules_dirs must be a list, got {type(raw_sigma_dirs).__name__!r}"
+        )
+    config = DetectionConfig(
         hst_window_size=data.get("hst_window_size", 1000),
         hst_n_trees=data.get("hst_n_trees", 25),
         dspot_calibration_window=dspot.get("calibration_window", 1000),
         dspot_risk_level=dspot.get("risk_level", 0.0001),
         dspot_initial_percentile=dspot.get("initial_percentile", 98),
+        hw_seasonal_period=hw.get("seasonal_period", data.get("hw_seasonal_period", 1440)),
+        hw_alpha=hw.get("alpha", data.get("hw_alpha", 0.3)),
+        hw_beta=hw.get("beta", data.get("hw_beta", 0.1)),
+        hw_gamma=hw.get("gamma", data.get("hw_gamma", 0.1)),
+        hw_n_std=hw.get("n_std", data.get("hw_n_std", 3.0)),
+        cusum_drift=cusum.get("drift", data.get("cusum_drift", 0.5)),
+        cusum_threshold=cusum.get("threshold", data.get("cusum_threshold", 5.0)),
+        cusum_ema_alpha=cusum.get("ema_alpha", data.get("cusum_ema_alpha", 0.1)),
+        cusum_warmup_buckets=cusum.get("warmup_buckets", data.get("cusum_warmup_buckets", 30)),
+        markov_smoothing=markov.get("smoothing", data.get("markov_smoothing", 1e-6)),
+        markov_min_events=markov.get("min_events", data.get("markov_min_events", 100)),
+        markov_max_entities=markov.get("max_entities", data.get("markov_max_entities", 1000)),
+        max_sources=data.get("max_sources", 256),
+        model_save_interval_seconds=data.get("model_save_interval_seconds", 300),
         weights_content=data.get("weights_content", 0.30),
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
         weights_pattern=data.get("weights_pattern", 0.20),
+        sigma_rules_dirs=sigma_rules_dirs,
     )
+    _validate_detection_config(config)
+    return config
 
 
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:

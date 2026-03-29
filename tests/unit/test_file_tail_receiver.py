@@ -809,3 +809,146 @@ class TestAllowedRootsResolvedAtInit:
         assert len(r._allowed_log_roots) == 1
         assert r._allowed_log_roots[0] == str(real_dir.resolve())
         assert str(link_dir) != r._allowed_log_roots[0]
+
+
+class TestGlobDirectorySkip:
+    """S-122: glob robustness — directories skipped, inaccessible paths logged."""
+
+    def test_directory_in_glob_skipped(self, tmp_path: Path) -> None:
+        """Directories matching glob patterns are excluded from results."""
+        subdir = tmp_path / "subdir.log"  # directory named like a log file
+        subdir.mkdir()
+        real_file = tmp_path / "real.log"
+        real_file.write_bytes(b"test line\n")
+
+        mgr = ReceiverManager()
+        receiver = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+        )
+        newly_added = receiver._expand_globs()
+
+        # The real file should be discovered
+        resolved_real = str(real_file.resolve())
+        assert resolved_real in newly_added
+        assert resolved_real in receiver._watched_files
+
+        # The directory should NOT be in any result set
+        resolved_subdir = str(subdir.resolve())
+        assert resolved_subdir not in newly_added
+        assert resolved_subdir not in receiver._watched_files
+
+    def test_inaccessible_path_logged_at_debug(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Paths that fail lstat() are skipped and logged at DEBUG, not WARNING/ERROR."""
+        real_file = tmp_path / "good.log"
+        real_file.write_bytes(b"data\n")
+
+        mgr = ReceiverManager()
+        receiver = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+        )
+
+        # First expand picks up the real file
+        receiver._expand_globs()
+        assert str(real_file.resolve()) in receiver._watched_files
+
+        # Now create a file, glob it, then remove it before lstat can run
+        # We simulate the race by monkeypatching glob to return a nonexistent path
+        import glob as glob_module_ref
+
+        original_glob = glob_module_ref.glob
+        ghost_path = str(tmp_path / "ghost.log")
+
+        def patched_glob(pattern: str, *, recursive: bool = False) -> list[str]:
+            result = original_glob(pattern, recursive=recursive)
+            result.append(ghost_path)
+            return result
+
+        import seerflow.receivers.file_tail as ft_module
+
+        original_glob_func = ft_module.glob_module.glob
+        ft_module.glob_module.glob = patched_glob
+        try:
+            with caplog.at_level(logging.DEBUG, logger="seerflow.receivers.file_tail"):
+                receiver._expand_globs()
+        finally:
+            ft_module.glob_module.glob = original_glob_func
+
+        # The ghost path must NOT be in watched files
+        assert ghost_path not in receiver._watched_files
+
+        # Should be logged at DEBUG level (not WARNING or ERROR)
+        debug_records = [
+            r for r in caplog.records if r.levelno == logging.DEBUG and "ghost.log" in r.message
+        ]
+        warning_or_error = [
+            r for r in caplog.records if r.levelno >= logging.WARNING and "ghost.log" in r.message
+        ]
+        assert len(debug_records) >= 1, "Expected a DEBUG log for the inaccessible path"
+        assert len(warning_or_error) == 0, (
+            "Inaccessible path should NOT be logged at WARNING or ERROR"
+        )
+
+
+class TestNewFileDetection:
+    """S-130: Fix new file detection and recursive watch."""
+
+    async def test_new_file_processed_on_creation(self, tmp_path: Path) -> None:
+        """File created after startup is processed immediately."""
+        mgr = ReceiverManager(queue_maxsize=100)
+        log_file = tmp_path / "new.log"
+        # File does NOT exist yet
+        receiver = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+            debounce_ms=200,
+        )
+        await receiver.start()
+        await receiver.wait_ready()
+
+        # Create the file with content
+        log_file.write_text("first line\n")
+
+        # Should be processed immediately, not deferred
+        try:
+            event = await asyncio.wait_for(mgr.get_event(), timeout=5.0)
+        finally:
+            await receiver.stop()
+        assert event is not None
+        assert b"first line" in event.data
+
+    async def test_recursive_false_prevents_subdir_watching(self, tmp_path: Path) -> None:
+        """watchfiles should NOT recurse into subdirectories."""
+        deep_dir = tmp_path / "sub1" / "sub2" / "sub3"
+        deep_dir.mkdir(parents=True)
+        log_file = tmp_path / "test.log"
+        log_file.write_text("initial\n")
+
+        mgr = ReceiverManager(queue_maxsize=100)
+        receiver = FileTailReceiver(
+            mgr,
+            source_id="test",
+            file_paths=(str(tmp_path / "*.log"),),
+            debounce_ms=200,
+        )
+        await receiver.start()
+        await receiver.wait_ready()
+
+        # Write into deep subdir — should produce NO event
+        (deep_dir / "deep.log").write_text("deep line\n")
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(mgr.get_event(), timeout=0.8)
+
+        # Write into watched top-level file — should produce an event
+        with open(log_file, "a") as f:
+            f.write("appended line\n")
+
+        event = await asyncio.wait_for(mgr.get_event(), timeout=5.0)
+        assert b"appended line" in event.data
+        await receiver.stop()

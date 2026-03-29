@@ -99,7 +99,7 @@ async def build_pipeline(config: SeerflowConfig) -> Pipeline:
             ),
         )
 
-    if r.webhook_enabled and r.webhooks:
+    if r.webhooks:
         from seerflow.receivers.webhook import WebhookConfig, WebhookReceiver
 
         wh_configs = tuple(

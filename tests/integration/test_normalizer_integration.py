@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.parsing.drain import DrainParser
@@ -66,3 +69,110 @@ class TestNormalizerEndToEnd:
         result = normalizer.normalize(raw)
         assert isinstance(result, SeerflowEvent)
         assert "\ufffd" in result.message
+
+
+class TestHandlerNormalizerIntegration:
+    """Integration: handler + EventNormalizer + storage round-trip."""
+
+    async def test_syslog_severity_propagates_to_storage(self, tmp_path: Path) -> None:
+        """Syslog event with severity metadata -> handler -> storage -> correct severity_id."""
+        from seerflow.config import SeerflowConfig, StorageConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.models.query import EventQuery
+        from seerflow.pipeline.handler import _make_handler
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        handler = _make_handler(ensemble, storage)
+
+        event = RawEvent(
+            data=b"kernel: segfault at 0000000000000000",
+            source_type="syslog",
+            source_id="test-syslog",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={"seerflow_severity": SeverityLevel.CRITICAL.value},
+        )
+        await handler(event)
+
+        # Flush WriteBuffer before querying
+        assert storage._write_buffer is not None
+        await storage._write_buffer.flush()
+
+        result = await storage.query_events(EventQuery(limit=10))
+        assert len(result.items) == 1
+        assert result.items[0].severity_id == SeverityLevel.CRITICAL
+
+        await storage.close()
+
+    async def test_file_tail_defaults_to_informational(self, tmp_path: Path) -> None:
+        """File tail event (no metadata) -> handler -> storage -> INFORMATIONAL."""
+        from seerflow.config import SeerflowConfig, StorageConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.models.query import EventQuery
+        from seerflow.pipeline.handler import _make_handler
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        handler = _make_handler(ensemble, storage)
+
+        event = RawEvent(
+            data=b"plain log line from file tail",
+            source_type="file",
+            source_id="test-file",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        await handler(event)
+
+        assert storage._write_buffer is not None
+        await storage._write_buffer.flush()
+
+        result = await storage.query_events(EventQuery(limit=10))
+        assert len(result.items) == 1
+        assert result.items[0].severity_id == SeverityLevel.INFORMATIONAL
+
+        await storage.close()
+
+    async def test_entity_refs_round_trip_to_storage(self, tmp_path: Path) -> None:
+        """Event with entities -> handler -> storage -> entity_refs persisted."""
+        from seerflow.config import SeerflowConfig, StorageConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.models.query import EventQuery
+        from seerflow.pipeline.handler import _make_handler
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        handler = _make_handler(ensemble, storage)
+
+        event = RawEvent(
+            data=b"Failed login from 10.0.1.5 by user admin",
+            source_type="syslog",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+        await handler(event)
+
+        assert storage._write_buffer is not None
+        await storage._write_buffer.flush()
+
+        result = await storage.query_events(EventQuery(limit=10))
+        assert len(result.items) == 1
+        stored = result.items[0]
+        assert "10.0.1.5" in stored.related_ips
+        assert len(stored.entity_refs) > 0
+        # entity_refs should contain the typed entities
+        assert stored.entity_refs == (
+            stored.related_ips + stored.related_users + stored.related_hosts
+        )
+
+        await storage.close()

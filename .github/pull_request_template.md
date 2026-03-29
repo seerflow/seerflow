@@ -28,8 +28,7 @@ Closes SEE-
 
 - [ ] Unit tests written for all new/changed code
 - [ ] All tests passing: `uv run pytest`
-- [ ] Coverage **>= 90%**: `uv run pytest --cov=src/seerflow --cov-fail-under=90`
-- [ ] Critical paths covered (parsers, entity resolution, correlation, ML): **>= 95%**
+- [ ] Coverage **>= 95%**: `uv run pytest --cov=src/seerflow --cov-fail-under=95`
 - [ ] Edge cases and error paths tested
 
 ### Code Quality (required)
