@@ -84,7 +84,12 @@ class EntityStore(Protocol):  # pragma: no cover
     """Entity timeline and relationship queries."""
 
     async def get_timeline(
-        self, entity_uuid: str, time_range: TimeRange
+        self,
+        entity_uuid: str,
+        time_range: TimeRange,
+        source_type: str | None = None,
+        severity_min: int | None = None,
+        limit: int = 10_000,
     ) -> list[SeerflowEvent]: ...
 
     async def get_related(self, entity_uuid: str) -> list[EntityRelation]: ...
