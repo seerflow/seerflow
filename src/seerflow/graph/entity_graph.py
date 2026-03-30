@@ -51,6 +51,7 @@ class EntityGraph:
         for eid in self._graph.incident(src_idx, mode="out"):
             edge = self._graph.es[eid]
             if edge.target == tgt_idx and edge["rel_type"] == rel_type:
+                edge["first_seen"] = min(edge["first_seen"], timestamp_ns)
                 edge["last_seen"] = max(edge["last_seen"], timestamp_ns)
                 edge["event_count"] += 1
                 return

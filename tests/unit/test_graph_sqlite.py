@@ -42,4 +42,4 @@ class TestGraphEdgeSqlite:
         await backend.write_edge("a", "b", "has_ip", 1000)
         await backend.write_edge("a", "b", "has_ip", 500)
         rows = await backend.load_edges()
-        assert rows[0][3] == 1000  # first_seen preserved (MAX keeps the original)
+        assert rows[0][3] == 500  # first_seen updated to MIN for out-of-order events

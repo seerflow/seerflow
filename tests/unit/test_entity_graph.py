@@ -34,6 +34,14 @@ class TestEntityGraphAddEdge:
         assert data is not None
         assert data["first_seen"] == 1000
 
+    def test_add_edge_updates_first_seen_to_min(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("a", "b", "has_ip", 500)
+        data = g.get_edge_data("a", "b", "has_ip")
+        assert data is not None
+        assert data["first_seen"] == 500
+
     def test_different_rel_types_create_separate_edges(self) -> None:
         g = EntityGraph()
         g.add_edge("a", "b", "has_ip", 1000)

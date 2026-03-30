@@ -308,6 +308,7 @@ _UPSERT_EDGE_SQL = """\
 INSERT INTO graph_edges (source_id, target_id, rel_type, first_seen, last_seen, event_count)
 VALUES (?, ?, ?, ?, ?, 1)
 ON CONFLICT(source_id, target_id, rel_type) DO UPDATE SET
+    first_seen = MIN(first_seen, excluded.first_seen),
     last_seen = MAX(last_seen, excluded.last_seen),
     event_count = event_count + 1"""
 

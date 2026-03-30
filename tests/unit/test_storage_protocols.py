@@ -48,6 +48,7 @@ class _MockGraphStore(GraphStore):
     ) -> None: ...
     async def load_edges(self) -> list[tuple[str, str, str, int, int, int]]:
         return []
+
     async def get_neighbors(
         self, entity_id: str, rel_types: tuple[str, ...] | None = None, depth: int = 1
     ) -> list[dict[str, str]]: ...
