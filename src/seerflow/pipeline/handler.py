@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.graph.entity_graph import EntityGraph
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.sqlite import SqliteBackend
@@ -24,8 +25,10 @@ def _make_handler(
     storage: SqliteBackend,
     save_interval_ns: int = 300_000_000_000,
     sigma_engine: SigmaEngine | None = None,
+    entity_graph: EntityGraph | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
+    from seerflow.graph.edges import infer_edges
     from seerflow.models.alert import create_ml_alert
     from seerflow.models.entity import resolve_entities
     from seerflow.parsing import EventNormalizer
@@ -53,6 +56,26 @@ def _make_handler(
                 seerflow_event,
                 entity_refs=entity_refs,
             )
+
+        # Update entity graph with inferred edges
+        if entity_graph is not None and entity_refs:
+            edges = infer_edges(seerflow_event)
+            for edge in edges:
+                entity_graph.add_edge(
+                    edge.source_id,
+                    edge.target_id,
+                    edge.rel_type,
+                    event.received_ns,
+                )
+                try:
+                    await storage.write_edge(
+                        edge.source_id,
+                        edge.target_id,
+                        edge.rel_type,
+                        event.received_ns,
+                    )
+                except Exception:
+                    _log.warning("Graph edge write failed", exc_info=True)
 
         # Track template metadata
         if seerflow_event.template_id != -1:
