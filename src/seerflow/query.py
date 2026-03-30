@@ -310,6 +310,77 @@ async def run_query_templates(storage: SqliteBackend, args: argparse.Namespace) 
     print(f"\n{len(templates)} template(s)")
 
 
+_DEFAULT_TIMELINE_WINDOW_NS = 24 * 3_600_000_000_000  # 24 hours
+
+
+async def run_query_timeline(storage: SqliteBackend, args: argparse.Namespace) -> None:
+    """Execute entity timeline query and print results."""
+    from seerflow.models.query import TimeRange
+
+    if args.severity is not None and not (0 <= args.severity <= 6):
+        print(
+            f"Error: --severity must be between 0 and 6, got {args.severity}",
+            file=sys.stderr,
+        )
+        return
+
+    now_ns = time.time_ns()
+    if args.last:
+        try:
+            duration_ns = parse_duration(args.last)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return
+    else:
+        duration_ns = _DEFAULT_TIMELINE_WINDOW_NS
+
+    time_range = TimeRange(start_ns=now_ns - duration_ns, end_ns=now_ns)
+
+    events = await storage.get_timeline(
+        args.entity_uuid,
+        time_range,
+        source_type=args.source,
+        severity_min=args.severity,
+        limit=args.limit,
+    )
+
+    if not events:
+        print("No events found.")
+        return
+
+    if args.json:
+        encoded = msgspec.json.encode(
+            [
+                {
+                    "event_id": str(e.event_id),
+                    "timestamp": format_timestamp(e.timestamp_ns),
+                    "severity": e.severity_id.name,
+                    "source_type": e.source_type,
+                    "template_id": e.template_id,
+                    "message": e.message,
+                }
+                for e in events
+            ]
+        )
+        sys.stdout.buffer.write(encoded)
+        print()
+        return
+
+    headers = ["TIMESTAMP", "SEVERITY", "SOURCE", "TID", "MESSAGE"]
+    rows = [
+        [
+            format_timestamp(e.timestamp_ns),
+            e.severity_id.name,
+            e.source_type,
+            str(e.template_id),
+            e.message[:60],
+        ]
+        for e in events
+    ]
+    print(format_table(headers, rows), end="")
+    print(f"\n{len(events)} event(s)")
+
+
 async def run_query(args: argparse.Namespace) -> None:
     """Top-level query dispatcher — load config, connect storage, route."""
     from seerflow.config import load_config
@@ -324,6 +395,8 @@ async def run_query(args: argparse.Namespace) -> None:
             await run_query_alerts(storage, args)
         elif args.query_type == "templates":
             await run_query_templates(storage, args)
+        elif args.query_type == "timeline":
+            await run_query_timeline(storage, args)
         else:
             msg = f"Unknown query_type: {args.query_type!r}"
             raise ValueError(msg)

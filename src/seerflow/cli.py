@@ -44,6 +44,15 @@ def _add_query_subparsers(subparsers: argparse._SubParsersAction) -> None:  # ty
     tpl.add_argument("--limit", type=int, default=50, help="Max results (default: 50)")
     tpl.add_argument("--json", action="store_true", default=False, help="Output as JSON")
 
+    # --- query timeline ---
+    tl = query_sub.add_parser("timeline", help="Entity timeline by UUID")
+    tl.add_argument("entity_uuid", help="Entity UUID5 string")
+    tl.add_argument("--last", type=str, default=None, help="Time window (e.g., 1h, 30m, 7d)")
+    tl.add_argument("--source", type=str, default=None, help="Filter by source type")
+    tl.add_argument("--severity", type=int, default=None, help="Minimum severity (0-6)")
+    tl.add_argument("--limit", type=int, default=1000, help="Max results (default: 1000)")
+    tl.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
