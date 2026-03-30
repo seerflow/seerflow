@@ -117,3 +117,24 @@ class TestEntityWindowBufferExpiry:
         stats = buf.stats()
         assert stats["entity_count"] == 2
         assert stats["total_events"] == 3
+
+
+class TestEntityWindowLRU:
+    def test_evicts_oldest_entity_when_max_exceeded(self) -> None:
+        buf = EntityWindowBuffer(window_ns=60_000_000_000, max_events=100, max_entities=2)
+        now = time.time_ns()
+        buf.add_event("uuid-a", _make_event(timestamp_ns=now))
+        buf.add_event("uuid-b", _make_event(timestamp_ns=now + 1000))
+        buf.add_event("uuid-c", _make_event(timestamp_ns=now + 2000))
+        # uuid-a should have been evicted
+        assert buf.entity_count == 2
+        assert buf.query("uuid-a") == []
+        assert len(buf.query("uuid-b")) == 1
+        assert len(buf.query("uuid-c")) == 1
+
+    def test_no_eviction_when_under_limit(self) -> None:
+        buf = EntityWindowBuffer(window_ns=60_000_000_000, max_events=100, max_entities=10)
+        now = time.time_ns()
+        buf.add_event("uuid-a", _make_event(timestamp_ns=now))
+        buf.add_event("uuid-b", _make_event(timestamp_ns=now + 1000))
+        assert buf.entity_count == 2

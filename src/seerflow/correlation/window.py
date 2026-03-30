@@ -18,16 +18,21 @@ class EntityWindowBuffer:
     Events older than ``window_ns`` are lazily pruned on query.
     """
 
-    __slots__ = ("_buffers", "_max_events", "_window_ns")
+    __slots__ = ("_buffers", "_max_entities", "_max_events", "_window_ns")
 
-    def __init__(self, window_ns: int, max_events: int = 1000) -> None:
+    def __init__(self, window_ns: int, max_events: int = 1000, max_entities: int = 10_000) -> None:
         self._window_ns = window_ns
         self._max_events = max_events
+        self._max_entities = max_entities
         self._buffers: dict[str, deque[SeerflowEvent]] = {}
 
     def add_event(self, entity_uuid: str, event: SeerflowEvent) -> None:
         """Add an event to the entity's window buffer."""
         if entity_uuid not in self._buffers:
+            # Evict oldest entity if at capacity
+            while len(self._buffers) >= self._max_entities:
+                oldest_key = next(iter(self._buffers))
+                del self._buffers[oldest_key]
             self._buffers[entity_uuid] = deque(maxlen=self._max_events)
         self._buffers[entity_uuid].append(event)
 
