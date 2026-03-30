@@ -129,6 +129,15 @@ class AlertingConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class CorrelationConfig:
+    """Correlation engine configuration."""
+
+    window_duration_seconds: int = 1800  # 30 minutes
+    max_events_per_entity: int = 1000
+    max_entities: int = 10_000
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class LLMConfig:
     """LLM backend configuration."""
 
@@ -144,6 +153,7 @@ class SeerflowConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     receivers: ReceiverConfig = field(default_factory=ReceiverConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
+    correlation: CorrelationConfig = field(default_factory=CorrelationConfig)
     alerting: AlertingConfig = field(default_factory=AlertingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     dashboard_port: int = 8080
@@ -403,6 +413,27 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     return config
 
 
+def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
+    """Build CorrelationConfig from a YAML ``correlation:`` section."""
+    config = CorrelationConfig(
+        window_duration_seconds=data.get("window_duration_seconds", 1800),
+        max_events_per_entity=data.get("max_events_per_entity", 1000),
+        max_entities=data.get("max_entities", 10_000),
+    )
+    if config.window_duration_seconds < 1:
+        raise ConfigError(
+            f"correlation.window_duration_seconds must be >= 1, "
+            f"got {config.window_duration_seconds!r}"
+        )
+    if config.max_events_per_entity < 1:
+        raise ConfigError(
+            f"correlation.max_events_per_entity must be >= 1, got {config.max_events_per_entity!r}"
+        )
+    if config.max_entities < 1:
+        raise ConfigError(f"correlation.max_entities must be >= 1, got {config.max_entities!r}")
+    return config
+
+
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
@@ -489,6 +520,7 @@ def load_config(
         storage=_build_storage(raw.get("storage", {})),
         receivers=_build_receivers(raw.get("receivers", {})),
         detection=_build_detection(raw.get("detection", {})),
+        correlation=_build_correlation(raw.get("correlation", {})),
         alerting=_build_alerting(raw.get("alerting", {})),
         llm=_build_llm(raw.get("llm", {})),
         dashboard_port=dashboard_port,

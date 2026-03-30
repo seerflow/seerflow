@@ -93,6 +93,15 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     except Exception:
         _log.warning("Graph edge loading failed — starting with empty graph", exc_info=True)
 
+    # Build entity window buffer for temporal correlation
+    from seerflow.correlation.window import EntityWindowBuffer
+
+    window_buffer = EntityWindowBuffer(
+        window_ns=config.correlation.window_duration_seconds * 1_000_000_000,
+        max_events=config.correlation.max_events_per_entity,
+        max_entities=config.correlation.max_entities,
+    )
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
@@ -102,6 +111,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         sigma_engine=sigma_engine,
         entity_graph=entity_graph,
         graph_algo_interval=config.detection.graph_algo_interval,
+        window_buffer=window_buffer,
     )
     await pipeline.run(handler)
 

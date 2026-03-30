@@ -10,6 +10,7 @@ from seerflow.config import (
     ConfigError,
     SeerflowConfig,
     WebhookEndpointConfig,
+    _build_correlation,
     _build_detection,
     load_config,
 )
@@ -580,3 +581,53 @@ class TestSigmaRulesDirsConfig:
         yaml_file.write_text("detection:\n  sigma_rules_dirs: /etc/rules\n")
         with pytest.raises(ConfigError, match="sigma_rules_dirs must be a list"):
             load_config(str(yaml_file))
+
+
+class TestCorrelationConfig:
+    def test_default_window_duration(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.window_duration_seconds == 1800  # 30 min
+
+    def test_default_max_events_per_entity(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.max_events_per_entity == 1000
+
+    def test_default_max_entities(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.max_entities == 10_000
+
+    def test_build_correlation_defaults(self) -> None:
+        config = _build_correlation({})
+        assert config.window_duration_seconds == 1800
+        assert config.max_events_per_entity == 1000
+        assert config.max_entities == 10_000
+
+    def test_build_correlation_custom_values(self) -> None:
+        config = _build_correlation(
+            {
+                "window_duration_seconds": 3600,
+                "max_events_per_entity": 500,
+                "max_entities": 5000,
+            }
+        )
+        assert config.window_duration_seconds == 3600
+        assert config.max_events_per_entity == 500
+        assert config.max_entities == 5000
+
+    def test_correlation_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "correlation:\n"
+            "  window_duration_seconds: 900\n"
+            "  max_events_per_entity: 2000\n"
+            "  max_entities: 20000\n"
+        )
+        config = load_config(str(yaml_file))
+        assert config.correlation.window_duration_seconds == 900
+        assert config.correlation.max_events_per_entity == 2000
+        assert config.correlation.max_entities == 20_000
+
+    def test_correlation_config_is_frozen(self) -> None:
+        config = SeerflowConfig()
+        with pytest.raises(AttributeError):
+            config.correlation.window_duration_seconds = 999  # type: ignore[misc]
