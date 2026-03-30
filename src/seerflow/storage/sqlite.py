@@ -304,6 +304,14 @@ def _validate_state_key(key: str) -> None:
 _SAVE_STATE_SQL = "INSERT OR REPLACE INTO model_state (key, data, updated_at) VALUES (?, ?, ?)"
 _LOAD_STATE_SQL = "SELECT data FROM model_state WHERE key = ?"
 
+_UPSERT_EDGE_SQL = """\
+INSERT INTO graph_edges (source_id, target_id, rel_type, first_seen, last_seen, event_count)
+VALUES (?, ?, ?, ?, ?, 1)
+ON CONFLICT(source_id, target_id, rel_type) DO UPDATE SET
+    first_seen = MIN(first_seen, excluded.first_seen),
+    last_seen = MAX(last_seen, excluded.last_seen),
+    event_count = event_count + 1"""
+
 _INSERT_ALERT_SQL = """\
 INSERT INTO alerts (
     alert_id, alert_type, timestamp_ns, severity_id, rule_name,
@@ -640,6 +648,33 @@ class SqliteBackend:
         async with await self._conn.execute(_LOAD_STATE_SQL, [key]) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else None
+
+    async def write_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        timestamp_ns: int,
+    ) -> None:
+        """Upsert a graph edge. Updates last_seen and increments event_count on conflict."""
+        await self._conn.execute(
+            _UPSERT_EDGE_SQL,
+            (source_id, target_id, rel_type, timestamp_ns, timestamp_ns),
+        )
+        await self._conn.commit()
+
+    async def load_edges(
+        self,
+    ) -> list[tuple[str, str, str, int, int, int]]:
+        """Load all graph edges for EntityGraph rebuild on startup."""
+        sql = (
+            "SELECT source_id, target_id, rel_type,"
+            " first_seen, last_seen, event_count"
+            " FROM graph_edges"
+        )
+        async with await self._conn.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+        return [(r[0], r[1], r[2], r[3], r[4], r[5]) for r in rows]
 
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""

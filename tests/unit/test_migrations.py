@@ -39,14 +39,14 @@ class TestSchemaVersion:
 
 class TestRunMigrations:
     @pytest.mark.asyncio()
-    async def test_fresh_db_applies_migration_1(self, tmp_path: Path) -> None:
-        """Migration 1 creates the schema_version table on a fresh database."""
+    async def test_fresh_db_applies_all_migrations(self, tmp_path: Path) -> None:
+        """All registered migrations are applied on a fresh database."""
         db_path = tmp_path / "test.db"
         async with aiosqlite.connect(str(db_path)) as conn:
             applied = await run_migrations(conn)
-            assert applied == 1
+            assert applied == len(MIGRATIONS)
             version = await get_schema_version(conn)
-            assert version == 1
+            assert version == max(MIGRATIONS)
 
     @pytest.mark.asyncio()
     async def test_already_at_latest_applies_nothing(self, tmp_path: Path) -> None:
@@ -61,45 +61,53 @@ class TestRunMigrations:
     async def test_migration_failure_rolls_back(self, tmp_path: Path) -> None:
         """If a migration fails, the transaction is rolled back."""
         db_path = tmp_path / "test.db"
+        latest = max(MIGRATIONS)
         async with aiosqlite.connect(str(db_path)) as conn:
             await run_migrations(conn)
 
             async def _broken(c: aiosqlite.Connection) -> None:
                 raise RuntimeError("migration failed")
 
+            next_version = latest + 1
             with (
-                patch.dict("seerflow.storage.migrations.MIGRATIONS", {**MIGRATIONS, 2: _broken}),
+                patch.dict(
+                    "seerflow.storage.migrations.MIGRATIONS",
+                    {**MIGRATIONS, next_version: _broken},
+                ),
                 pytest.raises(RuntimeError, match="migration failed"),
             ):
                 await run_migrations(conn)
 
             version = await get_schema_version(conn)
-            assert version == 1
+            assert version == latest
 
     @pytest.mark.asyncio()
     async def test_migrations_applied_in_order(self, tmp_path: Path) -> None:
         """Migrations are applied in ascending version order."""
         db_path = tmp_path / "test.db"
+        latest = max(MIGRATIONS)
         async with aiosqlite.connect(str(db_path)) as conn:
             await run_migrations(conn)
 
             order: list[int] = []
+            v_a = latest + 1
+            v_b = latest + 2
 
-            async def _m2(c: aiosqlite.Connection) -> None:
-                order.append(2)
+            async def _ma(c: aiosqlite.Connection) -> None:
+                order.append(v_a)
 
-            async def _m3(c: aiosqlite.Connection) -> None:
-                order.append(3)
+            async def _mb(c: aiosqlite.Connection) -> None:
+                order.append(v_b)
 
             with patch.dict(
                 "seerflow.storage.migrations.MIGRATIONS",
-                {**MIGRATIONS, 2: _m2, 3: _m3},
+                {**MIGRATIONS, v_a: _ma, v_b: _mb},
             ):
                 applied = await run_migrations(conn)
                 assert applied == 2
-                assert order == [2, 3]
+                assert order == [v_a, v_b]
                 version = await get_schema_version(conn)
-                assert version == 3
+                assert version == v_b
 
 
 class TestSqliteBackendMigration:

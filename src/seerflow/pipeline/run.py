@@ -82,10 +82,25 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     except Exception:
         _log.warning("Sigma rule loading failed — running without Sigma detection", exc_info=True)
 
+    # Build entity graph and load persisted edges
+    from seerflow.graph.entity_graph import EntityGraph
+
+    entity_graph = EntityGraph()
+    try:
+        edge_rows = await storage.load_edges()
+        entity_graph.load(edge_rows)
+        _log.info("Graph: loaded %d edges", len(edge_rows))
+    except Exception:
+        _log.warning("Graph edge loading failed — starting with empty graph", exc_info=True)
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
-        ensemble, storage, save_interval_ns=save_interval_ns, sigma_engine=sigma_engine
+        ensemble,
+        storage,
+        save_interval_ns=save_interval_ns,
+        sigma_engine=sigma_engine,
+        entity_graph=entity_graph,
     )
     await pipeline.run(handler)
 
