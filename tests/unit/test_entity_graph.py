@@ -179,3 +179,17 @@ class TestEntityGraphVertexAttrs:
         cid = g.get_vertex_attr("a", "community_id")
         assert cid is not None
         assert isinstance(cid, int)
+
+    def test_run_algorithms_sets_all_metrics(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("b", "c", "logged_into", 1000)
+        g.run_algorithms()
+        # Original metrics
+        assert g.get_vertex_attr("a", "pagerank") is not None
+        assert g.get_vertex_attr("a", "community_id") is not None
+        # New metrics
+        assert g.get_vertex_attr("a", "fan_out") is not None
+        assert g.get_vertex_attr("a", "fan_in") is not None
+        assert g.get_vertex_attr("a", "betweenness") is not None
+        assert g.get_vertex_attr("a", "ego_graph_size") is not None
