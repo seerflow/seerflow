@@ -30,7 +30,9 @@ _log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from seerflow.graph.entity_graph import EntityGraph
     from seerflow.models._types import FeedbackType
+    from seerflow.models.query import EntityRelation
 
 
 # ---------------------------------------------------------------------------
@@ -755,3 +757,61 @@ class SqliteBackend:
             await self._conn.rollback()
             _log.exception("SQLite batch write failed — %d events not committed", len(events))
             raise
+
+
+# ---------------------------------------------------------------------------
+# Standalone graph query helpers
+# ---------------------------------------------------------------------------
+
+
+def get_related_from_graph(
+    graph: EntityGraph,
+    entity_uuid: str,
+) -> list[EntityRelation]:
+    """Get related entities from the in-memory EntityGraph.
+
+    Delegates to EntityGraph.get_neighbors() and maps results
+    to EntityRelation objects.  Edge metadata (rel_type) is resolved
+    by inspecting incident edges in both directions.
+    """
+    from seerflow.models.query import EntityRelation
+
+    neighbors = graph.get_neighbors(entity_uuid, depth=1)
+    if not neighbors:
+        return []
+
+    src_idx = graph._vertex_map.get(entity_uuid)
+    if src_idx is None:
+        return []
+
+    results: list[EntityRelation] = []
+    for neighbor in neighbors:
+        neighbor_id = neighbor["entity_id"]
+        tgt_idx = graph._vertex_map.get(neighbor_id)
+        if tgt_idx is None:
+            continue
+
+        rel_type = _find_edge_rel_type(graph, src_idx, tgt_idx)
+        results.append(
+            EntityRelation(
+                entity_uuid=neighbor_id,
+                entity_type="",
+                entity_value="",
+                relation_type=rel_type,
+            )
+        )
+    return results
+
+
+def _find_edge_rel_type(
+    graph: EntityGraph,
+    src_idx: int,
+    tgt_idx: int,
+) -> str:
+    """Find the rel_type of the edge connecting two vertices (either direction)."""
+    for eid in graph._graph.incident(src_idx, mode="all"):
+        edge = graph._graph.es[eid]
+        other = edge.target if edge.source == src_idx else edge.source
+        if other == tgt_idx:
+            return str(edge["rel_type"])
+    return ""

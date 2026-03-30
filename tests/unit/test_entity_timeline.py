@@ -100,3 +100,30 @@ class TestGetTimeline:
         )
         assert len(results) == 1
         assert results[0].source_type == "syslog"
+
+
+class TestGetRelated:
+    def test_returns_related_entities_from_graph(self) -> None:
+        from seerflow.graph.entity_graph import EntityGraph
+        from seerflow.models.query import EntityRelation
+
+        graph = EntityGraph()
+        graph.add_edge("user-uuid", "ip-uuid", "authenticated_from", 1000)
+        graph.add_edge("user-uuid", "host-uuid", "logged_into", 2000)
+
+        from seerflow.storage.sqlite import get_related_from_graph
+
+        results = get_related_from_graph(graph, "user-uuid")
+        assert len(results) == 2
+        assert all(isinstance(r, EntityRelation) for r in results)
+
+    def test_returns_empty_for_unknown_entity(self) -> None:
+        from seerflow.graph.entity_graph import EntityGraph
+
+        graph = EntityGraph()
+        graph.add_edge("a", "b", "has_ip", 1000)
+
+        from seerflow.storage.sqlite import get_related_from_graph
+
+        results = get_related_from_graph(graph, "unknown")
+        assert results == []
