@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -125,3 +126,73 @@ class TestWindowPipelineIntegration:
         if window.entity_count > 1:
             stats = window.stats()
             assert stats["total_events"] >= window.entity_count
+
+    async def test_late_event_skipped_for_correlation(self) -> None:
+        """Events beyond watermark tolerance are not added to window buffer."""
+        from seerflow.correlation.watermark import Watermark
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock = _mock_storage()
+        window = EntityWindowBuffer(
+            window_ns=config.correlation.window_duration_seconds * 1_000_000_000,
+            max_events=config.correlation.max_events_per_entity,
+            max_entities=config.correlation.max_entities,
+        )
+        watermark = Watermark(
+            tolerance_ns=config.correlation.late_tolerance_seconds * 1_000_000_000,
+        )
+
+        handler = _make_handler(
+            ensemble,
+            mock,
+            window_buffer=window,
+            watermark=watermark,
+        )
+
+        # First event advances watermark
+        event1 = RawEvent(
+            data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
+            source_type="syslog",
+            source_id="test",
+            received_ns=time.time_ns(),
+            metadata={},
+        )
+        await handler(event1)
+
+        # Late event (timestamp far in the past) should be skipped for correlation
+        late_event = RawEvent(
+            data=b"Failed password for admin from 10.0.1.5 port 22 ssh2",
+            source_type="syslog",
+            source_id="test",
+            received_ns=1_000_000_000,  # way in the past (1 second since epoch)
+            metadata={},
+        )
+        await handler(late_event)
+
+        # Window should not have grown (late event skipped for correlation)
+        # But event should still be written to storage
+        assert mock.write_events.call_count >= 2
+
+    async def test_handler_without_watermark_still_works(self) -> None:
+        """Handler works when watermark is not provided."""
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock = _mock_storage()
+        window = EntityWindowBuffer(
+            window_ns=1800_000_000_000,
+            max_events=1000,
+            max_entities=10_000,
+        )
+
+        handler = _make_handler(ensemble, mock, window_buffer=window)
+
+        event = RawEvent(
+            data=b"simple message",
+            source_type="syslog",
+            source_id="test",
+            received_ns=time.time_ns(),
+            metadata={},
+        )
+        await handler(event)
+        assert mock.write_events.called

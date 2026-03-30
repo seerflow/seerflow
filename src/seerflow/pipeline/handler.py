@@ -11,6 +11,7 @@ import msgspec.structs
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from seerflow.correlation.watermark import Watermark
     from seerflow.correlation.window import EntityWindowBuffer
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.graph.entity_graph import EntityGraph
@@ -29,6 +30,7 @@ def _make_handler(
     entity_graph: EntityGraph | None = None,
     graph_algo_interval: int = 500,
     window_buffer: EntityWindowBuffer | None = None,
+    watermark: Watermark | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
@@ -60,10 +62,22 @@ def _make_handler(
                 entity_refs=entity_refs,
             )
 
+        # Advance watermark and check for late events
+        if watermark is not None:
+            watermark.advance(seerflow_event.timestamp_ns)
+
         # Add event to correlation window buffer for each entity
         if window_buffer is not None and entity_refs:
-            for entity_uuid in entity_refs:
-                window_buffer.add_event(entity_uuid, seerflow_event)
+            # Skip late events for correlation (still stored + ML-scored)
+            if watermark is not None and watermark.is_late(seerflow_event.timestamp_ns):
+                _log.debug(
+                    "Late event skipped for correlation: ts=%d watermark=%d",
+                    seerflow_event.timestamp_ns,
+                    watermark.current_ns,
+                )
+            else:
+                for entity_uuid in entity_refs:
+                    window_buffer.add_event(entity_uuid, seerflow_event)
 
         # Update entity graph with inferred edges
         if entity_graph is not None and entity_refs:

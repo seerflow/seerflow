@@ -102,6 +102,13 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         max_entities=config.correlation.max_entities,
     )
 
+    # Build watermark for late-arrival tolerance
+    from seerflow.correlation.watermark import Watermark
+
+    watermark = Watermark(
+        tolerance_ns=config.correlation.late_tolerance_seconds * 1_000_000_000,
+    )
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
@@ -112,6 +119,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         entity_graph=entity_graph,
         graph_algo_interval=config.detection.graph_algo_interval,
         window_buffer=window_buffer,
+        watermark=watermark,
     )
     await pipeline.run(handler)
 

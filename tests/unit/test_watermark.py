@@ -1,4 +1,5 @@
 """Tests for Watermark-based late arrival tolerance."""
+
 from __future__ import annotations
 
 from seerflow.correlation.watermark import Watermark
