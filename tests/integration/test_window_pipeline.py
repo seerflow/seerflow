@@ -52,10 +52,10 @@ class TestWindowPipelineIntegration:
         )
         await handler(event)
 
-        # Window should have events if entities were extracted
-        if window.entity_count > 0:
-            stats = window.stats()
-            assert stats["total_events"] > 0
+        # The test message contains IP + user — entities should be extracted
+        assert window.entity_count > 0, "Expected entities from test message"
+        stats = window.stats()
+        assert stats["total_events"] > 0
 
     async def test_handler_without_window_still_works(self) -> None:
         """Handler works when window_buffer is not provided (backward compat)."""

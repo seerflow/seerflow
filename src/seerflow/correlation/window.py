@@ -27,9 +27,16 @@ class EntityWindowBuffer:
         self._buffers: dict[str, deque[SeerflowEvent]] = {}
 
     def add_event(self, entity_uuid: str, event: SeerflowEvent) -> None:
-        """Add an event to the entity's window buffer."""
-        if entity_uuid not in self._buffers:
-            # Evict oldest entity if at capacity
+        """Add an event to the entity's window buffer.
+
+        Uses LRU eviction: entities are moved to the end of the dict
+        on each access, so the least-recently-used entity is always first.
+        """
+        if entity_uuid in self._buffers:
+            # Move to end (most recently used)
+            self._buffers[entity_uuid] = self._buffers.pop(entity_uuid)
+        else:
+            # Evict LRU entity if at capacity
             while len(self._buffers) >= self._max_entities:
                 oldest_key = next(iter(self._buffers))
                 del self._buffers[oldest_key]

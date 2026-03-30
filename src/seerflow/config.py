@@ -415,11 +415,23 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
 
 def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
     """Build CorrelationConfig from a YAML ``correlation:`` section."""
-    return CorrelationConfig(
+    config = CorrelationConfig(
         window_duration_seconds=data.get("window_duration_seconds", 1800),
         max_events_per_entity=data.get("max_events_per_entity", 1000),
         max_entities=data.get("max_entities", 10_000),
     )
+    if config.window_duration_seconds < 1:
+        raise ConfigError(
+            f"correlation.window_duration_seconds must be >= 1, "
+            f"got {config.window_duration_seconds!r}"
+        )
+    if config.max_events_per_entity < 1:
+        raise ConfigError(
+            f"correlation.max_events_per_entity must be >= 1, got {config.max_events_per_entity!r}"
+        )
+    if config.max_entities < 1:
+        raise ConfigError(f"correlation.max_entities must be >= 1, got {config.max_entities!r}")
+    return config
 
 
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
