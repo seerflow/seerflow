@@ -1,0 +1,124 @@
+"""Tests for EntityGraph igraph wrapper."""
+
+from __future__ import annotations
+
+from seerflow.graph.entity_graph import EntityGraph
+
+
+class TestEntityGraphAddEdge:
+    def test_add_edge_creates_vertices(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        assert g.vertex_count == 2
+
+    def test_add_edge_creates_edge(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        assert g.edge_count == 1
+
+    def test_add_duplicate_edge_updates_metadata(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("a", "b", "has_ip", 2000)
+        assert g.edge_count == 1
+        data = g.get_edge_data("a", "b", "has_ip")
+        assert data is not None
+        assert data["last_seen"] == 2000
+        assert data["event_count"] == 2
+
+    def test_add_edge_preserves_first_seen(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("a", "b", "has_ip", 2000)
+        data = g.get_edge_data("a", "b", "has_ip")
+        assert data is not None
+        assert data["first_seen"] == 1000
+
+    def test_different_rel_types_create_separate_edges(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("a", "b", "logged_into", 1000)
+        assert g.edge_count == 2
+
+
+class TestEntityGraphQueries:
+    def test_get_neighbors_depth_1(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("a", "c", "logged_into", 1000)
+        g.add_edge("c", "d", "has_ip", 1000)
+        neighbors = g.get_neighbors("a", depth=1)
+        ids = {n["entity_id"] for n in neighbors}
+        assert ids == {"b", "c"}
+
+    def test_get_neighbors_depth_2(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("b", "c", "logged_into", 1000)
+        neighbors = g.get_neighbors("a", depth=2)
+        ids = {n["entity_id"] for n in neighbors}
+        assert ids == {"b", "c"}
+
+    def test_get_neighbors_with_rel_filter(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("a", "c", "logged_into", 1000)
+        neighbors = g.get_neighbors("a", rel_types=("has_ip",))
+        assert len(neighbors) == 1
+        assert neighbors[0]["entity_id"] == "b"
+
+    def test_shortest_path(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("b", "c", "logged_into", 1000)
+        path = g.shortest_path("a", "c")
+        assert path == ["a", "b", "c"]
+
+    def test_shortest_path_disconnected(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("c", "d", "logged_into", 1000)
+        path = g.shortest_path("a", "c")
+        assert path == []
+
+    def test_get_neighbors_unknown_vertex(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        neighbors = g.get_neighbors("unknown")
+        assert neighbors == []
+
+    def test_get_edge_data_nonexistent(self) -> None:
+        g = EntityGraph()
+        assert g.get_edge_data("a", "b", "has_ip") is None
+
+
+class TestEntityGraphLoadExport:
+    def test_load_from_rows(self) -> None:
+        g = EntityGraph()
+        rows = [
+            ("a", "b", "has_ip", 1000, 2000, 5),
+            ("b", "c", "logged_into", 1500, 1500, 1),
+        ]
+        g.load(rows)
+        assert g.vertex_count == 3
+        assert g.edge_count == 2
+        data = g.get_edge_data("a", "b", "has_ip")
+        assert data is not None
+        assert data["event_count"] == 5
+
+    def test_export_edges(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("b", "c", "logged_into", 2000)
+        exported = g.export_edges()
+        assert len(exported) == 2
+
+    def test_load_then_export_roundtrip(self) -> None:
+        rows = [
+            ("x", "y", "authenticated_from", 100, 200, 3),
+        ]
+        g = EntityGraph()
+        g.load(rows)
+        exported = g.export_edges()
+        assert len(exported) == 1
+        assert exported[0] == ("x", "y", "authenticated_from", 100, 200, 3)
