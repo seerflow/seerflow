@@ -53,3 +53,15 @@ class TestWatermark:
         wm = Watermark(tolerance_ns=30_000_000_000)
         wm.advance(200_000_000_000)
         assert wm.current_ns == 200_000_000_000
+
+    def test_negative_tolerance_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="tolerance_ns must be >= 0"):
+            Watermark(tolerance_ns=-1)
+
+    def test_zero_tolerance_makes_older_events_late(self) -> None:
+        wm = Watermark(tolerance_ns=0)
+        wm.advance(100_000_000_000)
+        assert wm.is_late(99_999_999_999) is True
+        assert wm.is_late(100_000_000_000) is False

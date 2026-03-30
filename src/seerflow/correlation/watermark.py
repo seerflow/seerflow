@@ -13,8 +13,11 @@ class Watermark:
     __slots__ = ("_current_ns", "_tolerance_ns")
 
     def __init__(self, tolerance_ns: int) -> None:
+        if tolerance_ns < 0:
+            msg = f"tolerance_ns must be >= 0, got {tolerance_ns!r}"
+            raise ValueError(msg)
         self._tolerance_ns = tolerance_ns
-        self._current_ns: int = 0
+        self._current_ns: int = 0  # 0 means "no advance yet"
 
     def advance(self, event_time_ns: int) -> None:
         """Advance the watermark if event_time_ns exceeds current position."""

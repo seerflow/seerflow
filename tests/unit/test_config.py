@@ -631,6 +631,12 @@ class TestCorrelationConfig:
         config = SeerflowConfig()
         assert config.correlation.late_tolerance_seconds == 30
 
+    def test_negative_late_tolerance_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_correlation
+
+        with pytest.raises(ConfigError, match="late_tolerance_seconds must be >= 0"):
+            _build_correlation({"late_tolerance_seconds": -1})
+
     def test_correlation_config_is_frozen(self) -> None:
         config = SeerflowConfig()
         with pytest.raises(AttributeError):
