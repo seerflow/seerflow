@@ -343,7 +343,10 @@ class TestCreateMlAlert:
         from seerflow.models.alert import create_ml_alert
 
         event = self._make_event(
-            entity_refs=(), related_ips=(), related_users=(), related_hosts=(),
+            entity_refs=(),
+            related_ips=(),
+            related_users=(),
+            related_hosts=(),
         )
         result = self._make_result()
         alert = create_ml_alert(event, result)

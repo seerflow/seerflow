@@ -140,9 +140,12 @@ class TestHandlerNormalizerIntegration:
         await storage.close()
 
     async def test_entity_refs_round_trip_to_storage(self, tmp_path: Path) -> None:
-        """Event with entities -> handler -> storage -> entity_refs persisted."""
+        """Event with entities -> handler -> storage -> entity_refs persisted as UUID5."""
+        import uuid
+
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
+        from seerflow.models.entity import resolve_entities
         from seerflow.models.query import EventQuery
         from seerflow.pipeline.handler import _make_handler
         from seerflow.storage.sqlite import SqliteBackend
@@ -170,9 +173,11 @@ class TestHandlerNormalizerIntegration:
         stored = result.items[0]
         assert "10.0.1.5" in stored.related_ips
         assert len(stored.entity_refs) > 0
-        # entity_refs should contain the typed entities
-        assert stored.entity_refs == (
-            stored.related_ips + stored.related_users + stored.related_hosts
-        )
+        # entity_refs should contain UUID5 strings (not raw values)
+        for ref in stored.entity_refs:
+            uuid.UUID(ref, version=5)  # raises ValueError if not valid UUID
+        # entity_refs should match resolve_entities output for the same raw values
+        expected = resolve_entities(stored.related_ips, stored.related_users, stored.related_hosts)
+        assert stored.entity_refs == expected
 
         await storage.close()

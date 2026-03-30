@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import TYPE_CHECKING
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
 
 from seerflow.models.entity import (
     generate_host_id,
