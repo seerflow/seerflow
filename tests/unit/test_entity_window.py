@@ -98,6 +98,16 @@ class TestEntityWindowBufferExpiry:
         results = buf.query("uuid-a")
         assert len(results) == 1
 
+    def test_query_removes_fully_expired_entity(self) -> None:
+        window_ns = 5_000_000_000
+        buf = EntityWindowBuffer(window_ns=window_ns, max_events=100)
+        old = time.time_ns() - 10_000_000_000
+        buf.add_event("uuid-a", _make_event(timestamp_ns=old))
+        assert buf.entity_count == 1
+        results = buf.query("uuid-a")
+        assert results == []
+        assert buf.entity_count == 0
+
     def test_prune_removes_expired_events(self) -> None:
         window_ns = 5_000_000_000
         buf = EntityWindowBuffer(window_ns=window_ns, max_events=100)
