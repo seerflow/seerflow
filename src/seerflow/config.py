@@ -135,6 +135,7 @@ class CorrelationConfig:
     window_duration_seconds: int = 1800  # 30 minutes
     max_events_per_entity: int = 1000
     max_entities: int = 10_000
+    late_tolerance_seconds: int = 30
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -419,7 +420,13 @@ def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
         window_duration_seconds=data.get("window_duration_seconds", 1800),
         max_events_per_entity=data.get("max_events_per_entity", 1000),
         max_entities=data.get("max_entities", 10_000),
+        late_tolerance_seconds=data.get("late_tolerance_seconds", 30),
     )
+    if config.late_tolerance_seconds < 0:
+        raise ConfigError(
+            f"correlation.late_tolerance_seconds must be >= 0, "
+            f"got {config.late_tolerance_seconds!r}"
+        )
     if config.window_duration_seconds < 1:
         raise ConfigError(
             f"correlation.window_duration_seconds must be >= 1, "

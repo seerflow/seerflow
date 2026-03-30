@@ -627,6 +627,10 @@ class TestCorrelationConfig:
         assert config.correlation.max_events_per_entity == 2000
         assert config.correlation.max_entities == 20_000
 
+    def test_default_late_tolerance(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.late_tolerance_seconds == 30
+
     def test_correlation_config_is_frozen(self) -> None:
         config = SeerflowConfig()
         with pytest.raises(AttributeError):
