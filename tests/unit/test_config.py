@@ -524,6 +524,10 @@ class TestDetectionValidation:
         with pytest.raises(ConfigError, match="markov_smoothing"):
             _build_detection({"markov": {"smoothing": float("inf")}})
 
+    def test_graph_algo_interval_default(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.graph_algo_interval == 500
+
     def test_defaults_are_valid(self) -> None:
         config = _build_detection({})
         assert config.hw_seasonal_period == 1440

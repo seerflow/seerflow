@@ -115,6 +115,7 @@ class DetectionConfig:
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
     weights_pattern: float = 0.20
+    graph_algo_interval: int = 500
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
@@ -389,6 +390,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
         weights_pattern=data.get("weights_pattern", 0.20),
+        graph_algo_interval=data.get("graph_algo_interval", 500),
         sigma_rules_dirs=sigma_rules_dirs,
     )
     _validate_detection_config(config)
