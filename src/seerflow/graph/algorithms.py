@@ -33,4 +33,4 @@ def compute_communities(graph: EntityGraph) -> dict[str, int]:
     undirected = ig.as_undirected(mode="collapse")
     undirected.simplify()  # Remove self-loops and multi-edges for Louvain
     membership = undirected.community_multilevel().membership
-    return {ig.vs[i]["name"]: membership[i] for i in range(ig.vcount())}
+    return {undirected.vs[i]["name"]: membership[i] for i in range(undirected.vcount())}

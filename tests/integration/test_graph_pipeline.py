@@ -146,6 +146,9 @@ class TestGraphPipelineIntegration:
         mock = _mock_storage()
         graph = EntityGraph()
 
+        # Pre-seed graph so algorithm trigger is deterministic
+        graph.add_edge("seed-a", "seed-b", "has_ip", 1000)
+
         # Set interval to 3 for testing
         handler = _make_handler(
             ensemble,
@@ -166,7 +169,7 @@ class TestGraphPipelineIntegration:
         for _ in range(3):
             await handler(event)
 
-        # If graph has vertices, algorithms should have set pagerank
-        if graph.vertex_count > 0:
-            first_entity = next(iter(graph._vertex_map))
-            assert graph.get_vertex_attr(first_entity, "pagerank") is not None
+        # Algorithms should have run — pagerank set on pre-seeded vertices
+        assert graph.get_vertex_attr("seed-a", "pagerank") is not None
+        assert isinstance(graph.get_vertex_attr("seed-a", "pagerank"), float)
+        assert graph.get_vertex_attr("seed-a", "community_id") is not None
