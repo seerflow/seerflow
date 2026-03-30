@@ -214,6 +214,11 @@ def generate_domain_id(domain: str) -> uuid.UUID:
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_for_log(value: str) -> str:
+    """Strip control characters that enable log injection."""
+    return value.replace("\n", "\\n").replace("\r", "\\r").replace("\x1b", "\\x1b")
+
+
 def resolve_entities(
     ips: tuple[str, ...],
     users: tuple[str, ...],
@@ -232,20 +237,20 @@ def resolve_entities(
         try:
             resolved.append(str(generate_ip_id(raw_ip)))
         except (ValueError, TypeError):
-            _log.warning("Skipping malformed IP during entity resolution: %s", raw_ip)
+            _log.warning("Skipping malformed IP during entity resolution: %s", _sanitize_for_log(raw_ip))
 
     for raw_user in users:
         try:
             username, domain = normalize_username(raw_user)
             resolved.append(str(generate_user_id(username, domain)))
         except (ValueError, TypeError):
-            _log.warning("Skipping malformed user during entity resolution: %s", raw_user)
+            _log.warning("Skipping malformed user during entity resolution: %s", _sanitize_for_log(raw_user))
 
     for raw_host in hosts:
         try:
             resolved.append(str(generate_host_id(raw_host)))
         except (ValueError, TypeError):
-            _log.warning("Skipping malformed host during entity resolution: %s", raw_host)
+            _log.warning("Skipping malformed host during entity resolution: %s", _sanitize_for_log(raw_host))
 
     return tuple(resolved)
 
