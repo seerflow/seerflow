@@ -138,3 +138,38 @@ class TestGraphPipelineIntegration:
         # Graph should still be updated in-memory even if storage fails
         if graph.edge_count > 0:
             assert mock.write_edge.called
+
+    async def test_algorithms_run_at_configured_interval(self) -> None:
+        """Graph algorithms are triggered every graph_algo_interval events."""
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock = _mock_storage()
+        graph = EntityGraph()
+
+        # Pre-seed graph so algorithm trigger is deterministic
+        graph.add_edge("seed-a", "seed-b", "has_ip", 1000)
+
+        # Set interval to 3 for testing
+        handler = _make_handler(
+            ensemble,
+            mock,
+            entity_graph=graph,
+            graph_algo_interval=3,
+        )
+
+        event = RawEvent(
+            data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
+            source_type="syslog",
+            source_id="test",
+            received_ns=1_700_000_000_000_000_000,
+            metadata={},
+        )
+
+        # Send 3 events to trigger algorithm run
+        for _ in range(3):
+            await handler(event)
+
+        # Algorithms should have run — pagerank set on pre-seeded vertices
+        assert graph.get_vertex_attr("seed-a", "pagerank") is not None
+        assert isinstance(graph.get_vertex_attr("seed-a", "pagerank"), float)
+        assert graph.get_vertex_attr("seed-a", "community_id") is not None

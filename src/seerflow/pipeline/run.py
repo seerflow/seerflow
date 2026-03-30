@@ -101,6 +101,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         save_interval_ns=save_interval_ns,
         sigma_engine=sigma_engine,
         entity_graph=entity_graph,
+        graph_algo_interval=config.detection.graph_algo_interval,
     )
     await pipeline.run(handler)
 

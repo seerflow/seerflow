@@ -115,6 +115,7 @@ class DetectionConfig:
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
     weights_pattern: float = 0.20
+    graph_algo_interval: int = 500
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
@@ -344,6 +345,12 @@ def _validate_detection_config(config: DetectionConfig) -> None:
 
     _require_finite_positive("detection.markov_smoothing", config.markov_smoothing)
 
+    if config.graph_algo_interval < 10 or config.graph_algo_interval > 100_000:
+        raise ConfigError(
+            f"detection.graph_algo_interval must be between 10 and 100_000, "
+            f"got {config.graph_algo_interval!r}"
+        )
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     """Build DetectionConfig from a YAML ``detection:`` section.
@@ -389,6 +396,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
         weights_pattern=data.get("weights_pattern", 0.20),
+        graph_algo_interval=data.get("graph_algo_interval", 500),
         sigma_rules_dirs=sigma_rules_dirs,
     )
     _validate_detection_config(config)

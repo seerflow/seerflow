@@ -174,6 +174,39 @@ class EntityGraph:
         return node_ids, edges
 
     # ------------------------------------------------------------------
+    # Vertex attributes & algorithms
+    # ------------------------------------------------------------------
+
+    def set_vertex_attr(self, entity_id: str, key: str, value: object) -> None:
+        """Set an attribute on a vertex. No-op if entity not in graph."""
+        idx = self._vertex_map.get(entity_id)
+        if idx is not None:
+            self._graph.vs[idx][key] = value
+
+    def get_vertex_attr(self, entity_id: str, key: str) -> object | None:
+        """Get an attribute from a vertex. Returns None if not found."""
+        idx = self._vertex_map.get(entity_id)
+        if idx is None:
+            return None
+        try:
+            result: object = self._graph.vs[idx][key]
+        except KeyError:
+            return None
+        return result
+
+    def run_algorithms(self) -> None:
+        """Compute PageRank + Louvain and store as vertex attributes."""
+        from seerflow.graph.algorithms import compute_communities, compute_pagerank
+
+        pagerank = compute_pagerank(self)
+        for entity_id, score in pagerank.items():
+            self.set_vertex_attr(entity_id, "pagerank", score)
+
+        communities = compute_communities(self)
+        for entity_id, cid in communities.items():
+            self.set_vertex_attr(entity_id, "community_id", cid)
+
+    # ------------------------------------------------------------------
     # Bulk load / export (for storage round-trips)
     # ------------------------------------------------------------------
 

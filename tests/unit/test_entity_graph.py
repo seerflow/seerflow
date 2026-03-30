@@ -150,3 +150,32 @@ class TestEntityGraphLoadExport:
         exported = g.export_edges()
         assert len(exported) == 1
         assert exported[0] == ("x", "y", "authenticated_from", 100, 200, 3)
+
+
+class TestEntityGraphVertexAttrs:
+    def test_set_and_get_vertex_attr(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.set_vertex_attr("a", "pagerank", 0.75)
+        assert g.get_vertex_attr("a", "pagerank") == 0.75
+
+    def test_get_vertex_attr_unknown_entity(self) -> None:
+        g = EntityGraph()
+        assert g.get_vertex_attr("unknown", "pagerank") is None
+
+    def test_get_vertex_attr_unknown_key(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        assert g.get_vertex_attr("a", "nonexistent") is None
+
+    def test_run_algorithms_sets_pagerank_and_community(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("b", "c", "logged_into", 1000)
+        g.run_algorithms()
+        pr = g.get_vertex_attr("a", "pagerank")
+        assert pr is not None
+        assert isinstance(pr, float)
+        cid = g.get_vertex_attr("a", "community_id")
+        assert cid is not None
+        assert isinstance(cid, int)

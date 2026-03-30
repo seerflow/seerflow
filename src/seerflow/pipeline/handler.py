@@ -26,6 +26,7 @@ def _make_handler(
     save_interval_ns: int = 300_000_000_000,
     sigma_engine: SigmaEngine | None = None,
     entity_graph: EntityGraph | None = None,
+    graph_algo_interval: int = 500,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
@@ -200,6 +201,19 @@ def _make_handler(
                         "Periodic model save failed — will retry",
                         exc_info=True,
                     )
+
+        # Run graph algorithms periodically
+        if entity_graph is not None and entity_graph.vertex_count > 0:
+            try:
+                if event_count % graph_algo_interval == 0:
+                    entity_graph.run_algorithms()
+                    _log.info(
+                        "Graph algorithms: %d vertices, %d edges",
+                        entity_graph.vertex_count,
+                        entity_graph.edge_count,
+                    )
+            except Exception:
+                _log.warning("Graph algorithm execution failed", exc_info=True)
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler
