@@ -30,6 +30,7 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "drain3>=0.9.11",
     "grpcio>=1.78.0",
+    "igraph>=1.0.0",
     "msgspec>=0.20.0",
     "opentelemetry-proto>=1.40.0",
     "pysigma>=1.2.0",
