@@ -315,7 +315,18 @@ _DEFAULT_TIMELINE_WINDOW_NS = 24 * 3_600_000_000_000  # 24 hours
 
 async def run_query_timeline(storage: SqliteBackend, args: argparse.Namespace) -> None:
     """Execute entity timeline query and print results."""
+    import uuid as _uuid_mod
+
     from seerflow.models.query import TimeRange
+
+    try:
+        _uuid_mod.UUID(args.entity_uuid)
+    except ValueError:
+        print(
+            f"Error: entity_uuid must be a valid UUID, got {args.entity_uuid!r}",
+            file=sys.stderr,
+        )
+        return
 
     if args.severity is not None and not (0 <= args.severity <= 6):
         print(

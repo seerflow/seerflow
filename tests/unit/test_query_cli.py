@@ -1211,7 +1211,7 @@ class TestRunQueryTimeline:
         storage = await SqliteBackend.connect(storage_cfg)
 
         args = argparse.Namespace(
-            entity_uuid="nonexistent-uuid",
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
             last="1h",
             source=None,
             severity=None,
@@ -1238,7 +1238,7 @@ class TestRunQueryTimeline:
         storage = await SqliteBackend.connect(storage_cfg)
 
         args = argparse.Namespace(
-            entity_uuid="some-uuid",
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
             last="invalid",
             source=None,
             severity=None,
@@ -1265,7 +1265,7 @@ class TestRunQueryTimeline:
         storage = await SqliteBackend.connect(storage_cfg)
 
         args = argparse.Namespace(
-            entity_uuid="some-uuid",
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
             last="1h",
             source=None,
             severity=99,
@@ -1340,7 +1340,7 @@ class TestRunQueryDispatchTimeline:
         args = argparse.Namespace(
             config=None,
             query_type="timeline",
-            entity_uuid="test-uuid",
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
             last="1h",
             source=None,
             severity=None,

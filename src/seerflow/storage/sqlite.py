@@ -543,6 +543,7 @@ class SqliteBackend:
         Uses the entity_events junction table for efficient lookups via
         composite PK (entity_uuid, timestamp_ns, event_id).
         """
+        clamped_limit = min(max(limit, 1), 10_000)
         clauses = [
             "ee.entity_uuid = ?",
             "e.timestamp_ns >= ?",
@@ -566,7 +567,7 @@ class SqliteBackend:
             f"JOIN entity_events ee ON ee.event_id = e.event_id "
             f"WHERE {where} ORDER BY e.timestamp_ns ASC LIMIT ?"
         )
-        params.append(limit)
+        params.append(clamped_limit)
 
         async with await self._conn.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
