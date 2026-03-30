@@ -257,7 +257,10 @@ class TestCreateMlAlert:
         source_type: str = "syslog",
         timestamp_ns: int = 1_700_000_000_000_000_000,
         severity_id: SeverityLevel = SeverityLevel.ERROR,
-        entity_refs: tuple[str, ...] = ("192.168.1.1", "root"),
+        entity_refs: tuple[str, ...] = ("uuid-ip-placeholder", "uuid-user-placeholder"),
+        related_ips: tuple[str, ...] = ("192.168.1.1",),
+        related_users: tuple[str, ...] = ("root",),
+        related_hosts: tuple[str, ...] = (),
     ) -> SeerflowEvent:
         return SeerflowEvent(
             event_id=uuid.uuid4(),
@@ -268,6 +271,9 @@ class TestCreateMlAlert:
             source_type=source_type,
             template_id=template_id,
             entity_refs=entity_refs,
+            related_ips=related_ips,
+            related_users=related_users,
+            related_hosts=related_hosts,
         )
 
     def _make_result(
@@ -336,20 +342,28 @@ class TestCreateMlAlert:
     def test_empty_entity_refs(self) -> None:
         from seerflow.models.alert import create_ml_alert
 
-        event = self._make_event(entity_refs=())
+        event = self._make_event(
+            entity_refs=(), related_ips=(), related_users=(), related_hosts=(),
+        )
         result = self._make_result()
         alert = create_ml_alert(event, result)
 
         assert alert.entity_uuid == ""
         assert alert.entity_value == ""
-        assert alert.entity_type == "ip"
+        assert alert.entity_type == "ip"  # fallback
 
     def test_first_entity_used(self) -> None:
         from seerflow.models.alert import create_ml_alert
 
-        event = self._make_event(entity_refs=("10.0.0.1", "admin", "web01"))
+        event = self._make_event(
+            entity_refs=("uuid-ip", "uuid-user", "uuid-host"),
+            related_ips=("10.0.0.1",),
+            related_users=("admin",),
+            related_hosts=("web01",),
+        )
         result = self._make_result()
         alert = create_ml_alert(event, result)
 
-        assert alert.entity_uuid == "10.0.0.1"
-        assert alert.entity_value == "10.0.0.1"
+        assert alert.entity_uuid == "uuid-ip"  # UUID5 from entity_refs
+        assert alert.entity_value == "10.0.0.1"  # raw from related_ips
+        assert alert.entity_type == "ip"  # inferred

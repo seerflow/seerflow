@@ -15,6 +15,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from seerflow.models._types import EntityType
     from seerflow.models.event import SeerflowEvent
 
 import msgspec
@@ -249,7 +250,7 @@ def resolve_entities(
     return tuple(resolved)
 
 
-def infer_entity_type(event: SeerflowEvent) -> str:
+def infer_entity_type(event: SeerflowEvent) -> EntityType:
     """Infer the primary entity type from populated related_* fields.
 
     Priority: ip > user > host.  Falls back to ``"ip"`` when no
