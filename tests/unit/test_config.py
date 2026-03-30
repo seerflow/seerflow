@@ -528,6 +528,26 @@ class TestDetectionValidation:
         config = SeerflowConfig()
         assert config.detection.graph_algo_interval == 500
 
+    def test_graph_algo_interval_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="graph_algo_interval"):
+            _build_detection({"graph_algo_interval": 0})
+
+    def test_graph_algo_interval_below_minimum_raises(self) -> None:
+        with pytest.raises(ConfigError, match="graph_algo_interval"):
+            _build_detection({"graph_algo_interval": 9})
+
+    def test_graph_algo_interval_above_maximum_raises(self) -> None:
+        with pytest.raises(ConfigError, match="graph_algo_interval"):
+            _build_detection({"graph_algo_interval": 100_001})
+
+    def test_graph_algo_interval_at_minimum_boundary_valid(self) -> None:
+        config = _build_detection({"graph_algo_interval": 10})
+        assert config.graph_algo_interval == 10
+
+    def test_graph_algo_interval_at_maximum_boundary_valid(self) -> None:
+        config = _build_detection({"graph_algo_interval": 100_000})
+        assert config.graph_algo_interval == 100_000
+
     def test_defaults_are_valid(self) -> None:
         config = _build_detection({})
         assert config.hw_seasonal_period == 1440

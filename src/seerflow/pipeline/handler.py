@@ -203,18 +203,15 @@ def _make_handler(
                     )
 
         # Run graph algorithms periodically
-        if (
-            entity_graph is not None
-            and event_count % graph_algo_interval == 0
-            and entity_graph.vertex_count > 0
-        ):
+        if entity_graph is not None and entity_graph.vertex_count > 0:
             try:
-                entity_graph.run_algorithms()
-                _log.info(
-                    "Graph algorithms: %d vertices, %d edges",
-                    entity_graph.vertex_count,
-                    entity_graph.edge_count,
-                )
+                if event_count % graph_algo_interval == 0:
+                    entity_graph.run_algorithms()
+                    _log.info(
+                        "Graph algorithms: %d vertices, %d edges",
+                        entity_graph.vertex_count,
+                        entity_graph.edge_count,
+                    )
             except Exception:
                 _log.warning("Graph algorithm execution failed", exc_info=True)
 

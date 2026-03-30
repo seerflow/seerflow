@@ -345,6 +345,12 @@ def _validate_detection_config(config: DetectionConfig) -> None:
 
     _require_finite_positive("detection.markov_smoothing", config.markov_smoothing)
 
+    if config.graph_algo_interval < 10 or config.graph_algo_interval > 100_000:
+        raise ConfigError(
+            f"detection.graph_algo_interval must be between 10 and 100_000, "
+            f"got {config.graph_algo_interval!r}"
+        )
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     """Build DetectionConfig from a YAML ``detection:`` section.
