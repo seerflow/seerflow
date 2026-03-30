@@ -11,9 +11,11 @@ from seerflow.models.entity import (
     generate_host_id,
     generate_ip_id,
     generate_user_id,
+    infer_entity_type,
     normalize_username,
     resolve_entities,
 )
+from seerflow.models.event import SeerflowEvent
 
 
 class TestResolveEntities:
@@ -92,3 +94,44 @@ class TestResolveEntities:
         username, domain = normalize_username("admin")
         assert result[1] == str(generate_user_id(username, domain))
         assert result[2] == str(generate_host_id("web-01"))
+
+
+class TestInferEntityType:
+    """Tests for infer_entity_type()."""
+
+    def _make_event(
+        self,
+        *,
+        related_ips: tuple[str, ...] = (),
+        related_users: tuple[str, ...] = (),
+        related_hosts: tuple[str, ...] = (),
+    ) -> SeerflowEvent:
+        import uuid as _uuid
+
+        return SeerflowEvent(
+            event_id=_uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            severity_id=6,
+            message="test",
+            source_type="syslog",
+            related_ips=related_ips,
+            related_users=related_users,
+            related_hosts=related_hosts,
+        )
+
+    def test_ip_priority(self) -> None:
+        event = self._make_event(related_ips=("10.0.1.1",), related_users=("admin",))
+        assert infer_entity_type(event) == "ip"
+
+    def test_user_when_no_ips(self) -> None:
+        event = self._make_event(related_users=("admin",), related_hosts=("web-01",))
+        assert infer_entity_type(event) == "user"
+
+    def test_host_when_no_ips_or_users(self) -> None:
+        event = self._make_event(related_hosts=("web-01",))
+        assert infer_entity_type(event) == "host"
+
+    def test_fallback_ip_when_nothing(self) -> None:
+        event = self._make_event()
+        assert infer_entity_type(event) == "ip"

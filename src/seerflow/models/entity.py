@@ -12,6 +12,10 @@ from __future__ import annotations
 import ipaddress
 import logging
 import uuid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from seerflow.models.event import SeerflowEvent
 
 import msgspec
 
@@ -243,3 +247,18 @@ def resolve_entities(
             _log.warning("Skipping malformed host during entity resolution: %s", raw_host)
 
     return tuple(resolved)
+
+
+def infer_entity_type(event: SeerflowEvent) -> str:
+    """Infer the primary entity type from populated related_* fields.
+
+    Priority: ip > user > host.  Falls back to ``"ip"`` when no
+    related fields are populated (matches current default behaviour).
+    """
+    if event.related_ips:
+        return "ip"
+    if event.related_users:
+        return "user"
+    if event.related_hosts:
+        return "host"
+    return "ip"
