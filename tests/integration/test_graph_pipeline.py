@@ -148,7 +148,10 @@ class TestGraphPipelineIntegration:
 
         # Set interval to 3 for testing
         handler = _make_handler(
-            ensemble, mock, entity_graph=graph, graph_algo_interval=3,
+            ensemble,
+            mock,
+            entity_graph=graph,
+            graph_algo_interval=3,
         )
 
         event = RawEvent(
