@@ -94,13 +94,17 @@ class EntityStore(Protocol):  # pragma: no cover
 class GraphStore(Protocol):  # pragma: no cover
     """Entity relationship graph operations."""
 
-    async def add_edge(
+    async def write_edge(
         self,
         source_id: str,
         target_id: str,
         rel_type: str,
         timestamp_ns: int,
     ) -> None: ...
+
+    async def load_edges(
+        self,
+    ) -> list[tuple[str, str, str, int, int, int]]: ...
 
     async def get_neighbors(
         self,

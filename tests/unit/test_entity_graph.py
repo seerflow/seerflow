@@ -113,6 +113,26 @@ class TestEntityGraphLoadExport:
         exported = g.export_edges()
         assert len(exported) == 2
 
+    def test_get_subgraph_returns_nodes_and_edges(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("b", "c", "logged_into", 1000)
+        node_ids, edges = g.get_subgraph("a", depth=2)
+        assert set(node_ids) == {"a", "b", "c"}
+        assert len(edges) == 2
+
+    def test_get_subgraph_unknown_entity(self) -> None:
+        g = EntityGraph()
+        node_ids, edges = g.get_subgraph("unknown")
+        assert node_ids == ["unknown"]
+        assert edges == []
+
+    def test_get_edge_data_wrong_target(self) -> None:
+        g = EntityGraph()
+        g.add_edge("a", "b", "has_ip", 1000)
+        g.add_edge("a", "c", "logged_into", 1000)
+        assert g.get_edge_data("a", "c", "has_ip") is None
+
     def test_load_then_export_roundtrip(self) -> None:
         rows = [
             ("x", "y", "authenticated_from", 100, 200, 3),
