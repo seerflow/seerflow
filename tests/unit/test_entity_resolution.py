@@ -86,6 +86,24 @@ class TestResolveEntities:
         assert len(result) == 0
         assert "not-an-ip" in caplog.text
 
+    def test_malformed_user_skipped_with_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            result = resolve_entities(ips=(), users=("",), hosts=())
+        assert len(result) == 0
+        assert caplog.text
+
+    def test_malformed_host_skipped_with_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            result = resolve_entities(ips=(), users=(), hosts=("",))
+        assert len(result) == 0
+        assert caplog.text
+
     def test_order_is_ips_then_users_then_hosts(self) -> None:
         result = resolve_entities(
             ips=("10.0.1.1",),

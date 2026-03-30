@@ -28,6 +28,7 @@ from seerflow.models.entity import (
     generate_user_id,
     infer_entity_type,
     normalize_username,
+    primary_entity_value,
     resolve_entities,
 )
 from seerflow.models.event import AttrValue, SeerflowEvent, SeverityLevel
@@ -75,5 +76,6 @@ __all__ = [
     "generate_user_id",
     "infer_entity_type",
     "normalize_username",
+    "primary_entity_value",
     "resolve_entities",
 ]

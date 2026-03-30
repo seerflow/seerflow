@@ -250,6 +250,22 @@ def resolve_entities(
     return tuple(resolved)
 
 
+def primary_entity_value(event: SeerflowEvent) -> str:
+    """Return the raw display value for the highest-priority entity.
+
+    Priority: ip > user > host.  Returns ``""`` when no related
+    fields are populated.  Shares the same priority order as
+    :func:`infer_entity_type`.
+    """
+    if event.related_ips:
+        return event.related_ips[0]
+    if event.related_users:
+        return event.related_users[0]
+    if event.related_hosts:
+        return event.related_hosts[0]
+    return ""
+
+
 def infer_entity_type(event: SeerflowEvent) -> EntityType:
     """Infer the primary entity type from populated related_* fields.
 

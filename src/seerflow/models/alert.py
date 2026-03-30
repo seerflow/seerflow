@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import msgspec
 
 from seerflow.models._types import AlertType, EntityType, FeedbackType
-from seerflow.models.entity import infer_entity_type
+from seerflow.models.entity import infer_entity_type, primary_entity_value
 from seerflow.models.event import SeverityLevel
 
 if TYPE_CHECKING:
@@ -107,15 +107,6 @@ def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
     is populated.
     """
     entity_refs = event.entity_refs
-    raw_value = (
-        event.related_ips[0]
-        if event.related_ips
-        else event.related_users[0]
-        if event.related_users
-        else event.related_hosts[0]
-        if event.related_hosts
-        else ""
-    )
     return Alert(
         alert_id=str(
             uuid.uuid5(
@@ -133,7 +124,7 @@ def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
             f"direction={result.anomaly_direction}"
         ),
         entity_uuid=entity_refs[0] if entity_refs else "",
-        entity_value=raw_value,
+        entity_value=primary_entity_value(event),
         entity_type=infer_entity_type(event),
         contributing_events=(event.event_id,),
         risk_score=result.score,

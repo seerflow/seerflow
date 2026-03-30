@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from sigma.rule import SigmaRule
 
 from seerflow.models.alert import Alert
-from seerflow.models.entity import infer_entity_type
+from seerflow.models.entity import infer_entity_type, primary_entity_value
 from seerflow.sigma.bundled import get_bundled_rule_paths
 from seerflow.sigma.matcher import CompiledRule, compile_rule, match_event
 from seerflow.sigma.pipeline import seerflow_pipeline
@@ -177,15 +177,6 @@ class SigmaEngine:
 def _create_sigma_alert(compiled: CompiledRule, event: SeerflowEvent) -> Alert:
     """Create an Alert from a matching Sigma rule and triggering event."""
     entity_refs = event.entity_refs
-    raw_value = (
-        event.related_ips[0]
-        if event.related_ips
-        else event.related_users[0]
-        if event.related_users
-        else event.related_hosts[0]
-        if event.related_hosts
-        else ""
-    )
     alert_id = str(
         uuid.uuid5(
             _NAMESPACE_SIGMA,
@@ -200,7 +191,7 @@ def _create_sigma_alert(compiled: CompiledRule, event: SeerflowEvent) -> Alert:
         rule_name=compiled.rule_name,
         description=compiled.description,
         entity_uuid=entity_refs[0] if entity_refs else "",
-        entity_value=raw_value,
+        entity_value=primary_entity_value(event),
         entity_type=infer_entity_type(event),
         contributing_events=(event.event_id,),
         mitre_tactics=compiled.attack_tactics,

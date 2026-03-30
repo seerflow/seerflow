@@ -175,7 +175,8 @@ class TestHandlerNormalizerIntegration:
         assert len(stored.entity_refs) > 0
         # entity_refs should contain UUID5 strings (not raw values)
         for ref in stored.entity_refs:
-            uuid.UUID(ref, version=5)  # raises ValueError if not valid UUID
+            parsed = uuid.UUID(ref)
+            assert parsed.version == 5
         # entity_refs should match resolve_entities output for the same raw values
         expected = resolve_entities(stored.related_ips, stored.related_users, stored.related_hosts)
         assert stored.entity_refs == expected
