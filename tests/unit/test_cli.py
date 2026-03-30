@@ -451,13 +451,17 @@ class TestRunLoop:
         await handler(event)
 
         written_event = mock_storage.write_events.call_args[0][0][0]
-        # entity_refs should be the concatenation of typed fields
-        assert written_event.entity_refs == (
-            written_event.related_ips + written_event.related_users + written_event.related_hosts
-        )
-        # At least IPs should be extracted
-        assert "192.168.1.1" in written_event.related_ips
+        import uuid as _uuid
+
+        # entity_refs now contains UUID5 strings, not raw values
         assert len(written_event.entity_refs) > 0
+        for ref in written_event.entity_refs:
+            parsed = _uuid.UUID(ref)
+            assert parsed.version == 5
+        # Raw values still in related_* fields
+        assert "192.168.1.1" in written_event.related_ips
+        # UUID5 strings are different from raw values
+        assert written_event.related_ips[0] not in written_event.entity_refs
 
     async def test_handler_entity_refs_empty_for_plain_message(self) -> None:
         """Handler leaves entity_refs empty when no entities found."""
