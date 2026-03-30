@@ -27,6 +27,7 @@ def _make_handler(
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.models.alert import create_ml_alert
+    from seerflow.models.entity import resolve_entities
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
 
@@ -41,11 +42,11 @@ def _make_handler(
         nonlocal event_count, anomaly_count, last_save_ns
         seerflow_event = normalizer.normalize(event)
 
-        # Derive entity_refs for HST entity_count + storage compatibility
-        entity_refs = (
-            seerflow_event.related_ips
-            + seerflow_event.related_users
-            + seerflow_event.related_hosts
+        # Resolve entities to deterministic UUID5 strings
+        entity_refs = resolve_entities(
+            seerflow_event.related_ips,
+            seerflow_event.related_users,
+            seerflow_event.related_hosts,
         )
         if entity_refs:
             seerflow_event = msgspec.structs.replace(

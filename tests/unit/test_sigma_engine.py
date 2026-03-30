@@ -125,14 +125,16 @@ class TestSigmaEngineEvaluate:
         assert event.event_id in alerts[0].contributing_events
 
     def test_alert_entity_from_event(self, engine: SigmaEngine) -> None:
-        """Alert entity fields come from the event's entity_refs."""
+        """Alert entity fields come from the event's entity_refs and related_* fields."""
         event = make_event(
             message="bash -c whoami",
             log_source_category="process_creation",
             log_source_product="linux",
             entity_refs=("10.0.0.1", "admin"),
+            related_ips=("10.0.0.1",),
+            related_users=("admin",),
         )
         alerts = engine.evaluate(event)
         assert len(alerts) == 1
-        assert alerts[0].entity_uuid == "10.0.0.1"
-        assert alerts[0].entity_value == "10.0.0.1"
+        assert alerts[0].entity_uuid == event.entity_refs[0]
+        assert alerts[0].entity_value == event.related_ips[0]
