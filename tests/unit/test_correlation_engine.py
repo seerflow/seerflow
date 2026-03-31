@@ -660,3 +660,187 @@ class TestAlertGeneration:
         alerts = self._fire_engine()
         assert len(alerts) == 1
         assert "alert_gen_rule" in alerts[0].description
+
+
+# ---------------------------------------------------------------------------
+# Task 5 (S-042): Risk score computation tests
+# ---------------------------------------------------------------------------
+
+
+class TestCorrelationRiskScore:
+    """Tests for risk score computation in CorrelationEngine._create_alert()."""
+
+    def test_risk_score_based_on_rule_severity(self) -> None:
+        """Higher severity rules produce higher risk scores."""
+        from seerflow.correlation.engine import CorrelationEngine
+
+        now = time.time_ns()
+        entity_uuid = "uuid-risk-entity"
+
+        # Low severity rule (WARNING = 3)
+        low_rule = _make_rule(
+            name="low_sev",
+            entity_type="ip",
+            alert_severity=SeverityLevel.WARNING,
+            sources=(
+                SourceCondition(
+                    source_type="syslog",
+                    conditions={"message": "event.*"},
+                    min_count=1,
+                ),
+            ),
+            min_sources=1,
+        )
+        # High severity rule (FATAL = 6)
+        high_rule = _make_rule(
+            name="high_sev",
+            entity_type="ip",
+            alert_severity=SeverityLevel.FATAL,
+            sources=(
+                SourceCondition(
+                    source_type="syslog",
+                    conditions={"message": "event.*"},
+                    min_count=1,
+                ),
+            ),
+            min_sources=1,
+        )
+
+        event = _make_event(
+            message="event detected",
+            source_type="syslog",
+            timestamp_ns=now,
+            related_ips=("10.0.0.1",),
+        )
+
+        # Engine with low severity
+        window_low = _make_window()
+        engine_low = CorrelationEngine(rules=[low_rule], window=window_low)
+        window_low.add_event(entity_uuid, event)
+        alerts_low = engine_low.evaluate(event, entity_refs=(entity_uuid,))
+
+        # Engine with high severity
+        window_high = _make_window()
+        engine_high = CorrelationEngine(rules=[high_rule], window=window_high)
+        window_high.add_event(entity_uuid, event)
+        alerts_high = engine_high.evaluate(event, entity_refs=(entity_uuid,))
+
+        assert len(alerts_low) == 1
+        assert len(alerts_high) == 1
+        assert alerts_low[0].risk_score > 0
+        assert alerts_high[0].risk_score > alerts_low[0].risk_score
+
+    def test_risk_score_scales_with_contributing_events(self) -> None:
+        """More contributing events produce higher risk score."""
+        from seerflow.correlation.engine import CorrelationEngine
+
+        now = time.time_ns()
+        entity_uuid = "uuid-scale-entity"
+
+        rule = _make_rule(
+            name="scale_rule",
+            entity_type="ip",
+            alert_severity=SeverityLevel.ERROR,
+            sources=(
+                SourceCondition(
+                    source_type="syslog",
+                    conditions={"message": "event.*"},
+                    min_count=1,
+                ),
+            ),
+            min_sources=1,
+        )
+
+        # Scenario A: 1 contributing event
+        window_a = _make_window()
+        engine_a = CorrelationEngine(rules=[rule], window=window_a)
+        event_a = _make_event(
+            message="event detected",
+            source_type="syslog",
+            timestamp_ns=now,
+            related_ips=("10.0.0.1",),
+        )
+        window_a.add_event(entity_uuid, event_a)
+        alerts_a = engine_a.evaluate(event_a, entity_refs=(entity_uuid,))
+
+        # Scenario B: 5 contributing events
+        window_b = _make_window()
+        engine_b = CorrelationEngine(rules=[rule], window=window_b)
+        for i in range(5):
+            ev = _make_event(
+                message="event detected",
+                source_type="syslog",
+                timestamp_ns=now - (5 - i) * 1_000_000,
+                related_ips=("10.0.0.1",),
+            )
+            window_b.add_event(entity_uuid, ev)
+        trigger_b = _make_event(
+            message="event detected",
+            source_type="syslog",
+            timestamp_ns=now,
+            related_ips=("10.0.0.1",),
+        )
+        window_b.add_event(entity_uuid, trigger_b)
+        alerts_b = engine_b.evaluate(trigger_b, entity_refs=(entity_uuid,))
+
+        assert len(alerts_a) == 1
+        assert len(alerts_b) == 1
+        assert alerts_b[0].risk_score > alerts_a[0].risk_score
+
+    def test_risk_score_with_no_events_still_has_severity_component(self) -> None:
+        """Zero events: severity still contributes to risk score."""
+        from seerflow.correlation.engine import CorrelationEngine
+
+        rule = _make_rule(
+            name="zero_rule",
+            entity_type="ip",
+            alert_severity=SeverityLevel.WARNING,
+        )
+
+        event = _make_event(
+            message="test",
+            source_type="syslog",
+            related_ips=("10.0.0.1",),
+        )
+
+        # Call _create_alert directly with empty contributing_event_ids
+        alert = CorrelationEngine._create_alert(
+            rule=rule,
+            entity_uuid="uuid-zero",
+            trigger_event=event,
+            contributing_event_ids=(),
+        )
+        # severity_weight = 3/6 = 0.5, event_weight = 0/10 = 0.0
+        # risk_score = 0.5 * 0.6 + 0.0 * 0.4 = 0.3
+        import pytest as _pytest
+
+        assert alert.risk_score == _pytest.approx(0.3)
+
+    def test_risk_score_capped_at_one(self) -> None:
+        """Risk score should be in [0, 1] range even with many events + high severity."""
+        from seerflow.correlation.engine import CorrelationEngine
+
+        rule = _make_rule(
+            name="cap_rule",
+            entity_type="ip",
+            alert_severity=SeverityLevel.FATAL,  # max severity = 6
+        )
+
+        now = time.time_ns()
+        event = _make_event(
+            message="test",
+            source_type="syslog",
+            timestamp_ns=now,
+            related_ips=("10.0.0.1",),
+        )
+
+        # 50 contributing events — far above the cap of 10
+        many_ids = tuple(uuid.uuid4() for _ in range(50))
+
+        alert = CorrelationEngine._create_alert(
+            rule=rule,
+            entity_uuid="uuid-cap",
+            trigger_event=event,
+            contributing_event_ids=many_ids,
+        )
+        assert 0.0 <= alert.risk_score <= 1.0

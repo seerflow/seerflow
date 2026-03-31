@@ -224,3 +224,115 @@ class TestCorrelationEnginePipelineIntegration:
 
         # Events should still be persisted
         assert mock.write_events.called
+
+
+class TestCorrelationRiskFeed:
+    """Test that correlation alerts feed into the risk register (S-042 Task 2)."""
+
+    async def test_correlation_alert_contributes_to_risk_register(self) -> None:
+        """Correlation alerts feed into risk register."""
+        from seerflow.correlation.risk import RiskRegister
+
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock = _mock_storage()
+
+        window = EntityWindowBuffer(
+            window_ns=1800 * 1_000_000_000,
+            max_events=1000,
+            max_entities=10_000,
+        )
+        rule = _make_rule()
+        engine = CorrelationEngine(rules=[rule], window=window)
+        risk_register = RiskRegister(
+            half_life_ns=3600 * 1_000_000_000,
+            threshold=100.0,
+        )
+
+        handler = _make_handler(
+            ensemble,
+            mock,
+            window_buffer=window,
+            correlation_engine=engine,
+            risk_register=risk_register,
+        )
+
+        non_anomaly = DetectionResult(
+            score=0.1,
+            upper_threshold=0.5,
+            lower_threshold=0.1,
+            is_anomaly=False,
+            anomaly_direction=None,
+            source_type="syslog",
+        )
+
+        with patch.object(type(ensemble), "process_event", return_value=non_anomaly):
+            for _i in range(3):
+                event = RawEvent(
+                    data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
+                    source_type="syslog",
+                    source_id="test",
+                    received_ns=time.time_ns(),
+                    metadata={},
+                )
+                await handler(event)
+
+        # At least one entity should have risk entries from correlation
+        assert risk_register.entity_count > 0
+        # Find an entity with correlation-sourced risk entries
+        found_corr = False
+        for entity_id in list(risk_register._entries.keys()):
+            entries = risk_register.get_entries(entity_id)
+            for entry in entries:
+                if entry.source == "correlation":
+                    found_corr = True
+                    assert entry.risk_points > 0
+                    break
+            if found_corr:
+                break
+        assert found_corr, "Expected at least one correlation risk entry in register"
+
+    async def test_handler_without_risk_register_skips_risk_feed(self) -> None:
+        """Backward compat: no risk register -> no crash."""
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+        mock = _mock_storage()
+
+        window = EntityWindowBuffer(
+            window_ns=1800 * 1_000_000_000,
+            max_events=1000,
+            max_entities=10_000,
+        )
+        rule = _make_rule()
+        engine = CorrelationEngine(rules=[rule], window=window)
+
+        # No risk_register passed
+        handler = _make_handler(
+            ensemble,
+            mock,
+            window_buffer=window,
+            correlation_engine=engine,
+        )
+
+        non_anomaly = DetectionResult(
+            score=0.1,
+            upper_threshold=0.5,
+            lower_threshold=0.1,
+            is_anomaly=False,
+            anomaly_direction=None,
+            source_type="syslog",
+        )
+
+        with patch.object(type(ensemble), "process_event", return_value=non_anomaly):
+            for _i in range(3):
+                event = RawEvent(
+                    data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
+                    source_type="syslog",
+                    source_id="test",
+                    received_ns=time.time_ns(),
+                    metadata={},
+                )
+                await handler(event)
+
+        # Should not crash — events still persisted
+        assert mock.write_events.called

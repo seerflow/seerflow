@@ -145,6 +145,15 @@ class CorrelationEngine:
         contributing_event_ids: tuple[uuid.UUID, ...],
     ) -> Alert:
         """Build an Alert from a fired correlation rule."""
+        # Risk score: blend rule severity with number of contributing events
+        # severity_weight = rule.alert_severity.value / 6  (normalize to [0, 1])
+        # event_weight = min(len(contributing_event_ids) / 10, 1.0)  (cap at 10)
+        # risk_score = severity_weight * 0.6 + event_weight * 0.4
+        n_events = len(contributing_event_ids)
+        severity_weight = rule.alert_severity.value / 6
+        event_weight = min(n_events / 10, 1.0)
+        risk_score = max(0.0, min(1.0, severity_weight * 0.6 + event_weight * 0.4))
+
         return Alert(
             alert_id=str(
                 uuid.uuid5(
@@ -163,5 +172,6 @@ class CorrelationEngine:
             contributing_events=contributing_event_ids,
             mitre_tactics=rule.mitre_tactics,
             mitre_techniques=rule.mitre_techniques,
+            risk_score=risk_score,
             dedup_key=f"corr:{rule.name}:{entity_uuid}",
         )
