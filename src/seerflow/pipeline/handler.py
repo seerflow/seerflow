@@ -12,6 +12,7 @@ import msgspec.structs
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.risk import RiskRegister
     from seerflow.correlation.watermark import Watermark
     from seerflow.correlation.window import EntityWindowBuffer
@@ -34,6 +35,7 @@ def _make_handler(
     window_buffer: EntityWindowBuffer | None = None,
     watermark: Watermark | None = None,
     risk_register: RiskRegister | None = None,
+    correlation_engine: CorrelationEngine | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
@@ -82,6 +84,19 @@ def _make_handler(
             else:
                 for entity_uuid in entity_refs:
                     window_buffer.add_event(entity_uuid, seerflow_event)
+
+        # Evaluate correlation rules (skip late events)
+        is_late = watermark is not None and watermark.is_late(seerflow_event.timestamp_ns)
+        if correlation_engine is not None and entity_refs and not is_late:
+            try:
+                corr_alerts = correlation_engine.evaluate(seerflow_event, entity_refs)
+                for corr_alert in corr_alerts:
+                    try:
+                        await storage.write_alert(corr_alert)
+                    except Exception:
+                        _log.warning("Correlation alert write failed", exc_info=True)
+            except Exception:
+                _log.warning("Correlation evaluation failed", exc_info=True)
 
         # Update entity graph with inferred edges
         if entity_graph is not None and entity_refs:
