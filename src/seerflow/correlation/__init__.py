@@ -14,11 +14,11 @@ from seerflow.correlation.window import EntityWindowBuffer
 __all__ = [
     "CorrelationEngine",
     "EntityWindowBuffer",
-    "get_bundled_rule_dir",
     "RiskEntry",
     "RiskRegister",
     "RuleValidationError",
     "Watermark",
+    "get_bundled_rule_dir",
     "load_correlation_rules",
     "parse_rule_yaml",
 ]
