@@ -255,3 +255,62 @@ class TestNegativeCases:
         # Brute force should NOT fire (only 2 failures, needs 5)
         brute_force = [a for a in alerts if a.rule_name == "brute-force-lateral-movement"]
         assert brute_force == []
+
+    def test_events_outside_temporal_window_do_not_fire(self) -> None:
+        rules = _load_builtin_rules()
+        window = EntityWindowBuffer(window_ns=700_000_000_000, max_events=1000)
+        engine = CorrelationEngine(rules=rules, window=window)
+
+        entity_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, "user:eve"))
+        base_ns = time.time_ns()
+
+        # 5 auth failures spread across 20 minutes (brute force window is 600s)
+        for i in range(5):
+            evt = _make_event(
+                message=f"Failed password for eve attempt {i}",
+                related_users=("eve",),
+                timestamp_ns=base_ns + i * 240_000_000_000,  # 4 min apart = 20 min total
+            )
+            window.add_event(entity_uuid, evt)
+
+        # Successful login well after the first failures
+        trigger = _make_event(
+            message="Accepted password for eve from 10.0.0.3",
+            related_users=("eve",),
+            timestamp_ns=base_ns + 1200_000_000_000,  # 20 min after first event
+        )
+        window.add_event(entity_uuid, trigger)
+
+        alerts = engine.evaluate(trigger, (entity_uuid,))
+        # Brute force should NOT fire — early failures outside 600s window
+        brute_force = [a for a in alerts if a.rule_name == "brute-force-lateral-movement"]
+        assert brute_force == []
+
+    def test_wrong_entity_type_does_not_fire(self) -> None:
+        rules = _load_builtin_rules()
+        window = EntityWindowBuffer(window_ns=700_000_000_000, max_events=1000)
+        engine = CorrelationEngine(rules=rules, window=window)
+
+        # Use IP entity UUID but feed user-pattern events (brute force is user-entity)
+        entity_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, "ip:10.0.0.1"))
+        base_ns = time.time_ns()
+
+        for i in range(5):
+            evt = _make_event(
+                message=f"Failed password for admin attempt {i}",
+                related_ips=("10.0.0.1",),  # IP entity, not user
+                timestamp_ns=base_ns + i * 1_000_000_000,
+            )
+            window.add_event(entity_uuid, evt)
+
+        trigger = _make_event(
+            message="Accepted password for admin from 10.0.0.1",
+            related_ips=("10.0.0.1",),
+            timestamp_ns=base_ns + 6_000_000_000,
+        )
+        window.add_event(entity_uuid, trigger)
+
+        alerts = engine.evaluate(trigger, (entity_uuid,))
+        # Brute force rule requires entity_type=user, but events have IP entities
+        brute_force = [a for a in alerts if a.rule_name == "brute-force-lateral-movement"]
+        assert brute_force == []
