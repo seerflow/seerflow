@@ -60,11 +60,14 @@ docker run -v ./seerflow.yaml:/app/seerflow.yaml:ro seerflow/seerflow
 
 1. **Ingests** logs from multiple sources simultaneously (syslog, OTLP gRPC/HTTP, file tailing, webhooks)
 2. **Parses** each log line with Drain3 (template extraction) and regex entity extraction (IPs, users, hosts, files, domains, processes)
-3. **Scores** events with an ML ensemble: Half-Space Trees (content), Holt-Winters (volume), CUSUM (change), Markov chains (sequence) -- blended with z-normalization
-4. **Thresholds** scores with biDSPOT (EVT-based auto-threshold -- no manual tuning)
-5. **Evaluates** 63 bundled Sigma rules (Linux, web, DNS, process, network) with MITRE ATT&CK tagging
-6. **Alerts** on anomalies and Sigma matches with template, entities, and score details
-7. **Persists** all events, alerts, and ML model state to SQLite for later analysis
+3. **Resolves** entities to deterministic UUID5 IDs for cross-source correlation
+4. **Scores** events with an ML ensemble: Half-Space Trees (content), Holt-Winters (volume), CUSUM (change), Markov chains (sequence) -- blended with z-normalization
+5. **Thresholds** scores with biDSPOT (EVT-based auto-threshold -- no manual tuning)
+6. **Evaluates** 63 bundled Sigma rules (Linux, web, DNS, process, network) with MITRE ATT&CK tagging
+7. **Graphs** entity relationships with igraph -- PageRank, Louvain, fan-out, betweenness centrality
+8. **Accumulates** per-entity risk with exponential decay -- catches slow-burn multi-step attacks
+9. **Alerts** on anomalies, Sigma matches, and risk threshold exceedances
+10. **Persists** all events, alerts, graph edges, and ML model state to SQLite
 
 ### Example: Detect Anomalies in Syslog
 
@@ -149,21 +152,28 @@ Key config sections:
 ## Detection Pipeline
 
 ```
-Log Sources → Receivers → Drain3 Parser → Entity Extractor → ML Ensemble → Sigma Rules → Alert
-                                ↓                ↓                ↓              ↓
-                          template_id       IPs, users      blended score   ATT&CK tags
-                          template_str      hosts, files    [0.0 - 1.0]    tactic/technique
-                          template_params   domains, procs
+Log Sources → Receivers → Drain3 → UUID5 Entities → ML Ensemble → Sigma Rules
+                                        ↓                ↓              ↓
+                                  Entity Graph      blended score   ATT&CK tags
+                                  Window Buffer     [0.0 - 1.0]    tactic/technique
+                                  Risk Register         ↓              ↓
+                                        ↓          Risk Accumulation → Alert
+                                  PageRank, Louvain
+                                  Fan-out, Betweenness
 ```
 
 - **Drain3**: Streaming log template extraction (120K msgs/sec)
+- **UUID5 Entity Resolution**: Deterministic cross-source entity IDs (same entity = same UUID)
 - **Half-Space Trees**: Content anomaly detection via River (constant time/memory)
 - **Holt-Winters**: Volume anomaly detection (trend + seasonal decomposition)
 - **CUSUM**: Change-point detection (bidirectional cumulative sum)
 - **Markov Chains**: Sequence anomaly detection (per-entity transition matrices)
 - **biDSPOT**: Bidirectional EVT auto-threshold (upper spikes + lower drops)
 - **DetectionEnsemble**: Orchestrates all detectors + blended scoring per source
-- **Sigma Engine**: 63 bundled SigmaHQ rules with logsource-indexed dispatch + custom rule directories
+- **Sigma Engine**: 63 bundled SigmaHQ rules with logsource-indexed dispatch
+- **Entity Graph**: igraph-backed relationship graph with typed edges + 6 algorithms
+- **Risk Accumulation**: Per-entity risk register with exponential decay + configurable threshold
+- **Sliding Window**: Per-entity event buffer with watermark-based late arrival tolerance
 
 ## Development
 
@@ -217,12 +227,20 @@ src/seerflow/
         bundled.py   # Bundled rule path discovery (importlib.resources)
         loader.py    # Custom rule directory discovery + validation
         rules/       # 63 curated SigmaHQ YAML rules (linux, web, dns, process, network)
+    graph/
+        entity_graph.py # igraph wrapper: vertices, edges, queries, algorithms
+        edges.py     # Typed edge inference from entity pairs
+        algorithms.py # PageRank, Louvain, fan-out, fan-in, betweenness, ego-graph
+    correlation/
+        window.py    # Per-entity sliding window buffer (deque, LRU eviction)
+        watermark.py # Watermark-based late arrival tolerance
+        risk.py      # Risk accumulation with exponential decay
     pipeline/
-        handler.py   # Event handler: parse → detect → sigma → store
+        handler.py   # Event handler: parse → detect → graph → correlate → store
         run.py       # Pipeline runner (config → receivers → handler → storage)
 tests/
-    unit/            # 1000+ unit tests
-    integration/     # Integration tests (multi-source, E2E pipeline, real SQLite)
+    unit/            # 1200+ unit tests
+    integration/     # Integration tests (pipeline, graph, correlation, real SQLite)
     benchmarks/      # Throughput benchmarks (pytest-benchmark, CI history tracking)
 ```
 
