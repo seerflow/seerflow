@@ -11,7 +11,7 @@ mitre_techniques:
 sources:
   - source_type: syslog
     conditions:
-      message: "(?i)(large.*transfer|upload.*complet|exfil|outbound.*bytes|sent.*\\d{6,}|POST.*\\d{6,})"
+      message: "(?i)(large.*transfer|upload.*completed?|exfil|outbound.*bytes|sent.*\\d{6,}|POST.*\\d{6,})"
     min_count: 3
   - source_type: syslog
     conditions:
