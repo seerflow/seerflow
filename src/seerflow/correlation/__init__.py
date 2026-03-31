@@ -1,5 +1,6 @@
 """Cross-source correlation: entity graph, temporal windows, rules."""
 
+from seerflow.correlation.bundled import get_bundled_rule_dir
 from seerflow.correlation.engine import CorrelationEngine
 from seerflow.correlation.risk import RiskEntry, RiskRegister
 from seerflow.correlation.rule_loader import (
@@ -13,6 +14,7 @@ from seerflow.correlation.window import EntityWindowBuffer
 __all__ = [
     "CorrelationEngine",
     "EntityWindowBuffer",
+    "get_bundled_rule_dir",
     "RiskEntry",
     "RiskRegister",
     "RuleValidationError",

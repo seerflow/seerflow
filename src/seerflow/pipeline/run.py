@@ -118,14 +118,17 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         max_entities=config.detection.risk_max_entities,
     )
 
-    # Load correlation rules from configured directories
+    # Load correlation rules — bundled + user-configured directories
+    from seerflow.correlation.bundled import get_bundled_rule_dir
     from seerflow.correlation.rule_loader import load_correlation_rules
 
-    correlation_rules = load_correlation_rules(config.correlation.rule_dirs)
+    bundled_dir = str(get_bundled_rule_dir())
+    rule_dirs = (bundled_dir, *config.correlation.rule_dirs)
+    correlation_rules = load_correlation_rules(rule_dirs)
     _log.info(
         "Correlation: loaded %d rules from %d dirs",
         len(correlation_rules),
-        len(config.correlation.rule_dirs),
+        len(rule_dirs),
     )
 
     # Build correlation engine for real-time rule evaluation
