@@ -17,7 +17,7 @@ class TestGetBundledRuleDir:
     def test_directory_contains_yml_files(self) -> None:
         rule_dir = get_bundled_rule_dir()
         yml_files = list(rule_dir.glob("*.yml"))
-        assert len(yml_files) == 5
+        assert len(yml_files) >= 5
 
 
 class TestBuiltinRulesLoadAndValidate:

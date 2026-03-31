@@ -5,12 +5,16 @@ from __future__ import annotations
 import time
 import uuid
 
+import pytest
+
 from seerflow.correlation.bundled import get_bundled_rule_dir
 from seerflow.correlation.engine import CorrelationEngine
 from seerflow.correlation.rule_loader import load_correlation_rules
 from seerflow.models.alert import CorrelationRule
 from seerflow.correlation.window import EntityWindowBuffer
 from seerflow.models.event import SeerflowEvent, SeverityLevel
+
+pytestmark = pytest.mark.integration
 
 
 def _make_event(
