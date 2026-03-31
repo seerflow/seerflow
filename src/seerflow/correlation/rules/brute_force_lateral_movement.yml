@@ -1,0 +1,21 @@
+name: brute-force-lateral-movement
+description: "Multiple authentication failures followed by successful login — potential brute force with lateral movement"
+entity_type: user
+window_seconds: 600
+min_sources: 2
+alert_severity: 5
+mitre_tactics:
+  - credential-access
+  - lateral-movement
+mitre_techniques:
+  - T1110
+  - T1021
+sources:
+  - source_type: syslog
+    conditions:
+      message: "(?i)(authentication fail|login fail|invalid password|failed password|access denied)"
+    min_count: 5
+  - source_type: syslog
+    conditions:
+      message: "(?i)(accepted.*password|session opened|login.*success|authenticated)"
+    min_count: 1
