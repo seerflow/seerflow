@@ -195,16 +195,27 @@ class EntityGraph:
         return result
 
     def run_algorithms(self) -> None:
-        """Compute PageRank + Louvain and store as vertex attributes."""
-        from seerflow.graph.algorithms import compute_communities, compute_pagerank
+        """Compute all graph algorithms and store as vertex attributes."""
+        from seerflow.graph.algorithms import (
+            compute_betweenness,
+            compute_communities,
+            compute_ego_graph_size,
+            compute_fan_in,
+            compute_fan_out,
+            compute_pagerank,
+        )
 
-        pagerank = compute_pagerank(self)
-        for entity_id, score in pagerank.items():
-            self.set_vertex_attr(entity_id, "pagerank", score)
-
-        communities = compute_communities(self)
-        for entity_id, cid in communities.items():
-            self.set_vertex_attr(entity_id, "community_id", cid)
+        for name, func in (
+            ("pagerank", compute_pagerank),
+            ("community_id", compute_communities),
+            ("fan_out", compute_fan_out),
+            ("fan_in", compute_fan_in),
+            ("betweenness", compute_betweenness),
+            ("ego_graph_size", compute_ego_graph_size),
+        ):
+            results = func(self)
+            for entity_id, value in results.items():
+                self.set_vertex_attr(entity_id, name, value)
 
     # ------------------------------------------------------------------
     # Bulk load / export (for storage round-trips)
