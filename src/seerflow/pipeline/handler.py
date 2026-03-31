@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import TYPE_CHECKING
 
 import msgspec.structs
@@ -11,6 +12,7 @@ import msgspec.structs
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from seerflow.correlation.risk import RiskRegister
     from seerflow.correlation.watermark import Watermark
     from seerflow.correlation.window import EntityWindowBuffer
     from seerflow.detection.ensemble import DetectionEnsemble
@@ -31,6 +33,7 @@ def _make_handler(
     graph_algo_interval: int = 500,
     window_buffer: EntityWindowBuffer | None = None,
     watermark: Watermark | None = None,
+    risk_register: RiskRegister | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
@@ -45,6 +48,7 @@ def _make_handler(
     template_meta: dict[int, TemplateInfo] = {}
     start_time = time.time()
     last_save_ns = time.time_ns()
+    risk_alerted: set[str] = set()  # entities that already fired a risk alert
 
     async def handler(event: RawEvent) -> None:
         nonlocal event_count, anomaly_count, last_save_ns
@@ -197,6 +201,21 @@ def _make_handler(
             except Exception:
                 _log.warning("Alert write failed", exc_info=True)
 
+            # Add risk for ML anomaly
+            if risk_register is not None and entity_refs:
+                from seerflow.correlation.risk import RiskEntry
+
+                for entity_uuid in entity_refs:
+                    risk_entry = RiskEntry(
+                        timestamp_ns=seerflow_event.timestamp_ns,
+                        risk_points=result.score * 10,
+                        source="ml",
+                        rule_name="hst-anomaly",
+                        mitre_tactics=(),
+                        mitre_techniques=(),
+                    )
+                    risk_register.add_risk(entity_uuid, risk_entry)
+
         # Sigma rule evaluation
         if sigma_engine is not None:
             try:
@@ -206,8 +225,58 @@ def _make_handler(
                         await storage.write_alert(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
+
+                    # Add risk for Sigma match
+                    if risk_register is not None and entity_refs:
+                        from seerflow.correlation.risk import RiskEntry
+
+                        for entity_uuid in entity_refs:
+                            risk_entry = RiskEntry(
+                                timestamp_ns=seerflow_event.timestamp_ns,
+                                risk_points=(15.0 if sigma_alert.severity_id.value >= 4 else 5.0),
+                                source="sigma",
+                                rule_name=sigma_alert.rule_name,
+                                mitre_tactics=sigma_alert.mitre_tactics,
+                                mitre_techniques=sigma_alert.mitre_techniques,
+                            )
+                            risk_register.add_risk(entity_uuid, risk_entry)
             except Exception:
                 _log.warning("Sigma evaluation failed", exc_info=True)
+
+        # Check risk threshold and fire correlation alert (with cooldown)
+        if risk_register is not None and entity_refs:
+            from seerflow.models.alert import Alert
+            from seerflow.models.entity import infer_entity_type, primary_entity_value
+
+            for entity_uuid in entity_refs:
+                if entity_uuid in risk_alerted:
+                    continue  # Already alerted for this entity
+                if risk_register.check_threshold(entity_uuid):
+                    risk_alerted.add(entity_uuid)
+                    risk_score = risk_register.get_risk(entity_uuid)
+                    risk_alert = Alert(
+                        alert_id=str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_DNS,
+                                f"risk:{entity_uuid}:{seerflow_event.timestamp_ns}",
+                            )
+                        ),
+                        alert_type="correlation",
+                        timestamp_ns=seerflow_event.timestamp_ns,
+                        severity_id=seerflow_event.severity_id,
+                        rule_name="risk-accumulation",
+                        description=(f"Entity risk threshold exceeded: score={risk_score:.1f}"),
+                        entity_uuid=entity_uuid,
+                        entity_value=primary_entity_value(seerflow_event),
+                        entity_type=infer_entity_type(seerflow_event),
+                        contributing_events=(seerflow_event.event_id,),
+                        risk_score=risk_score,
+                        dedup_key=f"risk:{entity_uuid}",
+                    )
+                    try:
+                        await storage.write_alert(risk_alert)
+                    except Exception:
+                        _log.warning("Risk alert write failed", exc_info=True)
 
         # Periodic model state save
         if event_count % 100 == 0 and event_count > 0:

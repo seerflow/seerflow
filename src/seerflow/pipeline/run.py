@@ -109,6 +109,15 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         tolerance_ns=config.correlation.late_tolerance_seconds * 1_000_000_000,
     )
 
+    # Build risk register for per-entity risk accumulation
+    from seerflow.correlation.risk import RiskRegister
+
+    risk_register = RiskRegister(
+        half_life_ns=config.detection.risk_half_life_hours * 3600 * 1_000_000_000,
+        threshold=config.detection.risk_threshold,
+        max_entities=config.detection.risk_max_entities,
+    )
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
@@ -120,6 +129,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         graph_algo_interval=config.detection.graph_algo_interval,
         window_buffer=window_buffer,
         watermark=watermark,
+        risk_register=risk_register,
     )
     await pipeline.run(handler)
 

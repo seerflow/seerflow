@@ -641,3 +641,59 @@ class TestCorrelationConfig:
         config = SeerflowConfig()
         with pytest.raises(AttributeError):
             config.correlation.window_duration_seconds = 999  # type: ignore[misc]
+
+
+class TestRiskConfig:
+    def test_default_risk_half_life_hours(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.risk_half_life_hours == 4
+
+    def test_default_risk_threshold(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.risk_threshold == 50.0
+
+    def test_default_risk_max_entities(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.risk_max_entities == 10_000
+
+    def test_risk_half_life_hours_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  risk_half_life_hours: 8\n")
+        config = load_config(str(yaml_file))
+        assert config.detection.risk_half_life_hours == 8
+
+    def test_risk_threshold_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  risk_threshold: 75.0\n")
+        config = load_config(str(yaml_file))
+        assert config.detection.risk_threshold == 75.0
+
+    def test_risk_max_entities_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  risk_max_entities: 5000\n")
+        config = load_config(str(yaml_file))
+        assert config.detection.risk_max_entities == 5000
+
+    def test_risk_half_life_hours_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_half_life_hours must be >= 1"):
+            _build_detection({"risk_half_life_hours": 0})
+
+    def test_risk_half_life_hours_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_half_life_hours must be >= 1"):
+            _build_detection({"risk_half_life_hours": -1})
+
+    def test_risk_threshold_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_threshold must be > 0"):
+            _build_detection({"risk_threshold": 0.0})
+
+    def test_risk_threshold_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_threshold must be > 0"):
+            _build_detection({"risk_threshold": -10.0})
+
+    def test_risk_max_entities_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_max_entities must be >= 1"):
+            _build_detection({"risk_max_entities": 0})
+
+    def test_risk_max_entities_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_max_entities must be >= 1"):
+            _build_detection({"risk_max_entities": -5})

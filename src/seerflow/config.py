@@ -116,6 +116,9 @@ class DetectionConfig:
     weights_sequence: float = 0.25
     weights_pattern: float = 0.20
     graph_algo_interval: int = 500
+    risk_half_life_hours: int = 4
+    risk_threshold: float = 50.0
+    risk_max_entities: int = 10_000
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
@@ -362,6 +365,17 @@ def _validate_detection_config(config: DetectionConfig) -> None:
             f"got {config.graph_algo_interval!r}"
         )
 
+    if config.risk_half_life_hours < 1:
+        raise ConfigError(
+            f"detection.risk_half_life_hours must be >= 1, got {config.risk_half_life_hours!r}"
+        )
+    if config.risk_threshold <= 0:
+        raise ConfigError(f"detection.risk_threshold must be > 0, got {config.risk_threshold!r}")
+    if config.risk_max_entities < 1:
+        raise ConfigError(
+            f"detection.risk_max_entities must be >= 1, got {config.risk_max_entities!r}"
+        )
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     """Build DetectionConfig from a YAML ``detection:`` section.
@@ -408,6 +422,9 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_sequence=data.get("weights_sequence", 0.25),
         weights_pattern=data.get("weights_pattern", 0.20),
         graph_algo_interval=data.get("graph_algo_interval", 500),
+        risk_half_life_hours=data.get("risk_half_life_hours", 4),
+        risk_threshold=float(data.get("risk_threshold", 50.0)),
+        risk_max_entities=data.get("risk_max_entities", 10_000),
         sigma_rules_dirs=sigma_rules_dirs,
     )
     _validate_detection_config(config)
