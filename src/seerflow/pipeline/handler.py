@@ -95,6 +95,20 @@ def _make_handler(
                         await storage.write_alert(corr_alert)
                     except Exception:
                         _log.warning("Correlation alert write failed", exc_info=True)
+
+                    # Feed correlation alerts into risk register
+                    if risk_register is not None and corr_alert.entity_uuid:
+                        from seerflow.correlation.risk import RiskEntry
+
+                        risk_entry = RiskEntry(
+                            timestamp_ns=seerflow_event.timestamp_ns,
+                            risk_points=corr_alert.risk_score * 20,
+                            source="correlation",
+                            rule_name=corr_alert.rule_name,
+                            mitre_tactics=corr_alert.mitre_tactics,
+                            mitre_techniques=corr_alert.mitre_techniques,
+                        )
+                        risk_register.add_risk(corr_alert.entity_uuid, risk_entry)
             except Exception:
                 _log.warning("Correlation evaluation failed", exc_info=True)
 
