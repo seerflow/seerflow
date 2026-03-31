@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from seerflow.config import load_config
+from seerflow.correlation.holders import EngineHolder
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.models.query import EventQuery
 from seerflow.pipeline.handler import _make_handler
@@ -148,7 +149,7 @@ async def _build_pipeline(
         ensemble,
         storage,
         save_interval_ns=999_999_999_999,
-        sigma_engine=sigma,
+        sigma_holder=EngineHolder(engine=sigma),
     )
     return storage, handler, sigma
 

@@ -286,7 +286,11 @@ class TestRunLoop:
         mock_sigma = MagicMock()
         mock_sigma.evaluate.return_value = [mock_alert]
 
-        handler = _make_handler(ensemble, mock_storage, sigma_engine=mock_sigma)
+        from seerflow.correlation.holders import EngineHolder
+
+        handler = _make_handler(
+            ensemble, mock_storage, sigma_holder=EngineHolder(engine=mock_sigma)
+        )
 
         event = RawEvent(
             data=b"test message",
@@ -305,6 +309,7 @@ class TestRunLoop:
         from unittest.mock import AsyncMock, MagicMock
 
         from seerflow.config import SeerflowConfig
+        from seerflow.correlation.holders import EngineHolder
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.pipeline.handler import _make_handler
         from seerflow.receivers.base import RawEvent
@@ -317,7 +322,9 @@ class TestRunLoop:
         mock_sigma = MagicMock()
         mock_sigma.evaluate.side_effect = RuntimeError("sigma broke")
 
-        handler = _make_handler(ensemble, mock_storage, sigma_engine=mock_sigma)
+        handler = _make_handler(
+            ensemble, mock_storage, sigma_holder=EngineHolder(engine=mock_sigma)
+        )
 
         event = RawEvent(
             data=b"test message",

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from seerflow.config import SeerflowConfig
+from seerflow.correlation.holders import EngineHolder
 from seerflow.correlation.risk import RiskRegister
 from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
 from seerflow.pipeline.handler import _make_handler
@@ -91,7 +92,7 @@ class TestRiskPipelineIntegration:
             ensemble,
             mock,
             risk_register=risk_register,
-            sigma_engine=sigma_engine,
+            sigma_holder=EngineHolder(engine=sigma_engine),
         )
 
         event = RawEvent(

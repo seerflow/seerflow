@@ -2,6 +2,7 @@
 
 from seerflow.correlation.bundled import get_bundled_rule_dir
 from seerflow.correlation.engine import CorrelationEngine
+from seerflow.correlation.holders import EngineHolder
 from seerflow.correlation.risk import RiskEntry, RiskRegister
 from seerflow.correlation.rule_loader import (
     RuleValidationError,
@@ -13,6 +14,7 @@ from seerflow.correlation.window import EntityWindowBuffer
 
 __all__ = [
     "CorrelationEngine",
+    "EngineHolder",
     "EntityWindowBuffer",
     "RiskEntry",
     "RiskRegister",
