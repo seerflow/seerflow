@@ -76,8 +76,13 @@ class CorrelationEngine:
         if event_entity_type != rule.entity_type:
             return None
 
-        # Query all events in the window for this entity
-        window_events = self._window.query(entity_uuid)
+        # Query events within the rule's temporal window
+        from seerflow.models.query import TimeRange
+
+        rule_window_ns = rule.window_seconds * 1_000_000_000
+        cutoff_ns = trigger_event.timestamp_ns - rule_window_ns
+        time_range = TimeRange(start_ns=cutoff_ns, end_ns=trigger_event.timestamp_ns)
+        window_events = self._window.query(entity_uuid, time_range=time_range)
         if not window_events:
             return None
 

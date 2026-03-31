@@ -85,8 +85,9 @@ def _make_handler(
                 for entity_uuid in entity_refs:
                     window_buffer.add_event(entity_uuid, seerflow_event)
 
-        # Evaluate correlation rules
-        if correlation_engine is not None and entity_refs:
+        # Evaluate correlation rules (skip late events)
+        is_late = watermark is not None and watermark.is_late(seerflow_event.timestamp_ns)
+        if correlation_engine is not None and entity_refs and not is_late:
             try:
                 corr_alerts = correlation_engine.evaluate(seerflow_event, entity_refs)
                 for corr_alert in corr_alerts:
