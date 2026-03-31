@@ -30,18 +30,29 @@ class RiskRegister:
     where ``lambda = ln(2) / half_life_ns``.
     """
 
-    __slots__ = ("_entries", "_half_life_ns", "_lambda", "_max_entities", "_threshold")
+    __slots__ = (
+        "_entries",
+        "_half_life_ns",
+        "_lambda",
+        "_max_entities",
+        "_max_entries_per_entity",
+        "_threshold",
+    )
+
+    _NEGLIGIBLE_SCORE = 0.01  # Prune entries contributing less than this
 
     def __init__(
         self,
         half_life_ns: int,
         threshold: float,
         max_entities: int = 10_000,
+        max_entries_per_entity: int = 500,
     ) -> None:
         self._half_life_ns = half_life_ns
         self._lambda = math.log(2) / half_life_ns
         self._threshold = threshold
         self._max_entities = max_entities
+        self._max_entries_per_entity = max_entries_per_entity
         self._entries: dict[str, list[RiskEntry]] = {}
 
     def add_risk(self, entity_id: str, entry: RiskEntry) -> float:
@@ -55,6 +66,10 @@ class RiskRegister:
                 del self._entries[oldest]
             self._entries[entity_id] = []
         self._entries[entity_id].append(entry)
+        # Cap entries per entity
+        entries = self._entries[entity_id]
+        if len(entries) > self._max_entries_per_entity:
+            self._entries[entity_id] = entries[-self._max_entries_per_entity :]
         return self.get_risk(entity_id)
 
     def get_risk(self, entity_id: str) -> float:

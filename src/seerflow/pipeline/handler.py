@@ -48,6 +48,7 @@ def _make_handler(
     template_meta: dict[int, TemplateInfo] = {}
     start_time = time.time()
     last_save_ns = time.time_ns()
+    risk_alerted: set[str] = set()  # entities that already fired a risk alert
 
     async def handler(event: RawEvent) -> None:
         nonlocal event_count, anomaly_count, last_save_ns
@@ -242,13 +243,16 @@ def _make_handler(
             except Exception:
                 _log.warning("Sigma evaluation failed", exc_info=True)
 
-        # Check risk threshold and fire correlation alert
+        # Check risk threshold and fire correlation alert (with cooldown)
         if risk_register is not None and entity_refs:
             from seerflow.models.alert import Alert
             from seerflow.models.entity import infer_entity_type, primary_entity_value
 
             for entity_uuid in entity_refs:
+                if entity_uuid in risk_alerted:
+                    continue  # Already alerted for this entity
                 if risk_register.check_threshold(entity_uuid):
+                    risk_alerted.add(entity_uuid)
                     risk_score = risk_register.get_risk(entity_uuid)
                     risk_alert = Alert(
                         alert_id=str(
