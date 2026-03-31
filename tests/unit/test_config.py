@@ -637,6 +637,10 @@ class TestCorrelationConfig:
         with pytest.raises(ConfigError, match="late_tolerance_seconds must be >= 0"):
             _build_correlation({"late_tolerance_seconds": -1})
 
+    def test_default_rule_dirs_empty(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.rule_dirs == ()
+
     def test_correlation_config_is_frozen(self) -> None:
         config = SeerflowConfig()
         with pytest.raises(AttributeError):

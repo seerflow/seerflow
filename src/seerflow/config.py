@@ -139,6 +139,7 @@ class CorrelationConfig:
     max_events_per_entity: int = 1000
     max_entities: int = 10_000
     late_tolerance_seconds: int = 30
+    rule_dirs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -433,11 +434,14 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
 
 def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
     """Build CorrelationConfig from a YAML ``correlation:`` section."""
+    rule_dirs_raw = data.get("rule_dirs", ())
+    rule_dirs = tuple(str(d) for d in rule_dirs_raw) if isinstance(rule_dirs_raw, list) else ()
     config = CorrelationConfig(
         window_duration_seconds=data.get("window_duration_seconds", 1800),
         max_events_per_entity=data.get("max_events_per_entity", 1000),
         max_entities=data.get("max_entities", 10_000),
         late_tolerance_seconds=data.get("late_tolerance_seconds", 30),
+        rule_dirs=rule_dirs,
     )
     if config.late_tolerance_seconds < 0:
         raise ConfigError(
