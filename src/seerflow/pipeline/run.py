@@ -118,6 +118,16 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         max_entities=config.detection.risk_max_entities,
     )
 
+    # Load correlation rules from configured directories
+    from seerflow.correlation.rule_loader import load_correlation_rules
+
+    correlation_rules = load_correlation_rules(config.correlation.rule_dirs)
+    _log.info(
+        "Correlation: loaded %d rules from %d dirs",
+        len(correlation_rules),
+        len(config.correlation.rule_dirs),
+    )
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
