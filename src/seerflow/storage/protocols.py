@@ -1,11 +1,11 @@
 """Storage Protocol interfaces for the Seerflow pipeline.
 
-Four Protocols define the storage contract. Backends (SQLite, PostgreSQL)
+Five Protocols define the storage contract. Backends (SQLite, PostgreSQL)
 implement these Protocols. All methods are async. All Protocols are
 ``@runtime_checkable`` for startup validation.
 
-v1 Protocols: LogStore, AlertStore, ModelStore, EntityStore.
-GraphStore and CheckpointStore are deferred (see architecture Appendix D).
+v1 Protocols: LogStore, AlertStore, ModelStore, EntityStore, GraphStore.
+CheckpointStore is deferred (see architecture Appendix D).
 
 Note: Type annotations use ``TYPE_CHECKING`` guards for zero-cost imports.
 ``typing.get_type_hints()`` will fail at runtime on these Protocol classes;
@@ -84,7 +84,48 @@ class EntityStore(Protocol):  # pragma: no cover
     """Entity timeline and relationship queries."""
 
     async def get_timeline(
-        self, entity_uuid: str, time_range: TimeRange
+        self,
+        entity_uuid: str,
+        time_range: TimeRange,
+        source_type: str | None = None,
+        severity_min: int | None = None,
+        limit: int = 10_000,
     ) -> list[SeerflowEvent]: ...
 
     async def get_related(self, entity_uuid: str) -> list[EntityRelation]: ...
+
+
+@runtime_checkable
+class GraphStore(Protocol):  # pragma: no cover
+    """Entity relationship graph operations."""
+
+    async def write_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        timestamp_ns: int,
+    ) -> None: ...
+
+    async def load_edges(
+        self,
+    ) -> list[tuple[str, str, str, int, int, int]]: ...
+
+    async def get_neighbors(
+        self,
+        entity_id: str,
+        rel_types: tuple[str, ...] | None = None,
+        depth: int = 1,
+    ) -> list[dict[str, str]]: ...
+
+    async def shortest_path(
+        self,
+        source_id: str,
+        target_id: str,
+    ) -> list[str]: ...
+
+    async def get_subgraph(
+        self,
+        entity_id: str,
+        depth: int = 2,
+    ) -> tuple[list[str], list[dict[str, str]]]: ...

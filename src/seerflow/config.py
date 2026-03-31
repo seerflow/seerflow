@@ -115,6 +115,10 @@ class DetectionConfig:
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
     weights_pattern: float = 0.20
+    graph_algo_interval: int = 500
+    risk_half_life_hours: int = 4
+    risk_threshold: float = 50.0
+    risk_max_entities: int = 10_000
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
@@ -125,6 +129,16 @@ class AlertingConfig:
     dedup_window_seconds: int = 900
     webhooks: tuple[dict[str, Any], ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class CorrelationConfig:
+    """Correlation engine configuration."""
+
+    window_duration_seconds: int = 1800  # 30 minutes
+    max_events_per_entity: int = 1000
+    max_entities: int = 10_000
+    late_tolerance_seconds: int = 30
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -143,6 +157,7 @@ class SeerflowConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     receivers: ReceiverConfig = field(default_factory=ReceiverConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
+    correlation: CorrelationConfig = field(default_factory=CorrelationConfig)
     alerting: AlertingConfig = field(default_factory=AlertingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     dashboard_port: int = 8080
@@ -344,6 +359,23 @@ def _validate_detection_config(config: DetectionConfig) -> None:
 
     _require_finite_positive("detection.markov_smoothing", config.markov_smoothing)
 
+    if config.graph_algo_interval < 10 or config.graph_algo_interval > 100_000:
+        raise ConfigError(
+            f"detection.graph_algo_interval must be between 10 and 100_000, "
+            f"got {config.graph_algo_interval!r}"
+        )
+
+    if config.risk_half_life_hours < 1:
+        raise ConfigError(
+            f"detection.risk_half_life_hours must be >= 1, got {config.risk_half_life_hours!r}"
+        )
+    if config.risk_threshold <= 0:
+        raise ConfigError(f"detection.risk_threshold must be > 0, got {config.risk_threshold!r}")
+    if config.risk_max_entities < 1:
+        raise ConfigError(
+            f"detection.risk_max_entities must be >= 1, got {config.risk_max_entities!r}"
+        )
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     """Build DetectionConfig from a YAML ``detection:`` section.
@@ -389,9 +421,40 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_volume=data.get("weights_volume", 0.25),
         weights_sequence=data.get("weights_sequence", 0.25),
         weights_pattern=data.get("weights_pattern", 0.20),
+        graph_algo_interval=data.get("graph_algo_interval", 500),
+        risk_half_life_hours=data.get("risk_half_life_hours", 4),
+        risk_threshold=float(data.get("risk_threshold", 50.0)),
+        risk_max_entities=data.get("risk_max_entities", 10_000),
         sigma_rules_dirs=sigma_rules_dirs,
     )
     _validate_detection_config(config)
+    return config
+
+
+def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
+    """Build CorrelationConfig from a YAML ``correlation:`` section."""
+    config = CorrelationConfig(
+        window_duration_seconds=data.get("window_duration_seconds", 1800),
+        max_events_per_entity=data.get("max_events_per_entity", 1000),
+        max_entities=data.get("max_entities", 10_000),
+        late_tolerance_seconds=data.get("late_tolerance_seconds", 30),
+    )
+    if config.late_tolerance_seconds < 0:
+        raise ConfigError(
+            f"correlation.late_tolerance_seconds must be >= 0, "
+            f"got {config.late_tolerance_seconds!r}"
+        )
+    if config.window_duration_seconds < 1:
+        raise ConfigError(
+            f"correlation.window_duration_seconds must be >= 1, "
+            f"got {config.window_duration_seconds!r}"
+        )
+    if config.max_events_per_entity < 1:
+        raise ConfigError(
+            f"correlation.max_events_per_entity must be >= 1, got {config.max_events_per_entity!r}"
+        )
+    if config.max_entities < 1:
+        raise ConfigError(f"correlation.max_entities must be >= 1, got {config.max_entities!r}")
     return config
 
 
@@ -481,6 +544,7 @@ def load_config(
         storage=_build_storage(raw.get("storage", {})),
         receivers=_build_receivers(raw.get("receivers", {})),
         detection=_build_detection(raw.get("detection", {})),
+        correlation=_build_correlation(raw.get("correlation", {})),
         alerting=_build_alerting(raw.get("alerting", {})),
         llm=_build_llm(raw.get("llm", {})),
         dashboard_port=dashboard_port,

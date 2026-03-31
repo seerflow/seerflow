@@ -110,3 +110,12 @@ All settings are optional — sensible defaults apply when omitted.
 | `backend` | string | `""` | LLM inference backend. One of `llamacpp`, `ollama`, `cloud`. Empty disables LLM features. |
 | `model_path` | string | `""` | Path to a local GGUF model file (used when `backend=llamacpp`). |
 | `ollama_url` | string | `"http://localhost:11434"` | Base URL of the Ollama API server (used when `backend=ollama`). |
+
+## `correlation`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `window_duration_seconds` | int | `1800` | Sliding window duration for entity-temporal correlation (default 30 min). |
+| `max_events_per_entity` | int | `1000` | Maximum events per entity in the correlation window buffer. |
+| `max_entities` | int | `10000` | Maximum number of entities tracked in the window buffer (LRU eviction). |
+| `late_tolerance_seconds` | int | `30` | Watermark tolerance for late-arriving events (events beyond tolerance skipped for correlation). |

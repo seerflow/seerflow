@@ -10,6 +10,7 @@ from seerflow.config import (
     ConfigError,
     SeerflowConfig,
     WebhookEndpointConfig,
+    _build_correlation,
     _build_detection,
     load_config,
 )
@@ -524,6 +525,30 @@ class TestDetectionValidation:
         with pytest.raises(ConfigError, match="markov_smoothing"):
             _build_detection({"markov": {"smoothing": float("inf")}})
 
+    def test_graph_algo_interval_default(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.graph_algo_interval == 500
+
+    def test_graph_algo_interval_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="graph_algo_interval"):
+            _build_detection({"graph_algo_interval": 0})
+
+    def test_graph_algo_interval_below_minimum_raises(self) -> None:
+        with pytest.raises(ConfigError, match="graph_algo_interval"):
+            _build_detection({"graph_algo_interval": 9})
+
+    def test_graph_algo_interval_above_maximum_raises(self) -> None:
+        with pytest.raises(ConfigError, match="graph_algo_interval"):
+            _build_detection({"graph_algo_interval": 100_001})
+
+    def test_graph_algo_interval_at_minimum_boundary_valid(self) -> None:
+        config = _build_detection({"graph_algo_interval": 10})
+        assert config.graph_algo_interval == 10
+
+    def test_graph_algo_interval_at_maximum_boundary_valid(self) -> None:
+        config = _build_detection({"graph_algo_interval": 100_000})
+        assert config.graph_algo_interval == 100_000
+
     def test_defaults_are_valid(self) -> None:
         config = _build_detection({})
         assert config.hw_seasonal_period == 1440
@@ -556,3 +581,119 @@ class TestSigmaRulesDirsConfig:
         yaml_file.write_text("detection:\n  sigma_rules_dirs: /etc/rules\n")
         with pytest.raises(ConfigError, match="sigma_rules_dirs must be a list"):
             load_config(str(yaml_file))
+
+
+class TestCorrelationConfig:
+    def test_default_window_duration(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.window_duration_seconds == 1800  # 30 min
+
+    def test_default_max_events_per_entity(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.max_events_per_entity == 1000
+
+    def test_default_max_entities(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.max_entities == 10_000
+
+    def test_build_correlation_defaults(self) -> None:
+        config = _build_correlation({})
+        assert config.window_duration_seconds == 1800
+        assert config.max_events_per_entity == 1000
+        assert config.max_entities == 10_000
+
+    def test_build_correlation_custom_values(self) -> None:
+        config = _build_correlation(
+            {
+                "window_duration_seconds": 3600,
+                "max_events_per_entity": 500,
+                "max_entities": 5000,
+            }
+        )
+        assert config.window_duration_seconds == 3600
+        assert config.max_events_per_entity == 500
+        assert config.max_entities == 5000
+
+    def test_correlation_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "correlation:\n"
+            "  window_duration_seconds: 900\n"
+            "  max_events_per_entity: 2000\n"
+            "  max_entities: 20000\n"
+        )
+        config = load_config(str(yaml_file))
+        assert config.correlation.window_duration_seconds == 900
+        assert config.correlation.max_events_per_entity == 2000
+        assert config.correlation.max_entities == 20_000
+
+    def test_default_late_tolerance(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.late_tolerance_seconds == 30
+
+    def test_negative_late_tolerance_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_correlation
+
+        with pytest.raises(ConfigError, match="late_tolerance_seconds must be >= 0"):
+            _build_correlation({"late_tolerance_seconds": -1})
+
+    def test_correlation_config_is_frozen(self) -> None:
+        config = SeerflowConfig()
+        with pytest.raises(AttributeError):
+            config.correlation.window_duration_seconds = 999  # type: ignore[misc]
+
+
+class TestRiskConfig:
+    def test_default_risk_half_life_hours(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.risk_half_life_hours == 4
+
+    def test_default_risk_threshold(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.risk_threshold == 50.0
+
+    def test_default_risk_max_entities(self) -> None:
+        config = SeerflowConfig()
+        assert config.detection.risk_max_entities == 10_000
+
+    def test_risk_half_life_hours_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  risk_half_life_hours: 8\n")
+        config = load_config(str(yaml_file))
+        assert config.detection.risk_half_life_hours == 8
+
+    def test_risk_threshold_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  risk_threshold: 75.0\n")
+        config = load_config(str(yaml_file))
+        assert config.detection.risk_threshold == 75.0
+
+    def test_risk_max_entities_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("detection:\n  risk_max_entities: 5000\n")
+        config = load_config(str(yaml_file))
+        assert config.detection.risk_max_entities == 5000
+
+    def test_risk_half_life_hours_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_half_life_hours must be >= 1"):
+            _build_detection({"risk_half_life_hours": 0})
+
+    def test_risk_half_life_hours_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_half_life_hours must be >= 1"):
+            _build_detection({"risk_half_life_hours": -1})
+
+    def test_risk_threshold_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_threshold must be > 0"):
+            _build_detection({"risk_threshold": 0.0})
+
+    def test_risk_threshold_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_threshold must be > 0"):
+            _build_detection({"risk_threshold": -10.0})
+
+    def test_risk_max_entities_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_max_entities must be >= 1"):
+            _build_detection({"risk_max_entities": 0})
+
+    def test_risk_max_entities_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="risk_max_entities must be >= 1"):
+            _build_detection({"risk_max_entities": -5})

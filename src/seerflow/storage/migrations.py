@@ -37,8 +37,30 @@ async def _migrate_v1_bootstrap(conn: aiosqlite.Connection) -> None:
     """)
 
 
+async def _migrate_v2_graph_edges(conn: aiosqlite.Connection) -> None:
+    """Create graph_edges table for entity relationship persistence."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            source_id   TEXT    NOT NULL,
+            target_id   TEXT    NOT NULL,
+            rel_type    TEXT    NOT NULL,
+            first_seen  INTEGER NOT NULL,
+            last_seen   INTEGER NOT NULL,
+            event_count INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(source_id, target_id, rel_type)
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id)"
+    )
+
+
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     1: _migrate_v1_bootstrap,
+    2: _migrate_v2_graph_edges,
 }
 
 

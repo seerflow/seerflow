@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import msgspec
 
 from seerflow.models._types import AlertType, EntityType, FeedbackType
+from seerflow.models.entity import infer_entity_type, primary_entity_value
 from seerflow.models.event import SeverityLevel
 
 if TYPE_CHECKING:
@@ -100,8 +101,10 @@ class Alert(msgspec.Struct, frozen=True):
 def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
     """Create an ML anomaly Alert from a SeerflowEvent and DetectionResult.
 
-    Uses the first entity from ``event.entity_refs`` as the primary entity.
-    If no entities are present, entity fields default to empty strings.
+    Uses the first entity from ``event.entity_refs`` as ``entity_uuid``
+    (UUID5 string).  The raw display value comes from the first populated
+    ``related_*`` field.  Entity type is inferred from which related field
+    is populated.
     """
     entity_refs = event.entity_refs
     return Alert(
@@ -121,8 +124,8 @@ def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
             f"direction={result.anomaly_direction}"
         ),
         entity_uuid=entity_refs[0] if entity_refs else "",
-        entity_value=entity_refs[0] if entity_refs else "",
-        entity_type="ip",
+        entity_value=primary_entity_value(event),
+        entity_type=infer_entity_type(event),
         contributing_events=(event.event_id,),
         risk_score=result.score,
         dedup_key=f"hst:{event.template_id}:{event.source_type}",

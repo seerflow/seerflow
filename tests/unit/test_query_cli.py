@@ -1008,3 +1008,349 @@ class TestMainDispatch:
             mock_asyncio.run = MagicMock()
             main()
             mock_asyncio.run.assert_called_once()
+
+
+class TestQueryTimelineArgparse:
+    def test_parse_timeline_args(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid-123"])
+        assert args.command == "query"
+        assert args.query_type == "timeline"
+        assert args.entity_uuid == "test-uuid-123"
+
+    def test_parse_timeline_with_last(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid", "--last", "1h"])
+        assert args.last == "1h"
+
+    def test_parse_timeline_with_source_filter(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid", "--source", "syslog"])
+        assert args.source == "syslog"
+
+    def test_parse_timeline_with_severity(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid", "--severity", "3"])
+        assert args.severity == 3
+
+    def test_parse_timeline_with_limit(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid", "--limit", "500"])
+        assert args.limit == 500
+
+    def test_parse_timeline_default_limit(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid"])
+        assert args.limit == 1000
+
+    def test_parse_timeline_with_json(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid", "--json"])
+        assert args.json is True
+
+    def test_parse_timeline_json_default_false(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "timeline", "test-uuid"])
+        assert args.json is False
+
+    def test_parse_timeline_missing_uuid_exits(self) -> None:
+        from seerflow.cli import parse_args
+
+        with pytest.raises(SystemExit) as exc:
+            parse_args(["query", "timeline"])
+        assert exc.value.code == 2
+
+    def test_parse_timeline_all_options(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(
+            [
+                "query",
+                "timeline",
+                "test-uuid-all",
+                "--last",
+                "7d",
+                "--source",
+                "file",
+                "--severity",
+                "2",
+                "--limit",
+                "200",
+                "--json",
+            ]
+        )
+        assert args.entity_uuid == "test-uuid-all"
+        assert args.last == "7d"
+        assert args.source == "file"
+        assert args.severity == 2
+        assert args.limit == 200
+        assert args.json is True
+
+
+class TestRunQueryTimeline:
+    async def test_timeline_table_output(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Query timeline outputs formatted table for entity events."""
+        import argparse
+        import time
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.event import SeerflowEvent, SeverityLevel
+        from seerflow.query import run_query_timeline
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        entity_uuid = "aaaaaaaa-bbbb-5ccc-dddd-eeeeeeeeeeee"
+        now_ns = time.time_ns()
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=now_ns,
+            observed_ns=now_ns,
+            severity_id=SeverityLevel.ERROR,
+            message="timeline test event",
+            source_type="syslog",
+            source_id="test",
+            template_id=5,
+            entity_refs=(entity_uuid,),
+        )
+        await storage.write_events([event])
+        assert storage._write_buffer is not None
+        await storage._write_buffer.flush()
+
+        args = argparse.Namespace(
+            entity_uuid=entity_uuid,
+            last="1h",
+            source=None,
+            severity=None,
+            limit=1000,
+            json=False,
+        )
+        await run_query_timeline(storage, args)
+        captured = capsys.readouterr()
+
+        assert "TIMESTAMP" in captured.out
+        assert "ERROR" in captured.out
+        assert "syslog" in captured.out
+        assert "timeline test event" in captured.out
+
+        await storage.close()
+
+    async def test_timeline_json_output(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Query timeline with --json outputs valid JSON."""
+        import argparse
+        import json
+        import time
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.event import SeerflowEvent, SeverityLevel
+        from seerflow.query import run_query_timeline
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        entity_uuid = "aaaaaaaa-bbbb-5ccc-dddd-eeeeeeeeeeee"
+        now_ns = time.time_ns()
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=now_ns,
+            observed_ns=now_ns,
+            severity_id=SeverityLevel.WARNING,
+            message="json timeline test",
+            source_type="file",
+            source_id="test",
+            template_id=3,
+            entity_refs=(entity_uuid,),
+        )
+        await storage.write_events([event])
+        assert storage._write_buffer is not None
+        await storage._write_buffer.flush()
+
+        args = argparse.Namespace(
+            entity_uuid=entity_uuid,
+            last="1h",
+            source=None,
+            severity=None,
+            limit=1000,
+            json=True,
+        )
+        await run_query_timeline(storage, args)
+        captured = capsys.readouterr()
+
+        parsed = json.loads(captured.out)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 1
+        assert parsed[0]["message"] == "json timeline test"
+
+        await storage.close()
+
+    async def test_timeline_no_results(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Query timeline with no matching events prints message."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.query import run_query_timeline
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        args = argparse.Namespace(
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
+            last="1h",
+            source=None,
+            severity=None,
+            limit=1000,
+            json=False,
+        )
+        await run_query_timeline(storage, args)
+        captured = capsys.readouterr()
+        assert "No events found" in captured.out
+
+        await storage.close()
+
+    async def test_timeline_invalid_duration(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Query timeline with invalid --last prints error."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.query import run_query_timeline
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        args = argparse.Namespace(
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
+            last="invalid",
+            source=None,
+            severity=None,
+            limit=1000,
+            json=False,
+        )
+        await run_query_timeline(storage, args)
+        captured = capsys.readouterr()
+        assert "Invalid duration" in captured.err
+
+        await storage.close()
+
+    async def test_timeline_invalid_severity(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Query timeline with invalid --severity prints error."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.query import run_query_timeline
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        args = argparse.Namespace(
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
+            last="1h",
+            source=None,
+            severity=99,
+            limit=1000,
+            json=False,
+        )
+        await run_query_timeline(storage, args)
+        captured = capsys.readouterr()
+        assert "--severity must be between 0 and 6" in captured.err
+
+        await storage.close()
+
+    async def test_timeline_default_window_24h(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When --last is not provided, timeline defaults to 24h window."""
+        import argparse
+        import time
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.event import SeerflowEvent, SeverityLevel
+        from seerflow.query import run_query_timeline
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        entity_uuid = "aaaaaaaa-bbbb-5ccc-dddd-eeeeeeeeeeee"
+        now_ns = time.time_ns()
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=now_ns,
+            observed_ns=now_ns,
+            severity_id=SeverityLevel.INFORMATIONAL,
+            message="default window event",
+            source_type="file",
+            source_id="test",
+            entity_refs=(entity_uuid,),
+        )
+        await storage.write_events([event])
+        assert storage._write_buffer is not None
+        await storage._write_buffer.flush()
+
+        args = argparse.Namespace(
+            entity_uuid=entity_uuid,
+            last=None,
+            source=None,
+            severity=None,
+            limit=1000,
+            json=False,
+        )
+        await run_query_timeline(storage, args)
+        captured = capsys.readouterr()
+        assert "default window event" in captured.out
+
+        await storage.close()
+
+
+class TestRunQueryDispatchTimeline:
+    async def test_run_query_dispatches_timeline(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """run_query dispatches to timeline subcommand."""
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.config import SeerflowConfig, StorageConfig
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        config = SeerflowConfig(storage=storage_cfg)
+
+        args = argparse.Namespace(
+            config=None,
+            query_type="timeline",
+            entity_uuid="4be0643f-1d98-573b-97cd-ca98a65347dd",
+            last="1h",
+            source=None,
+            severity=None,
+            limit=1000,
+            json=False,
+        )
+        with patch("seerflow.config.load_config", return_value=config):
+            from seerflow.query import run_query
+
+            await run_query(args)
+
+        captured = capsys.readouterr()
+        assert "No events found" in captured.out

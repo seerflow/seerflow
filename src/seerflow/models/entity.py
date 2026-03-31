@@ -10,7 +10,13 @@ Consumers should treat ``dict`` fields (``hashes``) as read-only.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import uuid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from seerflow.models._types import EntityType
+    from seerflow.models.event import SeerflowEvent
 
 import msgspec
 
@@ -24,6 +30,8 @@ NS_HOST = uuid.UUID("a1b2c3d4-0003-0000-0000-000000000003")
 NS_PROCESS = uuid.UUID("a1b2c3d4-0004-0000-0000-000000000004")
 NS_FILE = uuid.UUID("a1b2c3d4-0005-0000-0000-000000000005")
 NS_DOMAIN = uuid.UUID("a1b2c3d4-0006-0000-0000-000000000006")
+
+_log = logging.getLogger("seerflow")
 
 
 # ---------------------------------------------------------------------------
@@ -199,3 +207,89 @@ def generate_domain_id(domain: str) -> uuid.UUID:
         msg = "domain is empty"
         raise ValueError(msg)
     return uuid.uuid5(NS_DOMAIN, canonical)
+
+
+# ---------------------------------------------------------------------------
+# Batch entity resolution
+# ---------------------------------------------------------------------------
+
+
+def _sanitize_for_log(value: str) -> str:
+    """Strip control characters that enable log injection."""
+    return value.replace("\n", "\\n").replace("\r", "\\r").replace("\x1b", "\\x1b")
+
+
+def resolve_entities(
+    ips: tuple[str, ...],
+    users: tuple[str, ...],
+    hosts: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Resolve raw entity values to deterministic UUID5 strings.
+
+    Calls the type-specific ``generate_*_id()`` for each value.
+    Values that fail normalization (e.g. malformed IPs) are skipped
+    with a warning log.  Returns a tuple of UUID5 string representations
+    in order: IPs, then users, then hosts.
+    """
+    resolved: list[str] = []
+
+    for raw_ip in ips:
+        try:
+            resolved.append(str(generate_ip_id(raw_ip)))
+        except (ValueError, TypeError):
+            _log.warning(
+                "Skipping malformed IP: %s",
+                _sanitize_for_log(raw_ip),
+            )
+
+    for raw_user in users:
+        try:
+            username, domain = normalize_username(raw_user)
+            resolved.append(str(generate_user_id(username, domain)))
+        except (ValueError, TypeError):
+            _log.warning(
+                "Skipping malformed user: %s",
+                _sanitize_for_log(raw_user),
+            )
+
+    for raw_host in hosts:
+        try:
+            resolved.append(str(generate_host_id(raw_host)))
+        except (ValueError, TypeError):
+            _log.warning(
+                "Skipping malformed host: %s",
+                _sanitize_for_log(raw_host),
+            )
+
+    return tuple(resolved)
+
+
+def primary_entity_value(event: SeerflowEvent) -> str:
+    """Return the raw display value for the highest-priority entity.
+
+    Priority: ip > user > host.  Returns ``""`` when no related
+    fields are populated.  Shares the same priority order as
+    :func:`infer_entity_type`.
+    """
+    if event.related_ips:
+        return event.related_ips[0]
+    if event.related_users:
+        return event.related_users[0]
+    if event.related_hosts:
+        return event.related_hosts[0]
+    return ""
+
+
+def infer_entity_type(event: SeerflowEvent) -> EntityType:
+    """Infer the primary entity type from populated related_* fields.
+
+    Priority: ip > user > host.  Falls back to ``"ip"`` when no
+    related fields are populated (matches current default behaviour).
+    """
+    if event.related_ips:
+        return "ip"
+    if event.related_users:
+        return "user"
+    if event.related_hosts:
+        return "host"
+    return "ip"

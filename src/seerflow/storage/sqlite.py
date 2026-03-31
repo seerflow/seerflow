@@ -23,14 +23,16 @@ import msgspec
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent
-from seerflow.models.query import AlertQuery, EventQuery, Page
+from seerflow.models.query import AlertQuery, EventQuery, Page, TimeRange
 
 _log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from seerflow.graph.entity_graph import EntityGraph
     from seerflow.models._types import FeedbackType
+    from seerflow.models.query import EntityRelation
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +306,14 @@ def _validate_state_key(key: str) -> None:
 _SAVE_STATE_SQL = "INSERT OR REPLACE INTO model_state (key, data, updated_at) VALUES (?, ?, ?)"
 _LOAD_STATE_SQL = "SELECT data FROM model_state WHERE key = ?"
 
+_UPSERT_EDGE_SQL = """\
+INSERT INTO graph_edges (source_id, target_id, rel_type, first_seen, last_seen, event_count)
+VALUES (?, ?, ?, ?, ?, 1)
+ON CONFLICT(source_id, target_id, rel_type) DO UPDATE SET
+    first_seen = MIN(first_seen, excluded.first_seen),
+    last_seen = MAX(last_seen, excluded.last_seen),
+    event_count = event_count + 1"""
+
 _INSERT_ALERT_SQL = """\
 INSERT INTO alerts (
     alert_id, alert_type, timestamp_ns, severity_id, rule_name,
@@ -520,6 +530,50 @@ class SqliteBackend:
         items = tuple(msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows)
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
+    async def get_timeline(
+        self,
+        entity_uuid: str,
+        time_range: TimeRange,
+        source_type: str | None = None,
+        severity_min: int | None = None,
+        limit: int = 10_000,
+    ) -> list[SeerflowEvent]:
+        """Get all events for an entity within a time range, sorted chronologically.
+
+        Uses the entity_events junction table for efficient lookups via
+        composite PK (entity_uuid, timestamp_ns, event_id).
+        """
+        clamped_limit = min(max(limit, 1), 10_000)
+        clauses = [
+            "ee.entity_uuid = ?",
+            "e.timestamp_ns >= ?",
+            "e.timestamp_ns <= ?",
+        ]
+        params: list[Any] = [entity_uuid, time_range.start_ns, time_range.end_ns]
+
+        if source_type is not None:
+            clauses.append("e.source_type = ?")
+            params.append(source_type)
+
+        if severity_min is not None:
+            clauses.append("e.severity_id >= ?")
+            params.append(severity_min)
+
+        where = " AND ".join(clauses)
+        # where clause assembled from hardcoded SQL fragments above.
+        # All user values are bound via params. No user data is interpolated.
+        sql = (
+            f"SELECT e.data FROM events e "  # noqa: S608  # nosec B608
+            f"JOIN entity_events ee ON ee.event_id = e.event_id "
+            f"WHERE {where} ORDER BY e.timestamp_ns ASC LIMIT ?"
+        )
+        params.append(clamped_limit)
+
+        async with await self._conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+
+        return [msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows]
+
     async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]:
         """Full-text search using FTS5 phrase matching."""
         safe_query = _sanitize_fts_query(query)
@@ -641,6 +695,33 @@ class SqliteBackend:
             row = await cursor.fetchone()
         return row[0] if row else None
 
+    async def write_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        timestamp_ns: int,
+    ) -> None:
+        """Upsert a graph edge. Updates last_seen and increments event_count on conflict."""
+        await self._conn.execute(
+            _UPSERT_EDGE_SQL,
+            (source_id, target_id, rel_type, timestamp_ns, timestamp_ns),
+        )
+        await self._conn.commit()
+
+    async def load_edges(
+        self,
+    ) -> list[tuple[str, str, str, int, int, int]]:
+        """Load all graph edges for EntityGraph rebuild on startup."""
+        sql = (
+            "SELECT source_id, target_id, rel_type,"
+            " first_seen, last_seen, event_count"
+            " FROM graph_edges"
+        )
+        async with await self._conn.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+        return [(r[0], r[1], r[2], r[3], r[4], r[5]) for r in rows]
+
     async def _write_batch(self, events: list[SeerflowEvent]) -> None:
         """Serialize and persist a batch of events to SQLite."""
         if not events:
@@ -677,3 +758,61 @@ class SqliteBackend:
             await self._conn.rollback()
             _log.exception("SQLite batch write failed — %d events not committed", len(events))
             raise
+
+
+# ---------------------------------------------------------------------------
+# Standalone graph query helpers
+# ---------------------------------------------------------------------------
+
+
+def get_related_from_graph(
+    graph: EntityGraph,
+    entity_uuid: str,
+) -> list[EntityRelation]:
+    """Get related entities from the in-memory EntityGraph.
+
+    Delegates to EntityGraph.get_neighbors() and maps results
+    to EntityRelation objects.  Edge metadata (rel_type) is resolved
+    by inspecting incident edges in both directions.
+    """
+    from seerflow.models.query import EntityRelation
+
+    neighbors = graph.get_neighbors(entity_uuid, depth=1)
+    if not neighbors:
+        return []
+
+    src_idx = graph._vertex_map.get(entity_uuid)
+    if src_idx is None:
+        return []
+
+    results: list[EntityRelation] = []
+    for neighbor in neighbors:
+        neighbor_id = neighbor["entity_id"]
+        tgt_idx = graph._vertex_map.get(neighbor_id)
+        if tgt_idx is None:
+            continue
+
+        rel_type = _find_edge_rel_type(graph, src_idx, tgt_idx)
+        results.append(
+            EntityRelation(
+                entity_uuid=neighbor_id,
+                entity_type="",
+                entity_value="",
+                relation_type=rel_type,
+            )
+        )
+    return results
+
+
+def _find_edge_rel_type(
+    graph: EntityGraph,
+    src_idx: int,
+    tgt_idx: int,
+) -> str:
+    """Find the rel_type of the edge connecting two vertices (either direction)."""
+    for eid in graph._graph.incident(src_idx, mode="all"):
+        edge = graph._graph.es[eid]
+        other = edge.target if edge.source == src_idx else edge.source
+        if other == tgt_idx:
+            return str(edge["rel_type"])
+    return ""

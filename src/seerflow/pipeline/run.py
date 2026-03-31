@@ -82,10 +82,54 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     except Exception:
         _log.warning("Sigma rule loading failed — running without Sigma detection", exc_info=True)
 
+    # Build entity graph and load persisted edges
+    from seerflow.graph.entity_graph import EntityGraph
+
+    entity_graph = EntityGraph()
+    try:
+        edge_rows = await storage.load_edges()
+        entity_graph.load(edge_rows)
+        _log.info("Graph: loaded %d edges", len(edge_rows))
+    except Exception:
+        _log.warning("Graph edge loading failed — starting with empty graph", exc_info=True)
+
+    # Build entity window buffer for temporal correlation
+    from seerflow.correlation.window import EntityWindowBuffer
+
+    window_buffer = EntityWindowBuffer(
+        window_ns=config.correlation.window_duration_seconds * 1_000_000_000,
+        max_events=config.correlation.max_events_per_entity,
+        max_entities=config.correlation.max_entities,
+    )
+
+    # Build watermark for late-arrival tolerance
+    from seerflow.correlation.watermark import Watermark
+
+    watermark = Watermark(
+        tolerance_ns=config.correlation.late_tolerance_seconds * 1_000_000_000,
+    )
+
+    # Build risk register for per-entity risk accumulation
+    from seerflow.correlation.risk import RiskRegister
+
+    risk_register = RiskRegister(
+        half_life_ns=config.detection.risk_half_life_hours * 3600 * 1_000_000_000,
+        threshold=config.detection.risk_threshold,
+        max_entities=config.detection.risk_max_entities,
+    )
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
-        ensemble, storage, save_interval_ns=save_interval_ns, sigma_engine=sigma_engine
+        ensemble,
+        storage,
+        save_interval_ns=save_interval_ns,
+        sigma_engine=sigma_engine,
+        entity_graph=entity_graph,
+        graph_algo_interval=config.detection.graph_algo_interval,
+        window_buffer=window_buffer,
+        watermark=watermark,
+        risk_register=risk_register,
     )
     await pipeline.run(handler)
 

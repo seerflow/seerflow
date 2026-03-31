@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import TYPE_CHECKING
 
 import msgspec.structs
@@ -11,7 +12,11 @@ import msgspec.structs
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from seerflow.correlation.risk import RiskRegister
+    from seerflow.correlation.watermark import Watermark
+    from seerflow.correlation.window import EntityWindowBuffer
     from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.graph.entity_graph import EntityGraph
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.sqlite import SqliteBackend
@@ -24,9 +29,16 @@ def _make_handler(
     storage: SqliteBackend,
     save_interval_ns: int = 300_000_000_000,
     sigma_engine: SigmaEngine | None = None,
+    entity_graph: EntityGraph | None = None,
+    graph_algo_interval: int = 500,
+    window_buffer: EntityWindowBuffer | None = None,
+    watermark: Watermark | None = None,
+    risk_register: RiskRegister | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
+    from seerflow.graph.edges import infer_edges
     from seerflow.models.alert import create_ml_alert
+    from seerflow.models.entity import resolve_entities
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
 
@@ -36,22 +48,60 @@ def _make_handler(
     template_meta: dict[int, TemplateInfo] = {}
     start_time = time.time()
     last_save_ns = time.time_ns()
+    risk_alerted: set[str] = set()  # entities that already fired a risk alert
 
     async def handler(event: RawEvent) -> None:
         nonlocal event_count, anomaly_count, last_save_ns
         seerflow_event = normalizer.normalize(event)
 
-        # Derive entity_refs for HST entity_count + storage compatibility
-        entity_refs = (
-            seerflow_event.related_ips
-            + seerflow_event.related_users
-            + seerflow_event.related_hosts
+        # Resolve entities to deterministic UUID5 strings
+        entity_refs = resolve_entities(
+            seerflow_event.related_ips,
+            seerflow_event.related_users,
+            seerflow_event.related_hosts,
         )
         if entity_refs:
             seerflow_event = msgspec.structs.replace(
                 seerflow_event,
                 entity_refs=entity_refs,
             )
+
+        # Advance watermark and check for late events
+        if watermark is not None:
+            watermark.advance(seerflow_event.timestamp_ns)
+
+        # Add event to correlation window buffer for each entity
+        if window_buffer is not None and entity_refs:
+            # Skip late events for correlation (still stored + ML-scored)
+            if watermark is not None and watermark.is_late(seerflow_event.timestamp_ns):
+                _log.debug(
+                    "Late event skipped for correlation: ts=%d watermark=%d",
+                    seerflow_event.timestamp_ns,
+                    watermark.current_ns,
+                )
+            else:
+                for entity_uuid in entity_refs:
+                    window_buffer.add_event(entity_uuid, seerflow_event)
+
+        # Update entity graph with inferred edges
+        if entity_graph is not None and entity_refs:
+            edges = infer_edges(seerflow_event)
+            for edge in edges:
+                entity_graph.add_edge(
+                    edge.source_id,
+                    edge.target_id,
+                    edge.rel_type,
+                    event.received_ns,
+                )
+                try:
+                    await storage.write_edge(
+                        edge.source_id,
+                        edge.target_id,
+                        edge.rel_type,
+                        event.received_ns,
+                    )
+                except Exception:
+                    _log.warning("Graph edge write failed", exc_info=True)
 
         # Track template metadata
         if seerflow_event.template_id != -1:
@@ -151,6 +201,21 @@ def _make_handler(
             except Exception:
                 _log.warning("Alert write failed", exc_info=True)
 
+            # Add risk for ML anomaly
+            if risk_register is not None and entity_refs:
+                from seerflow.correlation.risk import RiskEntry
+
+                for entity_uuid in entity_refs:
+                    risk_entry = RiskEntry(
+                        timestamp_ns=seerflow_event.timestamp_ns,
+                        risk_points=result.score * 10,
+                        source="ml",
+                        rule_name="hst-anomaly",
+                        mitre_tactics=(),
+                        mitre_techniques=(),
+                    )
+                    risk_register.add_risk(entity_uuid, risk_entry)
+
         # Sigma rule evaluation
         if sigma_engine is not None:
             try:
@@ -160,8 +225,58 @@ def _make_handler(
                         await storage.write_alert(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
+
+                    # Add risk for Sigma match
+                    if risk_register is not None and entity_refs:
+                        from seerflow.correlation.risk import RiskEntry
+
+                        for entity_uuid in entity_refs:
+                            risk_entry = RiskEntry(
+                                timestamp_ns=seerflow_event.timestamp_ns,
+                                risk_points=(15.0 if sigma_alert.severity_id.value >= 4 else 5.0),
+                                source="sigma",
+                                rule_name=sigma_alert.rule_name,
+                                mitre_tactics=sigma_alert.mitre_tactics,
+                                mitre_techniques=sigma_alert.mitre_techniques,
+                            )
+                            risk_register.add_risk(entity_uuid, risk_entry)
             except Exception:
                 _log.warning("Sigma evaluation failed", exc_info=True)
+
+        # Check risk threshold and fire correlation alert (with cooldown)
+        if risk_register is not None and entity_refs:
+            from seerflow.models.alert import Alert
+            from seerflow.models.entity import infer_entity_type, primary_entity_value
+
+            for entity_uuid in entity_refs:
+                if entity_uuid in risk_alerted:
+                    continue  # Already alerted for this entity
+                if risk_register.check_threshold(entity_uuid):
+                    risk_alerted.add(entity_uuid)
+                    risk_score = risk_register.get_risk(entity_uuid)
+                    risk_alert = Alert(
+                        alert_id=str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_DNS,
+                                f"risk:{entity_uuid}:{seerflow_event.timestamp_ns}",
+                            )
+                        ),
+                        alert_type="correlation",
+                        timestamp_ns=seerflow_event.timestamp_ns,
+                        severity_id=seerflow_event.severity_id,
+                        rule_name="risk-accumulation",
+                        description=(f"Entity risk threshold exceeded: score={risk_score:.1f}"),
+                        entity_uuid=entity_uuid,
+                        entity_value=primary_entity_value(seerflow_event),
+                        entity_type=infer_entity_type(seerflow_event),
+                        contributing_events=(seerflow_event.event_id,),
+                        risk_score=risk_score,
+                        dedup_key=f"risk:{entity_uuid}",
+                    )
+                    try:
+                        await storage.write_alert(risk_alert)
+                    except Exception:
+                        _log.warning("Risk alert write failed", exc_info=True)
 
         # Periodic model state save
         if event_count % 100 == 0 and event_count > 0:
@@ -176,6 +291,19 @@ def _make_handler(
                         "Periodic model save failed — will retry",
                         exc_info=True,
                     )
+
+        # Run graph algorithms periodically
+        if entity_graph is not None and entity_graph.vertex_count > 0:
+            try:
+                if event_count % graph_algo_interval == 0:
+                    entity_graph.run_algorithms()
+                    _log.info(
+                        "Graph algorithms: %d vertices, %d edges",
+                        entity_graph.vertex_count,
+                        entity_graph.edge_count,
+                    )
+            except Exception:
+                _log.warning("Graph algorithm execution failed", exc_info=True)
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler

@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import seerflow.storage as storage_mod
-from seerflow.storage import AlertStore, EntityStore, LogStore, ModelStore
+from seerflow.storage import AlertStore, EntityStore, GraphStore, LogStore, ModelStore
 
 if TYPE_CHECKING:
     from seerflow.models._types import FeedbackType
@@ -40,6 +40,22 @@ class _MockEntityStore(EntityStore):
         self, entity_uuid: str, time_range: TimeRange
     ) -> list[SeerflowEvent]: ...
     async def get_related(self, entity_uuid: str) -> list[EntityRelation]: ...
+
+
+class _MockGraphStore(GraphStore):
+    async def write_edge(
+        self, source_id: str, target_id: str, rel_type: str, timestamp_ns: int
+    ) -> None: ...
+    async def load_edges(self) -> list[tuple[str, str, str, int, int, int]]:
+        return []
+
+    async def get_neighbors(
+        self, entity_id: str, rel_types: tuple[str, ...] | None = None, depth: int = 1
+    ) -> list[dict[str, str]]: ...
+    async def shortest_path(self, source_id: str, target_id: str) -> list[str]: ...
+    async def get_subgraph(
+        self, entity_id: str, depth: int = 2
+    ) -> tuple[list[str], list[dict[str, str]]]: ...
 
 
 # -- Non-conforming helpers -------------------------------------------------
@@ -120,10 +136,25 @@ class TestEntityStore:
         assert not isinstance(_NotAStore(), EntityStore)
 
 
+class TestGraphStore:
+    def test_runtime_checkable(self) -> None:
+        assert isinstance(_MockGraphStore(), GraphStore)
+
+    def test_non_conforming_fails(self) -> None:
+        assert not isinstance(_NotAStore(), GraphStore)
+
+
 class TestExports:
     def test_all_protocols_in_dunder_all(self) -> None:
         """Every Protocol must be listed in ``storage.__all__``."""
-        expected = {"AlertStore", "EntityStore", "LogStore", "ModelStore", "SqliteBackend"}
+        expected = {
+            "AlertStore",
+            "EntityStore",
+            "GraphStore",
+            "LogStore",
+            "ModelStore",
+            "SqliteBackend",
+        }
         assert expected == set(storage_mod.__all__)
 
 
