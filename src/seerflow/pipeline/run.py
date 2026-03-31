@@ -128,6 +128,15 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         len(config.correlation.rule_dirs),
     )
 
+    # Build correlation engine for real-time rule evaluation
+    from seerflow.correlation.engine import CorrelationEngine
+
+    correlation_engine = CorrelationEngine(
+        rules=correlation_rules,
+        window=window_buffer,
+    )
+    _log.info("Correlation engine: %d rules loaded", len(correlation_rules))
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
@@ -140,6 +149,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         window_buffer=window_buffer,
         watermark=watermark,
         risk_register=risk_register,
+        correlation_engine=correlation_engine,
     )
     await pipeline.run(handler)
 
