@@ -79,6 +79,9 @@ def _validate_sources(
                 raise RuleValidationError(msg) from exc
 
         min_count = src.get("min_count", 1)
+        if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+            msg = f"sources[{i}].min_count must be a positive integer, got {min_count!r}"
+            raise RuleValidationError(msg)
         sources.append(
             SourceCondition(
                 source_type=source_type,
@@ -173,7 +176,7 @@ def load_correlation_rules(
         if not path.is_dir():
             _log.warning("Correlation rule directory does not exist: %s", dir_path)
             continue
-        for yml_file in sorted(path.glob("*.yml")):
+        for yml_file in sorted({*path.glob("*.yml"), *path.glob("*.yaml")}):
             try:
                 with yml_file.open() as f:
                     data = yaml.safe_load(f)
