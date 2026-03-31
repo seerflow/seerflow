@@ -787,8 +787,8 @@ class TestCorrelationRiskScore:
         assert len(alerts_b) == 1
         assert alerts_b[0].risk_score > alerts_a[0].risk_score
 
-    def test_risk_score_zero_for_no_contributing_events(self) -> None:
-        """Edge case: if somehow no contributing events, score is 0."""
+    def test_risk_score_with_no_events_still_has_severity_component(self) -> None:
+        """Zero events: severity still contributes to risk score."""
         from seerflow.correlation.engine import CorrelationEngine
 
         rule = _make_rule(
@@ -810,7 +810,11 @@ class TestCorrelationRiskScore:
             trigger_event=event,
             contributing_event_ids=(),
         )
-        assert alert.risk_score == 0.0
+        # severity_weight = 3/6 = 0.5, event_weight = 0/10 = 0.0
+        # risk_score = 0.5 * 0.6 + 0.0 * 0.4 = 0.3
+        import pytest as _pytest
+
+        assert alert.risk_score == _pytest.approx(0.3)
 
     def test_risk_score_capped_at_one(self) -> None:
         """Risk score should be in [0, 1] range even with many events + high severity."""

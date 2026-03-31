@@ -150,12 +150,9 @@ class CorrelationEngine:
         # event_weight = min(len(contributing_event_ids) / 10, 1.0)  (cap at 10)
         # risk_score = severity_weight * 0.6 + event_weight * 0.4
         n_events = len(contributing_event_ids)
-        if n_events == 0:
-            risk_score = 0.0
-        else:
-            severity_weight = rule.alert_severity.value / 6
-            event_weight = min(n_events / 10, 1.0)
-            risk_score = severity_weight * 0.6 + event_weight * 0.4
+        severity_weight = rule.alert_severity.value / 6
+        event_weight = min(n_events / 10, 1.0)
+        risk_score = max(0.0, min(1.0, severity_weight * 0.6 + event_weight * 0.4))
 
         return Alert(
             alert_id=str(
