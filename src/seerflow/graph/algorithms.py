@@ -41,10 +41,7 @@ def compute_fan_out(graph: EntityGraph) -> dict[str, int]:
     ig = graph._graph
     if ig.vcount() == 0:
         return {}
-    return {
-        ig.vs[i]["name"]: len(set(ig.neighbors(i, mode="out")))
-        for i in range(ig.vcount())
-    }
+    return {ig.vs[i]["name"]: len(set(ig.neighbors(i, mode="out"))) for i in range(ig.vcount())}
 
 
 def compute_fan_in(graph: EntityGraph) -> dict[str, int]:
@@ -52,10 +49,7 @@ def compute_fan_in(graph: EntityGraph) -> dict[str, int]:
     ig = graph._graph
     if ig.vcount() == 0:
         return {}
-    return {
-        ig.vs[i]["name"]: len(set(ig.neighbors(i, mode="in")))
-        for i in range(ig.vcount())
-    }
+    return {ig.vs[i]["name"]: len(set(ig.neighbors(i, mode="in"))) for i in range(ig.vcount())}
 
 
 def compute_betweenness(graph: EntityGraph) -> dict[str, float]:
@@ -71,10 +65,7 @@ def compute_betweenness(graph: EntityGraph) -> dict[str, float]:
     # Normalize by (n-1)(n-2)/2 for undirected graphs
     denom = ((n - 1) * (n - 2)) / 2 if n > 2 else 1.0
     scores = ig.betweenness(directed=False)
-    return {
-        ig.vs[i]["name"]: scores[i] / denom if denom > 0 else 0.0
-        for i in range(n)
-    }
+    return {ig.vs[i]["name"]: scores[i] / denom if denom > 0 else 0.0 for i in range(n)}
 
 
 def compute_ego_graph_size(graph: EntityGraph) -> dict[str, int]:
@@ -82,7 +73,4 @@ def compute_ego_graph_size(graph: EntityGraph) -> dict[str, int]:
     ig = graph._graph
     if ig.vcount() == 0:
         return {}
-    return {
-        ig.vs[i]["name"]: len(set(ig.neighbors(i, mode="all")))
-        for i in range(ig.vcount())
-    }
+    return {ig.vs[i]["name"]: len(set(ig.neighbors(i, mode="all"))) for i in range(ig.vcount())}
