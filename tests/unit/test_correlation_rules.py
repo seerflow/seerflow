@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from seerflow.correlation.rule_loader import RuleValidationError, parse_rule_yaml
 
@@ -152,3 +157,93 @@ class TestParseRuleYaml:
         data = {**VALID_RULE, "window_seconds": 3.5}
         with pytest.raises(RuleValidationError, match="window_seconds"):
             parse_rule_yaml(data)
+
+
+class TestLoadCorrelationRules:
+    def test_loads_rules_from_directory(self, tmp_path: Path) -> None:
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        rule_file = tmp_path / "test_rule.yml"
+        rule_file.write_text(
+            """
+name: test_rule
+entity_type: ip
+window_seconds: 1800
+min_sources: 1
+alert_severity: 4
+sources:
+  - source_type: syslog
+    conditions:
+      message: "test.*"
+    min_count: 1
+"""
+        )
+        rules = load_correlation_rules([str(tmp_path)])
+        assert len(rules) == 1
+        assert rules[0].name == "test_rule"
+
+    def test_skips_invalid_rules_with_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        bad_file = tmp_path / "bad.yml"
+        bad_file.write_text("name: missing_required_fields\n")
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            rules = load_correlation_rules([str(tmp_path)])
+        assert len(rules) == 0
+        assert "bad.yml" in caplog.text
+
+    def test_empty_directory_returns_empty(self, tmp_path: Path) -> None:
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        rules = load_correlation_rules([str(tmp_path)])
+        assert rules == []
+
+    def test_nonexistent_directory_skipped(self) -> None:
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        rules = load_correlation_rules(["/nonexistent/path"])
+        assert rules == []
+
+    def test_multiple_directories(self, tmp_path: Path) -> None:
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        dir1 = tmp_path / "dir1"
+        dir1.mkdir()
+        dir2 = tmp_path / "dir2"
+        dir2.mkdir()
+        (dir1 / "rule1.yml").write_text(
+            """
+name: rule1
+entity_type: ip
+window_seconds: 600
+min_sources: 1
+alert_severity: 3
+sources:
+  - source_type: syslog
+    conditions:
+      message: "pattern1.*"
+    min_count: 1
+"""
+        )
+        (dir2 / "rule2.yml").write_text(
+            """
+name: rule2
+entity_type: user
+window_seconds: 300
+min_sources: 1
+alert_severity: 5
+sources:
+  - source_type: file
+    conditions:
+      message: "pattern2.*"
+    min_count: 1
+"""
+        )
+        rules = load_correlation_rules([str(dir1), str(dir2)])
+        assert len(rules) == 2
+        names = {r.name for r in rules}
+        assert names == {"rule1", "rule2"}

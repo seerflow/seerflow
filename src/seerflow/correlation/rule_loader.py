@@ -7,11 +7,17 @@ catch syntax errors at load time rather than at match time.
 
 from __future__ import annotations
 
+import logging
 import re
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from seerflow.models.alert import CorrelationRule, SourceCondition
 from seerflow.models.event import SeverityLevel
+
+_log = logging.getLogger("seerflow")
 
 _VALID_ENTITY_TYPES = frozenset({"user", "ip", "host", "process", "file", "domain"})
 _MAX_PATTERN_LENGTH = 512
@@ -152,3 +158,34 @@ def parse_rule_yaml(data: dict[str, Any]) -> CorrelationRule:
         mitre_techniques=mitre_techniques,
         description=description,
     )
+
+
+def load_correlation_rules(
+    dirs: list[str] | tuple[str, ...],
+) -> list[CorrelationRule]:
+    """Load and validate correlation rules from YAML files in directories.
+
+    Skips invalid rules with a warning log. Returns valid rules only.
+    """
+    rules: list[CorrelationRule] = []
+    for dir_path in dirs:
+        path = Path(dir_path)
+        if not path.is_dir():
+            _log.warning("Correlation rule directory does not exist: %s", dir_path)
+            continue
+        for yml_file in sorted(path.glob("*.yml")):
+            try:
+                with yml_file.open() as f:
+                    data = yaml.safe_load(f)
+                if not isinstance(data, dict):
+                    _log.warning("Skipping %s: not a valid YAML mapping", yml_file)
+                    continue
+                rule = parse_rule_yaml(data)
+                rules.append(rule)
+            except (RuleValidationError, yaml.YAMLError) as exc:
+                _log.warning(
+                    "Skipping invalid correlation rule %s: %s",
+                    yml_file.name,
+                    exc,
+                )
+    return rules
