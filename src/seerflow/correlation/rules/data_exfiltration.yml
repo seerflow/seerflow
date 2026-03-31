@@ -1,0 +1,19 @@
+name: data-exfiltration
+description: "Unusual outbound data transfer combined with file access from the same IP — potential data exfiltration"
+entity_type: ip
+window_seconds: 900
+min_sources: 2
+alert_severity: 5
+mitre_tactics:
+  - exfiltration
+mitre_techniques:
+  - T1048
+sources:
+  - source_type: syslog
+    conditions:
+      message: "(?i)(large.*transfer|upload.*completed?|exfil|outbound.*bytes|sent.*\\d{6,}|POST.*\\d{6,})"
+    min_count: 3
+  - source_type: syslog
+    conditions:
+      message: "(?i)(file.*access|read.*sensitive|scp\\b|rsync\\b|tar\\b|zip\\b|curl.*upload|wget.*post)"
+    min_count: 2
