@@ -28,19 +28,6 @@ sources:
     min_count: 1
 """
 
-VALID_RULE_2_YAML = """\
-name: test_rule_2
-entity_type: user
-window_seconds: 300
-min_sources: 1
-alert_severity: 4
-sources:
-  - source_type: file
-    conditions:
-      message: "second.*"
-    min_count: 1
-"""
-
 INVALID_RULE_YAML = """\
 name: invalid_rule
 entity_type: INVALID_TYPE

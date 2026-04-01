@@ -28,7 +28,6 @@ VALID_RULE_YAML = (
 
 
 class TestReloaderIntegration:
-    @pytest.mark.asyncio
     async def test_reload_logs_success(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -62,7 +61,6 @@ class TestReloaderIntegration:
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    @pytest.mark.asyncio
     async def test_reload_logs_failure_on_invalid(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -98,7 +96,6 @@ class TestReloaderIntegration:
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    @pytest.mark.asyncio
     async def test_no_dirs_watch_returns_immediately(self) -> None:
         """RuleReloader with no dirs returns without blocking."""
         from seerflow.correlation.reloader import RuleReloader

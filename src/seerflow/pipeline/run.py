@@ -153,10 +153,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
 
     reloader = RuleReloader(
         correlation_holder=correlation_holder,
-        correlation_dirs=list(config.correlation.rule_dirs),
+        correlation_dirs=[bundled_dir, *config.correlation.rule_dirs],
         window_buffer=window_buffer,
-        sigma_holder=sigma_holder,
-        sigma_dirs=list(config.detection.sigma_rules_dirs),
     )
     reload_task = asyncio.create_task(reloader.watch())
 
