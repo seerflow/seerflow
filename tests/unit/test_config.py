@@ -367,51 +367,51 @@ class TestReceiverConfigCompleteness:
 
 class TestDetectionValidation:
     def test_invalid_weight_negative(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="weights_content"):
             _build_detection({"weights_content": -0.5})
 
     def test_invalid_weight_nan(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="weights_content"):
             _build_detection({"weights_content": float("nan")})
 
     def test_invalid_weight_inf(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="weights_volume"):
             _build_detection({"weights_volume": float("inf")})
 
     def test_invalid_model_save_interval(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="model_save_interval_seconds"):
             _build_detection({"model_save_interval_seconds": 0})
 
     def test_invalid_model_save_interval_negative(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="model_save_interval_seconds"):
             _build_detection({"model_save_interval_seconds": -1})
 
     def test_invalid_markov_max_entities_too_high(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="markov_max_entities"):
             _build_detection({"markov_max_entities": 200_000})
 
     def test_invalid_markov_max_entities_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="markov_max_entities"):
             _build_detection({"markov_max_entities": 0})
 
     def test_invalid_max_sources_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="max_sources"):
             _build_detection({"max_sources": 0})
 
     def test_invalid_max_sources_too_high(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="max_sources"):
             _build_detection({"max_sources": 20_000})
 
     def test_invalid_cusum_ema_alpha_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="cusum_ema_alpha"):
             _build_detection({"cusum_ema_alpha": 0.0})
 
     def test_invalid_cusum_ema_alpha_one(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="cusum_ema_alpha"):
             _build_detection({"cusum_ema_alpha": 1.0})
 
     def test_invalid_cusum_warmup_buckets_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="cusum_warmup_buckets"):
             _build_detection({"cusum_warmup_buckets": 0})
 
     def test_nested_hw_config(self) -> None:
@@ -555,6 +555,91 @@ class TestDetectionValidation:
         assert config.cusum_ema_alpha == 0.1
         assert config.cusum_warmup_buckets == 30
         assert config.weights_content == 0.30
+
+    # --- S-146: Missing detection validations ---
+
+    def test_hst_window_size_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="hst_window_size"):
+            _build_detection({"hst_window_size": 0})
+
+    def test_hst_window_size_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="hst_window_size"):
+            _build_detection({"hst_window_size": -1})
+
+    def test_hst_n_trees_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="hst_n_trees"):
+            _build_detection({"hst_n_trees": 0})
+
+    def test_dspot_calibration_window_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_calibration_window"):
+            _build_detection({"dspot": {"calibration_window": 0}})
+
+    def test_dspot_risk_level_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_risk_level"):
+            _build_detection({"dspot": {"risk_level": 0.0}})
+
+    def test_dspot_risk_level_one_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_risk_level"):
+            _build_detection({"dspot": {"risk_level": 1.0}})
+
+    def test_dspot_risk_level_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_risk_level"):
+            _build_detection({"dspot": {"risk_level": -0.1}})
+
+    def test_dspot_initial_percentile_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_initial_percentile"):
+            _build_detection({"dspot": {"initial_percentile": 0}})
+
+    def test_dspot_initial_percentile_101_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_initial_percentile"):
+            _build_detection({"dspot": {"initial_percentile": 101}})
+
+    def test_markov_min_events_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="markov_min_events"):
+            _build_detection({"markov": {"min_events": 0}})
+
+    def test_markov_min_events_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="markov_min_events"):
+            _build_detection({"markov": {"min_events": -5}})
+
+
+class TestReceiverUpperBounds:
+    """S-146: Upper-bound checks to prevent OOM."""
+
+    def test_queue_maxsize_too_large_raises(self) -> None:
+        from seerflow.config import _build_receivers
+
+        with pytest.raises(ConfigError, match="queue_maxsize"):
+            _build_receivers({"queue_maxsize": 1_000_001})
+
+    def test_otlp_http_max_request_bytes_too_large_raises(self) -> None:
+        from seerflow.config import _build_receivers
+
+        with pytest.raises(ConfigError, match="otlp_http_max_request_bytes"):
+            _build_receivers({"otlp_http_max_request_bytes": 100_000_001})
+
+    def test_queue_maxsize_at_upper_bound_valid(self) -> None:
+        from seerflow.config import _build_receivers
+
+        cfg = _build_receivers({"queue_maxsize": 1_000_000})
+        assert cfg.queue_maxsize == 1_000_000
+
+    def test_otlp_http_max_request_bytes_at_upper_bound_valid(self) -> None:
+        from seerflow.config import _build_receivers
+
+        cfg = _build_receivers({"otlp_http_max_request_bytes": 100_000_000})
+        assert cfg.otlp_http_max_request_bytes == 100_000_000
+
+
+class TestStorageConfigRepr:
+    """S-146: postgresql_url must not leak in repr."""
+
+    def test_postgresql_url_not_in_repr(self) -> None:
+        from seerflow.config import StorageConfig
+
+        cfg = StorageConfig(postgresql_url="postgres://user:secret@host/db")
+        assert "secret" not in repr(cfg)
+        assert "postgresql_url" not in repr(cfg)
 
 
 class TestSigmaRulesDirsConfig:
