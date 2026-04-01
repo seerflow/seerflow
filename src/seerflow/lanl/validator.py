@@ -9,6 +9,7 @@ pipeline end-to-end from raw LANL CSV files to a :class:`ValidationResult`.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time as time_mod
 from dataclasses import dataclass
@@ -72,6 +73,7 @@ def match_against_ground_truth(
     Returns:
         Tuple of ``(true_positive_alerts, false_positive_alerts, missed_redteam_records)``.
     """
+    from seerflow.lanl.hostmap import host_to_ip
     from seerflow.models.entity import normalize_username
 
     matched_redteam_indices: set[int] = set()
@@ -93,17 +95,15 @@ def match_against_ground_truth(
             else:
                 norm_user = ""
 
-            # Build candidate set: user, hostnames, and derived IPs
+            # Build candidate set: user, hostnames, and derived IPs.
             # IP-typed alerts have entity_value = derived IP (e.g. "10.0.69.29"),
             # while redteam records have hostnames (e.g. "C17693").
+            # Each host_to_ip call is wrapped independently so a failure on
+            # one hostname doesn't prevent the other from being added.
             candidates = {norm_user, rec.src_computer.lower(), rec.dst_computer.lower()}
-            try:
-                from seerflow.lanl.hostmap import host_to_ip
-
-                candidates.add(host_to_ip(rec.src_computer))
-                candidates.add(host_to_ip(rec.dst_computer))
-            except (ValueError, TypeError):
-                pass  # Invalid hostname format — skip IP derivation
+            for host_field in (rec.src_computer, rec.dst_computer):
+                with contextlib.suppress(ValueError, TypeError):
+                    candidates.add(host_to_ip(host_field))
 
             if alert_entity in candidates:
                 matched = True
@@ -305,13 +305,12 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     # Maps normalized entity name → earliest redteam time (seconds)
     # Include both hostnames and derived IPs so ip-typed alerts match.
     from seerflow.lanl.hostmap import host_to_ip as _host_to_ip
+    from seerflow.models.entity import normalize_username as _norm_user
 
     redteam_first_seen: dict[str, int] = {}
     for rt_rec in redteam_records:
-        from seerflow.models.entity import normalize_username
-
         if rt_rec.user != "?":
-            norm_user, _ = normalize_username(rt_rec.user)
+            norm_user, _ = _norm_user(rt_rec.user)
             if norm_user not in redteam_first_seen:
                 redteam_first_seen[norm_user] = rt_rec.time
         for computer in (rt_rec.src_computer, rt_rec.dst_computer):
