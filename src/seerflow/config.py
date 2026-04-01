@@ -233,6 +233,30 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
     )
 
 
+def _build_webhook_configs(raw: Any) -> tuple[WebhookEndpointConfig, ...]:
+    """Parse raw webhook config entries into a tuple of WebhookEndpointConfig."""
+    if not isinstance(raw, list):
+        return ()
+    configs: list[WebhookEndpointConfig] = []
+    for wh in raw:
+        if not isinstance(wh, dict):
+            msg = "Each webhook entry must be a mapping"
+            raise ConfigError(msg)
+        fm = wh.get("field_mapping", {})
+        if isinstance(fm, dict):
+            fm = {str(k): str(v) for k, v in fm.items()}
+        configs.append(
+            WebhookEndpointConfig(
+                path=wh.get("path", "/ingest/webhook"),
+                auth_header=wh.get("auth_header", ""),
+                auth_token=wh.get("auth_token", ""),
+                field_mapping=fm,
+                source_id=wh.get("source_id", "webhook"),
+            )
+        )
+    return tuple(configs)
+
+
 def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     file_paths = data.get("file_paths", ())
     if isinstance(file_paths, list):
@@ -240,28 +264,6 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     allowed_log_roots = data.get("allowed_log_roots", ())
     if isinstance(allowed_log_roots, list):
         allowed_log_roots = tuple(str(r) for r in allowed_log_roots)
-    raw_webhooks = data.get("webhooks", ())
-    if isinstance(raw_webhooks, list):
-        webhook_configs: list[WebhookEndpointConfig] = []
-        for wh in raw_webhooks:
-            if not isinstance(wh, dict):
-                msg = "Each webhook entry must be a mapping"
-                raise ConfigError(msg)
-            fm = wh.get("field_mapping", {})
-            if isinstance(fm, dict):
-                fm = {str(k): str(v) for k, v in fm.items()}
-            webhook_configs.append(
-                WebhookEndpointConfig(
-                    path=wh.get("path", "/ingest/webhook"),
-                    auth_header=wh.get("auth_header", ""),
-                    auth_token=wh.get("auth_token", ""),
-                    field_mapping=fm,
-                    source_id=wh.get("source_id", "webhook"),
-                )
-            )
-        webhooks_tuple = tuple(webhook_configs)
-    else:
-        webhooks_tuple = ()
     cfg = ReceiverConfig(
         syslog_enabled=data.get("syslog_enabled", True),
         syslog_udp_port=data.get("syslog_udp_port", 514),
@@ -277,7 +279,7 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
         file_checkpoint_dir=data.get("file_checkpoint_dir", ""),
         file_debounce_ms=data.get("file_debounce_ms", 1600),
         allowed_log_roots=allowed_log_roots,
-        webhooks=webhooks_tuple,
+        webhooks=_build_webhook_configs(data.get("webhooks", ())),
         webhook_enabled=data.get("webhook_enabled", False),
         webhook_port=data.get("webhook_port", 8081),
         bind_addr=data.get("bind_addr", "0.0.0.0"),  # noqa: S104  # nosec B104
@@ -486,6 +488,18 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
 # ---------------------------------------------------------------------------
 
 
+def _load_yaml_file(config_path: Path) -> dict[str, Any]:
+    """Load and validate a YAML config file, returning the parsed mapping."""
+    try:
+        with config_path.open() as f:
+            raw = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Failed to parse config file {config_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
+    return raw
+
+
 def load_config(
     path: str | None = None,
     *,
@@ -494,18 +508,12 @@ def load_config(
     """Load Seerflow configuration from a YAML file.
 
     Args:
-        path: Explicit path to a YAML config file. If the file does not
-            exist, raises ``ConfigError``. If ``None``, searches for
+        path: Explicit config file path. ``None`` searches for
             ``seerflow.yaml`` in *search_dir* (default: CWD).
-        search_dir: Directory to search for ``seerflow.yaml`` when *path*
-            is ``None``. Defaults to the current working directory.
-
-    Returns:
-        A frozen ``SeerflowConfig`` with all env vars resolved.
+        search_dir: Directory to search when *path* is ``None``.
 
     Raises:
-        ConfigError: If a required ``${VAR}`` env var is not set, the
-            config file is malformed, or an explicit path does not exist.
+        ConfigError: On missing file, bad YAML, or invalid values.
     """
     raw: dict[str, Any] = {}
 
@@ -513,24 +521,11 @@ def load_config(
         config_path = Path(path)
         if not config_path.exists():
             raise ConfigError(f"Config file not found: {path}")
-        try:
-            with config_path.open() as f:
-                raw = yaml.safe_load(f) or {}
-        except yaml.YAMLError as exc:
-            raise ConfigError(f"Failed to parse config file {path}: {exc}") from exc
-        if not isinstance(raw, dict):
-            raise ConfigError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
+        raw = _load_yaml_file(config_path)
     else:
-        search = search_dir or Path.cwd()
-        candidate = search / "seerflow.yaml"
+        candidate = (search_dir or Path.cwd()) / "seerflow.yaml"
         if candidate.exists():
-            try:
-                with candidate.open() as f:
-                    raw = yaml.safe_load(f) or {}
-            except yaml.YAMLError as exc:
-                raise ConfigError(f"Failed to parse config file {candidate}: {exc}") from exc
-            if not isinstance(raw, dict):
-                raise ConfigError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
+            raw = _load_yaml_file(candidate)
 
     # Interpolate env vars in all string values
     raw = _walk_and_interpolate(raw)
