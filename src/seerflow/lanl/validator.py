@@ -199,6 +199,8 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     Returns:
         A frozen :class:`ValidationResult`.
     """
+    import msgspec.structs
+
     from seerflow.correlation.bundled import get_bundled_rule_dir
     from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.rule_loader import load_correlation_rules
@@ -208,12 +210,15 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
         convert_flow_record,
         convert_proc_record,
     )
+    from seerflow.lanl.hostmap import host_to_ip as _host_to_ip
     from seerflow.lanl.parser import (
+        RedTeamRecord,
         parse_auth_line,
         parse_flow_line,
         parse_proc_line,
         parse_redteam_line,
     )
+    from seerflow.models.entity import normalize_username as _norm_user
     from seerflow.models.entity import resolve_entities
 
     # ------------------------------------------------------------------
@@ -251,8 +256,6 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     # decades in the past, so they'd be pruned instantly.  Shift all
     # events so the latest one sits 60 seconds before "now".
 
-    import msgspec.structs
-
     if all_events:
         max_ts = max(e.timestamp_ns for e in all_events)
         now_ns = time_mod.time_ns()
@@ -266,8 +269,6 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
             for e in all_events
         ]
         # Also shift redteam record times so ground-truth matching works
-        from seerflow.lanl.parser import RedTeamRecord
-
         offset_s = offset_ns // 1_000_000_000
         redteam_records = [
             RedTeamRecord(
@@ -297,16 +298,13 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     # 5. Set up engine and window
     # ------------------------------------------------------------------
 
-    window_ns = int(1800 * 1e9)  # 30 minutes
+    window_ns = 1800 * 1_000_000_000  # 30 minutes in ns
     window = EntityWindowBuffer(window_ns=window_ns, max_events=10_000)
     engine = CorrelationEngine(rules, window)
 
     # Build a lookup of first red-team timestamp per entity for latency calc
     # Maps normalized entity name → earliest redteam time (seconds)
     # Include both hostnames and derived IPs so ip-typed alerts match.
-    from seerflow.lanl.hostmap import host_to_ip as _host_to_ip
-    from seerflow.models.entity import normalize_username as _norm_user
-
     redteam_first_seen: dict[str, int] = {}
     for rt_rec in redteam_records:
         if rt_rec.user != "?":
