@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 import time
@@ -177,6 +178,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
 
     # Cancel the rule reloader on shutdown
     reload_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await reload_task
 
     try:
         # Flush remaining template metadata.

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.integration
 
@@ -26,16 +30,14 @@ VALID_RULE_YAML = (
 class TestReloaderIntegration:
     @pytest.mark.asyncio
     async def test_reload_logs_success(
-        self, tmp_path: object, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Writing a new YAML rule triggers reload and logs success."""
-        from pathlib import Path
-
         from seerflow.correlation.holders import EngineHolder
         from seerflow.correlation.reloader import RuleReloader
         from seerflow.correlation.window import EntityWindowBuffer
 
-        rule_dir = Path(str(tmp_path)) / "rules"
+        rule_dir = tmp_path / "rules"
         rule_dir.mkdir()
         window = EntityWindowBuffer(window_ns=60_000_000_000, max_events=100)
         holder: EngineHolder[object] = EngineHolder(engine=None)
@@ -62,16 +64,14 @@ class TestReloaderIntegration:
 
     @pytest.mark.asyncio
     async def test_reload_logs_failure_on_invalid(
-        self, tmp_path: object, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Invalid YAML doesn't crash the reloader -- engine still rebuilt with valid rules."""
-        from pathlib import Path
-
         from seerflow.correlation.holders import EngineHolder
         from seerflow.correlation.reloader import RuleReloader
         from seerflow.correlation.window import EntityWindowBuffer
 
-        rule_dir = Path(str(tmp_path)) / "rules"
+        rule_dir = tmp_path / "rules"
         rule_dir.mkdir()
         window = EntityWindowBuffer(window_ns=60_000_000_000, max_events=100)
         holder: EngineHolder[object] = EngineHolder(engine=None)
@@ -91,6 +91,8 @@ class TestReloaderIntegration:
 
         # Reloader should still work (engine rebuilt with 0 valid rules from this dir)
         assert holder.engine is not None
+        # Verify warning was logged for the invalid rule
+        assert "bad.yml" in caplog.text or "not a valid YAML" in caplog.text
 
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
