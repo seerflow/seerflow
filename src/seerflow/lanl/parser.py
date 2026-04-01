@@ -1,0 +1,318 @@
+"""LANL Unified Host and Network Dataset CSV parser.
+
+Parses the four CSV file types from the LANL dataset:
+  - Authentication events (auth.txt / redauth.txt)
+  - Process events (proc.txt / redproc.txt)
+  - Network flow events (flows.txt / redflows.txt)
+  - Red-team compromise labels (redteam.txt)
+
+All records are frozen dataclasses (immutable, slotted) so they are safe to
+share across threads and can be used as dict/set keys.
+
+References:
+  Turcotte et al., "Unified Host and Network Data Set", 2017.
+  https://csr.lanl.gov/data/2017.html
+"""
+
+from __future__ import annotations
+
+import gzip
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Record types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AuthRecord:
+    """Single row from the LANL authentication log.
+
+    Fields follow the published CSV column order::
+
+        time, src_user, dst_user, src_computer, dst_computer,
+        auth_type, logon_type, auth_orientation, success
+    """
+
+    time: int
+    src_user: str
+    dst_user: str
+    src_computer: str
+    dst_computer: str
+    auth_type: str
+    logon_type: str
+    auth_orientation: str
+    success: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ProcRecord:
+    """Single row from the LANL process log.
+
+    Fields::
+
+        time, user, computer, process_name, start_end
+    """
+
+    time: int
+    user: str
+    computer: str
+    process_name: str
+    start_end: str
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRecord:
+    """Single row from the LANL network flow log.
+
+    Fields::
+
+        time, duration, src_computer, src_port,
+        dst_computer, dst_port, protocol, packet_count, byte_count
+
+    Missing port values (``?``) are stored as ``-1``.
+    """
+
+    time: int
+    duration: int
+    src_computer: str
+    src_port: int
+    dst_computer: str
+    dst_port: int
+    protocol: int
+    packet_count: int
+    byte_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class RedTeamRecord:
+    """Single row from the LANL red-team label file.
+
+    Fields::
+
+        time, user, src_computer, dst_computer
+    """
+
+    time: int
+    user: str
+    src_computer: str
+    dst_computer: str
+
+
+# Public union type for all record variants.
+AnyRecord = AuthRecord | ProcRecord | FlowRecord | RedTeamRecord
+
+
+# ---------------------------------------------------------------------------
+# Parse helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_int(value: str) -> int:
+    """Convert a field value to int; raises ValueError on bad input."""
+    return int(value)
+
+
+def _parse_port(value: str) -> int:
+    """Convert a port field value to int; returns -1 for missing (``?``)."""
+    if value == "?":
+        return -1
+    return int(value)
+
+
+def _parse_success(value: str) -> bool:
+    """Convert ``Success``/``Fail`` to bool."""
+    return value.strip().lower() == "success"
+
+
+# ---------------------------------------------------------------------------
+# Public parse functions
+# ---------------------------------------------------------------------------
+
+
+def parse_auth_line(line: str) -> AuthRecord:
+    """Parse a single authentication log CSV line into an :class:`AuthRecord`.
+
+    Expected column order::
+
+        time, src_user, dst_user, src_computer, dst_computer,
+        auth_type, logon_type, auth_orientation, Success|Fail
+
+    Args:
+        line: A raw CSV line (no newline required).
+
+    Returns:
+        An immutable :class:`AuthRecord`.
+
+    Raises:
+        ValueError: If the line does not have exactly 9 fields.
+    """
+    parts = line.strip().split(",")
+    if len(parts) != 9:
+        msg = f"auth line must have 9 fields, got {len(parts)}: {line!r}"
+        raise ValueError(msg)
+    return AuthRecord(
+        time=_parse_int(parts[0]),
+        src_user=parts[1],
+        dst_user=parts[2],
+        src_computer=parts[3],
+        dst_computer=parts[4],
+        auth_type=parts[5],
+        logon_type=parts[6],
+        auth_orientation=parts[7],
+        success=_parse_success(parts[8]),
+    )
+
+
+def parse_proc_line(line: str) -> ProcRecord:
+    """Parse a single process log CSV line into a :class:`ProcRecord`.
+
+    Expected column order::
+
+        time, user, computer, process_name, Start|End
+
+    Args:
+        line: A raw CSV line.
+
+    Returns:
+        An immutable :class:`ProcRecord`.
+
+    Raises:
+        ValueError: If the line does not have exactly 5 fields.
+    """
+    parts = line.strip().split(",")
+    if len(parts) != 5:
+        msg = f"proc line must have 5 fields, got {len(parts)}: {line!r}"
+        raise ValueError(msg)
+    return ProcRecord(
+        time=_parse_int(parts[0]),
+        user=parts[1],
+        computer=parts[2],
+        process_name=parts[3],
+        start_end=parts[4],
+    )
+
+
+def parse_flow_line(line: str) -> FlowRecord:
+    """Parse a single network flow CSV line into a :class:`FlowRecord`.
+
+    Expected column order::
+
+        time, duration, src_computer, src_port,
+        dst_computer, dst_port, protocol, packet_count, byte_count
+
+    Missing port values (``?``) are stored as ``-1``.
+
+    Args:
+        line: A raw CSV line.
+
+    Returns:
+        An immutable :class:`FlowRecord`.
+
+    Raises:
+        ValueError: If the line does not have exactly 9 fields.
+    """
+    parts = line.strip().split(",")
+    if len(parts) != 9:
+        msg = f"flow line must have 9 fields, got {len(parts)}: {line!r}"
+        raise ValueError(msg)
+    return FlowRecord(
+        time=_parse_int(parts[0]),
+        duration=_parse_int(parts[1]),
+        src_computer=parts[2],
+        src_port=_parse_port(parts[3]),
+        dst_computer=parts[4],
+        dst_port=_parse_port(parts[5]),
+        protocol=_parse_int(parts[6]),
+        packet_count=_parse_int(parts[7]),
+        byte_count=_parse_int(parts[8]),
+    )
+
+
+def parse_redteam_line(line: str) -> RedTeamRecord:
+    """Parse a single red-team label CSV line into a :class:`RedTeamRecord`.
+
+    Expected column order::
+
+        time, user, src_computer, dst_computer
+
+    Args:
+        line: A raw CSV line.
+
+    Returns:
+        An immutable :class:`RedTeamRecord`.
+
+    Raises:
+        ValueError: If the line does not have exactly 4 fields.
+    """
+    parts = line.strip().split(",")
+    if len(parts) != 4:
+        msg = f"redteam line must have 4 fields, got {len(parts)}: {line!r}"
+        raise ValueError(msg)
+    return RedTeamRecord(
+        time=_parse_int(parts[0]),
+        user=parts[1],
+        src_computer=parts[2],
+        dst_computer=parts[3],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Streaming iterator
+# ---------------------------------------------------------------------------
+
+_PARSERS: dict[str, Callable[[str], AnyRecord]] = {
+    "auth": parse_auth_line,
+    "proc": parse_proc_line,
+    "flow": parse_flow_line,
+    "redteam": parse_redteam_line,
+}
+
+
+def iter_records(
+    path: Path,
+    record_type: str,
+) -> Iterator[AnyRecord]:
+    """Stream records from a LANL CSV file (plain or gzip-compressed).
+
+    The file is read line by line so that arbitrarily large files can be
+    processed without loading them entirely into memory.
+
+    Args:
+        path: Path to the CSV file.  Files ending in ``.gz`` are
+              decompressed transparently.
+        record_type: One of ``"auth"``, ``"proc"``, ``"flow"``,
+                     or ``"redteam"``.
+
+    Yields:
+        Parsed record objects of the appropriate type.
+
+    Raises:
+        ValueError: If *record_type* is not recognised.
+    """
+    if record_type not in _PARSERS:
+        valid = ", ".join(sorted(_PARSERS))
+        msg = f"Unknown record_type {record_type!r}. Valid options: {valid}"
+        raise ValueError(msg)
+
+    parse_fn = _PARSERS[record_type]
+    suffix = path.suffix.lower()
+
+    if suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            for raw in fh:
+                stripped = raw.strip()
+                if stripped:
+                    yield parse_fn(stripped)
+    else:
+        with path.open(encoding="utf-8") as fh:
+            for raw in fh:
+                stripped = raw.strip()
+                if stripped:
+                    yield parse_fn(stripped)
