@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from seerflow.correlation.engine import CorrelationEngine
+    from seerflow.correlation.holders import EngineHolder
     from seerflow.correlation.risk import RiskRegister
     from seerflow.correlation.watermark import Watermark
     from seerflow.correlation.window import EntityWindowBuffer
@@ -29,13 +30,13 @@ def _make_handler(
     ensemble: DetectionEnsemble,
     storage: SqliteBackend,
     save_interval_ns: int = 300_000_000_000,
-    sigma_engine: SigmaEngine | None = None,
+    sigma_holder: EngineHolder[SigmaEngine | None] | None = None,
     entity_graph: EntityGraph | None = None,
     graph_algo_interval: int = 500,
     window_buffer: EntityWindowBuffer | None = None,
     watermark: Watermark | None = None,
     risk_register: RiskRegister | None = None,
-    correlation_engine: CorrelationEngine | None = None,
+    correlation_holder: EngineHolder[CorrelationEngine | None] | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
@@ -87,6 +88,7 @@ def _make_handler(
 
         # Evaluate correlation rules (skip late events)
         is_late = watermark is not None and watermark.is_late(seerflow_event.timestamp_ns)
+        correlation_engine = correlation_holder.engine if correlation_holder is not None else None
         if correlation_engine is not None and entity_refs and not is_late:
             try:
                 corr_alerts = correlation_engine.evaluate(seerflow_event, entity_refs)
@@ -246,6 +248,7 @@ def _make_handler(
                     risk_register.add_risk(entity_uuid, risk_entry)
 
         # Sigma rule evaluation
+        sigma_engine = sigma_holder.engine if sigma_holder is not None else None
         if sigma_engine is not None:
             try:
                 sigma_alerts = sigma_engine.evaluate(seerflow_event)

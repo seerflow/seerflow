@@ -9,6 +9,7 @@ import pytest
 
 from seerflow.config import SeerflowConfig
 from seerflow.correlation.engine import CorrelationEngine
+from seerflow.correlation.holders import EngineHolder
 from seerflow.correlation.window import EntityWindowBuffer
 from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
 from seerflow.models.alert import CorrelationRule, SourceCondition
@@ -69,7 +70,7 @@ class TestCorrelationEnginePipelineIntegration:
             ensemble,
             mock,
             window_buffer=window,
-            correlation_engine=engine,
+            correlation_holder=EngineHolder(engine=engine),
         )
 
         # Patch ensemble to return a non-anomaly so only correlation fires
@@ -144,7 +145,7 @@ class TestCorrelationEnginePipelineIntegration:
             ensemble,
             mock,
             window_buffer=window,
-            correlation_engine=engine,
+            correlation_holder=EngineHolder(engine=engine),
         )
 
         # Patch engine.evaluate at the class level (CorrelationEngine uses __slots__)
@@ -197,7 +198,7 @@ class TestCorrelationEnginePipelineIntegration:
             ensemble,
             mock,
             window_buffer=window,
-            correlation_engine=engine,
+            correlation_holder=EngineHolder(engine=engine),
         )
 
         non_anomaly = DetectionResult(
@@ -253,7 +254,7 @@ class TestCorrelationRiskFeed:
             ensemble,
             mock,
             window_buffer=window,
-            correlation_engine=engine,
+            correlation_holder=EngineHolder(engine=engine),
             risk_register=risk_register,
         )
 
@@ -311,7 +312,7 @@ class TestCorrelationRiskFeed:
             ensemble,
             mock,
             window_buffer=window,
-            correlation_engine=engine,
+            correlation_holder=EngineHolder(engine=engine),
         )
 
         non_anomaly = DetectionResult(

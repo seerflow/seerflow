@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 import time
@@ -140,21 +141,43 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     )
     _log.info("Correlation engine: %d rules loaded", len(correlation_rules))
 
+    from seerflow.correlation.holders import EngineHolder
+
+    sigma_holder = EngineHolder(engine=sigma_engine)
+    correlation_holder: EngineHolder[CorrelationEngine | None] = EngineHolder(
+        engine=correlation_engine
+    )
+
+    # Start rule reloader for user-configured directories
+    from seerflow.correlation.reloader import RuleReloader
+
+    reloader = RuleReloader(
+        correlation_holder=correlation_holder,
+        correlation_dirs=[bundled_dir, *config.correlation.rule_dirs],
+        window_buffer=window_buffer,
+    )
+    reload_task = asyncio.create_task(reloader.watch())
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
         ensemble,
         storage,
         save_interval_ns=save_interval_ns,
-        sigma_engine=sigma_engine,
+        sigma_holder=sigma_holder,
         entity_graph=entity_graph,
         graph_algo_interval=config.detection.graph_algo_interval,
         window_buffer=window_buffer,
         watermark=watermark,
         risk_register=risk_register,
-        correlation_engine=correlation_engine,
+        correlation_holder=correlation_holder,
     )
     await pipeline.run(handler)
+
+    # Cancel the rule reloader on shutdown
+    reload_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await reload_task
 
     try:
         # Flush remaining template metadata.
