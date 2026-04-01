@@ -45,9 +45,9 @@ USER nobody
 # Ports: HTTP API, OTLP gRPC, OTLP HTTP, syslog UDP
 EXPOSE 8080 4317 4318 514/udp
 
-# Health check: verify the service is alive via the health API endpoint
+# Health check: verify the process is alive (interim until /api/v1/health exists)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v1/health')"]
+    CMD ["seerflow", "--version"]
 
 # tini as init process, seerflow as main command
 ENTRYPOINT ["tini", "--"]

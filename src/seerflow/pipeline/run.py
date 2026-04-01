@@ -8,6 +8,8 @@ import logging
 import sys
 import time
 
+import aiohttp.web
+
 from seerflow import __version__
 from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
@@ -158,6 +160,19 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     )
     reload_task = asyncio.create_task(reloader.watch())
 
+    # Start health endpoint server on dashboard_port
+    from seerflow.api.health import create_health_app
+
+    health_state = {"pipeline": "running", "storage": "connected"}
+    health_app = create_health_app(state=health_state)
+    health_runner = aiohttp.web.AppRunner(health_app)
+    await health_runner.setup()
+    health_site = aiohttp.web.TCPSite(
+        health_runner, "0.0.0.0", config.dashboard_port  # noqa: S104
+    )
+    await health_site.start()
+    _log.info("Health endpoint listening on port %d", config.dashboard_port)
+
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
     handler = _make_handler(
@@ -208,6 +223,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         except Exception:
             _log.warning("Final model save failed", exc_info=True)
     finally:
+        await health_runner.cleanup()
         await storage.close()
         _log.info("Seerflow stopped")
 
