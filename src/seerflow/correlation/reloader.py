@@ -61,7 +61,7 @@ class RuleReloader:
         async for _changes in watchfiles.awatch(
             *self._correlation_dirs,
             watch_filter=_YamlFilter(),
-            debounce=1000,
+            debounce=1600,
         ):
             if self._correlation_holder is not None:
                 self._reload_correlation()
@@ -76,7 +76,10 @@ class RuleReloader:
             new_engine = CorrelationEngine(rules=rules, window=self._window_buffer)
             if self._correlation_holder is not None:
                 self._correlation_holder.engine = new_engine
-            _log.info("Reloaded correlation engine with %d rules", len(rules))
+            if len(rules) == 0:
+                _log.warning("Correlation engine reloaded with 0 rules — all detection disabled")
+            else:
+                _log.info("Reloaded correlation engine with %d rules", len(rules))
         except Exception:
             _log.warning(
                 "Failed to reload correlation rules; keeping existing engine",
