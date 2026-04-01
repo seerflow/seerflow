@@ -9,9 +9,11 @@ import pytest
 from seerflow.config import (
     ConfigError,
     SeerflowConfig,
+    StorageConfig,
     WebhookEndpointConfig,
     _build_correlation,
     _build_detection,
+    _build_receivers,
     load_config,
 )
 
@@ -607,26 +609,18 @@ class TestReceiverUpperBounds:
     """S-146: Upper-bound checks to prevent OOM."""
 
     def test_queue_maxsize_too_large_raises(self) -> None:
-        from seerflow.config import _build_receivers
-
         with pytest.raises(ConfigError, match="queue_maxsize"):
             _build_receivers({"queue_maxsize": 1_000_001})
 
     def test_otlp_http_max_request_bytes_too_large_raises(self) -> None:
-        from seerflow.config import _build_receivers
-
         with pytest.raises(ConfigError, match="otlp_http_max_request_bytes"):
             _build_receivers({"otlp_http_max_request_bytes": 100_000_001})
 
     def test_queue_maxsize_at_upper_bound_valid(self) -> None:
-        from seerflow.config import _build_receivers
-
         cfg = _build_receivers({"queue_maxsize": 1_000_000})
         assert cfg.queue_maxsize == 1_000_000
 
     def test_otlp_http_max_request_bytes_at_upper_bound_valid(self) -> None:
-        from seerflow.config import _build_receivers
-
         cfg = _build_receivers({"otlp_http_max_request_bytes": 100_000_000})
         assert cfg.otlp_http_max_request_bytes == 100_000_000
 
@@ -635,11 +629,37 @@ class TestStorageConfigRepr:
     """S-146: postgresql_url must not leak in repr."""
 
     def test_postgresql_url_not_in_repr(self) -> None:
-        from seerflow.config import StorageConfig
-
         cfg = StorageConfig(postgresql_url="postgres://user:secret@host/db")
         assert "secret" not in repr(cfg)
         assert "postgresql_url" not in repr(cfg)
+
+
+class TestDetectionBoundaryValid:
+    """S-146: Boundary valid tests for new detection params."""
+
+    def test_hst_window_size_at_lower_bound(self) -> None:
+        config = _build_detection({"hst_window_size": 1})
+        assert config.hst_window_size == 1
+
+    def test_hst_n_trees_at_lower_bound(self) -> None:
+        config = _build_detection({"hst_n_trees": 1})
+        assert config.hst_n_trees == 1
+
+    def test_dspot_calibration_window_at_lower_bound(self) -> None:
+        config = _build_detection({"dspot": {"calibration_window": 1}})
+        assert config.dspot_calibration_window == 1
+
+    def test_dspot_initial_percentile_at_lower_bound(self) -> None:
+        config = _build_detection({"dspot": {"initial_percentile": 1}})
+        assert config.dspot_initial_percentile == 1
+
+    def test_dspot_initial_percentile_at_upper_bound(self) -> None:
+        config = _build_detection({"dspot": {"initial_percentile": 100}})
+        assert config.dspot_initial_percentile == 100
+
+    def test_markov_min_events_at_lower_bound(self) -> None:
+        config = _build_detection({"markov": {"min_events": 1}})
+        assert config.markov_min_events == 1
 
 
 class TestSigmaRulesDirsConfig:

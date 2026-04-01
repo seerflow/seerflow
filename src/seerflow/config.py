@@ -292,11 +292,11 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     _require_valid_port("receivers.webhook_port", cfg.webhook_port)
     if cfg.queue_maxsize < 1 or cfg.queue_maxsize > 1_000_000:
         raise ConfigError(
-            f"receivers.queue_maxsize must be between 1 and 1_000_000, got {cfg.queue_maxsize!r}"
+            f"receivers.queue_maxsize must be between 1 and 1000000, got {cfg.queue_maxsize!r}"
         )
     if cfg.otlp_http_max_request_bytes < 1 or cfg.otlp_http_max_request_bytes > 100_000_000:
         raise ConfigError(
-            f"receivers.otlp_http_max_request_bytes must be between 1 and 100_000_000, "
+            f"receivers.otlp_http_max_request_bytes must be between 1 and 100000000, "
             f"got {cfg.otlp_http_max_request_bytes!r}"
         )
     return cfg
