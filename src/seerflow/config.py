@@ -44,7 +44,7 @@ class StorageConfig:
     backend: str = "sqlite"
     data_dir: str = ""
     sqlite_path: str = ""
-    postgresql_url: str = ""
+    postgresql_url: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -290,11 +290,13 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
     _require_valid_port("receivers.otlp_grpc_port", cfg.otlp_grpc_port)
     _require_valid_port("receivers.otlp_http_port", cfg.otlp_http_port)
     _require_valid_port("receivers.webhook_port", cfg.webhook_port)
-    if cfg.queue_maxsize < 1:
-        raise ConfigError(f"receivers.queue_maxsize must be >= 1, got {cfg.queue_maxsize!r}")
-    if cfg.otlp_http_max_request_bytes < 1:
+    if cfg.queue_maxsize < 1 or cfg.queue_maxsize > 1_000_000:
         raise ConfigError(
-            f"receivers.otlp_http_max_request_bytes must be >= 1, "
+            f"receivers.queue_maxsize must be between 1 and 1000000, got {cfg.queue_maxsize!r}"
+        )
+    if cfg.otlp_http_max_request_bytes < 1 or cfg.otlp_http_max_request_bytes > 100_000_000:
+        raise ConfigError(
+            f"receivers.otlp_http_max_request_bytes must be between 1 and 100000000, "
             f"got {cfg.otlp_http_max_request_bytes!r}"
         )
     return cfg
@@ -314,6 +316,34 @@ def _require_open_unit(field: str, value: float) -> None:
 
 def _validate_detection_config(config: DetectionConfig) -> None:
     """Validate all numeric bounds in DetectionConfig; raise ConfigError if invalid."""
+    # HST parameters
+    if config.hst_window_size < 1:
+        raise ConfigError(
+            f"detection.hst_window_size must be >= 1, got {config.hst_window_size!r}"
+        )
+    if config.hst_n_trees < 1:
+        raise ConfigError(f"detection.hst_n_trees must be >= 1, got {config.hst_n_trees!r}")
+
+    # DSPOT parameters
+    if config.dspot_calibration_window < 1:
+        raise ConfigError(
+            f"detection.dspot_calibration_window must be >= 1, "
+            f"got {config.dspot_calibration_window!r}"
+        )
+    _require_open_unit("detection.dspot_risk_level", config.dspot_risk_level)
+    if config.dspot_initial_percentile < 1 or config.dspot_initial_percentile > 100:
+        raise ConfigError(
+            f"detection.dspot_initial_percentile must be in [1, 100], "
+            f"got {config.dspot_initial_percentile!r}"
+        )
+
+    # Markov parameters
+    if config.markov_min_events < 1:
+        raise ConfigError(
+            f"detection.markov_min_events must be >= 1, got {config.markov_min_events!r}"
+        )
+
+    # Weights
     for name, value in (
         ("weights_content", config.weights_content),
         ("weights_volume", config.weights_volume),
