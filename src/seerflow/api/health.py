@@ -26,9 +26,7 @@ async def health_handler(request: web.Request) -> web.Response:
     Returns 200 when all components are healthy, 503 otherwise.
     """
     state: dict[str, str] = request.app.get(_HEALTH_STATE_KEY, _DEFAULT_STATE)
-    all_healthy = all(
-        v in ("running", "connected", "ok") for v in state.values()
-    )
+    all_healthy = all(v in ("running", "connected", "ok") for v in state.values())
     status = "healthy" if all_healthy else "degraded"
     http_status = 200 if all_healthy else 503
     return web.json_response(
