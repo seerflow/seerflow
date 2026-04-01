@@ -65,8 +65,10 @@ def convert_auth_record(rec: AuthRecord) -> list[SeerflowEvent]:
         )
         severity = SeverityLevel.WARNING
 
-    hosts: tuple[str, ...] = (rec.src_computer, rec.dst_computer)
-
+    # User-view: ONLY related_users (no related_hosts/ips) to avoid
+    # cross-entity contamination in the window buffer. Host windows
+    # would otherwise accumulate events from multiple users, causing
+    # user-typed rules to fire spuriously.
     user_view = SeerflowEvent(
         event_id=uuid.uuid4(),
         timestamp_ns=timestamp_ns,
@@ -76,9 +78,10 @@ def convert_auth_record(rec: AuthRecord) -> list[SeerflowEvent]:
         source_type="syslog",
         related_users=(dst_user,),
         related_ips=(),
-        related_hosts=hosts,
+        related_hosts=(),
     )
 
+    # IP-view: ONLY related_ips for the same reason.
     ip_view = SeerflowEvent(
         event_id=uuid.uuid4(),
         timestamp_ns=timestamp_ns,
@@ -88,7 +91,7 @@ def convert_auth_record(rec: AuthRecord) -> list[SeerflowEvent]:
         source_type="syslog",
         related_ips=(src_ip,),
         related_users=(),
-        related_hosts=hosts,
+        related_hosts=(),
     )
 
     return [user_view, ip_view]
@@ -121,7 +124,7 @@ def convert_proc_record(rec: ProcRecord) -> list[SeerflowEvent]:
         source_type="syslog",
         related_users=(username,),
         related_ips=(),
-        related_hosts=(rec.computer,),
+        related_hosts=(),
     )
 
     return [event]
@@ -159,7 +162,7 @@ def convert_flow_record(rec: FlowRecord) -> list[SeerflowEvent]:
         source_type="syslog",
         related_ips=(src_ip,),
         related_users=(),
-        related_hosts=(rec.src_computer, rec.dst_computer),
+        related_hosts=(),
     )
 
     return [event]

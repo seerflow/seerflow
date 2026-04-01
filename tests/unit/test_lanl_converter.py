@@ -162,20 +162,20 @@ def test_auth_failure_ip_view_contains_src_host_ip(converter):
     assert expected_ip in ip_view.related_ips
 
 
-def test_auth_failure_user_view_hosts_contain_src_and_dst(converter):
+def test_auth_failure_user_view_has_no_hosts(converter):
+    """User-view: no related_hosts to prevent cross-entity contamination."""
     rec = _auth_failure()
     events = converter.convert_auth_record(rec)
     user_view = next(e for e in events if e.related_users)
-    assert rec.src_computer in user_view.related_hosts
-    assert rec.dst_computer in user_view.related_hosts
+    assert user_view.related_hosts == ()
 
 
-def test_auth_failure_ip_view_hosts_contain_src_and_dst(converter):
+def test_auth_failure_ip_view_has_no_hosts(converter):
+    """IP-view: no related_hosts to prevent cross-entity contamination."""
     rec = _auth_failure()
     events = converter.convert_auth_record(rec)
     ip_view = next(e for e in events if e.related_ips)
-    assert rec.src_computer in ip_view.related_hosts
-    assert rec.dst_computer in ip_view.related_hosts
+    assert ip_view.related_hosts == ()
 
 
 # ---------------------------------------------------------------------------
@@ -270,12 +270,12 @@ def test_flow_timestamp_in_nanoseconds(converter):
     assert events[0].timestamp_ns == rec.time * 1_000_000_000
 
 
-def test_flow_related_hosts_contain_src_and_dst(converter):
+def test_flow_has_no_hosts(converter):
+    """Flow ip-view events must NOT include related_hosts."""
     rec = _flow_record()
     events = converter.convert_flow_record(rec)
     ev = events[0]
-    assert rec.src_computer in ev.related_hosts
-    assert rec.dst_computer in ev.related_hosts
+    assert ev.related_hosts == ()
 
 
 def test_flow_related_ips_contains_src_ip(converter):
@@ -323,11 +323,12 @@ def test_proc_related_users_contains_normalized_user(converter):
     assert "u500" in ev.related_users
 
 
-def test_proc_related_hosts_contains_computer(converter):
+def test_proc_has_no_hosts(converter):
+    """Process user-view events must NOT include related_hosts."""
     rec = _proc_start()
     events = converter.convert_proc_record(rec)
     ev = events[0]
-    assert rec.computer in ev.related_hosts
+    assert ev.related_hosts == ()
 
 
 def test_proc_start_message_format(converter):

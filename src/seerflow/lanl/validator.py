@@ -10,6 +10,7 @@ pipeline end-to-end from raw LANL CSV files to a :class:`ValidationResult`.
 from __future__ import annotations
 
 import logging
+import time as time_mod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -92,12 +93,19 @@ def match_against_ground_truth(
             else:
                 norm_user = ""
 
-            # Check entity value overlap: user, src_computer, or dst_computer
-            if alert_entity in (
-                norm_user,
-                rec.src_computer.lower(),
-                rec.dst_computer.lower(),
-            ):
+            # Build candidate set: user, hostnames, and derived IPs
+            # IP-typed alerts have entity_value = derived IP (e.g. "10.0.69.29"),
+            # while redteam records have hostnames (e.g. "C17693").
+            candidates = {norm_user, rec.src_computer.lower(), rec.dst_computer.lower()}
+            try:
+                from seerflow.lanl.hostmap import host_to_ip
+
+                candidates.add(host_to_ip(rec.src_computer))
+                candidates.add(host_to_ip(rec.dst_computer))
+            except (ValueError, TypeError):
+                pass  # Invalid hostname format — skip IP derivation
+
+            if alert_entity in candidates:
                 matched = True
                 matched_redteam_indices.add(idx)
                 # Do not break — one alert can confirm multiple redteam events
@@ -236,7 +244,43 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
         all_events.extend(convert_flow_record(flow_rec))
 
     # ------------------------------------------------------------------
-    # 3. Sort chronologically
+    # 3. Time-shift events to be "recent"
+    # ------------------------------------------------------------------
+    # The EntityWindowBuffer lazy-prunes events older than wall-clock
+    # minus window_ns.  LANL synthetic timestamps (100, 200 ...) are
+    # decades in the past, so they'd be pruned instantly.  Shift all
+    # events so the latest one sits 60 seconds before "now".
+
+    import msgspec.structs
+
+    if all_events:
+        max_ts = max(e.timestamp_ns for e in all_events)
+        now_ns = time_mod.time_ns()
+        offset_ns = now_ns - max_ts - 60_000_000_000  # 60 s headroom
+        all_events = [
+            msgspec.structs.replace(
+                e,
+                timestamp_ns=e.timestamp_ns + offset_ns,
+                observed_ns=e.observed_ns + offset_ns,
+            )
+            for e in all_events
+        ]
+        # Also shift redteam record times so ground-truth matching works
+        from seerflow.lanl.parser import RedTeamRecord
+
+        offset_s = offset_ns // 1_000_000_000
+        redteam_records = [
+            RedTeamRecord(
+                time=rt.time + offset_s,
+                user=rt.user,
+                src_computer=rt.src_computer,
+                dst_computer=rt.dst_computer,
+            )
+            for rt in redteam_records
+        ]
+
+    # ------------------------------------------------------------------
+    # 3b. Sort chronologically
     # ------------------------------------------------------------------
 
     all_events.sort(key=lambda e: e.timestamp_ns)
@@ -259,6 +303,9 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
 
     # Build a lookup of first red-team timestamp per entity for latency calc
     # Maps normalized entity name → earliest redteam time (seconds)
+    # Include both hostnames and derived IPs so ip-typed alerts match.
+    from seerflow.lanl.hostmap import host_to_ip as _host_to_ip
+
     redteam_first_seen: dict[str, int] = {}
     for rt_rec in redteam_records:
         from seerflow.models.entity import normalize_username
@@ -271,6 +318,12 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
             key = computer.lower()
             if key not in redteam_first_seen:
                 redteam_first_seen[key] = rt_rec.time
+            try:
+                ip_key = _host_to_ip(computer)
+                if ip_key not in redteam_first_seen:
+                    redteam_first_seen[ip_key] = rt_rec.time
+            except (ValueError, TypeError):
+                pass
 
     # ------------------------------------------------------------------
     # 6. Process events and collect alerts
@@ -308,7 +361,12 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     # 7. Match against ground truth
     # ------------------------------------------------------------------
 
-    tp_alerts, fp_alerts, missed = match_against_ground_truth(all_alerts, redteam_records)
+    # Use a generous matching window (5 minutes) because correlation rules
+    # accumulate evidence over their temporal windows before firing.  An
+    # alert may fire several minutes after the first red-team indicator.
+    tp_alerts, fp_alerts, missed = match_against_ground_truth(
+        all_alerts, redteam_records, time_window_s=300
+    )
 
     # ------------------------------------------------------------------
     # 8. Compute and return metrics
