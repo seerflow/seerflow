@@ -169,8 +169,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     await health_runner.setup()
     health_site = aiohttp.web.TCPSite(
         health_runner,
-        "0.0.0.0",
-        config.dashboard_port,  # noqa: S104
+        "0.0.0.0",  # noqa: S104
+        config.dashboard_port,
     )
     await health_site.start()
     _log.info("Health endpoint listening on port %d", config.dashboard_port)
