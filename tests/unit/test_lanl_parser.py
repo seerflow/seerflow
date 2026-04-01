@@ -195,6 +195,24 @@ class TestIterRecords:
         with pytest.raises(ValueError, match="Unknown record_type"):
             list(iter_records(csv_file, "unknown"))
 
+    # --- Field count validation per parse function ---------------------------
+
+    def test_parse_auth_line_wrong_field_count(self) -> None:
+        with pytest.raises(ValueError, match="9 fields"):
+            parse_auth_line("1,2,3")
+
+    def test_parse_proc_line_wrong_field_count(self) -> None:
+        with pytest.raises(ValueError, match="5 fields"):
+            parse_proc_line("1,2")
+
+    def test_parse_flow_line_wrong_field_count(self) -> None:
+        with pytest.raises(ValueError, match="9 fields"):
+            parse_flow_line("1,2,3,4")
+
+    def test_parse_redteam_line_wrong_field_count(self) -> None:
+        with pytest.raises(ValueError, match="4 fields"):
+            parse_redteam_line("1,2")
+
     def test_iter_records_is_lazy(self, tmp_path: Path) -> None:
         csv_file = tmp_path / "auth.csv"
         lines = "\n".join(

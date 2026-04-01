@@ -369,8 +369,47 @@ def test_run_validation_detects_known_redteam_user(validator):
     """The fixture redteam.csv contains U5624@DOM1 — at least 1 TP expected."""
     fixtures_dir = Path(__file__).parent.parent / "fixtures" / "lanl"
     result = validator.run_validation(fixtures_dir)
-
-    # The fixture has red-team events; we expect at least 1 TP or at least
-    # some alerts to fire (we cannot guarantee exact match without full data,
-    # but total_events_processed should be > 0 and no crash should occur).
     assert result.total_events_processed > 0
+
+
+def test_run_validation_missing_csv_files(validator, tmp_path):
+    """run_validation gracefully handles a directory missing some CSV files."""
+    # Only create redteam.csv — others are missing
+    (tmp_path / "redteam.csv").write_text("100,U1@DOM1,C1,C2\n")
+    result = validator.run_validation(tmp_path)
+    assert result.total_events_processed == 0
+    assert result.total_alerts == 0
+
+
+# ---------------------------------------------------------------------------
+# IP-derived matching in match_against_ground_truth
+# ---------------------------------------------------------------------------
+
+
+def test_match_ip_typed_alert_matches_derived_ip(validator):
+    """IP-typed alerts should match redteam records via host_to_ip derivation."""
+    from seerflow.lanl.hostmap import host_to_ip
+    from seerflow.lanl.parser import RedTeamRecord
+
+    derived_ip = host_to_ip("C17693")  # "10.0.69.29"
+    redteam = [
+        RedTeamRecord(time=100, user="?", src_computer="C17693", dst_computer="C528"),
+    ]
+    alerts = [_make_alert(timestamp_ns=110_000_000_000, entity_value=derived_ip)]
+    tp, fp, missed = validator.match_against_ground_truth(alerts, redteam)
+    assert len(tp) == 1
+    assert len(fp) == 0
+    assert len(missed) == 0
+
+
+def test_match_invalid_hostname_does_not_crash(validator):
+    """Redteam records with non-LANL hostnames should not crash matching."""
+    from seerflow.lanl.parser import RedTeamRecord
+
+    redteam = [
+        RedTeamRecord(time=100, user="U1@DOM1", src_computer="INVALID", dst_computer="ALSO_BAD"),
+    ]
+    alerts = [_make_alert(timestamp_ns=110_000_000_000, entity_value="u1")]
+    tp, _fp, _missed = validator.match_against_ground_truth(alerts, redteam)
+    # Should still match on normalized username
+    assert len(tp) == 1
