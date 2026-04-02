@@ -99,8 +99,10 @@ class DetectionEnsemble:
     __slots__ = (
         "_config",
         "_detectors",
+        "_event_counters",
         "_eviction_count",
         "_max_sources",
+        "_score_interval",
         "_score_windows",
         "_thresholds",
         "_weights",
@@ -109,9 +111,11 @@ class DetectionEnsemble:
     def __init__(self, config: DetectionConfig) -> None:
         self._config = config
         self._max_sources = config.max_sources
+        self._score_interval = config.score_interval
         self._detectors: OrderedDict[str, list[Detector]] = OrderedDict()
         self._thresholds: OrderedDict[str, DSpotThreshold] = OrderedDict()
         self._eviction_count: int = 0
+        self._event_counters: dict[str, int] = {}
         self._score_windows: OrderedDict[str, list[_WelfordAccumulator]] = OrderedDict()
         self._weights: tuple[float, ...] = (
             config.weights_content,
@@ -124,6 +128,19 @@ class DetectionEnsemble:
         """Score, learn, and threshold-check a single event."""
         raw_source = (event.source_type or "default").replace("\x00", "")
         source = raw_source[:_MAX_SOURCE_KEY_LEN] or "default"
+
+        # Batch scoring: skip scoring for non-Nth events
+        self._event_counters[source] = self._event_counters.get(source, 0) + 1
+        if self._score_interval > 1 and self._event_counters[source] % self._score_interval != 0:
+            return DetectionResult(
+                score=0.0,
+                upper_threshold=0.0,
+                lower_threshold=0.0,
+                is_anomaly=False,
+                anomaly_direction=None,
+                source_type=source,
+            )
+
         detectors = self._get_detectors(source)
         scores = [d.score(event) for d in detectors]
         scores = [s if math.isfinite(s) else 0.0 for s in scores]
@@ -184,6 +201,7 @@ class DetectionEnsemble:
             evicted_source, _ = self._detectors.popitem(last=False)
             self._thresholds.pop(evicted_source, None)
             self._score_windows.pop(evicted_source, None)
+            self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
         self._detectors[source] = [
             HSTDetector(

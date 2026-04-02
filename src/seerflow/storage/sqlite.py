@@ -232,6 +232,7 @@ CREATE TABLE IF NOT EXISTS templates (
 
 
 _PRAGMAS = (
+    "PRAGMA page_size=8192",  # 8 KiB pages — must be set before journal_mode on new DBs
     "PRAGMA journal_mode=WAL",  # concurrent reads during writes
     "PRAGMA synchronous=NORMAL",  # fsync on checkpoint only — ~100ms loss on power fail
     "PRAGMA cache_size=-64000",  # 64 MiB in-memory page cache
