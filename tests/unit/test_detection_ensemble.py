@@ -462,3 +462,35 @@ class TestEnsembleHardening:
         keys = list(ensemble._detectors.keys())
         assert "syslog" in keys
         assert "\x00" not in keys[0]
+
+
+class TestBatchScoring:
+    def test_score_interval_1_scores_every_event(self) -> None:
+        """Default score_interval=1 should score every event."""
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        results = [ensemble.process_event(_make_event(template_id=i)) for i in range(5)]
+        assert all(isinstance(r, DetectionResult) for r in results)
+
+    def test_score_interval_10_skips_9_events(self) -> None:
+        """With score_interval=10, only every 10th event should be fully scored."""
+        config = DetectionConfig(hw_seasonal_period=10, score_interval=10)
+        ensemble = DetectionEnsemble(config)
+        results = [ensemble.process_event(_make_event(template_id=i % 5)) for i in range(20)]
+        skipped = [r for r in results if r.score == 0.0 and not r.is_anomaly]
+        assert len(skipped) >= 18
+
+    def test_skipped_events_return_zero_score(self) -> None:
+        """Skipped events must return score=0.0 and is_anomaly=False."""
+        config = DetectionConfig(hw_seasonal_period=10, score_interval=100)
+        ensemble = DetectionEnsemble(config)
+        result = ensemble.process_event(_make_event(template_id=1))
+        assert result.score == 0.0
+        assert result.is_anomaly is False
+
+    def test_score_interval_zero_raises(self) -> None:
+        """score_interval=0 must raise ConfigError."""
+        from seerflow.config import ConfigError, _build_detection
+
+        with pytest.raises(ConfigError, match="score_interval"):
+            _build_detection({"score_interval": 0})

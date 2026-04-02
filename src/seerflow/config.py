@@ -119,6 +119,7 @@ class DetectionConfig:
     risk_half_life_hours: int = 4
     risk_threshold: float = 50.0
     risk_max_entities: int = 10_000
+    score_interval: int = 1  # Score every Nth event per source (1 = every event)
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
@@ -408,6 +409,10 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         raise ConfigError(
             f"detection.risk_max_entities must be >= 1, got {config.risk_max_entities!r}"
         )
+    if config.score_interval < 1:
+        raise ConfigError(
+            f"detection.score_interval must be >= 1, got {config.score_interval!r}"
+        )
 
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
@@ -458,6 +463,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         risk_half_life_hours=data.get("risk_half_life_hours", 4),
         risk_threshold=float(data.get("risk_threshold", 50.0)),
         risk_max_entities=data.get("risk_max_entities", 10_000),
+        score_interval=data.get("score_interval", 1),
         sigma_rules_dirs=sigma_rules_dirs,
     )
     _validate_detection_config(config)
