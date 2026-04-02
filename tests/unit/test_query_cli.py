@@ -1130,11 +1130,11 @@ class TestMainDispatch:
         mock_args = argparse.Namespace(config=None, command="query", query_type="events")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock()
+            mock_run_async.return_value = None
             main()
-            mock_asyncio.run.assert_called_once()
+            mock_run_async.assert_called_once()
 
 
 class TestQueryTimelineArgparse:

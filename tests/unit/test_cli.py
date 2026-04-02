@@ -354,11 +354,11 @@ class TestRunLoop:
         mock_args = argparse.Namespace(config=None, command="start")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock()
+            mock_run_async.return_value = None
             main()
-            mock_asyncio.run.assert_called_once()
+            mock_run_async.assert_called_once()
 
     def test_main_handles_keyboard_interrupt(self) -> None:
         """main() exits cleanly on KeyboardInterrupt."""
@@ -370,9 +370,9 @@ class TestRunLoop:
         mock_args = argparse.Namespace(config=None, command="start")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock(side_effect=KeyboardInterrupt)
+            mock_run_async.side_effect = KeyboardInterrupt
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
@@ -681,9 +681,9 @@ class TestTailSubcommand:
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.pipeline.tail._build_tail_config") as mock_build,
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock()
+            mock_run_async.return_value = None
             main()
             mock_build.assert_called_once_with(["/tmp/test.log"], config_path=None)
-            mock_asyncio.run.assert_called_once()
+            mock_run_async.assert_called_once()
