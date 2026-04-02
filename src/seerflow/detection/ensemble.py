@@ -201,6 +201,7 @@ class DetectionEnsemble:
             evicted_source, _ = self._detectors.popitem(last=False)
             self._thresholds.pop(evicted_source, None)
             self._score_windows.pop(evicted_source, None)
+            self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
         self._detectors[source] = [
             HSTDetector(

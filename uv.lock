@@ -1347,7 +1347,7 @@ dependencies = [
     { name = "pysigma" },
     { name = "pyyaml" },
     { name = "river" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
     { name = "watchfiles" },
 ]
 
@@ -1378,7 +1378,7 @@ requires-dist = [
     { name = "pysigma", specifier = ">=1.2.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "river", specifier = ">=0.23.0" },
-    { name = "uvloop", specifier = ">=0.22.1" },
+    { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.22.1" },
     { name = "watchfiles", specifier = ">=1.1.1" },
 ]
 
