@@ -410,9 +410,7 @@ def _validate_detection_config(config: DetectionConfig) -> None:
             f"detection.risk_max_entities must be >= 1, got {config.risk_max_entities!r}"
         )
     if config.score_interval < 1:
-        raise ConfigError(
-            f"detection.score_interval must be >= 1, got {config.score_interval!r}"
-        )
+        raise ConfigError(f"detection.score_interval must be >= 1, got {config.score_interval!r}")
 
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
