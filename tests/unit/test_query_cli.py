@@ -1123,7 +1123,7 @@ class TestMainDispatch:
     def test_main_dispatches_query(self) -> None:
         """main() dispatches to run_query for query subcommand."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 

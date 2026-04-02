@@ -347,7 +347,7 @@ class TestRunLoop:
     def test_main_calls_parse_args_and_run(self) -> None:
         """main() wires parse_args → asyncio.run(_run) for 'start' command."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 
@@ -363,7 +363,7 @@ class TestRunLoop:
     def test_main_handles_keyboard_interrupt(self) -> None:
         """main() exits cleanly on KeyboardInterrupt."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 
@@ -673,7 +673,7 @@ class TestTailSubcommand:
     def test_main_dispatches_tail(self) -> None:
         """main() dispatches to _build_tail_config + _run_with_config for tail."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 
