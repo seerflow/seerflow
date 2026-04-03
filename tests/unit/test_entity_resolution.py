@@ -256,6 +256,26 @@ class TestNFCNormalization:
         assert composed != decomposed
         assert generate_host_id(composed) == generate_host_id(decomposed)
 
+    def test_file_id_nfc_composed_equals_decomposed(self) -> None:
+        import unicodedata
+
+        from seerflow.models.entity import generate_file_id
+
+        composed = "/tmp/caf\u00e9.log"
+        decomposed = unicodedata.normalize("NFD", composed)
+        assert composed != decomposed
+        assert generate_file_id(composed) == generate_file_id(decomposed)
+
+    def test_domain_id_nfc_composed_equals_decomposed(self) -> None:
+        import unicodedata
+
+        from seerflow.models.entity import generate_domain_id
+
+        composed = "caf\u00e9.com"
+        decomposed = unicodedata.normalize("NFD", composed)
+        assert composed != decomposed
+        assert generate_domain_id(composed) == generate_domain_id(decomposed)
+
 
 class TestInferEntityTypeExtended:
     """Tests for 6-type priority in infer_entity_type()."""

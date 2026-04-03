@@ -194,7 +194,7 @@ def generate_process_id(hostname: str, pid: int, start_time: int) -> uuid.UUID:
 
 def generate_file_id(path: str) -> uuid.UUID:
     """Deterministic UUID5 for a file entity."""
-    canonical = path.strip()
+    canonical = unicodedata.normalize("NFC", path.strip())
     if not canonical:
         msg = "file path is empty"
         raise ValueError(msg)
@@ -203,7 +203,7 @@ def generate_file_id(path: str) -> uuid.UUID:
 
 def generate_domain_id(domain: str) -> uuid.UUID:
     """Deterministic UUID5 for a domain entity."""
-    canonical = domain.strip().lower().rstrip(".")
+    canonical = unicodedata.normalize("NFC", domain.strip().lower().rstrip("."))
     if not canonical:
         msg = "domain is empty"
         raise ValueError(msg)
