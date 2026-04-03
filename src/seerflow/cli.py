@@ -54,8 +54,8 @@ def _add_query_subparsers(subparsers: argparse._SubParsersAction) -> None:  # ty
     tl.add_argument("--json", action="store_true", default=False, help="Output as JSON")
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse CLI arguments."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
         prog="seerflow",
         description="Streaming log intelligence agent",
@@ -76,9 +76,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     tail_parser = subparsers.add_parser("tail", help="Monitor log files (no config needed)")
     tail_parser.add_argument("paths", nargs="+", help="File paths or glob patterns")
 
+    import_parser = subparsers.add_parser("import", help="Import log files into Seerflow")
+    import_parser.add_argument("paths", nargs="+", help="Log file paths or glob patterns")
+    import_parser.add_argument(
+        "--db",
+        type=str,
+        default=None,
+        help="Database path (default: from config)",
+    )
+
     _add_query_subparsers(subparsers)
 
-    return parser.parse_args(argv)
+    return parser
 
 
-__all__ = ["parse_args"]
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments."""
+    return build_parser().parse_args(argv)
+
+
+__all__ = ["build_parser", "parse_args"]

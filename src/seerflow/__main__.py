@@ -41,6 +41,23 @@ def main() -> None:
             from seerflow.query import run_query
 
             _run_async(run_query(args))
+        elif args.command == "import":
+            from seerflow.config import load_config
+            from seerflow.import_cmd import run_import
+
+            db_path = args.db
+            if db_path is None:
+                from pathlib import Path
+
+                cfg = load_config(args.config)
+                db_path = cfg.storage.sqlite_path or str(
+                    Path(cfg.storage.data_dir) / "seerflow.db"
+                )
+
+            async def _do_import() -> None:
+                await run_import(paths=args.paths, db_path=db_path)
+
+            _run_async(_do_import())
         else:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:

@@ -7,6 +7,7 @@ import glob as _glob
 import gzip
 import logging
 import lzma
+import time
 from pathlib import Path
 from typing import IO
 
@@ -67,3 +68,88 @@ def expand_paths(patterns: list[str]) -> list[Path]:
                 seen.add(resolved)
                 result.append(resolved)
     return result
+
+
+async def run_import(
+    *,
+    paths: list[str],
+    db_path: str,
+) -> dict[str, int | float]:
+    """Import log files through the Seerflow pipeline.
+
+    Returns stats: files_processed, lines_read, events_stored, elapsed_seconds.
+    """
+    from seerflow.config import StorageConfig, load_config
+    from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.pipeline.handler import _make_handler
+    from seerflow.receivers.base import RawEvent
+    from seerflow.storage.sqlite import SqliteBackend
+
+    start = time.monotonic()
+    expanded = expand_paths(paths)
+
+    if not expanded:
+        return {
+            "files_processed": 0,
+            "lines_read": 0,
+            "events_stored": 0,
+            "elapsed_seconds": 0.0,
+        }
+
+    # Minimal pipeline setup — no sigma, no graph, no correlation
+    config = load_config()
+    storage_config = StorageConfig(
+        backend="sqlite",
+        data_dir=str(Path(db_path).parent),
+        sqlite_path=db_path,
+    )
+    storage = await SqliteBackend.connect(storage_config)
+
+    try:
+        ensemble = DetectionEnsemble(config.detection)
+        handler = _make_handler(ensemble, storage)
+
+        files_processed = 0
+        lines_read = 0
+
+        for file_path in expanded:
+            if is_binary(file_path):
+                _log.warning("Skipping binary file: %s", file_path)
+                continue
+
+            _log.info("Importing: %s", file_path)
+            file_lines = 0
+            with open_log(file_path) as fh:
+                for line in fh:
+                    line = line.rstrip("\n\r")
+                    if not line:
+                        continue
+                    raw = RawEvent(
+                        data=line.encode("utf-8"),
+                        source_type="import",
+                        source_id=str(file_path),
+                        received_ns=time.time_ns(),
+                        metadata={},
+                    )
+                    await handler(raw)
+                    file_lines += 1
+
+            lines_read += file_lines
+            files_processed += 1
+            _log.info("  %s: %d lines", file_path.name, file_lines)
+
+        elapsed = time.monotonic() - start
+        _log.info(
+            "Import complete: %d files, %d lines in %.1fs",
+            files_processed,
+            lines_read,
+            elapsed,
+        )
+        return {
+            "files_processed": files_processed,
+            "lines_read": lines_read,
+            "events_stored": lines_read,
+            "elapsed_seconds": round(elapsed, 2),
+        }
+    finally:
+        await storage.close()
