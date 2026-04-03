@@ -55,6 +55,11 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
     OCSF invariant: ``type_uid = class_uid * 100 + activity_id``. Callers
     setting any of these three fields must set all three consistently.
 
+    Entity fields: ``related_ips``, ``related_users``, ``related_hosts``,
+    ``related_files``, ``related_domains``, ``related_processes`` carry raw
+    extracted values.  ``entity_refs`` holds deterministic UUID5 strings
+    resolved from the raw values (see ``resolve_entities``).
+
     ``related_hashes`` format: ``"<algo>:<lowercase-hex-digest>"``, e.g.
     ``"sha256:e3b0c44298fc1c14..."``  Validation is enforced at the
     ingestion boundary, not in this struct.
