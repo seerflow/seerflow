@@ -15,9 +15,7 @@ EDGE_TYPE_MAP: dict[tuple[str, str], str] = {
     ("user", "host"): "logged_into",
     ("ip", "host"): "has_ip",
     ("user", "file"): "accessed",
-    ("process", "process"): "spawned_by",
     ("ip", "domain"): "resolved_to",
-    ("host", "ip"): "connected_to",
 }
 
 
@@ -34,6 +32,8 @@ def infer_edges(event: SeerflowEvent) -> list[EdgeRecord]:
     """Infer typed edges from entity pairs in an event.
 
     Uses the entity type pair mapping to determine relationship types.
+    Process-process pairs produce a ``spawned_by`` edge (inline special case,
+    not in EDGE_TYPE_MAP, since the map only handles cross-type pairs).
     Returns one edge per known (source_type, target_type) combination.
     """
     typed: list[tuple[str, str]] = []

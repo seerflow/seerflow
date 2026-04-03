@@ -221,6 +221,16 @@ class TestResolveEntitiesExtended:
             result = resolve_entities(ips=(), users=(), hosts=(), domains=("",))
         assert len(result) == 0
 
+    def test_malformed_file_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            result = resolve_entities(ips=(), users=(), hosts=(), files=("",))
+        assert len(result) == 0
+
+    def test_process_colon_only_resolves_as_name(self) -> None:
+        """A bare ':' is treated as a name (no valid pid), producing a UUID."""
+        result = resolve_entities(ips=(), users=(), hosts=(), processes=(":",))
+        assert len(result) == 1  # uuid5(NS_PROCESS, ":") is valid
+
     def test_backward_compat_no_kwargs(self) -> None:
         """Existing callers passing only ips/users/hosts still work."""
         result = resolve_entities(("10.0.1.1",), ("admin",), ("web-01",))
@@ -281,6 +291,13 @@ class TestInferEntityTypeExtended:
             related_domains=("evil.com",),
         )
         assert infer_entity_type(event) == "host"
+
+    def test_malformed_ip_falls_through_to_user(self) -> None:
+        event = self._make_event(
+            related_ips=("not-an-ip",),
+            related_users=("admin",),
+        )
+        assert infer_entity_type(event) == "user"
 
 
 class TestPrimaryEntityValueExtended:

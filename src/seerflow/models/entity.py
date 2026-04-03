@@ -261,7 +261,7 @@ def _resolve_processes(raw_processes: tuple[str, ...]) -> list[str]:
 
         try:
             if name is not None and pid is not None:
-                uid = str(generate_process_id(hostname="", pid=pid, start_time=0))
+                uid = str(uuid.uuid5(NS_PROCESS, f"{name}:{pid}"))
             elif name is not None:
                 uid = str(uuid.uuid5(NS_PROCESS, name))
             else:
@@ -375,10 +375,15 @@ def infer_entity_type(event: SeerflowEvent) -> EntityType:
     """Infer the primary entity type from populated related_* fields.
 
     Priority: ip > user > host > domain > file > process.
+    Validates first IP to stay in sync with primary_entity_value().
     Falls back to ``"ip"`` when no related fields are populated.
     """
     if event.related_ips:
-        return "ip"
+        try:
+            ipaddress.ip_address(event.related_ips[0].strip())
+            return "ip"
+        except ValueError:
+            pass  # fall through to next type
     if event.related_users:
         return "user"
     if event.related_hosts:
