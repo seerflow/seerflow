@@ -155,3 +155,23 @@ class TestInferEntityType:
     def test_fallback_ip_when_nothing(self) -> None:
         event = self._make_event()
         assert infer_entity_type(event) == "ip"
+
+
+class TestNFCNormalization:
+    """NFC normalization prevents duplicate UUIDs from different Unicode forms."""
+
+    def test_user_id_nfc_composed_equals_decomposed(self) -> None:
+        import unicodedata
+
+        composed = "caf\u00e9"  # precomposed e-acute
+        decomposed = unicodedata.normalize("NFD", composed)
+        assert composed != decomposed  # sanity: they are different byte sequences
+        assert generate_user_id(composed, "") == generate_user_id(decomposed, "")
+
+    def test_host_id_nfc_composed_equals_decomposed(self) -> None:
+        import unicodedata
+
+        composed = "h\u00f6st"  # precomposed o-umlaut
+        decomposed = unicodedata.normalize("NFD", composed)
+        assert composed != decomposed
+        assert generate_host_id(composed) == generate_host_id(decomposed)

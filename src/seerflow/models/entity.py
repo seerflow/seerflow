@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import unicodedata
 import uuid
 from typing import TYPE_CHECKING
 
@@ -158,7 +159,7 @@ def normalize_username(raw: str, default_domain: str = "") -> tuple[str, str]:
 
 def generate_user_id(username: str, domain: str) -> uuid.UUID:
     """Deterministic UUID5 for a user entity."""
-    username = username.strip()
+    username = unicodedata.normalize("NFC", username.strip())
     if not username:
         msg = "username is empty"
         raise ValueError(msg)
@@ -175,7 +176,7 @@ def generate_ip_id(raw: str) -> uuid.UUID:
 
 def generate_host_id(hostname: str, domain: str = "") -> uuid.UUID:
     """Deterministic UUID5 for a host entity."""
-    h = hostname.strip().lower().rstrip(".")
+    h = unicodedata.normalize("NFC", hostname.strip().lower().rstrip("."))
     if not h:
         msg = "hostname is empty"
         raise ValueError(msg)
