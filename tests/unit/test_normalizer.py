@@ -191,6 +191,41 @@ class TestNormalizerExports:
         assert "EventNormalizer" in seerflow.parsing.__all__
 
 
+class TestNormalizerExtendedEntities:
+    """Tests for file/domain/process entity population."""
+
+    def test_file_entities_populated(self) -> None:
+        normalizer = EventNormalizer()
+        raw = _make_raw("Reading /etc/passwd for config")
+        result = normalizer.normalize(raw)
+        assert "/etc/passwd" in result.related_files
+
+    def test_domain_entities_populated(self) -> None:
+        normalizer = EventNormalizer()
+        raw = _make_raw("DNS query for evil.com from 10.0.1.1")
+        result = normalizer.normalize(raw)
+        assert "evil.com" in result.related_domains
+
+    def test_process_entities_populated(self) -> None:
+        normalizer = EventNormalizer()
+        raw = _make_raw("sshd[1234]: Accepted publickey for admin")
+        result = normalizer.normalize(raw)
+        assert any("sshd" in p for p in result.related_processes)
+
+    def test_all_six_types_extracted(self) -> None:
+        normalizer = EventNormalizer()
+        raw = _make_raw(
+            "sshd[1234]: user=admin host=web-01 from 10.0.1.1 reading /etc/shadow query evil.com"
+        )
+        result = normalizer.normalize(raw)
+        assert result.related_ips
+        assert result.related_users
+        assert result.related_hosts
+        assert result.related_files
+        assert result.related_domains
+        assert result.related_processes
+
+
 class TestConstants:
     def test_constants_importable(self) -> None:
         from seerflow.parsing._constants import (

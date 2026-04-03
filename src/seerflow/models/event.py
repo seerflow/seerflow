@@ -107,6 +107,9 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
     related_ips: tuple[str, ...] = ()
     related_users: tuple[str, ...] = ()
     related_hosts: tuple[str, ...] = ()
+    related_files: tuple[str, ...] = ()
+    related_domains: tuple[str, ...] = ()
+    related_processes: tuple[str, ...] = ()
     related_hashes: tuple[str, ...] = ()  # File/process hashes for IoC matching
 
     # MITRE ATT&CK
