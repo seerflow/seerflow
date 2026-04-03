@@ -14,6 +14,10 @@ EDGE_TYPE_MAP: dict[tuple[str, str], str] = {
     ("user", "ip"): "authenticated_from",
     ("user", "host"): "logged_into",
     ("ip", "host"): "has_ip",
+    ("user", "file"): "accessed",
+    ("process", "process"): "spawned_by",
+    ("ip", "domain"): "resolved_to",
+    ("host", "ip"): "connected_to",
 }
 
 
@@ -36,6 +40,9 @@ def infer_edges(event: SeerflowEvent) -> list[EdgeRecord]:
     ip_uuids = resolve_entities(event.related_ips, (), ())
     user_uuids = resolve_entities((), event.related_users, ())
     host_uuids = resolve_entities((), (), event.related_hosts)
+    domain_uuids = resolve_entities((), (), (), domains=event.related_domains)
+    file_uuids = resolve_entities((), (), (), files=event.related_files)
+    process_uuids = resolve_entities((), (), (), processes=event.related_processes)
 
     for ip_uuid in ip_uuids:
         typed.append(("ip", ip_uuid))
@@ -43,18 +50,31 @@ def infer_edges(event: SeerflowEvent) -> list[EdgeRecord]:
         typed.append(("user", user_uuid))
     for host_uuid in host_uuids:
         typed.append(("host", host_uuid))
+    for domain_uuid in domain_uuids:
+        typed.append(("domain", domain_uuid))
+    for file_uuid in file_uuids:
+        typed.append(("file", file_uuid))
+    for process_uuid in process_uuids:
+        typed.append(("process", process_uuid))
 
     edges: list[EdgeRecord] = []
     for i, (type_a, uuid_a) in enumerate(typed):
         for type_b, uuid_b in typed[i + 1 :]:
             if type_a == type_b:
+                # Special case: process→process spawned_by
+                if type_a == "process":
+                    edges.append(
+                        EdgeRecord(source_id=uuid_a, target_id=uuid_b, rel_type="spawned_by")
+                    )
                 continue
-            rel = EDGE_TYPE_MAP.get((type_a, type_b))
-            if rel is not None:
-                edges.append(EdgeRecord(source_id=uuid_a, target_id=uuid_b, rel_type=rel))
-                continue
-            rel = EDGE_TYPE_MAP.get((type_b, type_a))
-            if rel is not None:
-                edges.append(EdgeRecord(source_id=uuid_b, target_id=uuid_a, rel_type=rel))
+            # Check both directions independently — the map may define different
+            # semantic relations for each direction (e.g. ip→host "has_ip" and
+            # host→ip "connected_to").
+            rel_ab = EDGE_TYPE_MAP.get((type_a, type_b))
+            if rel_ab is not None:
+                edges.append(EdgeRecord(source_id=uuid_a, target_id=uuid_b, rel_type=rel_ab))
+            rel_ba = EDGE_TYPE_MAP.get((type_b, type_a))
+            if rel_ba is not None:
+                edges.append(EdgeRecord(source_id=uuid_b, target_id=uuid_a, rel_type=rel_ba))
 
     return edges
