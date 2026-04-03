@@ -62,6 +62,9 @@ def _make_handler(
             seerflow_event.related_ips,
             seerflow_event.related_users,
             seerflow_event.related_hosts,
+            files=seerflow_event.related_files,
+            domains=seerflow_event.related_domains,
+            processes=seerflow_event.related_processes,
         )
         if entity_refs:
             seerflow_event = msgspec.structs.replace(
@@ -221,6 +224,9 @@ def _make_handler(
                 ("IPs", seerflow_event.related_ips),
                 ("Users", seerflow_event.related_users),
                 ("Hosts", seerflow_event.related_hosts),
+                ("Domains", seerflow_event.related_domains),
+                ("Files", seerflow_event.related_files),
+                ("Processes", seerflow_event.related_processes),
             ):
                 if vals:
                     entity_parts.append(f"{label}: {', '.join(_safe(v) for v in vals[:5])}")
