@@ -95,6 +95,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         _log.info("Graph: loaded %d edges", len(edge_rows))
     except Exception:
         _log.warning("Graph edge loading failed — starting with empty graph", exc_info=True)
+    storage.set_entity_graph(entity_graph)
 
     # Build entity window buffer for temporal correlation
     from seerflow.correlation.window import EntityWindowBuffer

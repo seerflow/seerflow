@@ -416,12 +416,13 @@ class WriteBuffer:
 class SqliteBackend:
     """SQLite storage backend implementing LogStore.write_events."""
 
-    __slots__ = ("_closed", "_conn", "_write_buffer")
+    __slots__ = ("_closed", "_conn", "_entity_graph", "_write_buffer")
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
         self._write_buffer: WriteBuffer | None = None
         self._closed = False
+        self._entity_graph: EntityGraph | None = None
 
     @classmethod
     async def connect(cls, config: StorageConfig) -> SqliteBackend:
@@ -574,6 +575,16 @@ class SqliteBackend:
             rows = await cursor.fetchall()
 
         return [msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows]
+
+    def set_entity_graph(self, graph: EntityGraph) -> None:
+        """Set the EntityGraph for relationship queries."""
+        self._entity_graph = graph
+
+    async def get_related(self, entity_uuid: str) -> list[EntityRelation]:
+        """Get entities related to the given entity via graph edges."""
+        if self._entity_graph is None:
+            return []
+        return get_related_from_graph(self._entity_graph, entity_uuid)
 
     async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]:
         """Full-text search using FTS5 phrase matching."""
