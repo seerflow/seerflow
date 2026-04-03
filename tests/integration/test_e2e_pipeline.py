@@ -330,3 +330,73 @@ async def test_six_type_entities_flow_through_pipeline(tmp_path: Path) -> None:
     assert graph.edge_count >= 4, f"expected >= 4 graph edges, got {graph.edge_count}"
 
     await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# EntityStore integration test (timeline + related)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+async def test_entity_store_timeline_and_related(tmp_path: Path) -> None:
+    """EntityStore queries: get_timeline returns events for an entity,
+    get_related returns graph neighbors."""
+
+    from seerflow.graph.entity_graph import EntityGraph
+    from seerflow.models.entity import generate_ip_id, generate_user_id
+    from seerflow.models.query import TimeRange
+    from seerflow.storage.protocols import EntityStore
+
+    config_yaml = tmp_path / "seerflow.yaml"
+    config_yaml.write_text(
+        "storage:\n"
+        f"  data_dir: {tmp_path}\n"
+        "receivers:\n"
+        "  syslog_enabled: false\n"
+        "  otlp_grpc_enabled: false\n"
+        "  otlp_http_enabled: false\n"
+        "  webhook_enabled: false\n"
+    )
+    config = load_config(str(config_yaml))
+    storage = await SqliteBackend.connect(config.storage)
+    ensemble = DetectionEnsemble(config.detection)
+    sigma = SigmaEngine()
+    sigma.load_bundled()
+    entity_graph = EntityGraph()
+
+    storage.set_entity_graph(entity_graph)
+
+    handler = _make_handler(
+        ensemble,
+        storage,
+        save_interval_ns=999_999_999_999,
+        sigma_holder=EngineHolder(engine=sigma),
+        entity_graph=entity_graph,
+    )
+
+    # Message that creates a known user + IP pair
+    message = "sshd[1234]: user=admin host=web-01 from 10.0.1.1 Failed password"
+    before_ns = time.time_ns()
+    await handler(_raw(message))
+    after_ns = time.time_ns()
+    await _flush(storage)
+
+    # Derive entity UUIDs the same way the pipeline does
+    user_uuid = str(generate_user_id("admin", ""))
+    ip_uuid = str(generate_ip_id("10.0.1.1"))
+
+    # --- get_timeline: should return the event we just processed ---
+    time_range = TimeRange(start_ns=before_ns - 1, end_ns=after_ns + 1)
+    timeline = await storage.get_timeline(user_uuid, time_range)
+    assert len(timeline) >= 1, f"expected >= 1 event in timeline, got {len(timeline)}"
+
+    # --- get_related: graph neighbor (user → ip edge) should be returned ---
+    related = await storage.get_related(user_uuid)
+    assert any(r.entity_uuid == ip_uuid for r in related), (
+        f"expected IP {ip_uuid} in related entities, got {related}"
+    )
+
+    # --- isinstance check: SqliteBackend satisfies EntityStore Protocol ---
+    assert isinstance(storage, EntityStore)
+
+    await storage.close()
