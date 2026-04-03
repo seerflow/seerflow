@@ -67,14 +67,12 @@ def infer_edges(event: SeerflowEvent) -> list[EdgeRecord]:
                         EdgeRecord(source_id=uuid_a, target_id=uuid_b, rel_type="spawned_by")
                     )
                 continue
-            # Check both directions independently — the map may define different
-            # semantic relations for each direction (e.g. ip→host "has_ip" and
-            # host→ip "connected_to").
-            rel_ab = EDGE_TYPE_MAP.get((type_a, type_b))
-            if rel_ab is not None:
-                edges.append(EdgeRecord(source_id=uuid_a, target_id=uuid_b, rel_type=rel_ab))
-            rel_ba = EDGE_TYPE_MAP.get((type_b, type_a))
-            if rel_ba is not None:
-                edges.append(EdgeRecord(source_id=uuid_b, target_id=uuid_a, rel_type=rel_ba))
+            rel = EDGE_TYPE_MAP.get((type_a, type_b))
+            if rel is not None:
+                edges.append(EdgeRecord(source_id=uuid_a, target_id=uuid_b, rel_type=rel))
+                continue
+            rel = EDGE_TYPE_MAP.get((type_b, type_a))
+            if rel is not None:
+                edges.append(EdgeRecord(source_id=uuid_b, target_id=uuid_a, rel_type=rel))
 
     return edges

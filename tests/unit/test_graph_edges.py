@@ -94,7 +94,7 @@ class TestInferEdges:
         has_ip = [e for e in edges if e.rel_type == "has_ip"]
         assert len(has_ip) == 1
 
-    def test_all_three_types_produces_four_edges(self) -> None:
+    def test_all_three_types_produces_three_edges(self) -> None:
         from seerflow.models.entity import (
             generate_host_id,
             generate_ip_id,
@@ -113,10 +113,9 @@ class TestInferEdges:
             entity_refs=(ip_uuid, user_uuid, host_uuid),
         )
         edges = infer_edges(event)
-        # ip+host generates both has_ip (ip→host) and connected_to (host→ip)
-        assert len(edges) == 4
+        assert len(edges) == 3
         rel_types = {e.rel_type for e in edges}
-        assert rel_types == {"authenticated_from", "logged_into", "has_ip", "connected_to"}
+        assert rel_types == {"authenticated_from", "logged_into", "has_ip"}
 
     def test_no_entities_returns_empty(self) -> None:
         event = _make_event()
@@ -218,4 +217,4 @@ class TestInferEdgesExtended:
         assert "authenticated_from" in rel_types
         assert "resolved_to" in rel_types
         assert "accessed" in rel_types
-        assert len(edges) >= 6
+        assert len(edges) >= 5
