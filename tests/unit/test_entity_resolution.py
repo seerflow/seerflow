@@ -300,6 +300,48 @@ class TestInferEntityTypeExtended:
         assert infer_entity_type(event) == "user"
 
 
+class TestSanitizeForLog:
+    def test_strips_newline(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\nb") == "a\\nb"
+
+    def test_strips_carriage_return(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\rb") == "a\\rb"
+
+    def test_strips_ansi_escape(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\x1bb") == "a\\x1bb"
+
+    def test_strips_tab(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\tb") == "a\\tb"
+
+    def test_strips_null_byte(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\x00b") == "a\\x00b"
+
+    def test_strips_unicode_line_separator(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\u2028b") == "a\\u2028b"
+
+    def test_strips_unicode_paragraph_separator(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\u2029b") == "a\\u2029b"
+
+    def test_clean_string_unchanged(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("hello world") == "hello world"
+
+
 class TestPrimaryEntityValueExtended:
     """Tests for 6-type primary_entity_value()."""
 

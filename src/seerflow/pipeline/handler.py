@@ -41,7 +41,7 @@ def _make_handler(
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
     from seerflow.models.alert import create_ml_alert
-    from seerflow.models.entity import resolve_entities
+    from seerflow.models.entity import resolve_entities, sanitize_for_log
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
 
@@ -215,10 +215,7 @@ def _make_handler(
             )
 
             # Type-prefixed entity logging for safe, structured triage.
-            # Strip newlines/ANSI to prevent log injection from crafted input.
-            def _safe(v: str) -> str:
-                return v.replace("\n", "").replace("\r", "").replace("\x1b", "")
-
+            # Escape control chars to prevent log injection from crafted input.
             entity_parts: list[str] = []
             for label, vals in (
                 ("IPs", seerflow_event.related_ips),
@@ -229,7 +226,7 @@ def _make_handler(
                 ("Processes", seerflow_event.related_processes),
             ):
                 if vals:
-                    entity_parts.append(f"{label}: {', '.join(_safe(v) for v in vals[:5])}")
+                    entity_parts.append(f"{label}: {', '.join(sanitize_for_log(v) for v in vals[:5])}")
             if entity_parts:
                 _log.warning("  entities: %s", ", ".join(entity_parts))
             alert = create_ml_alert(seerflow_event, result)
