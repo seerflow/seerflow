@@ -255,3 +255,86 @@ class TestE2EPipeline:
         elapsed = time.time() - start
 
         assert elapsed < 30.0, f"Pipeline took {elapsed:.1f}s, budget is 30s"
+
+
+# ---------------------------------------------------------------------------
+# 6-type entity pipeline test (standalone, not inside TestE2EPipeline class)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+async def test_six_type_entities_flow_through_pipeline(tmp_path: "Path") -> None:
+    """All 6 entity types (ip, user, host, file, domain, process) should be
+    extracted, resolved to UUID5, and produce graph edges after pipeline processing.
+    """
+    from pathlib import Path as _Path
+
+    from seerflow.graph.entity_graph import EntityGraph
+
+    config_yaml = tmp_path / "seerflow.yaml"
+    config_yaml.write_text(
+        "storage:\n"
+        f"  data_dir: {tmp_path}\n"
+        "receivers:\n"
+        "  syslog_enabled: false\n"
+        "  otlp_grpc_enabled: false\n"
+        "  otlp_http_enabled: false\n"
+        "  webhook_enabled: false\n"
+    )
+    config = load_config(str(config_yaml))
+    storage = await SqliteBackend.connect(config.storage)
+    ensemble = DetectionEnsemble(config.detection)
+    sigma = SigmaEngine()
+    sigma.load_bundled()
+    graph = EntityGraph()
+
+    handler = _make_handler(
+        ensemble,
+        storage,
+        save_interval_ns=999_999_999_999,
+        sigma_holder=EngineHolder(engine=sigma),
+        entity_graph=graph,
+    )
+
+    # Message containing all 6 entity types:
+    # process: sshd[1234]  user: admin  host: web-01  ip: 10.0.1.1
+    # file: /etc/shadow    domain: evil.com
+    message = (
+        "sshd[1234]: user=admin host=web-01 from 10.0.1.1 "
+        "reading /etc/shadow query evil.com"
+    )
+    await handler(_raw(message))
+    await _flush(storage)
+
+    result = await storage.query_events(EventQuery(limit=10))
+    assert result.total == 1
+    event = result.items[0]
+
+    # --- Entity field assertions ---
+    assert "10.0.1.1" in event.related_ips, f"expected IP in {event.related_ips}"
+    assert "admin" in event.related_users, f"expected user in {event.related_users}"
+    assert "web-01" in event.related_hosts, f"expected host in {event.related_hosts}"
+    assert "/etc/shadow" in event.related_files, f"expected file in {event.related_files}"
+    assert "evil.com" in event.related_domains, f"expected domain in {event.related_domains}"
+    assert any(
+        "sshd" in p for p in event.related_processes
+    ), f"expected sshd process in {event.related_processes}"
+
+    # --- entity_refs must be populated (UUID5 strings) ---
+    assert len(event.entity_refs) >= 6, (
+        f"expected at least 6 entity_refs, got {len(event.entity_refs)}: {event.entity_refs}"
+    )
+
+    # --- Graph must have edges (cross-type entity pairs) ---
+    # Vertices only appear when they participate in an edge.  The EDGE_TYPE_MAP
+    # covers user↔ip, user↔host, ip↔host, user↔file, ip↔domain — so ip, user,
+    # host, file, and domain each appear as a vertex (5 total).  The process
+    # entity has no mapped pair in v1, so it does not appear in the graph.
+    assert graph.vertex_count >= 5, (
+        f"expected >= 5 graph vertices, got {graph.vertex_count}"
+    )
+    assert graph.edge_count >= 4, (
+        f"expected >= 4 graph edges, got {graph.edge_count}"
+    )
+
+    await storage.close()
