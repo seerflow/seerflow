@@ -263,11 +263,10 @@ class TestE2EPipeline:
 
 
 @pytest.mark.e2e
-async def test_six_type_entities_flow_through_pipeline(tmp_path: "Path") -> None:
+async def test_six_type_entities_flow_through_pipeline(tmp_path: Path) -> None:
     """All 6 entity types (ip, user, host, file, domain, process) should be
     extracted, resolved to UUID5, and produce graph edges after pipeline processing.
     """
-    from pathlib import Path as _Path
 
     from seerflow.graph.entity_graph import EntityGraph
 
@@ -299,10 +298,7 @@ async def test_six_type_entities_flow_through_pipeline(tmp_path: "Path") -> None
     # Message containing all 6 entity types:
     # process: sshd[1234]  user: admin  host: web-01  ip: 10.0.1.1
     # file: /etc/shadow    domain: evil.com
-    message = (
-        "sshd[1234]: user=admin host=web-01 from 10.0.1.1 "
-        "reading /etc/shadow query evil.com"
-    )
+    message = "sshd[1234]: user=admin host=web-01 from 10.0.1.1 reading /etc/shadow query evil.com"
     await handler(_raw(message))
     await _flush(storage)
 
@@ -316,9 +312,9 @@ async def test_six_type_entities_flow_through_pipeline(tmp_path: "Path") -> None
     assert "web-01" in event.related_hosts, f"expected host in {event.related_hosts}"
     assert "/etc/shadow" in event.related_files, f"expected file in {event.related_files}"
     assert "evil.com" in event.related_domains, f"expected domain in {event.related_domains}"
-    assert any(
-        "sshd" in p for p in event.related_processes
-    ), f"expected sshd process in {event.related_processes}"
+    assert any("sshd" in p for p in event.related_processes), (
+        f"expected sshd process in {event.related_processes}"
+    )
 
     # --- entity_refs must be populated (UUID5 strings) ---
     assert len(event.entity_refs) >= 6, (
@@ -330,11 +326,7 @@ async def test_six_type_entities_flow_through_pipeline(tmp_path: "Path") -> None
     # covers user↔ip, user↔host, ip↔host, user↔file, ip↔domain — so ip, user,
     # host, file, and domain each appear as a vertex (5 total).  The process
     # entity has no mapped pair in v1, so it does not appear in the graph.
-    assert graph.vertex_count >= 5, (
-        f"expected >= 5 graph vertices, got {graph.vertex_count}"
-    )
-    assert graph.edge_count >= 4, (
-        f"expected >= 4 graph edges, got {graph.edge_count}"
-    )
+    assert graph.vertex_count >= 5, f"expected >= 5 graph vertices, got {graph.vertex_count}"
+    assert graph.edge_count >= 4, f"expected >= 4 graph edges, got {graph.edge_count}"
 
     await storage.close()
