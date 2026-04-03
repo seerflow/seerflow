@@ -348,24 +348,34 @@ def resolve_entities(
 def primary_entity_value(event: SeerflowEvent) -> str:
     """Return the raw display value for the highest-priority entity.
 
-    Priority: ip > user > host.  Returns ``""`` when no related
-    fields are populated.  Shares the same priority order as
-    :func:`infer_entity_type`.
+    Priority: ip > user > host > domain > file > process.
+    Returns ``""`` when no related fields are populated.
+    Validates IPs before returning to stay in sync with resolve_entities().
     """
     if event.related_ips:
-        return event.related_ips[0]
+        try:
+            ipaddress.ip_address(event.related_ips[0].strip())
+            return event.related_ips[0]
+        except ValueError:
+            pass  # fall through to next type
     if event.related_users:
         return event.related_users[0]
     if event.related_hosts:
         return event.related_hosts[0]
+    if event.related_domains:
+        return event.related_domains[0]
+    if event.related_files:
+        return event.related_files[0]
+    if event.related_processes:
+        return event.related_processes[0]
     return ""
 
 
 def infer_entity_type(event: SeerflowEvent) -> EntityType:
     """Infer the primary entity type from populated related_* fields.
 
-    Priority: ip > user > host.  Falls back to ``"ip"`` when no
-    related fields are populated (matches current default behaviour).
+    Priority: ip > user > host > domain > file > process.
+    Falls back to ``"ip"`` when no related fields are populated.
     """
     if event.related_ips:
         return "ip"
@@ -373,4 +383,10 @@ def infer_entity_type(event: SeerflowEvent) -> EntityType:
         return "user"
     if event.related_hosts:
         return "host"
+    if event.related_domains:
+        return "domain"
+    if event.related_files:
+        return "file"
+    if event.related_processes:
+        return "process"
     return "ip"

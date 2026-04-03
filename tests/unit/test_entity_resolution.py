@@ -17,6 +17,7 @@ from seerflow.models.entity import (
     generate_user_id,
     infer_entity_type,
     normalize_username,
+    primary_entity_value,
     resolve_entities,
 )
 from seerflow.models.event import SeerflowEvent
@@ -244,3 +245,89 @@ class TestNFCNormalization:
         decomposed = unicodedata.normalize("NFD", composed)
         assert composed != decomposed
         assert generate_host_id(composed) == generate_host_id(decomposed)
+
+
+class TestInferEntityTypeExtended:
+    """Tests for 6-type priority in infer_entity_type()."""
+
+    def _make_event(self, **kwargs: tuple[str, ...]) -> SeerflowEvent:
+        import uuid as _uuid
+
+        return SeerflowEvent(
+            event_id=_uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            severity_id=6,
+            message="test",
+            source_type="syslog",
+            **kwargs,
+        )
+
+    def test_domain_when_no_ip_user_host(self) -> None:
+        event = self._make_event(related_domains=("evil.com",))
+        assert infer_entity_type(event) == "domain"
+
+    def test_file_when_no_ip_user_host_domain(self) -> None:
+        event = self._make_event(related_files=("/etc/passwd",))
+        assert infer_entity_type(event) == "file"
+
+    def test_process_when_no_other_types(self) -> None:
+        event = self._make_event(related_processes=("sshd:1234",))
+        assert infer_entity_type(event) == "process"
+
+    def test_domain_loses_to_host(self) -> None:
+        event = self._make_event(
+            related_hosts=("web-01",),
+            related_domains=("evil.com",),
+        )
+        assert infer_entity_type(event) == "host"
+
+
+class TestPrimaryEntityValueExtended:
+    """Tests for 6-type primary_entity_value()."""
+
+    def _make_event(self, **kwargs: tuple[str, ...]) -> SeerflowEvent:
+        import uuid as _uuid
+
+        return SeerflowEvent(
+            event_id=_uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            severity_id=6,
+            message="test",
+            source_type="syslog",
+            **kwargs,
+        )
+
+    def test_returns_domain_value(self) -> None:
+        event = self._make_event(related_domains=("evil.com",))
+        assert primary_entity_value(event) == "evil.com"
+
+    def test_returns_file_value(self) -> None:
+        event = self._make_event(related_files=("/etc/passwd",))
+        assert primary_entity_value(event) == "/etc/passwd"
+
+    def test_returns_process_value(self) -> None:
+        event = self._make_event(related_processes=("sshd:1234",))
+        assert primary_entity_value(event) == "sshd:1234"
+
+    def test_malformed_ip_falls_through_to_user(self) -> None:
+        event = self._make_event(
+            related_ips=("not-an-ip",),
+            related_users=("admin",),
+        )
+        assert primary_entity_value(event) == "admin"
+
+    def test_malformed_ip_falls_through_to_domain(self) -> None:
+        event = self._make_event(
+            related_ips=("not-an-ip",),
+            related_domains=("evil.com",),
+        )
+        assert primary_entity_value(event) == "evil.com"
+
+    def test_valid_ip_returned_normally(self) -> None:
+        event = self._make_event(
+            related_ips=("10.0.1.1",),
+            related_users=("admin",),
+        )
+        assert primary_entity_value(event) == "10.0.1.1"
