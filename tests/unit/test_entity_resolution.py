@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     import pytest
 
 from seerflow.models.entity import (
+    generate_domain_id,
+    generate_file_id,
     generate_host_id,
     generate_ip_id,
     generate_user_id,
@@ -155,6 +157,73 @@ class TestInferEntityType:
     def test_fallback_ip_when_nothing(self) -> None:
         event = self._make_event()
         assert infer_entity_type(event) == "ip"
+
+
+class TestResolveEntitiesExtended:
+    """Tests for file/domain/process resolution in resolve_entities()."""
+
+    def test_domain_resolved_to_uuid5(self) -> None:
+        result = resolve_entities(ips=(), users=(), hosts=(), domains=("evil.com",))
+        assert len(result) == 1
+        assert result[0] == str(generate_domain_id("evil.com"))
+
+    def test_file_resolved_to_uuid5(self) -> None:
+        result = resolve_entities(ips=(), users=(), hosts=(), files=("/etc/passwd",))
+        assert len(result) == 1
+        assert result[0] == str(generate_file_id("/etc/passwd"))
+
+    def test_process_name_pid_resolved(self) -> None:
+        result = resolve_entities(ips=(), users=(), hosts=(), processes=("sshd:1234",))
+        assert len(result) == 1
+        parsed = uuid.UUID(result[0])
+        assert parsed.version == 5
+
+    def test_process_dedup_bare_pid_dropped_when_name_pid_exists(self) -> None:
+        result_both = resolve_entities(
+            ips=(),
+            users=(),
+            hosts=(),
+            processes=("sshd:1234", "1234"),
+        )
+        result_named = resolve_entities(
+            ips=(),
+            users=(),
+            hosts=(),
+            processes=("sshd:1234",),
+        )
+        assert result_both == result_named
+
+    def test_process_bare_pid_kept_when_no_name_pid(self) -> None:
+        result = resolve_entities(ips=(), users=(), hosts=(), processes=("5678",))
+        assert len(result) == 1
+
+    def test_process_bare_name_kept(self) -> None:
+        result = resolve_entities(ips=(), users=(), hosts=(), processes=("nginx",))
+        assert len(result) == 1
+
+    def test_six_type_order_is_ip_user_host_domain_file_process(self) -> None:
+        result = resolve_entities(
+            ips=("10.0.1.1",),
+            users=("admin",),
+            hosts=("web-01",),
+            domains=("example.com",),
+            files=("/tmp/test",),
+            processes=("sshd:22",),
+        )
+        assert len(result) == 6
+        assert result[0] == str(generate_ip_id("10.0.1.1"))
+        assert result[3] == str(generate_domain_id("example.com"))
+        assert result[4] == str(generate_file_id("/tmp/test"))
+
+    def test_malformed_domain_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            result = resolve_entities(ips=(), users=(), hosts=(), domains=("",))
+        assert len(result) == 0
+
+    def test_backward_compat_no_kwargs(self) -> None:
+        """Existing callers passing only ips/users/hosts still work."""
+        result = resolve_entities(("10.0.1.1",), ("admin",), ("web-01",))
+        assert len(result) == 3
 
 
 class TestNFCNormalization:

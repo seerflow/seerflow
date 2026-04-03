@@ -220,17 +220,77 @@ def _sanitize_for_log(value: str) -> str:
     return value.replace("\n", "\\n").replace("\r", "\\r").replace("\x1b", "\\x1b")
 
 
+def _parse_process_string(raw: str) -> tuple[str | None, int | None]:
+    """Parse process extraction format into (name, pid) components.
+
+    Formats: "name:pid" -> (name, pid), bare digits -> (None, pid), bare name -> (name, None).
+    """
+    if ":" in raw:
+        parts = raw.rsplit(":", 1)
+        try:
+            return parts[0], int(parts[1])
+        except (ValueError, IndexError):
+            return raw, None
+    if raw.isdigit():
+        return None, int(raw)
+    return raw, None
+
+
+def _resolve_processes(raw_processes: tuple[str, ...]) -> list[str]:
+    """Resolve process strings to UUID5 with cross-format dedup.
+
+    Dedup rule: bare PIDs are dropped when a name:pid entry shares the same PID.
+    """
+    parsed: list[tuple[str, str | None, int | None]] = []
+    for raw in raw_processes:
+        name, pid = _parse_process_string(raw.strip())
+        parsed.append((raw, name, pid))
+
+    # Build set of PIDs that appear in name:pid entries
+    named_pids: set[int] = set()
+    for _raw, name, pid in parsed:
+        if name is not None and pid is not None:
+            named_pids.add(pid)
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for raw, name, pid in parsed:
+        # Drop bare PIDs that are covered by a name:pid entry
+        if name is None and pid is not None and pid in named_pids:
+            continue
+
+        try:
+            if name is not None and pid is not None:
+                uid = str(generate_process_id(hostname="", pid=pid, start_time=0))
+            elif name is not None:
+                uid = str(uuid.uuid5(NS_PROCESS, name))
+            else:
+                uid = str(uuid.uuid5(NS_PROCESS, str(pid)))
+
+            if uid not in seen:
+                seen.add(uid)
+                resolved.append(uid)
+        except (ValueError, TypeError):
+            _log.warning("Skipping malformed process: %s", _sanitize_for_log(raw))
+
+    return resolved
+
+
 def resolve_entities(
     ips: tuple[str, ...],
     users: tuple[str, ...],
     hosts: tuple[str, ...],
+    *,
+    files: tuple[str, ...] = (),
+    domains: tuple[str, ...] = (),
+    processes: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     """Resolve raw entity values to deterministic UUID5 strings.
 
     Calls the type-specific ``generate_*_id()`` for each value.
     Values that fail normalization (e.g. malformed IPs) are skipped
     with a warning log.  Returns a tuple of UUID5 string representations
-    in order: IPs, then users, then hosts.
+    in priority order: IPs, users, hosts, domains, files, processes.
     """
     resolved: list[str] = []
 
@@ -261,6 +321,26 @@ def resolve_entities(
                 "Skipping malformed host: %s",
                 _sanitize_for_log(raw_host),
             )
+
+    for raw_domain in domains:
+        try:
+            resolved.append(str(generate_domain_id(raw_domain)))
+        except (ValueError, TypeError):
+            _log.warning(
+                "Skipping malformed domain: %s",
+                _sanitize_for_log(raw_domain),
+            )
+
+    for raw_file in files:
+        try:
+            resolved.append(str(generate_file_id(raw_file)))
+        except (ValueError, TypeError):
+            _log.warning(
+                "Skipping malformed file: %s",
+                _sanitize_for_log(raw_file),
+            )
+
+    resolved.extend(_resolve_processes(processes))
 
     return tuple(resolved)
 
