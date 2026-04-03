@@ -320,6 +320,16 @@ class TestInferEntityTypeExtended:
         assert infer_entity_type(event) == "user"
 
 
+class TestFileIdNullByte:
+    def test_null_byte_rejected(self) -> None:
+        import pytest
+
+        from seerflow.models.entity import generate_file_id
+
+        with pytest.raises(ValueError, match="null byte"):
+            generate_file_id("/tmp/\x00injected")
+
+
 class TestSanitizeForLog:
     def test_strips_newline(self) -> None:
         from seerflow.models.entity import sanitize_for_log

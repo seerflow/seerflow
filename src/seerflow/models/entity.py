@@ -198,6 +198,9 @@ def generate_file_id(path: str) -> uuid.UUID:
     if not canonical:
         msg = "file path is empty"
         raise ValueError(msg)
+    if "\x00" in canonical:
+        msg = "file path contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_FILE, canonical)
 
 
