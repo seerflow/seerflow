@@ -210,6 +210,9 @@ def generate_domain_id(domain: str) -> uuid.UUID:
     if not canonical:
         msg = "domain is empty"
         raise ValueError(msg)
+    if "\x00" in canonical:
+        msg = "domain contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_DOMAIN, canonical)
 
 

@@ -330,6 +330,16 @@ class TestFileIdNullByte:
             generate_file_id("/tmp/\x00injected")
 
 
+class TestDomainIdNullByte:
+    def test_null_byte_rejected(self) -> None:
+        import pytest
+
+        from seerflow.models.entity import generate_domain_id
+
+        with pytest.raises(ValueError, match="null byte"):
+            generate_domain_id("evil\x00.com")
+
+
 class TestSanitizeForLog:
     def test_strips_newline(self) -> None:
         from seerflow.models.entity import sanitize_for_log
