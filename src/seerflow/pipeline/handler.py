@@ -41,7 +41,7 @@ def _make_handler(
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
     from seerflow.models.alert import create_ml_alert
-    from seerflow.models.entity import resolve_entities
+    from seerflow.models.entity import resolve_entities, sanitize_for_log
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
 
@@ -57,15 +57,67 @@ def _make_handler(
         nonlocal event_count, anomaly_count, last_save_ns
         seerflow_event = normalizer.normalize(event)
 
-        # Resolve entities to deterministic UUID5 strings
-        entity_refs = resolve_entities(
-            seerflow_event.related_ips,
-            seerflow_event.related_users,
-            seerflow_event.related_hosts,
-            files=seerflow_event.related_files,
-            domains=seerflow_event.related_domains,
-            processes=seerflow_event.related_processes,
-        )
+        # Resolve entities to deterministic UUID5 strings.
+        # Resolve each type separately to build both entity_refs (flat tuple
+        # for correlation/risk) and typed_for_edges (typed pairs for edge
+        # inference) in a single pass.
+        typed_for_edges: list[tuple[str, str]] = []
+        entity_refs_list: list[str] = []
+        for _type_name, _raw_vals, _ips, _users, _hosts, _kw in (
+            (
+                "ip",
+                seerflow_event.related_ips,
+                seerflow_event.related_ips,
+                (),
+                (),
+                {},
+            ),
+            (
+                "user",
+                seerflow_event.related_users,
+                (),
+                seerflow_event.related_users,
+                (),
+                {},
+            ),
+            (
+                "host",
+                seerflow_event.related_hosts,
+                (),
+                (),
+                seerflow_event.related_hosts,
+                {},
+            ),
+            (
+                "domain",
+                seerflow_event.related_domains,
+                (),
+                (),
+                (),
+                {"domains": seerflow_event.related_domains},
+            ),
+            (
+                "file",
+                seerflow_event.related_files,
+                (),
+                (),
+                (),
+                {"files": seerflow_event.related_files},
+            ),
+            (
+                "process",
+                seerflow_event.related_processes,
+                (),
+                (),
+                (),
+                {"processes": seerflow_event.related_processes},
+            ),
+        ):
+            if _raw_vals:
+                for _uid in resolve_entities(_ips, _users, _hosts, **_kw):
+                    typed_for_edges.append((_type_name, _uid))
+                    entity_refs_list.append(_uid)
+        entity_refs = tuple(entity_refs_list)
         if entity_refs:
             seerflow_event = msgspec.structs.replace(
                 seerflow_event,
@@ -118,8 +170,8 @@ def _make_handler(
                 _log.warning("Correlation evaluation failed", exc_info=True)
 
         # Update entity graph with inferred edges
-        if entity_graph is not None and entity_refs:
-            edges = infer_edges(seerflow_event)
+        if entity_graph is not None and typed_for_edges:
+            edges = infer_edges(typed_for_edges)
             for edge in edges:
                 entity_graph.add_edge(
                     edge.source_id,
@@ -215,10 +267,7 @@ def _make_handler(
             )
 
             # Type-prefixed entity logging for safe, structured triage.
-            # Strip newlines/ANSI to prevent log injection from crafted input.
-            def _safe(v: str) -> str:
-                return v.replace("\n", "").replace("\r", "").replace("\x1b", "")
-
+            # Escape control chars to prevent log injection from crafted input.
             entity_parts: list[str] = []
             for label, vals in (
                 ("IPs", seerflow_event.related_ips),
@@ -229,7 +278,9 @@ def _make_handler(
                 ("Processes", seerflow_event.related_processes),
             ):
                 if vals:
-                    entity_parts.append(f"{label}: {', '.join(_safe(v) for v in vals[:5])}")
+                    entity_parts.append(
+                        f"{label}: {', '.join(sanitize_for_log(v) for v in vals[:5])}"
+                    )
             if entity_parts:
                 _log.warning("  entities: %s", ", ".join(entity_parts))
             alert = create_ml_alert(seerflow_event, result)

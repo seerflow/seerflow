@@ -256,6 +256,26 @@ class TestNFCNormalization:
         assert composed != decomposed
         assert generate_host_id(composed) == generate_host_id(decomposed)
 
+    def test_file_id_nfc_composed_equals_decomposed(self) -> None:
+        import unicodedata
+
+        from seerflow.models.entity import generate_file_id
+
+        composed = "/tmp/caf\u00e9.log"
+        decomposed = unicodedata.normalize("NFD", composed)
+        assert composed != decomposed
+        assert generate_file_id(composed) == generate_file_id(decomposed)
+
+    def test_domain_id_nfc_composed_equals_decomposed(self) -> None:
+        import unicodedata
+
+        from seerflow.models.entity import generate_domain_id
+
+        composed = "caf\u00e9.com"
+        decomposed = unicodedata.normalize("NFD", composed)
+        assert composed != decomposed
+        assert generate_domain_id(composed) == generate_domain_id(decomposed)
+
 
 class TestInferEntityTypeExtended:
     """Tests for 6-type priority in infer_entity_type()."""
@@ -298,6 +318,68 @@ class TestInferEntityTypeExtended:
             related_users=("admin",),
         )
         assert infer_entity_type(event) == "user"
+
+
+class TestFileIdNullByte:
+    def test_null_byte_rejected(self) -> None:
+        import pytest
+
+        from seerflow.models.entity import generate_file_id
+
+        with pytest.raises(ValueError, match="null byte"):
+            generate_file_id("/tmp/\x00injected")
+
+
+class TestDomainIdNullByte:
+    def test_null_byte_rejected(self) -> None:
+        import pytest
+
+        from seerflow.models.entity import generate_domain_id
+
+        with pytest.raises(ValueError, match="null byte"):
+            generate_domain_id("evil\x00.com")
+
+
+class TestSanitizeForLog:
+    def test_strips_newline(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\nb") == "a\\nb"
+
+    def test_strips_carriage_return(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\rb") == "a\\rb"
+
+    def test_strips_ansi_escape(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\x1bb") == "a\\x1bb"
+
+    def test_strips_tab(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\tb") == "a\\tb"
+
+    def test_strips_null_byte(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\x00b") == "a\\x00b"
+
+    def test_strips_unicode_line_separator(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\u2028b") == "a\\u2028b"
+
+    def test_strips_unicode_paragraph_separator(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("a\u2029b") == "a\\u2029b"
+
+    def test_clean_string_unchanged(self) -> None:
+        from seerflow.models.entity import sanitize_for_log
+
+        assert sanitize_for_log("hello world") == "hello world"
 
 
 class TestPrimaryEntityValueExtended:

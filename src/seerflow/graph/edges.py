@@ -1,14 +1,8 @@
-"""Edge inference from SeerflowEvent entity pairs."""
+"""Edge inference from typed entity pairs."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from seerflow.models.entity import resolve_entities
-
-if TYPE_CHECKING:
-    from seerflow.models.event import SeerflowEvent
 
 EDGE_TYPE_MAP: dict[tuple[str, str], str] = {
     ("user", "ip"): "authenticated_from",
@@ -28,38 +22,26 @@ class EdgeRecord:
     rel_type: str
 
 
-def infer_edges(event: SeerflowEvent) -> list[EdgeRecord]:
-    """Infer typed edges from entity pairs in an event.
+def infer_edges(typed_entities: list[tuple[str, str]]) -> list[EdgeRecord]:
+    """Infer typed edges from pre-resolved (type, uuid) pairs.
 
     Uses the entity type pair mapping to determine relationship types.
     Process-process pairs produce a ``spawned_by`` edge (inline special case,
     not in EDGE_TYPE_MAP, since the map only handles cross-type pairs).
     Returns one edge per known (source_type, target_type) combination.
+
+    **Limitation:** ``spawned_by`` direction is determined by extraction order
+    (first process is source), not by parent-child semantics. With N > 2
+    processes, N*(N-1)/2 edges are created — a full mesh, not a tree.
+
+    Args:
+        typed_entities: List of ``(entity_type, uuid_str)`` tuples, already
+            resolved by the caller.  Types should be one of: ``ip``, ``user``,
+            ``host``, ``domain``, ``file``, ``process``.
     """
-    typed: list[tuple[str, str]] = []
-    ip_uuids = resolve_entities(event.related_ips, (), ())
-    user_uuids = resolve_entities((), event.related_users, ())
-    host_uuids = resolve_entities((), (), event.related_hosts)
-    domain_uuids = resolve_entities((), (), (), domains=event.related_domains)
-    file_uuids = resolve_entities((), (), (), files=event.related_files)
-    process_uuids = resolve_entities((), (), (), processes=event.related_processes)
-
-    for ip_uuid in ip_uuids:
-        typed.append(("ip", ip_uuid))
-    for user_uuid in user_uuids:
-        typed.append(("user", user_uuid))
-    for host_uuid in host_uuids:
-        typed.append(("host", host_uuid))
-    for domain_uuid in domain_uuids:
-        typed.append(("domain", domain_uuid))
-    for file_uuid in file_uuids:
-        typed.append(("file", file_uuid))
-    for process_uuid in process_uuids:
-        typed.append(("process", process_uuid))
-
     edges: list[EdgeRecord] = []
-    for i, (type_a, uuid_a) in enumerate(typed):
-        for type_b, uuid_b in typed[i + 1 :]:
+    for i, (type_a, uuid_a) in enumerate(typed_entities):
+        for type_b, uuid_b in typed_entities[i + 1 :]:
             if type_a == type_b:
                 # Special case: process→process spawned_by
                 if type_a == "process":

@@ -30,6 +30,7 @@ from seerflow.models.entity import (
     normalize_username,
     primary_entity_value,
     resolve_entities,
+    sanitize_for_log,
 )
 from seerflow.models.event import AttrValue, SeerflowEvent, SeverityLevel
 from seerflow.models.query import (
@@ -78,4 +79,5 @@ __all__ = [
     "normalize_username",
     "primary_entity_value",
     "resolve_entities",
+    "sanitize_for_log",
 ]

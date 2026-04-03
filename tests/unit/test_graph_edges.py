@@ -2,37 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
-
 from seerflow.graph.edges import EDGE_TYPE_MAP, EdgeRecord, infer_edges
-from seerflow.models.event import SeerflowEvent
-
-
-def _make_event(
-    *,
-    related_ips: tuple[str, ...] = (),
-    related_users: tuple[str, ...] = (),
-    related_hosts: tuple[str, ...] = (),
-    related_files: tuple[str, ...] = (),
-    related_domains: tuple[str, ...] = (),
-    related_processes: tuple[str, ...] = (),
-    entity_refs: tuple[str, ...] = (),
-) -> SeerflowEvent:
-    return SeerflowEvent(
-        event_id=uuid.uuid4(),
-        timestamp_ns=1_700_000_000_000_000_000,
-        observed_ns=1_700_000_000_000_000_000,
-        severity_id=6,
-        message="test",
-        source_type="syslog",
-        related_ips=related_ips,
-        related_users=related_users,
-        related_hosts=related_hosts,
-        related_files=related_files,
-        related_domains=related_domains,
-        related_processes=related_processes,
-        entity_refs=entity_refs,
-    )
 
 
 class TestEdgeTypeMap:
@@ -62,12 +32,8 @@ class TestInferEdges:
         u, d = normalize_username("admin")
         user_uuid = str(generate_user_id(u, d))
         ip_uuid = str(generate_ip_id("10.0.1.1"))
-        event = _make_event(
-            related_ips=("10.0.1.1",),
-            related_users=("admin",),
-            entity_refs=(ip_uuid, user_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [("ip", ip_uuid), ("user", user_uuid)]
+        edges = infer_edges(typed_entities=typed)
         assert len(edges) >= 1
         auth_edges = [e for e in edges if e.rel_type == "authenticated_from"]
         assert len(auth_edges) == 1
@@ -79,12 +45,8 @@ class TestInferEdges:
 
         ip_uuid = str(generate_ip_id("10.0.1.1"))
         host_uuid = str(generate_host_id("web-01"))
-        event = _make_event(
-            related_ips=("10.0.1.1",),
-            related_hosts=("web-01",),
-            entity_refs=(ip_uuid, host_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [("ip", ip_uuid), ("host", host_uuid)]
+        edges = infer_edges(typed_entities=typed)
         has_ip = [e for e in edges if e.rel_type == "has_ip"]
         assert len(has_ip) == 1
 
@@ -100,28 +62,21 @@ class TestInferEdges:
         u, d = normalize_username("admin")
         user_uuid = str(generate_user_id(u, d))
         host_uuid = str(generate_host_id("web-01"))
-        event = _make_event(
-            related_ips=("10.0.1.1",),
-            related_users=("admin",),
-            related_hosts=("web-01",),
-            entity_refs=(ip_uuid, user_uuid, host_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [("ip", ip_uuid), ("user", user_uuid), ("host", host_uuid)]
+        edges = infer_edges(typed_entities=typed)
         assert len(edges) == 3
         rel_types = {e.rel_type for e in edges}
         assert rel_types == {"authenticated_from", "logged_into", "has_ip"}
 
     def test_no_entities_returns_empty(self) -> None:
-        event = _make_event()
-        edges = infer_edges(event)
+        edges = infer_edges(typed_entities=[])
         assert edges == []
 
     def test_single_entity_type_returns_empty(self) -> None:
         from seerflow.models.entity import generate_ip_id
 
         ip_uuid = str(generate_ip_id("10.0.1.1"))
-        event = _make_event(related_ips=("10.0.1.1",), entity_refs=(ip_uuid,))
-        edges = infer_edges(event)
+        edges = infer_edges(typed_entities=[("ip", ip_uuid)])
         assert edges == []
 
     def test_multiple_ips_creates_edge_per_ip(self) -> None:
@@ -131,12 +86,8 @@ class TestInferEdges:
         ip2 = str(generate_ip_id("10.0.1.2"))
         u, d = normalize_username("admin")
         user_uuid = str(generate_user_id(u, d))
-        event = _make_event(
-            related_ips=("10.0.1.1", "10.0.1.2"),
-            related_users=("admin",),
-            entity_refs=(ip1, ip2, user_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [("ip", ip1), ("ip", ip2), ("user", user_uuid)]
+        edges = infer_edges(typed_entities=typed)
         auth_edges = [e for e in edges if e.rel_type == "authenticated_from"]
         assert len(auth_edges) == 2
 
@@ -155,12 +106,8 @@ class TestInferEdgesExtended:
         u, d = normalize_username("admin")
         user_uuid = str(generate_user_id(u, d))
         file_uuid = str(generate_file_id("/etc/passwd"))
-        event = _make_event(
-            related_users=("admin",),
-            related_files=("/etc/passwd",),
-            entity_refs=(user_uuid, file_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [("user", user_uuid), ("file", file_uuid)]
+        edges = infer_edges(typed_entities=typed)
         accessed = [e for e in edges if e.rel_type == "accessed"]
         assert len(accessed) == 1
         assert accessed[0].source_id == user_uuid
@@ -171,12 +118,8 @@ class TestInferEdgesExtended:
 
         ip_uuid = str(generate_ip_id("10.0.1.1"))
         domain_uuid = str(generate_domain_id("evil.com"))
-        event = _make_event(
-            related_ips=("10.0.1.1",),
-            related_domains=("evil.com",),
-            entity_refs=(ip_uuid, domain_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [("ip", ip_uuid), ("domain", domain_uuid)]
+        edges = infer_edges(typed_entities=typed)
         resolved = [e for e in edges if e.rel_type == "resolved_to"]
         assert len(resolved) == 1
         assert resolved[0].source_id == ip_uuid
@@ -198,15 +141,14 @@ class TestInferEdgesExtended:
         host_uuid = str(generate_host_id("web-01"))
         domain_uuid = str(generate_domain_id("example.com"))
         file_uuid = str(generate_file_id("/tmp/test"))
-        event = _make_event(
-            related_ips=("10.0.1.1",),
-            related_users=("admin",),
-            related_hosts=("web-01",),
-            related_domains=("example.com",),
-            related_files=("/tmp/test",),
-            entity_refs=(ip_uuid, user_uuid, host_uuid, domain_uuid, file_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [
+            ("ip", ip_uuid),
+            ("user", user_uuid),
+            ("host", host_uuid),
+            ("domain", domain_uuid),
+            ("file", file_uuid),
+        ]
+        edges = infer_edges(typed_entities=typed)
         rel_types = {e.rel_type for e in edges}
         assert "authenticated_from" in rel_types
         assert "resolved_to" in rel_types
@@ -220,12 +162,28 @@ class TestInferEdgesExtended:
 
         proc1_uuid = str(_uuid.uuid5(NS_PROCESS, "sshd:1234"))
         proc2_uuid = str(_uuid.uuid5(NS_PROCESS, "bash:5678"))
-        event = _make_event(
-            related_processes=("sshd:1234", "bash:5678"),
-            entity_refs=(proc1_uuid, proc2_uuid),
-        )
-        edges = infer_edges(event)
+        typed = [("process", proc1_uuid), ("process", proc2_uuid)]
+        edges = infer_edges(typed_entities=typed)
         spawned = [e for e in edges if e.rel_type == "spawned_by"]
         assert len(spawned) == 1
         assert spawned[0].source_id == proc1_uuid
         assert spawned[0].target_id == proc2_uuid
+
+
+class TestInferEdgesTypedInput:
+    """Tests for infer_edges with pre-resolved typed entity list."""
+
+    def test_accepts_typed_entities(self) -> None:
+        from seerflow.models.entity import generate_ip_id, generate_user_id, normalize_username
+
+        u, d = normalize_username("admin")
+        user_uuid = str(generate_user_id(u, d))
+        ip_uuid = str(generate_ip_id("10.0.1.1"))
+        typed = [("ip", ip_uuid), ("user", user_uuid)]
+        edges = infer_edges(typed_entities=typed)
+        auth = [e for e in edges if e.rel_type == "authenticated_from"]
+        assert len(auth) == 1
+
+    def test_empty_list_returns_empty(self) -> None:
+        edges = infer_edges(typed_entities=[])
+        assert edges == []

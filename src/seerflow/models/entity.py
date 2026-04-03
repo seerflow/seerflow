@@ -194,18 +194,24 @@ def generate_process_id(hostname: str, pid: int, start_time: int) -> uuid.UUID:
 
 def generate_file_id(path: str) -> uuid.UUID:
     """Deterministic UUID5 for a file entity."""
-    canonical = path.strip()
+    canonical = unicodedata.normalize("NFC", path.strip())
     if not canonical:
         msg = "file path is empty"
+        raise ValueError(msg)
+    if "\x00" in canonical:
+        msg = "file path contains null byte"
         raise ValueError(msg)
     return uuid.uuid5(NS_FILE, canonical)
 
 
 def generate_domain_id(domain: str) -> uuid.UUID:
     """Deterministic UUID5 for a domain entity."""
-    canonical = domain.strip().lower().rstrip(".")
+    canonical = unicodedata.normalize("NFC", domain.strip().lower().rstrip("."))
     if not canonical:
         msg = "domain is empty"
+        raise ValueError(msg)
+    if "\x00" in canonical:
+        msg = "domain contains null byte"
         raise ValueError(msg)
     return uuid.uuid5(NS_DOMAIN, canonical)
 
@@ -215,9 +221,22 @@ def generate_domain_id(domain: str) -> uuid.UUID:
 # ---------------------------------------------------------------------------
 
 
-def _sanitize_for_log(value: str) -> str:
-    """Strip control characters that enable log injection."""
-    return value.replace("\n", "\\n").replace("\r", "\\r").replace("\x1b", "\\x1b")
+_LOG_CONTROL_CHARS = str.maketrans(
+    {
+        "\n": "\\n",
+        "\r": "\\r",
+        "\x1b": "\\x1b",
+        "\t": "\\t",
+        "\x00": "\\x00",
+        "\u2028": "\\u2028",
+        "\u2029": "\\u2029",
+    }
+)
+
+
+def sanitize_for_log(value: str) -> str:
+    """Escape control characters that enable log injection."""
+    return value.translate(_LOG_CONTROL_CHARS)
 
 
 def _parse_process_string(raw: str) -> tuple[str | None, int | None]:
@@ -271,7 +290,7 @@ def _resolve_processes(raw_processes: tuple[str, ...]) -> list[str]:
                 seen.add(uid)
                 resolved.append(uid)
         except (ValueError, TypeError):
-            _log.warning("Skipping malformed process: %s", _sanitize_for_log(raw))
+            _log.warning("Skipping malformed process: %s", sanitize_for_log(raw))
 
     return resolved
 
@@ -300,7 +319,7 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed IP: %s",
-                _sanitize_for_log(raw_ip),
+                sanitize_for_log(raw_ip),
             )
 
     for raw_user in users:
@@ -310,7 +329,7 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed user: %s",
-                _sanitize_for_log(raw_user),
+                sanitize_for_log(raw_user),
             )
 
     for raw_host in hosts:
@@ -319,7 +338,7 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed host: %s",
-                _sanitize_for_log(raw_host),
+                sanitize_for_log(raw_host),
             )
 
     for raw_domain in domains:
@@ -328,7 +347,7 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed domain: %s",
-                _sanitize_for_log(raw_domain),
+                sanitize_for_log(raw_domain),
             )
 
     for raw_file in files:
@@ -337,7 +356,7 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed file: %s",
-                _sanitize_for_log(raw_file),
+                sanitize_for_log(raw_file),
             )
 
     resolved.extend(_resolve_processes(processes))
