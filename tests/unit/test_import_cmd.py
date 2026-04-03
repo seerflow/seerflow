@@ -154,7 +154,7 @@ class TestRunImport:
         )
         assert stats["files_processed"] == 1
         assert stats["lines_read"] == 2
-        assert stats["events_stored"] >= 2
+        assert stats["lines_processed"] >= 2
 
     @pytest.mark.asyncio
     async def test_skips_binary_file(

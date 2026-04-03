@@ -44,7 +44,8 @@ def is_binary(path: Path) -> bool:
     try:
         chunk = path.read_bytes()[:_BINARY_CHECK_SIZE]
         return b"\x00" in chunk
-    except OSError:
+    except OSError as exc:
+        _log.warning("Could not read %s for binary check: %s", path, exc)
         return False
 
 
@@ -77,7 +78,7 @@ async def run_import(
 ) -> dict[str, int | float]:
     """Import log files through the Seerflow pipeline.
 
-    Returns stats: files_processed, lines_read, events_stored, elapsed_seconds.
+    Returns stats: files_processed, lines_read, lines_processed, elapsed_seconds.
     """
     from seerflow.config import StorageConfig, load_config
     from seerflow.detection.ensemble import DetectionEnsemble
@@ -92,7 +93,7 @@ async def run_import(
         return {
             "files_processed": 0,
             "lines_read": 0,
-            "events_stored": 0,
+            "lines_processed": 0,
             "elapsed_seconds": 0.0,
         }
 
@@ -119,20 +120,24 @@ async def run_import(
 
             _log.info("Importing: %s", file_path)
             file_lines = 0
-            with open_log(file_path) as fh:
-                for line in fh:
-                    line = line.rstrip("\n\r")
-                    if not line:
-                        continue
-                    raw = RawEvent(
-                        data=line.encode("utf-8"),
-                        source_type="import",
-                        source_id=str(file_path),
-                        received_ns=time.time_ns(),
-                        metadata={},
-                    )
-                    await handler(raw)
-                    file_lines += 1
+            try:
+                with open_log(file_path) as fh:
+                    for line in fh:
+                        line = line.rstrip("\n\r")
+                        if not line:
+                            continue
+                        raw = RawEvent(
+                            data=line.encode("utf-8"),
+                            source_type="import",
+                            source_id=str(file_path),
+                            received_ns=time.time_ns(),
+                            metadata={},
+                        )
+                        await handler(raw)
+                        file_lines += 1
+            except OSError as exc:
+                _log.warning("Skipping unreadable file %s: %s", file_path, exc)
+                continue
 
             lines_read += file_lines
             files_processed += 1
@@ -148,7 +153,7 @@ async def run_import(
         return {
             "files_processed": files_processed,
             "lines_read": lines_read,
-            "events_stored": lines_read,
+            "lines_processed": lines_read,
             "elapsed_seconds": round(elapsed, 2),
         }
     finally:
