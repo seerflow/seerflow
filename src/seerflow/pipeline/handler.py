@@ -58,9 +58,9 @@ def _make_handler(
         seerflow_event = normalizer.normalize(event)
 
         # Resolve entities to deterministic UUID5 strings.
-        # Resolve each type separately so we can build a typed list for edge
-        # inference in one pass — avoiding 6 redundant resolve calls inside
-        # infer_edges.
+        # Resolve each type separately to build both entity_refs (flat tuple
+        # for correlation/risk) and typed_for_edges (typed pairs for edge
+        # inference) in a single pass.
         typed_for_edges: list[tuple[str, str]] = []
         entity_refs_list: list[str] = []
         for _type_name, _raw_vals, _ips, _users, _hosts, _kw in (
