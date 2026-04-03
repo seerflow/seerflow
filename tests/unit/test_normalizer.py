@@ -215,8 +215,7 @@ class TestNormalizerExtendedEntities:
     def test_all_six_types_extracted(self) -> None:
         normalizer = EventNormalizer()
         raw = _make_raw(
-            "sshd[1234]: user=admin host=web-01 from 10.0.1.1 "
-            "reading /etc/shadow query evil.com"
+            "sshd[1234]: user=admin host=web-01 from 10.0.1.1 reading /etc/shadow query evil.com"
         )
         result = normalizer.normalize(raw)
         assert result.related_ips

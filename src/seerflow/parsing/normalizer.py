@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+
 class EventNormalizer:
     """Transforms RawEvent into SeerflowEvent.
 
