@@ -50,8 +50,7 @@ class TestAlertPersistenceIntegration:
             await handler(event)
 
         # Flush event buffer
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_alerts(AlertQuery(limit=10))
         assert len(result.items) == 1
@@ -99,8 +98,7 @@ class TestAlertPersistenceIntegration:
                 )
                 await handler(event)
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_alerts(AlertQuery(limit=10))
         # All 3 should dedup into 1 alert (same template_id + source_type)

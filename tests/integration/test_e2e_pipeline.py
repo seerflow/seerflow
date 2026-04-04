@@ -52,8 +52,7 @@ def _raw(message: str, source_type: str = "syslog") -> RawEvent:
 
 async def _flush(storage: SqliteBackend) -> None:
     """Flush the write buffer so events/alerts are queryable."""
-    if storage._write_buffer is not None:
-        await storage._write_buffer.flush()
+    await storage.flush()
 
 
 # Normal syslog messages (RFC 5424 format) for ML warmup

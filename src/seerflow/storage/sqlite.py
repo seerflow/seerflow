@@ -465,6 +465,11 @@ class SqliteBackend:
         finally:
             await self._conn.close()
 
+    async def flush(self) -> None:
+        """Flush pending writes to the database."""
+        if self._write_buffer is not None:
+            await self._write_buffer.flush()
+
     async def write_events(self, events: list[SeerflowEvent]) -> None:
         """Buffer events for batched writing to SQLite."""
         if not events:

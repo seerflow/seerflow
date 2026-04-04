@@ -43,8 +43,7 @@ class TestSyncWriteBenchmarks:
             try:
                 for event in events:
                     await b.write_events([event])
-                    if b._write_buffer is not None:
-                        await b._write_buffer.flush()
+                    await b.flush()
             finally:
                 await b.close()
 
@@ -59,8 +58,7 @@ class TestSyncWriteBenchmarks:
             b = await SqliteBackend.connect(config)
             try:
                 await b.write_events(events)
-                if b._write_buffer is not None:
-                    await b._write_buffer.flush()
+                await b.flush()
             finally:
                 await b.close()
 

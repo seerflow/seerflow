@@ -98,8 +98,7 @@ class TestHandlerNormalizerIntegration:
         await handler(event)
 
         # Flush WriteBuffer before querying
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_events(EventQuery(limit=10))
         assert len(result.items) == 1
@@ -130,8 +129,7 @@ class TestHandlerNormalizerIntegration:
         )
         await handler(event)
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_events(EventQuery(limit=10))
         assert len(result.items) == 1
@@ -165,8 +163,7 @@ class TestHandlerNormalizerIntegration:
         )
         await handler(event)
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_events(EventQuery(limit=10))
         assert len(result.items) == 1
