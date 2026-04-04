@@ -11,7 +11,7 @@ import re
 import sys
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import msgspec.json
 
@@ -392,6 +392,80 @@ async def run_query_timeline(storage: SqliteBackend, args: argparse.Namespace) -
     print(f"\n{len(events)} event(s)")
 
 
+def _format_bytes(n: int) -> str:
+    """Format byte count as human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:,.0f} KB"
+    return f"{n / (1024 * 1024):,.1f} MB"
+
+
+def format_health_table(health: dict[str, Any]) -> str:
+    """Format health dict as a human-readable table."""
+    lines: list[str] = []
+    src = health["source_count"]
+    mx = health["max_sources"]
+    pct = (src / mx * 100) if mx > 0 else 0.0
+
+    lines.append("Detection Ensemble Health")
+    lines.append("=" * 40)
+    lines.append(f"Sources:       {src} / {mx}  ({pct:.1f}%)")
+    lines.append(f"Evictions:     {health['eviction_count']}  (source)")
+    lines.append(
+        f"               {health['template_hw_eviction_count']}  (template HW)"
+        f"  {health['entity_hw_eviction_count']}  (entity HW)"
+    )
+    lines.append("")
+
+    mem = health["memory_by_type"]
+    rows = [
+        ["HST", str(src), _format_bytes(mem["hst"])],
+        ["HW (source)", str(src), _format_bytes(mem["hw_source"])],
+        ["HW (template)", str(health["template_hw_count"]), _format_bytes(mem["hw_template"])],
+        ["HW (entity)", str(health["entity_hw_count"]), _format_bytes(mem["hw_entity"])],
+        ["CUSUM", str(src), _format_bytes(mem["cusum"])],
+        ["DSPOT", str(src), _format_bytes(mem["dspot"])],
+        ["Markov", str(src), _format_bytes(mem["markov"])],
+    ]
+
+    lines.append(format_table(["DETECTOR", "COUNT", "MEMORY"], rows))
+    lines.append(f"Total: {_format_bytes(health['estimated_memory_bytes'])}")
+
+    markov = health.get("markov_entity_counts", {})
+    if markov:
+        lines.append("")
+        lines.append("Markov Entities by Source")
+        lines.append("-" * 30)
+        entity_rows = [[s, str(c)] for s, c in sorted(markov.items(), key=lambda x: -x[1])]
+        lines.append(format_table(["SOURCE", "ENTITIES"], entity_rows))
+
+    return "\n".join(lines)
+
+
+async def run_query_health(args: argparse.Namespace) -> None:
+    """Execute health query — load ensemble from storage, print stats."""
+    from seerflow.config import load_config
+    from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.storage.sqlite import SqliteBackend
+
+    config = load_config(args.config)
+    storage = await SqliteBackend.connect(config.storage)
+    try:
+        ensemble = DetectionEnsemble(config.detection)
+        await ensemble.load_all_state(storage)
+        health = ensemble.get_health()
+    finally:
+        await storage.close()
+
+    if args.json:
+        encoded = msgspec.json.encode(health)
+        sys.stdout.buffer.write(encoded)
+        print()
+    else:
+        print(format_health_table(health))
+
+
 async def run_query(args: argparse.Namespace) -> None:
     """Top-level query dispatcher — load config, connect storage, route."""
     from seerflow.config import load_config
@@ -408,6 +482,8 @@ async def run_query(args: argparse.Namespace) -> None:
             await run_query_templates(storage, args)
         elif args.query_type == "timeline":
             await run_query_timeline(storage, args)
+        elif args.query_type == "health":
+            await run_query_health(args)
         else:
             msg = f"Unknown query_type: {args.query_type!r}"
             raise ValueError(msg)

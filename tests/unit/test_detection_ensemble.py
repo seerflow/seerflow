@@ -1084,3 +1084,85 @@ class TestHealthMethod:
         assert "eviction_count" in health
         assert "template_hw_count" in health
         assert "entity_hw_count" in health
+
+
+class TestFormatHealthTable:
+    """S-140: format_health_table() output."""
+
+    def test_table_includes_sources_line(self) -> None:
+        from seerflow.query import format_health_table
+
+        health = {
+            "source_count": 3,
+            "max_sources": 256,
+            "eviction_count": 1,
+            "template_hw_count": 5,
+            "entity_hw_count": 2,
+            "template_hw_eviction_count": 0,
+            "entity_hw_eviction_count": 0,
+            "estimated_memory_bytes": 153_600,
+            "memory_by_type": {
+                "hst": 153_600,
+                "hw_source": 0,
+                "hw_template": 0,
+                "hw_entity": 0,
+                "cusum": 0,
+                "markov": 0,
+                "dspot": 0,
+            },
+            "markov_entity_counts": {},
+        }
+        output = format_health_table(health)
+        assert "3 / 256" in output
+
+    def test_table_includes_memory_total(self) -> None:
+        from seerflow.query import format_health_table
+
+        health = {
+            "source_count": 1,
+            "max_sources": 256,
+            "eviction_count": 0,
+            "template_hw_count": 0,
+            "entity_hw_count": 0,
+            "template_hw_eviction_count": 0,
+            "entity_hw_eviction_count": 0,
+            "estimated_memory_bytes": 51_200,
+            "memory_by_type": {
+                "hst": 51_200,
+                "hw_source": 0,
+                "hw_template": 0,
+                "hw_entity": 0,
+                "cusum": 0,
+                "markov": 0,
+                "dspot": 0,
+            },
+            "markov_entity_counts": {},
+        }
+        output = format_health_table(health)
+        assert "Total" in output
+
+    def test_table_includes_markov_entities(self) -> None:
+        from seerflow.query import format_health_table
+
+        health = {
+            "source_count": 1,
+            "max_sources": 256,
+            "eviction_count": 0,
+            "template_hw_count": 0,
+            "entity_hw_count": 0,
+            "template_hw_eviction_count": 0,
+            "entity_hw_eviction_count": 0,
+            "estimated_memory_bytes": 10_240,
+            "memory_by_type": {
+                "hst": 0,
+                "hw_source": 0,
+                "hw_template": 0,
+                "hw_entity": 0,
+                "cusum": 0,
+                "markov": 10_240,
+                "dspot": 0,
+            },
+            "markov_entity_counts": {"syslog": 1},
+        }
+        output = format_health_table(health)
+        assert "syslog" in output
