@@ -1166,3 +1166,69 @@ class TestFormatHealthTable:
         }
         output = format_health_table(health)
         assert "syslog" in output
+
+
+class TestRunQueryHealth:
+    """S-140: run_query_health() table and JSON output paths."""
+
+    @pytest.mark.asyncio
+    async def test_table_output(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from argparse import Namespace
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.query import run_query_health
+
+        mock_storage = AsyncMock()
+        mock_storage.load_state = AsyncMock(return_value=None)
+        mock_storage.close = AsyncMock()
+
+        with (
+            patch("seerflow.config.load_config") as mock_cfg,
+            patch(
+                "seerflow.storage.sqlite.SqliteBackend.connect",
+                new_callable=AsyncMock,
+            ) as mock_connect,
+        ):
+            mock_cfg.return_value.detection = DetectionConfig(hw_seasonal_period=10)
+            mock_cfg.return_value.storage = None
+            mock_connect.return_value = mock_storage
+
+            args = Namespace(config=None, json=False)
+            await run_query_health(args)
+
+        captured = capsys.readouterr()
+        assert "Detection Ensemble Health" in captured.out
+        assert "0 / 256" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from argparse import Namespace
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.query import run_query_health
+
+        mock_storage = AsyncMock()
+        mock_storage.load_state = AsyncMock(return_value=None)
+        mock_storage.close = AsyncMock()
+
+        with (
+            patch("seerflow.config.load_config") as mock_cfg,
+            patch(
+                "seerflow.storage.sqlite.SqliteBackend.connect",
+                new_callable=AsyncMock,
+            ) as mock_connect,
+        ):
+            mock_cfg.return_value.detection = DetectionConfig(hw_seasonal_period=10)
+            mock_cfg.return_value.storage = None
+            mock_connect.return_value = mock_storage
+
+            args = Namespace(config=None, json=True)
+            await run_query_health(args)
+
+        captured = capsys.readouterr()
+        import json
+
+        data = json.loads(captured.out)
+        assert "source_count" in data
+        assert "estimated_memory_bytes" in data
+        assert data["source_count"] == 0

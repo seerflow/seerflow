@@ -468,6 +468,11 @@ async def run_query_health(args: argparse.Namespace) -> None:
 
 async def run_query(args: argparse.Namespace) -> None:
     """Top-level query dispatcher — load config, connect storage, route."""
+    # Health manages its own config/storage (needs config.detection for ensemble).
+    if args.query_type == "health":
+        await run_query_health(args)
+        return
+
     from seerflow.config import load_config
     from seerflow.storage.sqlite import SqliteBackend
 
@@ -482,8 +487,6 @@ async def run_query(args: argparse.Namespace) -> None:
             await run_query_templates(storage, args)
         elif args.query_type == "timeline":
             await run_query_timeline(storage, args)
-        elif args.query_type == "health":
-            await run_query_health(args)
         else:
             msg = f"Unknown query_type: {args.query_type!r}"
             raise ValueError(msg)
