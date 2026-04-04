@@ -370,3 +370,202 @@ class TestCreateMlAlert:
         assert alert.entity_uuid == "uuid-ip"  # UUID5 from entity_refs
         assert alert.entity_value == "10.0.0.1"  # raw from related_ips
         assert alert.entity_type == "ip"  # inferred
+
+
+class TestCreateMlAlerts:
+    """Tests for create_ml_alerts factory function (per-entity granularity)."""
+
+    def _make_event(
+        self,
+        *,
+        template_id: int = 5,
+        source_type: str = "syslog",
+        timestamp_ns: int = 1_700_000_000_000_000_000,
+        severity_id: SeverityLevel = SeverityLevel.ERROR,
+        related_ips: tuple[str, ...] = ("192.168.1.1",),
+        related_users: tuple[str, ...] = ("root",),
+        related_hosts: tuple[str, ...] = ("web01",),
+    ) -> SeerflowEvent:
+        return SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=timestamp_ns,
+            observed_ns=timestamp_ns + 1000,
+            severity_id=severity_id,
+            message="test anomaly event",
+            source_type=source_type,
+            template_id=template_id,
+            related_ips=related_ips,
+            related_users=related_users,
+            related_hosts=related_hosts,
+        )
+
+    def _make_result(
+        self,
+        *,
+        score: float = 0.85,
+        upper_threshold: float = 0.70,
+    ) -> DetectionResult:
+        return DetectionResult(
+            score=score,
+            upper_threshold=upper_threshold,
+            lower_threshold=0.1,
+            is_anomaly=True,
+            anomaly_direction="upper",
+            source_type="syslog",
+        )
+
+    def test_multi_entity_creates_multiple_alerts(self) -> None:
+        """Three typed entities produce three alerts."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        user_uuid = str(uuid.uuid4())
+        host_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("192.168.1.1",),
+            related_users=("root",),
+            related_hosts=("web01",),
+        )
+        typed_entities = [
+            ("ip", ip_uuid),
+            ("user", user_uuid),
+            ("host", host_uuid),
+        ]
+        alerts = create_ml_alerts(event, self._make_result(), typed_entities)
+
+        assert len(alerts) == 3
+        assert alerts[0].entity_uuid == ip_uuid
+        assert alerts[0].entity_type == "ip"
+        assert alerts[1].entity_uuid == user_uuid
+        assert alerts[1].entity_type == "user"
+        assert alerts[2].entity_uuid == host_uuid
+        assert alerts[2].entity_type == "host"
+
+    def test_single_entity_creates_one_alert(self) -> None:
+        """One typed entity produces one alert (no regression)."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("10.0.0.1",),
+            related_users=(),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(event, self._make_result(), [("ip", ip_uuid)])
+
+        assert len(alerts) == 1
+        assert alerts[0].entity_uuid == ip_uuid
+        assert alerts[0].entity_type == "ip"
+        assert alerts[0].entity_value == "10.0.0.1"
+
+    def test_zero_entities_creates_one_fallback_alert(self) -> None:
+        """No typed entities produces one fallback alert via create_ml_alert."""
+        from seerflow.models.alert import create_ml_alerts
+
+        event = self._make_event()
+        alerts = create_ml_alerts(event, self._make_result(), [])
+
+        assert len(alerts) == 1
+        assert alerts[0].alert_type == "ml"
+
+    def test_alert_ids_unique_per_entity(self) -> None:
+        """Each alert in the list has a different alert_id."""
+        from seerflow.models.alert import create_ml_alerts
+
+        uuid1 = str(uuid.uuid4())
+        uuid2 = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("1.2.3.4",),
+            related_users=("alice",),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(
+            event, self._make_result(), [("ip", uuid1), ("user", uuid2)]
+        )
+
+        assert alerts[0].alert_id != alerts[1].alert_id
+
+    def test_dedup_keys_include_entity_uuid(self) -> None:
+        """Each alert's dedup_key contains its entity UUID."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        user_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("1.2.3.4",),
+            related_users=("bob",),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(
+            event, self._make_result(), [("ip", ip_uuid), ("user", user_uuid)]
+        )
+
+        assert ip_uuid in alerts[0].dedup_key
+        assert user_uuid in alerts[1].dedup_key
+
+    def test_entity_value_mapped_from_related_fields(self) -> None:
+        """Raw entity values are resolved from related_* fields by type."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        user_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("172.16.0.1",),
+            related_users=("jsmith",),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(
+            event, self._make_result(), [("ip", ip_uuid), ("user", user_uuid)]
+        )
+
+        assert alerts[0].entity_value == "172.16.0.1"
+        assert alerts[1].entity_value == "jsmith"
+
+    def test_all_alerts_share_same_timestamp_and_severity(self) -> None:
+        """Timestamp and severity come from the event for all alerts."""
+        from seerflow.models.alert import create_ml_alerts
+
+        uuid1 = str(uuid.uuid4())
+        uuid2 = str(uuid.uuid4())
+        ts = 9_999_000_000_000_000_000
+        event = self._make_event(
+            timestamp_ns=ts,
+            severity_id=SeverityLevel.CRITICAL,
+            related_ips=("1.1.1.1",),
+            related_users=("admin",),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(
+            event, self._make_result(), [("ip", uuid1), ("user", uuid2)]
+        )
+
+        for alert in alerts:
+            assert alert.timestamp_ns == ts
+            assert alert.severity_id == SeverityLevel.CRITICAL
+
+    def test_alert_ids_are_uuid5(self) -> None:
+        """Each alert_id is a valid UUID5 string."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("5.5.5.5",),
+            related_users=(),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(event, self._make_result(), [("ip", ip_uuid)])
+
+        parsed = uuid.UUID(alerts[0].alert_id)
+        assert parsed.version == 5
+
+    def test_description_contains_score_and_threshold(self) -> None:
+        """Alert description contains score and threshold values."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        event = self._make_event(related_ips=("1.2.3.4",), related_users=(), related_hosts=())
+        result = self._make_result(score=0.92, upper_threshold=0.75)
+        alerts = create_ml_alerts(event, result, [("ip", ip_uuid)])
+
+        assert "0.920" in alerts[0].description
+        assert "0.750" in alerts[0].description

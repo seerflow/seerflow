@@ -40,7 +40,7 @@ def _make_handler(
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.graph.edges import infer_edges
-    from seerflow.models.alert import create_ml_alert
+    from seerflow.models.alert import create_ml_alerts
     from seerflow.models.entity import resolve_entities, sanitize_for_log
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
@@ -283,11 +283,12 @@ def _make_handler(
                     )
             if entity_parts:
                 _log.warning("  entities: %s", ", ".join(entity_parts))
-            alert = create_ml_alert(seerflow_event, result)
-            try:
-                await storage.write_alert(alert)
-            except Exception:
-                _log.warning("Alert write failed", exc_info=True)
+            alerts = create_ml_alerts(seerflow_event, result, typed_for_edges)
+            for alert in alerts:
+                try:
+                    await storage.write_alert(alert)
+                except Exception:
+                    _log.warning("Alert write failed", exc_info=True)
 
             # Add risk for ML anomaly
             if risk_register is not None and entity_refs:
