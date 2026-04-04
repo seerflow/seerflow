@@ -163,7 +163,11 @@ class DetectionEnsemble:
 
         template_score = self._score_template_hw(source, event)
         entity_score = self._score_entity_hw(source, event)
-        scores = [*scores, template_score, entity_score]
+        scores = [
+            *scores,
+            template_score if math.isfinite(template_score) else 0.0,
+            entity_score if math.isfinite(entity_score) else 0.0,
+        ]
 
         # --- Blended scoring pipeline ---
         # 1. Get/create per-detector score windows for this source
@@ -195,11 +199,13 @@ class DetectionEnsemble:
         else:
             combined = 0.0
 
-        # 4. Signal amplification
+        # 4. Signal amplification -- thresholds scale with detector count:
+        # 2x when >=2/3 converge, 1.5x when >=1/2 converge
+        n_signals = len(z_scores)
         converging = sum(1 for z in z_scores if z > 1.0)
-        if converging >= 3:
+        if converging >= max(n_signals * 2 // 3, 2):
             combined *= 2.0
-        elif converging >= 2:
+        elif converging >= max(n_signals // 2, 2):
             combined *= 1.5
         for d in detectors:
             d.learn(event)
@@ -257,11 +263,13 @@ class DetectionEnsemble:
     def _score_template_hw(self, source: str, event: SeerflowEvent) -> float:
         """Score and learn template-level volume anomaly."""
         tid = event.template_id
-        if tid == -1:
+        if tid < 0:
             return 0.0
         key = f"{source}:{tid}"[:_MAX_SOURCE_KEY_LEN]
         self._template_event_counts[key] = self._template_event_counts.get(key, 0) + 1
-        hw = self._get_or_create_template_hw(key)
+        hw = self._get_or_create_hw(
+            key, self._template_hw, self._template_event_counts, self._max_template_hw
+        )
         score = (
             hw.score(event)
             if self._template_event_counts[key] >= self._min_events_for_scoring
@@ -269,23 +277,6 @@ class DetectionEnsemble:
         )
         hw.learn(event)
         return score
-
-    def _get_or_create_template_hw(self, key: str) -> HoltWintersDetector:
-        if key in self._template_hw:
-            self._template_hw.move_to_end(key)
-            return self._template_hw[key]
-        if len(self._template_hw) >= self._max_template_hw:
-            evicted_key, _ = self._template_hw.popitem(last=False)
-            self._template_event_counts.pop(evicted_key, None)
-        hw = HoltWintersDetector(
-            seasonal_period=self._config.hw_seasonal_period,
-            alpha=self._config.hw_alpha,
-            beta=self._config.hw_beta,
-            gamma=self._config.hw_gamma,
-            n_std=self._config.hw_n_std,
-        )
-        self._template_hw[key] = hw
-        return hw
 
     def _score_entity_hw(self, source: str, event: SeerflowEvent) -> float:
         """Score and learn entity-level volume anomaly (max across entities)."""
@@ -295,7 +286,9 @@ class DetectionEnsemble:
         for entity_val in event.entity_refs:
             key = f"{source}:{entity_val}"[:_MAX_SOURCE_KEY_LEN]
             self._entity_event_counts[key] = self._entity_event_counts.get(key, 0) + 1
-            hw = self._get_or_create_entity_hw(key)
+            hw = self._get_or_create_hw(
+                key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
+            )
             score = (
                 hw.score(event)
                 if self._entity_event_counts[key] >= self._min_events_for_scoring
@@ -306,13 +299,20 @@ class DetectionEnsemble:
                 max_score = score
         return max_score
 
-    def _get_or_create_entity_hw(self, key: str) -> HoltWintersDetector:
-        if key in self._entity_hw:
-            self._entity_hw.move_to_end(key)
-            return self._entity_hw[key]
-        if len(self._entity_hw) >= self._max_entity_hw:
-            evicted_key, _ = self._entity_hw.popitem(last=False)
-            self._entity_event_counts.pop(evicted_key, None)
+    def _get_or_create_hw(
+        self,
+        key: str,
+        hw_dict: OrderedDict[str, HoltWintersDetector],
+        counts_dict: dict[str, int],
+        max_items: int,
+    ) -> HoltWintersDetector:
+        """Return (or create) an HW detector in the given pool with LRU eviction."""
+        if key in hw_dict:
+            hw_dict.move_to_end(key)
+            return hw_dict[key]
+        if len(hw_dict) >= max_items:
+            evicted_key, _ = hw_dict.popitem(last=False)
+            counts_dict.pop(evicted_key, None)
         hw = HoltWintersDetector(
             seasonal_period=self._config.hw_seasonal_period,
             alpha=self._config.hw_alpha,
@@ -320,7 +320,7 @@ class DetectionEnsemble:
             gamma=self._config.hw_gamma,
             n_std=self._config.hw_n_std,
         )
-        self._entity_hw[key] = hw
+        hw_dict[key] = hw
         return hw
 
     def _get_threshold(self, source: str) -> DSpotThreshold:
@@ -508,7 +508,9 @@ class DetectionEnsemble:
             _log.warning("Corrupt %s manifest — skipping", prefix, exc_info=True)
             return 0
         loaded = 0
-        for key, evt_count in list(manifest.items())[:max_items]:
+        # Reverse: manifest preserves LRU order (oldest first from OrderedDict),
+        # so load MRU entries first to keep the hottest keys when capacity-limited.
+        for key, evt_count in list(manifest.items())[-max_items:]:
             data = await storage.load_state(f"{prefix}:{key}")
             if data is None:
                 continue

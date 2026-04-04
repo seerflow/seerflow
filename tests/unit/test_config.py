@@ -879,6 +879,14 @@ class TestGranularHWConfig:
         config = _build_detection({"min_events_for_scoring": 1})
         assert config.min_events_for_scoring == 1
 
+    def test_min_events_for_scoring_above_upper_bound_raises(self) -> None:
+        with pytest.raises(ConfigError, match="min_events_for_scoring"):
+            _build_detection({"min_events_for_scoring": 100_001})
+
+    def test_min_events_for_scoring_at_upper_bound(self) -> None:
+        config = _build_detection({"min_events_for_scoring": 100_000})
+        assert config.min_events_for_scoring == 100_000
+
     def test_weights_template_volume_negative_raises(self) -> None:
         with pytest.raises(ConfigError, match="weights_template_volume"):
             _build_detection({"weights_template_volume": -0.1})

@@ -430,9 +430,10 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         raise ConfigError(
             f"detection.max_entity_hw must be between 1 and 100_000, got {config.max_entity_hw!r}"
         )
-    if config.min_events_for_scoring < 1:
+    if config.min_events_for_scoring < 1 or config.min_events_for_scoring > 100_000:
         raise ConfigError(
-            f"detection.min_events_for_scoring must be >= 1, got {config.min_events_for_scoring!r}"
+            f"detection.min_events_for_scoring must be between 1 and 100_000, "
+            f"got {config.min_events_for_scoring!r}"
         )
 
 

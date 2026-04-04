@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import statistics
 import uuid
+from typing import Any
 
 import pytest
 
@@ -496,14 +497,14 @@ class TestBatchScoring:
             _build_detection({"score_interval": 0})
 
 
-def _granular_config(**overrides: object) -> DetectionConfig:
+def _granular_config(**overrides: Any) -> DetectionConfig:
     """Helper for granular HW tests — short alias for common config."""
-    defaults: dict[str, object] = {
+    defaults: dict[str, Any] = {
         "hw_seasonal_period": 10,
         "min_events_for_scoring": 1,
     }
     defaults.update(overrides)
-    return DetectionConfig(**defaults)  # type: ignore[arg-type]
+    return DetectionConfig(**defaults)
 
 
 class TestTemplateHW:
@@ -521,6 +522,14 @@ class TestTemplateHW:
         config = _granular_config(max_template_hw=100)
         ensemble = DetectionEnsemble(config)
         ensemble.process_event(_make_event(template_id=-1))
+        assert len(ensemble._template_hw) == 0
+
+    def test_template_hw_not_created_for_any_negative(self) -> None:
+        """Any negative template_id is treated as no template matched."""
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=-2))
+        ensemble.process_event(_make_event(template_id=-999))
         assert len(ensemble._template_hw) == 0
 
     def test_template_hw_lru_eviction(self) -> None:
