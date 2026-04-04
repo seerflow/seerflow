@@ -14,7 +14,7 @@ from typing import IO
 _log = logging.getLogger("seerflow")
 
 _BINARY_CHECK_SIZE = 8192
-_COMPRESSED_SUFFIXES = frozenset({".gz", ".bz2", ".xz", ".lzma", ".zst"})
+_COMPRESSED_SUFFIXES = frozenset({".gz", ".bz2", ".xz", ".lzma"})
 
 
 def open_log(path: Path) -> IO[str]:
@@ -78,7 +78,7 @@ async def run_import(
 ) -> dict[str, int | float]:
     """Import log files through the Seerflow pipeline.
 
-    Returns stats: files_processed, lines_read, lines_processed, elapsed_seconds.
+    Returns stats: files_processed, lines_read, lines_read, elapsed_seconds.
     """
     from seerflow.config import StorageConfig, load_config
     from seerflow.detection.ensemble import DetectionEnsemble
@@ -93,7 +93,7 @@ async def run_import(
         return {
             "files_processed": 0,
             "lines_read": 0,
-            "lines_processed": 0,
+            "lines_read": 0,
             "elapsed_seconds": 0.0,
         }
 
@@ -153,7 +153,6 @@ async def run_import(
         return {
             "files_processed": files_processed,
             "lines_read": lines_read,
-            "lines_processed": lines_read,
             "elapsed_seconds": round(elapsed, 2),
         }
     finally:
