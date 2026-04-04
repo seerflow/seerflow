@@ -1167,7 +1167,6 @@ class TestFormatHealthTable:
         output = format_health_table(health)
         assert "syslog" in output
 
-
     def test_table_format_bytes_mb_branch(self) -> None:
         from seerflow.query import format_health_table
 
@@ -1261,9 +1260,7 @@ class TestRunQueryHealth:
         assert data["source_count"] == 0
 
     @pytest.mark.asyncio
-    async def test_run_query_dispatches_health(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    async def test_run_query_dispatches_health(self, capsys: pytest.CaptureFixture[str]) -> None:
         from argparse import Namespace
         from unittest.mock import AsyncMock, patch
 
