@@ -545,6 +545,17 @@ class TestTemplateHW:
         assert "syslog:1" in ensemble._template_hw
         assert "syslog:2" not in ensemble._template_hw
 
+    def test_long_source_template_key_truncated(self) -> None:
+        """Template key truncated to _MAX_SOURCE_KEY_LEN."""
+        from seerflow.detection.ensemble import _MAX_SOURCE_KEY_LEN
+
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        long_source = "s" * 300
+        ensemble.process_event(_make_event(source_type=long_source, template_id=1))
+        keys = list(ensemble._template_hw.keys())
+        assert all(len(k) <= _MAX_SOURCE_KEY_LEN for k in keys)
+
     def test_min_events_threshold_returns_zero(self) -> None:
         """Template score is 0.0 until min_events_for_scoring reached."""
         config = _granular_config(
@@ -821,3 +832,73 @@ class TestExpandedPersistence:
 
         await ensemble.load_all_state(storage)
         assert len(ensemble._score_windows["syslog"]) == 6
+
+    async def test_corrupt_granular_manifest_skipped(self) -> None:
+        """Corrupt granular manifest is skipped gracefully."""
+        from unittest.mock import AsyncMock
+
+        import msgspec.json
+
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+
+        async def fake_load(key: str) -> bytes | None:
+            if key == "ensemble:manifest":
+                return msgspec.json.encode(["syslog"])
+            if key == "tmpl_hw:manifest":
+                return b"corrupt-json"
+            if key == "ent_hw:manifest":
+                return b"corrupt-json"
+            return None
+
+        storage = AsyncMock()
+        storage.load_state = AsyncMock(side_effect=fake_load)
+        await ensemble.load_all_state(storage)
+        assert len(ensemble._template_hw) == 0
+        assert len(ensemble._entity_hw) == 0
+
+    async def test_missing_granular_hw_data_skipped(self) -> None:
+        """Granular HW key in manifest but data missing → skipped."""
+        from unittest.mock import AsyncMock
+
+        import msgspec.json
+
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+
+        async def fake_load(key: str) -> bytes | None:
+            if key == "ensemble:manifest":
+                return msgspec.json.encode(["syslog"])
+            if key == "tmpl_hw:manifest":
+                return msgspec.json.encode({"syslog:1": 10})
+            if key == "tmpl_hw:syslog:1":
+                return None  # data missing
+            return None
+
+        storage = AsyncMock()
+        storage.load_state = AsyncMock(side_effect=fake_load)
+        await ensemble.load_all_state(storage)
+        assert "syslog:1" not in ensemble._template_hw
+
+    async def test_corrupt_granular_hw_state_skipped(self) -> None:
+        """Corrupt individual HW state → skipped, others continue."""
+        from unittest.mock import AsyncMock
+
+        import msgspec.json
+
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+
+        async def fake_load(key: str) -> bytes | None:
+            if key == "ensemble:manifest":
+                return msgspec.json.encode(["syslog"])
+            if key == "ent_hw:manifest":
+                return msgspec.json.encode({"syslog:e1": 10})
+            if key == "ent_hw:syslog:e1":
+                return b"corrupt-hw-state"
+            return None
+
+        storage = AsyncMock()
+        storage.load_state = AsyncMock(side_effect=fake_load)
+        await ensemble.load_all_state(storage)
+        assert "syslog:e1" not in ensemble._entity_hw

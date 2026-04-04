@@ -111,6 +111,8 @@ class DetectionConfig:
     markov_max_entities: int = 1000
     max_sources: int = 256
     model_save_interval_seconds: int = 300
+    # Weights do NOT need to sum to 1.0 — the blending pipeline divides by
+    # the sum of all weights, so only ratios matter.
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25

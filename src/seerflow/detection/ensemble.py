@@ -225,6 +225,9 @@ class DetectionEnsemble:
             self._score_windows.pop(evicted_source, None)
             self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
+            # Note: _template_hw / _entity_hw entries keyed by this source
+            # are NOT cleaned here — they have independent LRU eviction and
+            # will age out naturally.  Prefix-scanning would add O(n) cost.
         self._detectors[source] = [
             HSTDetector(
                 n_trees=self._config.hst_n_trees,
