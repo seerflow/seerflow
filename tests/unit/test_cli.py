@@ -687,3 +687,17 @@ class TestTailSubcommand:
             main()
             mock_build.assert_called_once_with(["/tmp/test.log"], config_path=None)
             mock_run_async.assert_called_once()
+
+
+class TestQueryHealthParsing:
+    """S-140: query health subcommand parsing."""
+
+    def test_query_health_parses(self) -> None:
+        args = parse_args(["query", "health"])
+        assert args.command == "query"
+        assert args.query_type == "health"
+        assert args.json is False
+
+    def test_query_health_json_flag(self) -> None:
+        args = parse_args(["query", "health", "--json"])
+        assert args.json is True

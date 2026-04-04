@@ -53,6 +53,10 @@ def _add_query_subparsers(subparsers: argparse._SubParsersAction) -> None:  # ty
     tl.add_argument("--limit", type=int, default=1000, help="Max results (default: 1000)")
     tl.add_argument("--json", action="store_true", default=False, help="Output as JSON")
 
+    # --- query health ---
+    health = query_sub.add_parser("health", help="Detection ensemble health stats")
+    health.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser."""
