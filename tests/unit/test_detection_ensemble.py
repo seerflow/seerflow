@@ -613,6 +613,17 @@ class TestEntityHW:
         assert "syslog:e3" in ensemble._entity_hw
         assert len(ensemble._entity_hw) == 2
 
+    def test_long_entity_value_truncated(self) -> None:
+        """Entity key truncated to _MAX_SOURCE_KEY_LEN."""
+        from seerflow.detection.ensemble import _MAX_SOURCE_KEY_LEN
+
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        long_entity = "x" * 500
+        ensemble.process_event(_make_event(entity_refs=(long_entity,)))
+        keys = list(ensemble._entity_hw.keys())
+        assert all(len(k) <= _MAX_SOURCE_KEY_LEN for k in keys)
+
     def test_entity_hw_lru_reaccess_survives(self) -> None:
         """Re-accessed entity HW moved to end, survives eviction."""
         config = _granular_config(max_entity_hw=2)

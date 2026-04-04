@@ -213,9 +213,11 @@ class TestPersistenceHardening:
         storage.save_state = AsyncMock()
         await ensemble.save_all_state(storage)
 
-        # Ensemble manifest should be present in saved keys
+        # All manifests must be the last 3 keys saved (crash-safety)
         saved_keys = [call[0][0] for call in storage.save_state.call_args_list]
-        assert "ensemble:manifest" in saved_keys
+        manifests = {"tmpl_hw:manifest", "ent_hw:manifest", "ensemble:manifest"}
+        assert set(saved_keys[-3:]) == manifests
+        assert saved_keys[-1] == "ensemble:manifest"
 
     async def test_manifest_truncated_on_load(self) -> None:
         """Manifest with more sources than max_sources is truncated."""

@@ -256,7 +256,7 @@ class DetectionEnsemble:
         tid = event.template_id
         if tid == -1:
             return 0.0
-        key = f"{source}:{tid}"
+        key = f"{source}:{tid}"[:_MAX_SOURCE_KEY_LEN]
         self._template_event_counts[key] = self._template_event_counts.get(key, 0) + 1
         hw = self._get_or_create_template_hw(key)
         score = (
@@ -290,7 +290,7 @@ class DetectionEnsemble:
             return 0.0
         max_score = 0.0
         for entity_val in event.entity_refs:
-            key = f"{source}:{entity_val}"
+            key = f"{source}:{entity_val}"[:_MAX_SOURCE_KEY_LEN]
             self._entity_event_counts[key] = self._entity_event_counts.get(key, 0) + 1
             hw = self._get_or_create_entity_hw(key)
             score = (
@@ -367,29 +367,31 @@ class DetectionEnsemble:
                     msgspec.json.encode([acc.to_dict() for acc in window_state]),
                 )
                 count += 1
-        await storage.save_state(
-            "ensemble:manifest",
-            msgspec.json.encode(sources),
-        )
         # Persist template HW instances
         tmpl_keys = list(self._template_hw.keys())
         for key in tmpl_keys:
             hw = self._template_hw[key]
             await storage.save_state(f"tmpl_hw:{key}", hw.serialize())
             count += 1
-        await storage.save_state(
-            "tmpl_hw:manifest",
-            msgspec.json.encode({k: self._template_event_counts.get(k, 0) for k in tmpl_keys}),
-        )
         # Persist entity HW instances
         ent_keys = list(self._entity_hw.keys())
         for key in ent_keys:
             hw = self._entity_hw[key]
             await storage.save_state(f"ent_hw:{key}", hw.serialize())
             count += 1
+        # Write all manifests last — crash-safety: partial data is ignored
+        # on load when the manifest is missing
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({k: self._template_event_counts.get(k, 0) for k in tmpl_keys}),
+        )
         await storage.save_state(
             "ent_hw:manifest",
             msgspec.json.encode({k: self._entity_event_counts.get(k, 0) for k in ent_keys}),
+        )
+        await storage.save_state(
+            "ensemble:manifest",
+            msgspec.json.encode(sources),
         )
         return count
 
