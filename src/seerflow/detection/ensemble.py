@@ -28,11 +28,11 @@ _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
 _MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
 
 # Memory estimation constants (bytes) — approximate per-instance footprint.
-_MEM_HST = 51_200          # ~50 KB: River HalfSpaceTrees, 25 trees
-_MEM_HW = 12_288           # ~12 KB: 1440 seasonal floats + state
-_MEM_CUSUM = 200           # ~200 B: O(1) counters + floats
+_MEM_HST = 51_200  # ~50 KB: River HalfSpaceTrees, 25 trees
+_MEM_HW = 12_288  # ~12 KB: 1440 seasonal floats + state
+_MEM_CUSUM = 200  # ~200 B: O(1) counters + floats
 _MEM_MARKOV_ENTITY = 10_240  # ~10 KB: transition matrix per entity
-_MEM_DSPOT = 8_192         # ~8 KB: calibration window + tail state
+_MEM_DSPOT = 8_192  # ~8 KB: calibration window + tail state
 
 
 class _WelfordAccumulator:
