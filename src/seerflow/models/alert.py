@@ -147,7 +147,9 @@ def create_ml_alerts(
             severity_id=event.severity_id,
             rule_name="hst-anomaly",
             description=(
-                f"Anomaly: score={result.score:.3f} threshold={result.upper_threshold:.3f}"
+                f"Anomaly detected: score={result.score:.3f} "
+                f"threshold={result.upper_threshold:.3f} "
+                f"direction={result.anomaly_direction}"
             ),
             entity_uuid=entity_uuid,
             entity_value=entity_value,

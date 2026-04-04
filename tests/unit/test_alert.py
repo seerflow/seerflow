@@ -565,3 +565,20 @@ class TestCreateMlAlerts:
 
         assert "0.920" in alerts[0].description
         assert "0.750" in alerts[0].description
+        assert "direction=" in alerts[0].description
+
+    def test_more_entities_than_raw_values_falls_back_to_empty(self) -> None:
+        """Entity with no corresponding raw value gets empty string."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid1 = str(uuid.uuid4())
+        ip_uuid2 = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("1.2.3.4",),
+            related_users=(),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(event, self._make_result(), [("ip", ip_uuid1), ("ip", ip_uuid2)])
+        assert len(alerts) == 2
+        assert alerts[0].entity_value == "1.2.3.4"
+        assert alerts[1].entity_value == ""
