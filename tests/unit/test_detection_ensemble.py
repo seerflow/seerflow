@@ -1168,6 +1168,33 @@ class TestFormatHealthTable:
         assert "syslog" in output
 
 
+    def test_table_format_bytes_mb_branch(self) -> None:
+        from seerflow.query import format_health_table
+
+        health = {
+            "source_count": 256,
+            "max_sources": 256,
+            "eviction_count": 0,
+            "template_hw_count": 0,
+            "entity_hw_count": 0,
+            "template_hw_eviction_count": 0,
+            "entity_hw_eviction_count": 0,
+            "estimated_memory_bytes": 13_107_200,
+            "memory_by_type": {
+                "hst": 13_107_200,
+                "hw_source": 0,
+                "hw_template": 0,
+                "hw_entity": 0,
+                "cusum": 0,
+                "markov": 0,
+                "dspot": 0,
+            },
+            "markov_entity_counts": {},
+        }
+        output = format_health_table(health)
+        assert "MB" in output
+
+
 class TestRunQueryHealth:
     """S-140: run_query_health() table and JSON output paths."""
 
@@ -1232,3 +1259,33 @@ class TestRunQueryHealth:
         assert "source_count" in data
         assert "estimated_memory_bytes" in data
         assert data["source_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_run_query_dispatches_health(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from argparse import Namespace
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.query import run_query
+
+        mock_storage = AsyncMock()
+        mock_storage.load_state = AsyncMock(return_value=None)
+        mock_storage.close = AsyncMock()
+
+        with (
+            patch("seerflow.config.load_config") as mock_cfg,
+            patch(
+                "seerflow.storage.sqlite.SqliteBackend.connect",
+                new_callable=AsyncMock,
+            ) as mock_connect,
+        ):
+            mock_cfg.return_value.detection = DetectionConfig(hw_seasonal_period=10)
+            mock_cfg.return_value.storage = None
+            mock_connect.return_value = mock_storage
+
+            args = Namespace(command="query", query_type="health", config=None, json=False)
+            await run_query(args)
+
+        captured = capsys.readouterr()
+        assert "Detection Ensemble Health" in captured.out
