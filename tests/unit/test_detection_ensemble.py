@@ -929,3 +929,40 @@ class TestExpandedPersistence:
         storage.load_state = AsyncMock(side_effect=fake_load)
         await ensemble.load_all_state(storage)
         assert "syslog:e1" not in ensemble._entity_hw
+
+
+class TestHWEvictionCounters:
+    """S-140: Template and entity HW eviction counters."""
+
+    def test_template_hw_eviction_count_starts_zero(self) -> None:
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        assert ensemble._template_hw_eviction_count == 0
+
+    def test_template_hw_eviction_count_increments(self) -> None:
+        config = _granular_config(max_template_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=1))
+        ensemble.process_event(_make_event(template_id=2))
+        ensemble.process_event(_make_event(template_id=3))
+        assert ensemble._template_hw_eviction_count == 1
+
+    def test_entity_hw_eviction_count_starts_zero(self) -> None:
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        assert ensemble._entity_hw_eviction_count == 0
+
+    def test_entity_hw_eviction_count_increments(self) -> None:
+        config = _granular_config(max_entity_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("e1",)))
+        ensemble.process_event(_make_event(entity_refs=("e2",)))
+        ensemble.process_event(_make_event(entity_refs=("e3",)))
+        assert ensemble._entity_hw_eviction_count == 1
+
+    def test_multiple_evictions_accumulate(self) -> None:
+        config = _granular_config(max_template_hw=1)
+        ensemble = DetectionEnsemble(config)
+        for i in range(5):
+            ensemble.process_event(_make_event(template_id=i))
+        assert ensemble._template_hw_eviction_count == 4

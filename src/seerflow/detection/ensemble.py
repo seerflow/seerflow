@@ -102,6 +102,7 @@ class DetectionEnsemble:
         "_detectors",
         "_entity_event_counts",
         "_entity_hw",
+        "_entity_hw_eviction_count",
         "_event_counters",
         "_eviction_count",
         "_max_entity_hw",
@@ -112,6 +113,7 @@ class DetectionEnsemble:
         "_score_windows",
         "_template_event_counts",
         "_template_hw",
+        "_template_hw_eviction_count",
         "_thresholds",
         "_weights",
     )
@@ -132,6 +134,8 @@ class DetectionEnsemble:
         self._entity_hw: OrderedDict[str, HoltWintersDetector] = OrderedDict()
         self._template_event_counts: dict[str, int] = {}
         self._entity_event_counts: dict[str, int] = {}
+        self._template_hw_eviction_count: int = 0
+        self._entity_hw_eviction_count: int = 0
         self._weights: tuple[float, ...] = (
             config.weights_content,
             config.weights_volume,
@@ -268,6 +272,8 @@ class DetectionEnsemble:
             return 0.0
         key = f"{source}:{tid}"[:_MAX_SOURCE_KEY_LEN]
         self._template_event_counts[key] = self._template_event_counts.get(key, 0) + 1
+        if key not in self._template_hw and len(self._template_hw) >= self._max_template_hw:
+            self._template_hw_eviction_count += 1
         hw = self._get_or_create_hw(
             key, self._template_hw, self._template_event_counts, self._max_template_hw
         )
@@ -290,6 +296,8 @@ class DetectionEnsemble:
                 continue
             key = f"{source}:{safe_val}"[:_MAX_SOURCE_KEY_LEN]
             self._entity_event_counts[key] = self._entity_event_counts.get(key, 0) + 1
+            if key not in self._entity_hw and len(self._entity_hw) >= self._max_entity_hw:
+                self._entity_hw_eviction_count += 1
             hw = self._get_or_create_hw(
                 key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
             )
