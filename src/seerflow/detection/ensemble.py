@@ -377,7 +377,7 @@ class DetectionEnsemble:
         for source, detectors in self._detectors.items():
             for d in detectors:
                 if isinstance(d, MarkovDetector):
-                    count = len(d._models)
+                    count = d.entity_count
                     markov_entity_counts[source] = count
                     total_markov_entities += count
 

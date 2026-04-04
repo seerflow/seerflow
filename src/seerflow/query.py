@@ -426,7 +426,11 @@ def format_health_table(health: dict[str, Any]) -> str:
         ["HW (entity)", str(health["entity_hw_count"]), _format_bytes(mem["hw_entity"])],
         ["CUSUM", str(src), _format_bytes(mem["cusum"])],
         ["DSPOT", str(src), _format_bytes(mem["dspot"])],
-        ["Markov", str(src), _format_bytes(mem["markov"])],
+        [
+            "Markov",
+            str(sum(health.get("markov_entity_counts", {}).values())),
+            _format_bytes(mem["markov"]),
+        ],
     ]
 
     lines.append(format_table(["DETECTOR", "COUNT", "MEMORY"], rows))
