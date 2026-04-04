@@ -6,7 +6,7 @@ SourceCondition defines per-source match conditions within a rule.
 """
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import msgspec
 
@@ -96,6 +96,70 @@ class Alert(msgspec.Struct, frozen=True):
     dedup_key: str = ""
     dedup_count: int = 1
     feedback: FeedbackType = ""
+
+
+def create_ml_alerts(
+    event: "SeerflowEvent",
+    result: "DetectionResult",
+    typed_entities: list[tuple[str, str]],
+) -> list[Alert]:
+    """Create one ML anomaly Alert per entity.
+
+    Each alert gets a unique alert_id and dedup_key incorporating the entity UUID.
+    Falls back to a single alert with empty entity if typed_entities is empty.
+    """
+    if not typed_entities:
+        return [create_ml_alert(event, result)]
+
+    # Build a type -> ordered raw values map from the event.
+    type_to_raw: dict[str, tuple[str, ...]] = {
+        "ip": event.related_ips,
+        "user": event.related_users,
+        "host": event.related_hosts,
+        "domain": event.related_domains,
+        "file": event.related_files,
+        "process": event.related_processes,
+    }
+
+    # Map each entity_uuid to its raw display value by consuming the type's
+    # raw-value list in encounter order.
+    type_counters: dict[str, int] = {}
+    raw_values: dict[str, str] = {}
+    for entity_type, entity_uuid in typed_entities:
+        idx = type_counters.get(entity_type, 0)
+        raw_vals = type_to_raw.get(entity_type, ())
+        if idx < len(raw_vals):
+            raw_values[entity_uuid] = raw_vals[idx]
+        type_counters[entity_type] = idx + 1
+
+    alerts: list[Alert] = []
+    for entity_type, entity_uuid in typed_entities:
+        entity_value = raw_values.get(entity_uuid, "")
+        alert = Alert(
+            alert_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_DNS,
+                    f"hst:{event.template_id}:{event.source_type}:{event.timestamp_ns}:{entity_uuid}",
+                )
+            ),
+            alert_type="ml",
+            timestamp_ns=event.timestamp_ns,
+            severity_id=event.severity_id,
+            rule_name="hst-anomaly",
+            description=(
+                f"Anomaly detected: score={result.score:.3f} "
+                f"threshold={result.upper_threshold:.3f} "
+                f"direction={result.anomaly_direction}"
+            ),
+            entity_uuid=entity_uuid,
+            entity_value=entity_value,
+            entity_type=cast("EntityType", entity_type),
+            contributing_events=(event.event_id,),
+            risk_score=result.score,
+            dedup_key=f"hst:{event.template_id}:{event.source_type}:{entity_uuid}",
+        )
+        alerts.append(alert)
+    return alerts
 
 
 def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
