@@ -966,3 +966,121 @@ class TestHWEvictionCounters:
         for i in range(5):
             ensemble.process_event(_make_event(template_id=i))
         assert ensemble._template_hw_eviction_count == 4
+
+
+class TestHealthMethod:
+    """S-140: get_health() returns memory estimation and Markov entity counts."""
+
+    def test_empty_ensemble_returns_zeros(self) -> None:
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        health = ensemble.get_health()
+        assert health["source_count"] == 0
+        assert health["estimated_memory_bytes"] == 0
+        assert health["memory_by_type"]["hst"] == 0
+        assert health["memory_by_type"]["hw_source"] == 0
+        assert health["memory_by_type"]["hw_template"] == 0
+        assert health["memory_by_type"]["hw_entity"] == 0
+        assert health["memory_by_type"]["cusum"] == 0
+        assert health["memory_by_type"]["markov"] == 0
+        assert health["memory_by_type"]["dspot"] == 0
+        assert health["markov_entity_counts"] == {}
+
+    def test_single_source_memory_estimate(self) -> None:
+        from seerflow.detection.ensemble import (
+            _MEM_CUSUM,
+            _MEM_DSPOT,
+            _MEM_HST,
+            _MEM_HW,
+        )
+
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog"))
+        health = ensemble.get_health()
+        assert health["source_count"] == 1
+        assert health["memory_by_type"]["hst"] == _MEM_HST
+        assert health["memory_by_type"]["hw_source"] == _MEM_HW
+        assert health["memory_by_type"]["cusum"] == _MEM_CUSUM
+        assert health["memory_by_type"]["dspot"] == _MEM_DSPOT
+
+    def test_multi_source_memory_sums(self) -> None:
+        from seerflow.detection.ensemble import _MEM_HST
+
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog"))
+        ensemble.process_event(_make_event(source_type="file"))
+        health = ensemble.get_health()
+        assert health["memory_by_type"]["hst"] == 2 * _MEM_HST
+
+    def test_template_hw_memory(self) -> None:
+        from seerflow.detection.ensemble import _MEM_HW
+
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=1))
+        ensemble.process_event(_make_event(template_id=2))
+        health = ensemble.get_health()
+        assert health["memory_by_type"]["hw_template"] == 2 * _MEM_HW
+
+    def test_entity_hw_memory(self) -> None:
+        from seerflow.detection.ensemble import _MEM_HW
+
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("e1",)))
+        ensemble.process_event(_make_event(entity_refs=("e2",)))
+        health = ensemble.get_health()
+        assert health["memory_by_type"]["hw_entity"] == 2 * _MEM_HW
+
+    def test_markov_entity_counts_per_source(self) -> None:
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog", entity_refs=("e1",)))
+        ensemble.process_event(_make_event(source_type="syslog", entity_refs=("e2",)))
+        ensemble.process_event(_make_event(source_type="file", entity_refs=("e3",)))
+        health = ensemble.get_health()
+        assert health["markov_entity_counts"]["syslog"] == 2
+        assert health["markov_entity_counts"]["file"] == 1
+
+    def test_markov_memory_estimate(self) -> None:
+        from seerflow.detection.ensemble import _MEM_MARKOV_ENTITY
+
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog", entity_refs=("e1",)))
+        ensemble.process_event(_make_event(source_type="syslog", entity_refs=("e2",)))
+        health = ensemble.get_health()
+        assert health["memory_by_type"]["markov"] == 2 * _MEM_MARKOV_ENTITY
+
+    def test_total_memory_is_sum_of_types(self) -> None:
+        config = _granular_config(max_template_hw=100, max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(
+            _make_event(template_id=1, entity_refs=("e1",)),
+        )
+        health = ensemble.get_health()
+        mem = health["memory_by_type"]
+        expected_total = sum(mem.values())
+        assert health["estimated_memory_bytes"] == expected_total
+
+    def test_includes_hw_eviction_counts(self) -> None:
+        config = _granular_config(max_template_hw=1, max_entity_hw=1)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=1, entity_refs=("e1",)))
+        ensemble.process_event(_make_event(template_id=2, entity_refs=("e2",)))
+        health = ensemble.get_health()
+        assert health["template_hw_eviction_count"] == 1
+        assert health["entity_hw_eviction_count"] == 1
+
+    def test_includes_existing_stats_fields(self) -> None:
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event())
+        health = ensemble.get_health()
+        assert "source_count" in health
+        assert "max_sources" in health
+        assert "eviction_count" in health
+        assert "template_hw_count" in health
+        assert "entity_hw_count" in health
