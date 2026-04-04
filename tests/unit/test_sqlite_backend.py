@@ -392,8 +392,7 @@ class TestWriteEvents:
         try:
             events = [_make_event(message=f"event {i}") for i in range(5)]
             await backend.write_events(events)
-            assert backend._write_buffer is not None
-            await backend._write_buffer.flush()
+            await backend.flush()
             cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
             row = await cursor.fetchone()
             assert row[0] == 5
@@ -428,8 +427,7 @@ class TestWriteEvents:
         # Don't flush manually — close should flush
         # We need to check before close destroys the connection
         # So we flush + check, then close
-        assert backend._write_buffer is not None
-        await backend._write_buffer.flush()
+        await backend.flush()
         cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
         row = await cursor.fetchone()
         assert row[0] == 5
@@ -1142,3 +1140,55 @@ class TestTemplateTable:
             assert [t.template_id for t in result] == [2, 1, 3]
         finally:
             await backend.close()
+
+
+class TestFlush:
+    @pytest.mark.asyncio
+    async def test_flush_empty_buffer_does_not_raise(self) -> None:
+        """flush() on an empty buffer completes without error."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            assert hasattr(backend, "flush")
+            await backend.flush()  # Should not raise even when buffer is empty
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_flush_writes_pending_events(self) -> None:
+        """Public flush() drains the write buffer and persists events."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            events = [_make_event(message=f"flush-test {i}") for i in range(3)]
+            await backend.write_events(events)
+            await backend.flush()
+            cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
+            row = await cursor.fetchone()
+            assert row[0] == 3
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_flush_idempotent(self) -> None:
+        """Calling flush() twice does not duplicate events."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            events = [_make_event(message=f"idem {i}") for i in range(2)]
+            await backend.write_events(events)
+            await backend.flush()
+            await backend.flush()  # second flush on empty buffer — safe
+            cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
+            row = await cursor.fetchone()
+            assert row[0] == 2
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_flush_after_close_does_not_raise(self) -> None:
+        """flush() on an already-closed backend must not raise."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        await backend.close()
+        await backend.flush()  # Must not raise ProgrammingError

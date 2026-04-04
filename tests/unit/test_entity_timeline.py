@@ -47,7 +47,7 @@ class TestGetTimeline:
         e2 = _make_event(entity_refs=(entity_uuid,), timestamp_ns=2000)
         e3 = _make_event(entity_refs=("other-uuid",), timestamp_ns=1500)
         await backend.write_events([e1, e2, e3])
-        await backend._write_buffer.flush()
+        await backend.flush()
 
         time_range = TimeRange(start_ns=0, end_ns=3000)
         results = await backend.get_timeline(entity_uuid, time_range)
@@ -60,7 +60,7 @@ class TestGetTimeline:
         e2 = _make_event(entity_refs=(entity_uuid,), timestamp_ns=1000)
         e3 = _make_event(entity_refs=(entity_uuid,), timestamp_ns=2000)
         await backend.write_events([e1, e2, e3])
-        await backend._write_buffer.flush()
+        await backend.flush()
 
         time_range = TimeRange(start_ns=0, end_ns=5000)
         results = await backend.get_timeline(entity_uuid, time_range)
@@ -73,7 +73,7 @@ class TestGetTimeline:
         e2 = _make_event(entity_refs=(entity_uuid,), timestamp_ns=2000)
         e3 = _make_event(entity_refs=(entity_uuid,), timestamp_ns=3000)
         await backend.write_events([e1, e2, e3])
-        await backend._write_buffer.flush()
+        await backend.flush()
 
         time_range = TimeRange(start_ns=1500, end_ns=2500)
         results = await backend.get_timeline(entity_uuid, time_range)
@@ -90,7 +90,7 @@ class TestGetTimeline:
         e1 = _make_event(entity_refs=(entity_uuid,), timestamp_ns=1000, source_type="syslog")
         e2 = _make_event(entity_refs=(entity_uuid,), timestamp_ns=2000, source_type="otlp")
         await backend.write_events([e1, e2])
-        await backend._write_buffer.flush()
+        await backend.flush()
 
         time_range = TimeRange(start_ns=0, end_ns=5000)
         results = await backend.get_timeline(

@@ -236,8 +236,7 @@ class TestRunQueryEvents:
             template_id=5,
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             last=None, template=None, source=None, severity=None, limit=50, json=False
@@ -275,8 +274,7 @@ class TestRunQueryEvents:
             source_type="file",
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             last=None, template=None, source=None, severity=None, limit=50, json=True
@@ -313,8 +311,7 @@ class TestRunQueryEvents:
             source_type="syslog",
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             last="1h", template=None, source=None, severity=None, limit=50, json=False
@@ -1252,8 +1249,7 @@ class TestRunQueryTimeline:
             entity_refs=(entity_uuid,),
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             entity_uuid=entity_uuid,
@@ -1303,8 +1299,7 @@ class TestRunQueryTimeline:
             entity_refs=(entity_uuid,),
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             entity_uuid=entity_uuid,
@@ -1433,8 +1428,7 @@ class TestRunQueryTimeline:
             entity_refs=(entity_uuid,),
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             entity_uuid=entity_uuid,

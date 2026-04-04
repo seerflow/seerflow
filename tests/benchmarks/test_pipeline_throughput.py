@@ -121,8 +121,7 @@ def generate_events(n: int, *, seed: int = 42) -> list[RawEvent]:
 
 async def _flush(storage: SqliteBackend) -> None:
     """Flush the write buffer so events are queryable."""
-    if storage._write_buffer is not None:
-        await storage._write_buffer.flush()
+    await storage.flush()
 
 
 async def _build_pipeline(
