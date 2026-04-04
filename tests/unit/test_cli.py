@@ -752,3 +752,32 @@ class TestGracefulStartupError:
 
         assert any("Startup failed" in r.message for r in caplog.records)
         assert any("seerflow.yaml" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_logs_warning_and_continues(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When some receivers fail but build_pipeline succeeds, no SystemExit."""
+        import logging
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from seerflow.pipeline import build_pipeline
+
+        mock_mgr = MagicMock()
+        mock_mgr._receivers = {"syslog": MagicMock(), "file": MagicMock()}
+        mock_mgr.start = AsyncMock(return_value=["file"])  # file failed
+        mock_mgr.stop = AsyncMock()
+        # syslog is healthy, file is not
+        mock_mgr._receivers["syslog"].is_healthy.return_value = True
+        mock_mgr._receivers["file"].is_healthy.return_value = False
+
+        mock_config = MagicMock()
+
+        with (
+            patch("seerflow.pipeline.ReceiverManager", return_value=mock_mgr),
+            caplog.at_level(logging.WARNING),
+        ):
+            pipeline = await build_pipeline(mock_config)
+
+        assert pipeline is not None
+        assert any("Some receivers failed" in r.message for r in caplog.records)
