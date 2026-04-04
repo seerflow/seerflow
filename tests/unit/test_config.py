@@ -806,3 +806,124 @@ class TestRiskConfig:
     def test_risk_max_entities_negative_raises(self) -> None:
         with pytest.raises(ConfigError, match="risk_max_entities must be >= 1"):
             _build_detection({"risk_max_entities": -5})
+
+
+class TestGranularHWConfig:
+    """S-138: Config params for per-template and per-entity HW detection."""
+
+    def test_defaults(self) -> None:
+        config = _build_detection({})
+        assert config.max_template_hw == 500
+        assert config.max_entity_hw == 500
+        assert config.min_events_for_scoring == 50
+        assert config.weights_template_volume == 0.15
+        assert config.weights_entity_volume == 0.15
+
+    def test_custom_values(self) -> None:
+        config = _build_detection(
+            {
+                "max_template_hw": 1000,
+                "max_entity_hw": 2000,
+                "min_events_for_scoring": 100,
+                "weights_template_volume": 0.10,
+                "weights_entity_volume": 0.20,
+            }
+        )
+        assert config.max_template_hw == 1000
+        assert config.max_entity_hw == 2000
+        assert config.min_events_for_scoring == 100
+        assert config.weights_template_volume == 0.10
+        assert config.weights_entity_volume == 0.20
+
+    def test_max_template_hw_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_template_hw"):
+            _build_detection({"max_template_hw": 0})
+
+    def test_max_template_hw_too_high_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_template_hw"):
+            _build_detection({"max_template_hw": 100_001})
+
+    def test_max_template_hw_at_lower_bound(self) -> None:
+        config = _build_detection({"max_template_hw": 1})
+        assert config.max_template_hw == 1
+
+    def test_max_template_hw_at_upper_bound(self) -> None:
+        config = _build_detection({"max_template_hw": 100_000})
+        assert config.max_template_hw == 100_000
+
+    def test_max_entity_hw_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_entity_hw"):
+            _build_detection({"max_entity_hw": 0})
+
+    def test_max_entity_hw_too_high_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_entity_hw"):
+            _build_detection({"max_entity_hw": 100_001})
+
+    def test_max_entity_hw_at_lower_bound(self) -> None:
+        config = _build_detection({"max_entity_hw": 1})
+        assert config.max_entity_hw == 1
+
+    def test_max_entity_hw_at_upper_bound(self) -> None:
+        config = _build_detection({"max_entity_hw": 100_000})
+        assert config.max_entity_hw == 100_000
+
+    def test_min_events_for_scoring_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="min_events_for_scoring"):
+            _build_detection({"min_events_for_scoring": 0})
+
+    def test_min_events_for_scoring_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="min_events_for_scoring"):
+            _build_detection({"min_events_for_scoring": -1})
+
+    def test_min_events_for_scoring_at_lower_bound(self) -> None:
+        config = _build_detection({"min_events_for_scoring": 1})
+        assert config.min_events_for_scoring == 1
+
+    def test_weights_template_volume_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_template_volume"):
+            _build_detection({"weights_template_volume": -0.1})
+
+    def test_weights_template_volume_nan_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_template_volume"):
+            _build_detection({"weights_template_volume": float("nan")})
+
+    def test_weights_template_volume_inf_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_template_volume"):
+            _build_detection({"weights_template_volume": float("inf")})
+
+    def test_weights_entity_volume_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_entity_volume"):
+            _build_detection({"weights_entity_volume": -0.1})
+
+    def test_weights_entity_volume_nan_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_entity_volume"):
+            _build_detection({"weights_entity_volume": float("nan")})
+
+    def test_weights_entity_volume_inf_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_entity_volume"):
+            _build_detection({"weights_entity_volume": float("inf")})
+
+    def test_weights_template_volume_zero_valid(self) -> None:
+        config = _build_detection({"weights_template_volume": 0.0})
+        assert config.weights_template_volume == 0.0
+
+    def test_weights_entity_volume_zero_valid(self) -> None:
+        config = _build_detection({"weights_entity_volume": 0.0})
+        assert config.weights_entity_volume == 0.0
+
+    def test_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "detection:\n"
+            "  max_template_hw: 250\n"
+            "  max_entity_hw: 300\n"
+            "  min_events_for_scoring: 25\n"
+            "  weights_template_volume: 0.12\n"
+            "  weights_entity_volume: 0.18\n"
+        )
+        config = load_config(str(yaml_file))
+        assert config.detection.max_template_hw == 250
+        assert config.detection.max_entity_hw == 300
+        assert config.detection.min_events_for_scoring == 25
+        assert config.detection.weights_template_volume == 0.12
+        assert config.detection.weights_entity_volume == 0.18

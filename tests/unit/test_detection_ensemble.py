@@ -283,7 +283,7 @@ class TestBlendedScoring:
 
         assert "syslog" in ensemble._score_windows
         assert "file" in ensemble._score_windows
-        assert len(ensemble._score_windows["syslog"]) == 4  # 4 detectors
+        assert len(ensemble._score_windows["syslog"]) == 6  # 4 core + 2 granular
 
     def test_warmup_uses_raw_scores(self) -> None:
         """During warmup (< 2 scores in window), raw scores used."""
@@ -494,3 +494,319 @@ class TestBatchScoring:
 
         with pytest.raises(ConfigError, match="score_interval"):
             _build_detection({"score_interval": 0})
+
+
+def _granular_config(**overrides: object) -> DetectionConfig:
+    """Helper for granular HW tests — short alias for common config."""
+    defaults: dict[str, object] = {
+        "hw_seasonal_period": 10,
+        "min_events_for_scoring": 1,
+    }
+    defaults.update(overrides)
+    return DetectionConfig(**defaults)  # type: ignore[arg-type]
+
+
+class TestTemplateHW:
+    """S-138: Per-template HoltWinters instances."""
+
+    def test_template_hw_created_lazily(self) -> None:
+        """Template HW instance created on first event with that template."""
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=5))
+        assert "syslog:5" in ensemble._template_hw
+
+    def test_template_hw_not_created_for_negative_one(self) -> None:
+        """template_id=-1 means no template matched — no HW instance."""
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=-1))
+        assert len(ensemble._template_hw) == 0
+
+    def test_template_hw_lru_eviction(self) -> None:
+        """Oldest template HW evicted when max_template_hw exceeded."""
+        config = _granular_config(max_template_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=1))
+        ensemble.process_event(_make_event(template_id=2))
+        ensemble.process_event(_make_event(template_id=3))
+        assert "syslog:1" not in ensemble._template_hw
+        assert "syslog:3" in ensemble._template_hw
+        assert len(ensemble._template_hw) == 2
+
+    def test_template_hw_lru_reaccess_survives(self) -> None:
+        """Re-accessed template HW moved to end, survives eviction."""
+        config = _granular_config(max_template_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=1))
+        ensemble.process_event(_make_event(template_id=2))
+        ensemble.process_event(_make_event(template_id=1))
+        ensemble.process_event(_make_event(template_id=3))
+        assert "syslog:1" in ensemble._template_hw
+        assert "syslog:2" not in ensemble._template_hw
+
+    def test_min_events_threshold_returns_zero(self) -> None:
+        """Template score is 0.0 until min_events_for_scoring reached."""
+        config = _granular_config(
+            max_template_hw=100,
+            min_events_for_scoring=5,
+            dspot_calibration_window=500,
+        )
+        ensemble = DetectionEnsemble(config)
+        for _ in range(4):
+            ensemble.process_event(_make_event(template_id=1))
+        assert "syslog:1" in ensemble._template_hw
+        assert ensemble._template_event_counts["syslog:1"] == 4
+
+    def test_template_event_counts_tracked(self) -> None:
+        """Event counts per template key are tracked."""
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        for _ in range(3):
+            ensemble.process_event(_make_event(template_id=7))
+        assert ensemble._template_event_counts["syslog:7"] == 3
+
+    def test_template_event_counts_evicted_with_hw(self) -> None:
+        """Event counts cleaned up when template HW is LRU-evicted."""
+        config = _granular_config(max_template_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=1))
+        ensemble.process_event(_make_event(template_id=2))
+        ensemble.process_event(_make_event(template_id=3))
+        assert "syslog:1" not in ensemble._template_event_counts
+
+    def test_different_sources_create_separate_template_hw(self) -> None:
+        """Same template_id from different sources gets separate HW."""
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog", template_id=1))
+        ensemble.process_event(_make_event(source_type="file", template_id=1))
+        assert "syslog:1" in ensemble._template_hw
+        assert "file:1" in ensemble._template_hw
+
+
+class TestEntityHW:
+    """S-138: Per-entity HoltWinters instances."""
+
+    def test_entity_hw_created_lazily(self) -> None:
+        """Entity HW instance created on first event with that entity."""
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("entity-abc",)))
+        assert "syslog:entity-abc" in ensemble._entity_hw
+
+    def test_entity_hw_not_created_for_empty_refs(self) -> None:
+        """No entity HW created when entity_refs is empty."""
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=()))
+        assert len(ensemble._entity_hw) == 0
+
+    def test_entity_hw_lru_eviction(self) -> None:
+        """Oldest entity HW evicted when max_entity_hw exceeded."""
+        config = _granular_config(max_entity_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("e1",)))
+        ensemble.process_event(_make_event(entity_refs=("e2",)))
+        ensemble.process_event(_make_event(entity_refs=("e3",)))
+        assert "syslog:e1" not in ensemble._entity_hw
+        assert "syslog:e3" in ensemble._entity_hw
+        assert len(ensemble._entity_hw) == 2
+
+    def test_entity_hw_lru_reaccess_survives(self) -> None:
+        """Re-accessed entity HW moved to end, survives eviction."""
+        config = _granular_config(max_entity_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("e1",)))
+        ensemble.process_event(_make_event(entity_refs=("e2",)))
+        ensemble.process_event(_make_event(entity_refs=("e1",)))
+        ensemble.process_event(_make_event(entity_refs=("e3",)))
+        assert "syslog:e1" in ensemble._entity_hw
+        assert "syslog:e2" not in ensemble._entity_hw
+
+    def test_multiple_entity_refs_creates_multiple_hw(self) -> None:
+        """Event with multiple entity_refs creates HW per entity."""
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("e1", "e2", "e3")))
+        assert "syslog:e1" in ensemble._entity_hw
+        assert "syslog:e2" in ensemble._entity_hw
+        assert "syslog:e3" in ensemble._entity_hw
+
+    def test_entity_min_events_threshold(self) -> None:
+        """Entity score is 0.0 until min_events_for_scoring reached."""
+        config = _granular_config(
+            max_entity_hw=100,
+            min_events_for_scoring=5,
+            dspot_calibration_window=500,
+        )
+        ensemble = DetectionEnsemble(config)
+        for _ in range(4):
+            ensemble.process_event(_make_event(entity_refs=("e1",)))
+        assert ensemble._entity_event_counts["syslog:e1"] == 4
+
+    def test_entity_event_counts_evicted_with_hw(self) -> None:
+        """Event counts cleaned up when entity HW is LRU-evicted."""
+        config = _granular_config(max_entity_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("e1",)))
+        ensemble.process_event(_make_event(entity_refs=("e2",)))
+        ensemble.process_event(_make_event(entity_refs=("e3",)))
+        assert "syslog:e1" not in ensemble._entity_event_counts
+
+    def test_different_sources_create_separate_entity_hw(self) -> None:
+        """Same entity from different sources gets separate HW."""
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(
+            _make_event(source_type="syslog", entity_refs=("e1",)),
+        )
+        ensemble.process_event(
+            _make_event(source_type="file", entity_refs=("e1",)),
+        )
+        assert "syslog:e1" in ensemble._entity_hw
+        assert "file:e1" in ensemble._entity_hw
+
+
+class TestExpandedBlending:
+    """S-138: Score blending expanded from 4 to 6 weights."""
+
+    def test_weight_tuple_has_six_entries(self) -> None:
+        """Weight tuple includes template_volume and entity_volume."""
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        assert len(ensemble._weights) == 6
+
+    def test_score_windows_have_six_accumulators(self) -> None:
+        """Score windows created with 6 accumulators (not 4)."""
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event())
+        assert len(ensemble._score_windows["syslog"]) == 6
+
+    def test_template_and_entity_weights_in_tuple(self) -> None:
+        """Template and entity volume weights are at indices 4 and 5."""
+        config = DetectionConfig(
+            hw_seasonal_period=10,
+            weights_template_volume=0.12,
+            weights_entity_volume=0.18,
+        )
+        ensemble = DetectionEnsemble(config)
+        assert ensemble._weights[4] == 0.12
+        assert ensemble._weights[5] == 0.18
+
+    def test_six_scores_blended(self) -> None:
+        """process_event produces a finite score with 6-component blending."""
+        config = _granular_config(dspot_calibration_window=500)
+        ensemble = DetectionEnsemble(config)
+        result = ensemble.process_event(
+            _make_event(template_id=1, entity_refs=("e1",)),
+        )
+        assert isinstance(result.score, float)
+        assert math.isfinite(result.score)
+
+
+class TestExpandedStats:
+    """S-138: Stats include template and entity HW counts."""
+
+    def test_stats_include_template_hw_count(self) -> None:
+        config = _granular_config(max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(template_id=1))
+        ensemble.process_event(_make_event(template_id=2))
+        stats = ensemble.get_stats()
+        assert stats["template_hw_count"] == 2
+
+    def test_stats_include_entity_hw_count(self) -> None:
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("e1",)))
+        ensemble.process_event(_make_event(entity_refs=("e2",)))
+        stats = ensemble.get_stats()
+        assert stats["entity_hw_count"] == 2
+
+    def test_stats_zero_when_no_template_or_entity(self) -> None:
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        stats = ensemble.get_stats()
+        assert stats["template_hw_count"] == 0
+        assert stats["entity_hw_count"] == 0
+
+
+class TestExpandedPersistence:
+    """S-138: Persistence includes template and entity HW state."""
+
+    async def test_save_includes_template_and_entity_hw(self) -> None:
+        from unittest.mock import AsyncMock
+
+        config = _granular_config()
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(
+            _make_event(template_id=1, entity_refs=("e1",)),
+        )
+
+        storage = AsyncMock()
+        storage.save_state = AsyncMock()
+        await ensemble.save_all_state(storage)
+
+        saved_keys = [call[0][0] for call in storage.save_state.call_args_list]
+        assert any(k.startswith("tmpl_hw:") for k in saved_keys)
+        assert any(k.startswith("ent_hw:") for k in saved_keys)
+        assert any(k == "tmpl_hw:manifest" for k in saved_keys)
+        assert any(k == "ent_hw:manifest" for k in saved_keys)
+
+    async def test_load_restores_template_and_entity_hw(self, tmp_path: object) -> None:
+        from seerflow.config import StorageConfig
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test.db"),  # type: ignore[operator]
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+        config = _granular_config(dspot_calibration_window=200)
+
+        ensemble1 = DetectionEnsemble(config)
+        for _ in range(10):
+            ensemble1.process_event(
+                _make_event(template_id=1, entity_refs=("e1",)),
+            )
+        await ensemble1.save_all_state(storage)
+
+        ensemble2 = DetectionEnsemble(config)
+        loaded = await ensemble2.load_all_state(storage)
+        assert "syslog:1" in ensemble2._template_hw
+        assert "syslog:e1" in ensemble2._entity_hw
+        assert loaded > 0
+
+        await storage.close()
+
+    async def test_backward_compat_4_accumulators_padded_to_6(
+        self,
+    ) -> None:
+        """Score windows with 4 accumulators padded to 6 on load."""
+        from unittest.mock import AsyncMock
+
+        import msgspec.json
+
+        from seerflow.detection.ensemble import _WelfordAccumulator
+
+        config = DetectionConfig(hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+
+        old_windows = [_WelfordAccumulator().to_dict() for _ in range(4)]
+        manifest = msgspec.json.encode(["syslog"])
+        windows_data = msgspec.json.encode(old_windows)
+
+        async def fake_load(key: str) -> bytes | None:
+            if key == "ensemble:manifest":
+                return manifest
+            if key == "windows:syslog":
+                return windows_data
+            return None
+
+        storage = AsyncMock()
+        storage.load_state = AsyncMock(side_effect=fake_load)
+
+        await ensemble.load_all_state(storage)
+        assert len(ensemble._score_windows["syslog"]) == 6

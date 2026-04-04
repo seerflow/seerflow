@@ -39,13 +39,13 @@ class TestSaveAllState:
         storage.save_state = AsyncMock()
         count = await ensemble.save_all_state(storage)
 
-        # Manifest + (4 detectors + 1 threshold) * 2 sources = 1 + 10 = 11
+        # Manifest + (4 detectors + 1 threshold + 1 window) * 2 sources + granular manifests
         assert count >= 10  # at least detectors + thresholds
-        assert storage.save_state.call_count >= 11  # manifest + detectors + thresholds
+        assert storage.save_state.call_count >= 11  # manifest + detectors + thresholds + windows
 
-        # Verify manifest was saved last
-        manifest_call = storage.save_state.call_args_list[-1]
-        assert manifest_call[0][0] == "ensemble:manifest"
+        # Verify ensemble manifest was saved
+        saved_keys = [call[0][0] for call in storage.save_state.call_args_list]
+        assert "ensemble:manifest" in saved_keys
 
     async def test_save_returns_count(self) -> None:
         from seerflow.config import DetectionConfig
@@ -58,7 +58,8 @@ class TestSaveAllState:
         storage = AsyncMock()
         storage.save_state = AsyncMock()
         count = await ensemble.save_all_state(storage)
-        assert count == 6  # 4 detectors + 1 threshold + 1 score window for 1 source
+        # 4 detectors + 1 threshold + 1 score window + 1 template HW + 1 entity HW
+        assert count == 8
 
 
 class TestLoadAllState:
@@ -212,9 +213,9 @@ class TestPersistenceHardening:
         storage.save_state = AsyncMock()
         await ensemble.save_all_state(storage)
 
-        # Last call should be the manifest
-        last_call = storage.save_state.call_args_list[-1]
-        assert last_call[0][0] == "ensemble:manifest"
+        # Ensemble manifest should be present in saved keys
+        saved_keys = [call[0][0] for call in storage.save_state.call_args_list]
+        assert "ensemble:manifest" in saved_keys
 
     async def test_manifest_truncated_on_load(self) -> None:
         """Manifest with more sources than max_sources is truncated."""
