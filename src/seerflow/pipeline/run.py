@@ -51,7 +51,18 @@ async def _run_with_config(config: SeerflowConfig) -> None:
             _log.info("Restored %d model states from storage", loaded)
     except Exception:
         _log.warning("Failed to restore model state — starting fresh", exc_info=True)
-    pipeline = await build_pipeline(config)
+    try:
+        pipeline = await build_pipeline(config)
+    except RuntimeError as exc:
+        _log.error("Startup failed: %s", exc)
+        _log.error(
+            "Suggestions:\n"
+            "  - Check file permissions for configured log paths\n"
+            "  - Ensure ports are not already in use\n"
+            "  - Verify receiver settings in seerflow.yaml"
+        )
+        await storage.close()
+        sys.exit(1)
 
     # Startup banner — only list healthy receivers
     receivers = [sid for sid, r in pipeline.manager._receivers.items() if r.is_healthy()]
