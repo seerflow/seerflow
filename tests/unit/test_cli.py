@@ -728,7 +728,9 @@ class TestGracefulStartupError:
         assert exc_info.value.code == 1
 
     @pytest.mark.asyncio
-    async def test_all_receivers_fail_logs_suggestions(self, caplog: pytest.LogCaptureFixture) -> None:
+    async def test_all_receivers_fail_logs_suggestions(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         import logging
         from unittest.mock import AsyncMock, patch
 
