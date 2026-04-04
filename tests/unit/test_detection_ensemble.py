@@ -644,6 +644,24 @@ class TestEntityHW:
         keys = list(ensemble._entity_hw.keys())
         assert all(len(k) <= _MAX_SOURCE_KEY_LEN for k in keys)
 
+    def test_entity_refs_capped_per_event(self) -> None:
+        """Only first 32 entity_refs processed per event."""
+        from seerflow.detection.ensemble import _MAX_ENTITIES_PER_SCORE
+
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        many_entities = tuple(f"e{i}" for i in range(100))
+        ensemble.process_event(_make_event(entity_refs=many_entities))
+        assert len(ensemble._entity_hw) == _MAX_ENTITIES_PER_SCORE
+
+    def test_null_byte_entity_value_skipped(self) -> None:
+        """Entity value that is only null bytes is skipped."""
+        config = _granular_config(max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(entity_refs=("\x00\x00", "valid")))
+        assert len(ensemble._entity_hw) == 1
+        assert "syslog:valid" in ensemble._entity_hw
+
     def test_entity_hw_lru_reaccess_survives(self) -> None:
         """Re-accessed entity HW moved to end, survives eviction."""
         config = _granular_config(max_entity_hw=2)

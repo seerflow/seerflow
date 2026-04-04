@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
+_MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
 
 
 class _WelfordAccumulator:
@@ -283,8 +284,11 @@ class DetectionEnsemble:
         if not event.entity_refs:
             return 0.0
         max_score = 0.0
-        for entity_val in event.entity_refs:
-            key = f"{source}:{entity_val}"[:_MAX_SOURCE_KEY_LEN]
+        for entity_val in event.entity_refs[:_MAX_ENTITIES_PER_SCORE]:
+            safe_val = entity_val.replace("\x00", "")
+            if not safe_val:
+                continue
+            key = f"{source}:{safe_val}"[:_MAX_SOURCE_KEY_LEN]
             self._entity_event_counts[key] = self._entity_event_counts.get(key, 0) + 1
             hw = self._get_or_create_hw(
                 key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
@@ -511,6 +515,9 @@ class DetectionEnsemble:
         # Reverse: manifest preserves LRU order (oldest first from OrderedDict),
         # so load MRU entries first to keep the hottest keys when capacity-limited.
         for key, evt_count in list(manifest.items())[-max_items:]:
+            if not isinstance(evt_count, int) or evt_count < 0:
+                _log.warning("Invalid event count %r for %s:%s — skipping", evt_count, prefix, key)
+                continue
             data = await storage.load_state(f"{prefix}:{key}")
             if data is None:
                 continue
