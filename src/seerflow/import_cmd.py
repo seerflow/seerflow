@@ -93,7 +93,6 @@ async def run_import(
         return {
             "files_processed": 0,
             "lines_read": 0,
-            "lines_read": 0,
             "elapsed_seconds": 0.0,
         }
 
