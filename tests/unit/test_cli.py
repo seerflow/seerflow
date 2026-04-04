@@ -701,3 +701,52 @@ class TestQueryHealthParsing:
     def test_query_health_json_flag(self) -> None:
         args = parse_args(["query", "health", "--json"])
         assert args.json is True
+
+
+class TestGracefulStartupError:
+    """S-141: Clean error when all receivers fail to start."""
+
+    @pytest.mark.asyncio
+    async def test_all_receivers_fail_exits_with_code_1(self) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.pipeline.run import _run_with_config
+
+        mock_config = AsyncMock()
+        mock_config.log_level = "INFO"
+        mock_config.storage.data_dir = "/tmp/seerflow-test"
+        mock_config.storage.sqlite_path = ":memory:"
+
+        with (
+            patch("seerflow.pipeline.run.build_pipeline", new_callable=AsyncMock) as mock_build,
+            patch("seerflow.storage.sqlite.SqliteBackend.connect", new_callable=AsyncMock),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            mock_build.side_effect = RuntimeError("All receivers failed to start: ['syslog']")
+            await _run_with_config(mock_config)
+
+        assert exc_info.value.code == 1
+
+    @pytest.mark.asyncio
+    async def test_all_receivers_fail_logs_suggestions(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.pipeline.run import _run_with_config
+
+        mock_config = AsyncMock()
+        mock_config.log_level = "INFO"
+        mock_config.storage.data_dir = "/tmp/seerflow-test"
+        mock_config.storage.sqlite_path = ":memory:"
+
+        with (
+            patch("seerflow.pipeline.run.build_pipeline", new_callable=AsyncMock) as mock_build,
+            patch("seerflow.storage.sqlite.SqliteBackend.connect", new_callable=AsyncMock),
+            caplog.at_level(logging.ERROR, logger="seerflow"),
+            pytest.raises(SystemExit),
+        ):
+            mock_build.side_effect = RuntimeError("All receivers failed to start: ['syslog']")
+            await _run_with_config(mock_config)
+
+        assert any("Startup failed" in r.message for r in caplog.records)
+        assert any("seerflow.yaml" in r.message for r in caplog.records)
