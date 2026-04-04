@@ -6,7 +6,7 @@ import logging
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import msgspec.json
 
@@ -26,6 +26,13 @@ _log = logging.getLogger(__name__)
 
 _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
 _MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
+
+# Memory estimation constants (bytes) — approximate per-instance footprint.
+_MEM_HST = 51_200  # ~50 KB: River HalfSpaceTrees, 25 trees
+_MEM_HW = 12_288  # ~12 KB: 1440 seasonal floats + state
+_MEM_CUSUM = 200  # ~200 B: O(1) counters + floats
+_MEM_MARKOV_ENTITY = 10_240  # ~10 KB: transition matrix per entity
+_MEM_DSPOT = 8_192  # ~8 KB: calibration window + tail state
 
 
 class _WelfordAccumulator:
@@ -102,6 +109,7 @@ class DetectionEnsemble:
         "_detectors",
         "_entity_event_counts",
         "_entity_hw",
+        "_entity_hw_eviction_count",
         "_event_counters",
         "_eviction_count",
         "_max_entity_hw",
@@ -112,6 +120,7 @@ class DetectionEnsemble:
         "_score_windows",
         "_template_event_counts",
         "_template_hw",
+        "_template_hw_eviction_count",
         "_thresholds",
         "_weights",
     )
@@ -132,6 +141,8 @@ class DetectionEnsemble:
         self._entity_hw: OrderedDict[str, HoltWintersDetector] = OrderedDict()
         self._template_event_counts: dict[str, int] = {}
         self._entity_event_counts: dict[str, int] = {}
+        self._template_hw_eviction_count: int = 0
+        self._entity_hw_eviction_count: int = 0
         self._weights: tuple[float, ...] = (
             config.weights_content,
             config.weights_volume,
@@ -268,6 +279,8 @@ class DetectionEnsemble:
             return 0.0
         key = f"{source}:{tid}"[:_MAX_SOURCE_KEY_LEN]
         self._template_event_counts[key] = self._template_event_counts.get(key, 0) + 1
+        if key not in self._template_hw and len(self._template_hw) >= self._max_template_hw:
+            self._template_hw_eviction_count += 1
         hw = self._get_or_create_hw(
             key, self._template_hw, self._template_event_counts, self._max_template_hw
         )
@@ -290,6 +303,8 @@ class DetectionEnsemble:
                 continue
             key = f"{source}:{safe_val}"[:_MAX_SOURCE_KEY_LEN]
             self._entity_event_counts[key] = self._entity_event_counts.get(key, 0) + 1
+            if key not in self._entity_hw and len(self._entity_hw) >= self._max_entity_hw:
+                self._entity_hw_eviction_count += 1
             hw = self._get_or_create_hw(
                 key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
             )
@@ -349,6 +364,49 @@ class DetectionEnsemble:
             "eviction_count": self._eviction_count,
             "template_hw_count": len(self._template_hw),
             "entity_hw_count": len(self._entity_hw),
+        }
+
+    def get_health(self) -> dict[str, Any]:
+        """Return health stats with memory estimation and Markov entity counts."""
+        stats = self.get_stats()
+        source_count = stats["source_count"]
+
+        # Markov entity counts per source
+        markov_entity_counts: dict[str, int] = {}
+        total_markov_entities = 0
+        for source, detectors in self._detectors.items():
+            for d in detectors:
+                if isinstance(d, MarkovDetector):
+                    count = d.entity_count
+                    markov_entity_counts[source] = count
+                    total_markov_entities += count
+
+        # Memory by type
+        mem_hst = source_count * _MEM_HST
+        mem_hw_source = source_count * _MEM_HW
+        mem_hw_template = stats["template_hw_count"] * _MEM_HW
+        mem_hw_entity = stats["entity_hw_count"] * _MEM_HW
+        mem_cusum = source_count * _MEM_CUSUM
+        mem_markov = total_markov_entities * _MEM_MARKOV_ENTITY
+        mem_dspot = len(self._thresholds) * _MEM_DSPOT
+
+        memory_by_type = {
+            "hst": mem_hst,
+            "hw_source": mem_hw_source,
+            "hw_template": mem_hw_template,
+            "hw_entity": mem_hw_entity,
+            "cusum": mem_cusum,
+            "markov": mem_markov,
+            "dspot": mem_dspot,
+        }
+
+        return {
+            **stats,
+            "template_hw_eviction_count": self._template_hw_eviction_count,
+            "entity_hw_eviction_count": self._entity_hw_eviction_count,
+            "estimated_memory_bytes": sum(memory_by_type.values()),
+            "memory_by_type": memory_by_type,
+            "markov_entity_counts": markov_entity_counts,
         }
 
     async def save_all_state(self, storage: ModelStore) -> int:
