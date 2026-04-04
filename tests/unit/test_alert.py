@@ -479,9 +479,7 @@ class TestCreateMlAlerts:
             related_users=("alice",),
             related_hosts=(),
         )
-        alerts = create_ml_alerts(
-            event, self._make_result(), [("ip", uuid1), ("user", uuid2)]
-        )
+        alerts = create_ml_alerts(event, self._make_result(), [("ip", uuid1), ("user", uuid2)])
 
         assert alerts[0].alert_id != alerts[1].alert_id
 
@@ -535,9 +533,7 @@ class TestCreateMlAlerts:
             related_users=("admin",),
             related_hosts=(),
         )
-        alerts = create_ml_alerts(
-            event, self._make_result(), [("ip", uuid1), ("user", uuid2)]
-        )
+        alerts = create_ml_alerts(event, self._make_result(), [("ip", uuid1), ("user", uuid2)])
 
         for alert in alerts:
             assert alert.timestamp_ns == ts
