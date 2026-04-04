@@ -1184,3 +1184,11 @@ class TestFlush:
             assert row[0] == 2
         finally:
             await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_flush_after_close_does_not_raise(self) -> None:
+        """flush() on an already-closed backend must not raise."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        await backend.close()
+        await backend.flush()  # Must not raise ProgrammingError
