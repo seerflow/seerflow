@@ -111,6 +111,8 @@ class DetectionConfig:
     markov_max_entities: int = 1000
     max_sources: int = 256
     model_save_interval_seconds: int = 300
+    # Weights do NOT need to sum to 1.0 — the blending pipeline divides by
+    # the sum of all weights, so only ratios matter.
     weights_content: float = 0.30
     weights_volume: float = 0.25
     weights_sequence: float = 0.25
@@ -120,6 +122,11 @@ class DetectionConfig:
     risk_threshold: float = 50.0
     risk_max_entities: int = 10_000
     score_interval: int = 1  # Score every Nth event per source (1 = every event)
+    max_template_hw: int = 500
+    max_entity_hw: int = 500
+    min_events_for_scoring: int = 50
+    weights_template_volume: float = 0.15
+    weights_entity_volume: float = 0.15
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
 
 
@@ -350,6 +357,8 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         ("weights_volume", config.weights_volume),
         ("weights_sequence", config.weights_sequence),
         ("weights_pattern", config.weights_pattern),
+        ("weights_template_volume", config.weights_template_volume),
+        ("weights_entity_volume", config.weights_entity_volume),
     ):
         if not math.isfinite(value):
             raise ConfigError(f"detection.{name} must be finite, got {value!r}")
@@ -412,6 +421,21 @@ def _validate_detection_config(config: DetectionConfig) -> None:
     if config.score_interval < 1:
         raise ConfigError(f"detection.score_interval must be >= 1, got {config.score_interval!r}")
 
+    if config.max_template_hw < 1 or config.max_template_hw > 100_000:
+        raise ConfigError(
+            f"detection.max_template_hw must be between 1 and 100_000, "
+            f"got {config.max_template_hw!r}"
+        )
+    if config.max_entity_hw < 1 or config.max_entity_hw > 100_000:
+        raise ConfigError(
+            f"detection.max_entity_hw must be between 1 and 100_000, got {config.max_entity_hw!r}"
+        )
+    if config.min_events_for_scoring < 1 or config.min_events_for_scoring > 100_000:
+        raise ConfigError(
+            f"detection.min_events_for_scoring must be between 1 and 100_000, "
+            f"got {config.min_events_for_scoring!r}"
+        )
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     """Build DetectionConfig from a YAML ``detection:`` section.
@@ -462,6 +486,11 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         risk_threshold=float(data.get("risk_threshold", 50.0)),
         risk_max_entities=data.get("risk_max_entities", 10_000),
         score_interval=data.get("score_interval", 1),
+        max_template_hw=data.get("max_template_hw", 500),
+        max_entity_hw=data.get("max_entity_hw", 500),
+        min_events_for_scoring=data.get("min_events_for_scoring", 50),
+        weights_template_volume=data.get("weights_template_volume", 0.15),
+        weights_entity_volume=data.get("weights_entity_volume", 0.15),
         sigma_rules_dirs=sigma_rules_dirs,
     )
     _validate_detection_config(config)

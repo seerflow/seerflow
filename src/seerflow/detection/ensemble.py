@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
+_MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
 
 
 class _WelfordAccumulator:
@@ -99,11 +100,18 @@ class DetectionEnsemble:
     __slots__ = (
         "_config",
         "_detectors",
+        "_entity_event_counts",
+        "_entity_hw",
         "_event_counters",
         "_eviction_count",
+        "_max_entity_hw",
         "_max_sources",
+        "_max_template_hw",
+        "_min_events_for_scoring",
         "_score_interval",
         "_score_windows",
+        "_template_event_counts",
+        "_template_hw",
         "_thresholds",
         "_weights",
     )
@@ -112,16 +120,25 @@ class DetectionEnsemble:
         self._config = config
         self._max_sources = config.max_sources
         self._score_interval = config.score_interval
+        self._max_template_hw = config.max_template_hw
+        self._max_entity_hw = config.max_entity_hw
+        self._min_events_for_scoring = config.min_events_for_scoring
         self._detectors: OrderedDict[str, list[Detector]] = OrderedDict()
         self._thresholds: OrderedDict[str, DSpotThreshold] = OrderedDict()
         self._eviction_count: int = 0
         self._event_counters: dict[str, int] = {}
         self._score_windows: OrderedDict[str, list[_WelfordAccumulator]] = OrderedDict()
+        self._template_hw: OrderedDict[str, HoltWintersDetector] = OrderedDict()
+        self._entity_hw: OrderedDict[str, HoltWintersDetector] = OrderedDict()
+        self._template_event_counts: dict[str, int] = {}
+        self._entity_event_counts: dict[str, int] = {}
         self._weights: tuple[float, ...] = (
             config.weights_content,
             config.weights_volume,
             config.weights_pattern,
             config.weights_sequence,
+            config.weights_template_volume,
+            config.weights_entity_volume,
         )
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
@@ -145,10 +162,20 @@ class DetectionEnsemble:
         scores = [d.score(event) for d in detectors]
         scores = [s if math.isfinite(s) else 0.0 for s in scores]
 
+        template_score = self._score_template_hw(source, event)
+        entity_score = self._score_entity_hw(source, event)
+        scores = [
+            *scores,
+            template_score if math.isfinite(template_score) else 0.0,
+            entity_score if math.isfinite(entity_score) else 0.0,
+        ]
+
         # --- Blended scoring pipeline ---
         # 1. Get/create per-detector score windows for this source
         if source not in self._score_windows:
-            self._score_windows[source] = [_WelfordAccumulator() for _ in range(len(detectors))]
+            self._score_windows[source] = [
+                _WelfordAccumulator() for _ in range(len(self._weights))
+            ]
         else:
             self._score_windows.move_to_end(source)
         windows = self._score_windows[source]
@@ -173,11 +200,13 @@ class DetectionEnsemble:
         else:
             combined = 0.0
 
-        # 4. Signal amplification
+        # 4. Signal amplification -- thresholds scale with detector count:
+        # 2x when >=2/3 converge, 1.5x when >=1/2 converge
+        n_signals = len(z_scores)
         converging = sum(1 for z in z_scores if z > 1.0)
-        if converging >= 3:
+        if converging >= max(n_signals * 2 // 3, 2):
             combined *= 2.0
-        elif converging >= 2:
+        elif converging >= max(n_signals // 2, 2):
             combined *= 1.5
         for d in detectors:
             d.learn(event)
@@ -203,6 +232,9 @@ class DetectionEnsemble:
             self._score_windows.pop(evicted_source, None)
             self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
+            # Note: _template_hw / _entity_hw entries keyed by this source
+            # are NOT cleaned here — they have independent LRU eviction and
+            # will age out naturally.  Prefix-scanning would add O(n) cost.
         self._detectors[source] = [
             HSTDetector(
                 n_trees=self._config.hst_n_trees,
@@ -229,6 +261,72 @@ class DetectionEnsemble:
         ]
         return self._detectors[source]
 
+    def _score_template_hw(self, source: str, event: SeerflowEvent) -> float:
+        """Score and learn template-level volume anomaly."""
+        tid = event.template_id
+        if tid < 0:
+            return 0.0
+        key = f"{source}:{tid}"[:_MAX_SOURCE_KEY_LEN]
+        self._template_event_counts[key] = self._template_event_counts.get(key, 0) + 1
+        hw = self._get_or_create_hw(
+            key, self._template_hw, self._template_event_counts, self._max_template_hw
+        )
+        score = (
+            hw.score(event)
+            if self._template_event_counts[key] >= self._min_events_for_scoring
+            else 0.0
+        )
+        hw.learn(event)
+        return score
+
+    def _score_entity_hw(self, source: str, event: SeerflowEvent) -> float:
+        """Score and learn entity-level volume anomaly (max across entities)."""
+        if not event.entity_refs:
+            return 0.0
+        max_score = 0.0
+        for entity_val in event.entity_refs[:_MAX_ENTITIES_PER_SCORE]:
+            safe_val = entity_val.replace("\x00", "")
+            if not safe_val:
+                continue
+            key = f"{source}:{safe_val}"[:_MAX_SOURCE_KEY_LEN]
+            self._entity_event_counts[key] = self._entity_event_counts.get(key, 0) + 1
+            hw = self._get_or_create_hw(
+                key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
+            )
+            score = (
+                hw.score(event)
+                if self._entity_event_counts[key] >= self._min_events_for_scoring
+                else 0.0
+            )
+            hw.learn(event)
+            if score > max_score:
+                max_score = score
+        return max_score
+
+    def _get_or_create_hw(
+        self,
+        key: str,
+        hw_dict: OrderedDict[str, HoltWintersDetector],
+        counts_dict: dict[str, int],
+        max_items: int,
+    ) -> HoltWintersDetector:
+        """Return (or create) an HW detector in the given pool with LRU eviction."""
+        if key in hw_dict:
+            hw_dict.move_to_end(key)
+            return hw_dict[key]
+        if len(hw_dict) >= max_items:
+            evicted_key, _ = hw_dict.popitem(last=False)
+            counts_dict.pop(evicted_key, None)
+        hw = HoltWintersDetector(
+            seasonal_period=self._config.hw_seasonal_period,
+            alpha=self._config.hw_alpha,
+            beta=self._config.hw_beta,
+            gamma=self._config.hw_gamma,
+            n_std=self._config.hw_n_std,
+        )
+        hw_dict[key] = hw
+        return hw
+
     def _get_threshold(self, source: str) -> DSpotThreshold:
         """Return (or create) the DSPOT threshold for *source*.
 
@@ -249,6 +347,8 @@ class DetectionEnsemble:
             "source_count": len(self._detectors),
             "max_sources": self._max_sources,
             "eviction_count": self._eviction_count,
+            "template_hw_count": len(self._template_hw),
+            "entity_hw_count": len(self._entity_hw),
         }
 
     async def save_all_state(self, storage: ModelStore) -> int:
@@ -274,6 +374,28 @@ class DetectionEnsemble:
                     msgspec.json.encode([acc.to_dict() for acc in window_state]),
                 )
                 count += 1
+        # Persist template HW instances
+        tmpl_keys = list(self._template_hw.keys())
+        for key in tmpl_keys:
+            hw = self._template_hw[key]
+            await storage.save_state(f"tmpl_hw:{key}", hw.serialize())
+            count += 1
+        # Persist entity HW instances
+        ent_keys = list(self._entity_hw.keys())
+        for key in ent_keys:
+            hw = self._entity_hw[key]
+            await storage.save_state(f"ent_hw:{key}", hw.serialize())
+            count += 1
+        # Write all manifests last — crash-safety: partial data is ignored
+        # on load when the manifest is missing
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({k: self._template_event_counts.get(k, 0) for k in tmpl_keys}),
+        )
+        await storage.save_state(
+            "ent_hw:manifest",
+            msgspec.json.encode({k: self._entity_event_counts.get(k, 0) for k in ent_keys}),
+        )
         await storage.save_state(
             "ensemble:manifest",
             msgspec.json.encode(sources),
@@ -337,9 +459,13 @@ class DetectionEnsemble:
                             windows_data,
                             type=list[dict[str, float | int]],
                         )
-                        self._score_windows[source] = [
-                            _WelfordAccumulator.from_dict(d) for d in acc_dicts
-                        ]
+                        accs = [_WelfordAccumulator.from_dict(d) for d in acc_dicts]
+                        if len(accs) < len(self._weights):
+                            accs.extend(
+                                _WelfordAccumulator()
+                                for _ in range(len(self._weights) - len(accs))
+                            )
+                        self._score_windows[source] = accs
                         count += 1
                     except Exception:
                         _log.warning(
@@ -349,4 +475,69 @@ class DetectionEnsemble:
                         )
             except Exception:
                 _log.warning("Invalid source %r in manifest — skipping", source, exc_info=True)
+        count += await self._load_granular_hw(
+            storage,
+            "tmpl_hw",
+            self._template_hw,
+            self._template_event_counts,
+            self._max_template_hw,
+        )
+        count += await self._load_granular_hw(
+            storage,
+            "ent_hw",
+            self._entity_hw,
+            self._entity_event_counts,
+            self._max_entity_hw,
+        )
         return count
+
+    async def _load_granular_hw(
+        self,
+        storage: ModelStore,
+        prefix: str,
+        hw_dict: OrderedDict[str, HoltWintersDetector],
+        counts_dict: dict[str, int],
+        max_items: int,
+    ) -> int:
+        """Load per-template or per-entity HW state from storage."""
+        manifest_bytes = await storage.load_state(f"{prefix}:manifest")
+        if manifest_bytes is None:
+            return 0
+        try:
+            manifest: dict[str, int] = msgspec.json.decode(
+                manifest_bytes,
+                type=dict[str, int],
+            )
+        except Exception:
+            _log.warning("Corrupt %s manifest — skipping", prefix, exc_info=True)
+            return 0
+        loaded = 0
+        # Reverse: manifest preserves LRU order (oldest first from OrderedDict),
+        # so load MRU entries first to keep the hottest keys when capacity-limited.
+        for key, evt_count in list(manifest.items())[-max_items:]:
+            if not isinstance(evt_count, int) or evt_count < 0:
+                _log.warning("Invalid event count %r for %s:%s — skipping", evt_count, prefix, key)
+                continue
+            data = await storage.load_state(f"{prefix}:{key}")
+            if data is None:
+                continue
+            try:
+                hw = HoltWintersDetector(
+                    seasonal_period=self._config.hw_seasonal_period,
+                    alpha=self._config.hw_alpha,
+                    beta=self._config.hw_beta,
+                    gamma=self._config.hw_gamma,
+                    n_std=self._config.hw_n_std,
+                )
+                hw.deserialize(data)
+                hw_dict[key] = hw
+                counts_dict[key] = evt_count
+                loaded += 1
+            except Exception:
+                _log.warning(
+                    "Corrupt %s state for %s — skipping",
+                    prefix,
+                    key,
+                    exc_info=True,
+                )
+        return loaded
