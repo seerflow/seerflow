@@ -10,6 +10,7 @@ Orchestrates:
 
 from __future__ import annotations
 
+import enum
 import logging
 import uuid
 from typing import TYPE_CHECKING
@@ -53,7 +54,7 @@ def _event_to_dict(event: SeerflowEvent) -> dict[str, object]:
             continue
         val = getattr(event, field.name)
         # Convert enums to their value for string-based Sigma matching
-        if hasattr(val, "value"):
+        if isinstance(val, enum.Enum):
             val = val.value
         d[field.name] = val
     return d
