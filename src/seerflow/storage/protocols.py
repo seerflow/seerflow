@@ -44,6 +44,8 @@ class LogStore(Protocol):  # pragma: no cover
         """
         ...
 
+    async def flush(self) -> None: ...
+
 
 @runtime_checkable
 class AlertStore(Protocol):  # pragma: no cover
