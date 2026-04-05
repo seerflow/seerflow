@@ -190,7 +190,11 @@ def load_correlation_rules(
     rules: list[CorrelationRule] = []
     seen_names: set[str] = set()
     for dir_path in dirs:
-        path = Path(dir_path).resolve()
+        raw_path = Path(dir_path)
+        if raw_path.is_symlink():
+            _log.warning("Skipping symlinked rule directory: %s", dir_path)
+            continue
+        path = raw_path.resolve()
         if not path.is_dir():
             _log.warning("Correlation rule directory does not exist: %s", dir_path)
             continue
