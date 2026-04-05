@@ -844,3 +844,82 @@ class TestCorrelationRiskScore:
             contributing_event_ids=many_ids,
         )
         assert 0.0 <= alert.risk_score <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# S-156 Task 1: _match_event() input bounds
+# ---------------------------------------------------------------------------
+
+
+class TestMatchEventBounds:
+    """S-156: _match_event truncates input and caps tuple iteration."""
+
+    def test_long_string_truncated(self) -> None:
+        """message with MARKER beyond 4096 chars must not match."""
+        from seerflow.correlation.engine import CorrelationEngine
+
+        marker = "SHOULDNOTMATCH"
+        # Build a string where MARKER starts at position 4097 (beyond the 4096-char limit)
+        long_message = "x" * 4096 + marker
+
+        rule = _make_rule(
+            sources=(
+                SourceCondition(
+                    source_type="syslog",
+                    conditions={"message": marker},
+                    min_count=1,
+                ),
+            ),
+            min_sources=1,
+        )
+        window = _make_window()
+        engine = CorrelationEngine(rules=[rule], window=window)
+        event = _make_event(message=long_message, source_type="syslog")
+        assert engine._match_event(event, source_idx=0, rule_name=rule.name) is False
+
+    def test_short_string_matches(self) -> None:
+        """message with MARKER within 4096 chars must match."""
+        from seerflow.correlation.engine import CorrelationEngine
+
+        marker = "SHOULDMATCH"
+        # MARKER starts well before the 4096-char truncation boundary
+        short_message = "x" * 100 + marker
+
+        rule = _make_rule(
+            sources=(
+                SourceCondition(
+                    source_type="syslog",
+                    conditions={"message": marker},
+                    min_count=1,
+                ),
+            ),
+            min_sources=1,
+        )
+        window = _make_window()
+        engine = CorrelationEngine(rules=[rule], window=window)
+        event = _make_event(message=short_message, source_type="syslog")
+        assert engine._match_event(event, source_idx=0, rule_name=rule.name) is True
+
+    def test_tuple_field_capped_at_20(self) -> None:
+        """related_ips with TARGET at index 21 (0-based) must not match."""
+        from seerflow.correlation.engine import CorrelationEngine
+
+        target = "192.0.2.99"
+        # 20 non-matching IPs followed by the target at index 20 (0-based),
+        # which is the 21st element — beyond the cap of 20.
+        ips = (*tuple(f"10.0.0.{i}" for i in range(20)), target)
+
+        rule = _make_rule(
+            sources=(
+                SourceCondition(
+                    source_type="syslog",
+                    conditions={"related_ips": re.escape(target)},
+                    min_count=1,
+                ),
+            ),
+            min_sources=1,
+        )
+        window = _make_window()
+        engine = CorrelationEngine(rules=[rule], window=window)
+        event = _make_event(related_ips=ips, source_type="syslog")
+        assert engine._match_event(event, source_idx=0, rule_name=rule.name) is False

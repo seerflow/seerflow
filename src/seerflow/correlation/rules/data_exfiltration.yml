@@ -11,9 +11,9 @@ mitre_techniques:
 sources:
   - source_type: syslog
     conditions:
-      message: "(?i)(large.*transfer|upload.*completed?|exfil|outbound.*bytes|sent.*\\d{6,}|POST.*\\d{6,})"
+      message: "(?i)(large[^\n]{0,200}transfer|upload[^\n]{0,200}completed?|exfil|outbound[^\n]{0,200}bytes|sent[^\n]{0,200}\\d{6,}|POST[^\n]{0,200}\\d{6,})"
     min_count: 3
   - source_type: syslog
     conditions:
-      message: "(?i)(file.*access|read.*sensitive|scp\\b|rsync\\b|tar\\b|zip\\b|curl.*upload|wget.*post)"
+      message: "(?i)(file[^\n]{0,200}access|read[^\n]{0,200}sensitive|scp\\b|rsync\\b|tar\\b|zip\\b|curl[^\n]{0,200}upload|wget[^\n]{0,200}post)"
     min_count: 2

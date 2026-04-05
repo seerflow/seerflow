@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from seerflow.models.alert import CorrelationRule
     from seerflow.models.event import SeerflowEvent
 
+_MAX_MATCH_INPUT = 4096
+_MAX_TUPLE_ENTRIES = 20
+
 
 class CorrelationEngine:
     """Evaluates correlation rules against entity-temporal windows."""
@@ -129,10 +132,12 @@ class CorrelationEngine:
                 return False
             # Handle tuple fields (related_ips, related_users, etc.)
             if isinstance(value, tuple):
-                if not any(pattern.search(str(v)) for v in value):
+                if not any(
+                    pattern.search(str(v)[:_MAX_MATCH_INPUT]) for v in value[:_MAX_TUPLE_ENTRIES]
+                ):
                     return False
             else:
-                if not pattern.search(str(value)):
+                if not pattern.search(str(value)[:_MAX_MATCH_INPUT]):
                     return False
         return True
 

@@ -6,6 +6,7 @@ and atomically rebuild the correlation engine without restarting the pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -56,7 +57,7 @@ class RuleReloader:
             return
 
         if self._correlation_holder is not None:
-            self._reload_correlation()
+            await asyncio.to_thread(self._reload_correlation)
 
         async for _changes in watchfiles.awatch(
             *self._correlation_dirs,
@@ -64,7 +65,7 @@ class RuleReloader:
             debounce=1600,
         ):
             if self._correlation_holder is not None:
-                self._reload_correlation()
+                await asyncio.to_thread(self._reload_correlation)
 
     def _reload_correlation(self) -> None:
         """Reload correlation rules from disk and replace the engine."""

@@ -17,5 +17,5 @@ sources:
     min_count: 5
   - source_type: syslog
     conditions:
-      message: "(?i)(accepted.*password|session opened|login.*success|authenticated)"
+      message: "(?i)(accepted[^\n]{0,200}password|session opened|login[^\n]{0,200}success|authenticated)"
     min_count: 1

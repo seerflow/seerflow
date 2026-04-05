@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 from seerflow.correlation.rule_loader import RuleValidationError, parse_rule_yaml
 
 VALID_RULE: dict[str, object] = {
-    "name": "ssh_brute_force",
+    "name": "ssh-brute-force",
     "entity_type": "ip",
     "window_seconds": 1800,
     "min_sources": 2,
@@ -35,7 +35,7 @@ VALID_RULE: dict[str, object] = {
 class TestParseRuleYaml:
     def test_valid_rule_returns_correlation_rule(self) -> None:
         rule = parse_rule_yaml(VALID_RULE)
-        assert rule.name == "ssh_brute_force"
+        assert rule.name == "ssh-brute-force"
         assert rule.entity_type == "ip"
         assert rule.window_seconds == 1800
 
@@ -166,7 +166,7 @@ class TestLoadCorrelationRules:
         rule_file = tmp_path / "test_rule.yml"
         rule_file.write_text(
             """
-name: test_rule
+name: test-rule
 entity_type: ip
 window_seconds: 1800
 min_sources: 1
@@ -180,7 +180,7 @@ sources:
         )
         rules = load_correlation_rules([str(tmp_path)])
         assert len(rules) == 1
-        assert rules[0].name == "test_rule"
+        assert rules[0].name == "test-rule"
 
     def test_skips_invalid_rules_with_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -247,3 +247,222 @@ sources:
         assert len(rules) == 2
         names = {r.name for r in rules}
         assert names == {"rule1", "rule2"}
+
+
+def _rule_data(**overrides: object) -> dict[str, object]:
+    """Return a minimal valid rule dict, optionally overriding fields."""
+    base: dict[str, object] = {
+        "name": "brute-force-1",
+        "entity_type": "ip",
+        "window_seconds": 600,
+        "min_sources": 1,
+        "alert_severity": 3,
+        "sources": [
+            {
+                "source_type": "syslog",
+                "conditions": {"message": "test.*"},
+                "min_count": 1,
+            }
+        ],
+    }
+    return {**base, **overrides}
+
+
+class TestRuleNameValidation:
+    """S-156: Rule name format validation."""
+
+    def test_valid_hyphenated_name_accepted(self) -> None:
+        rule = parse_rule_yaml(_rule_data(name="brute-force-1"))
+        assert rule.name == "brute-force-1"
+
+    def test_valid_all_lowercase_alphanumeric_accepted(self) -> None:
+        rule = parse_rule_yaml(_rule_data(name="ab"))
+        assert rule.name == "ab"
+
+    def test_uppercase_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="Invalid rule name"):
+            parse_rule_yaml(_rule_data(name="Brute-Force"))
+
+    def test_underscore_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="Invalid rule name"):
+            parse_rule_yaml(_rule_data(name="brute_force"))
+
+    def test_leading_hyphen_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="Invalid rule name"):
+            parse_rule_yaml(_rule_data(name="-brute-force"))
+
+    def test_trailing_hyphen_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="Invalid rule name"):
+            parse_rule_yaml(_rule_data(name="brute-force-"))
+
+    def test_max_length_accepted(self) -> None:
+        long_name = "a" + "-" * 62 + "b"  # 64 chars — valid boundary
+        rule = parse_rule_yaml(_rule_data(name=long_name))
+        assert rule.name == long_name
+
+    def test_over_max_length_rejected(self) -> None:
+        over_name = "a" * 65  # 65 chars — one over max
+        with pytest.raises(RuleValidationError, match="Invalid rule name"):
+            parse_rule_yaml(_rule_data(name=over_name))
+
+    def test_single_char_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="Invalid rule name"):
+            parse_rule_yaml(_rule_data(name="a"))
+
+
+class TestWindowSecondsUpperBound:
+    """S-156: window_seconds max 604800 (7 days) validation."""
+
+    def test_max_window_accepted(self) -> None:
+        rule = parse_rule_yaml(_rule_data(window_seconds=604_800))
+        assert rule.window_seconds == 604_800
+
+    def test_one_below_max_accepted(self) -> None:
+        rule = parse_rule_yaml(_rule_data(window_seconds=604_799))
+        assert rule.window_seconds == 604_799
+
+    def test_over_max_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="window_seconds must be <="):
+            parse_rule_yaml(_rule_data(window_seconds=604_801))
+
+    def test_well_over_max_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="window_seconds must be <="):
+            parse_rule_yaml(_rule_data(window_seconds=9_999_999))
+
+
+class TestMitreValidation:
+    """S-156: MITRE tactics/techniques must be non-empty strings."""
+
+    def test_non_string_tactic_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="mitre_tactics"):
+            parse_rule_yaml(_rule_data(mitre_tactics=[123]))
+
+    def test_empty_string_tactic_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="mitre_tactics"):
+            parse_rule_yaml(_rule_data(mitre_tactics=[""]))
+
+    def test_none_tactic_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="mitre_tactics"):
+            parse_rule_yaml(_rule_data(mitre_tactics=[None]))
+
+    def test_non_string_technique_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="mitre_techniques"):
+            parse_rule_yaml(_rule_data(mitre_techniques=[42]))
+
+    def test_empty_string_technique_rejected(self) -> None:
+        with pytest.raises(RuleValidationError, match="mitre_techniques"):
+            parse_rule_yaml(_rule_data(mitre_techniques=[""]))
+
+    def test_valid_mitre_values_accepted(self) -> None:
+        rule = parse_rule_yaml(
+            _rule_data(
+                mitre_tactics=["credential-access"],
+                mitre_techniques=["T1110.001"],
+            )
+        )
+        assert rule.mitre_tactics == ("credential-access",)
+        assert rule.mitre_techniques == ("T1110.001",)
+
+
+class TestDuplicateRuleDetection:
+    """S-156: Duplicate rule names are warned and skipped."""
+
+    def test_duplicate_name_skipped(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        rule_yaml = """
+name: brute-force-1
+entity_type: ip
+window_seconds: 600
+min_sources: 1
+alert_severity: 3
+sources:
+  - source_type: syslog
+    conditions:
+      message: "test.*"
+    min_count: 1
+"""
+        (tmp_path / "rule_a.yml").write_text(rule_yaml)
+        (tmp_path / "rule_b.yml").write_text(rule_yaml)
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            rules = load_correlation_rules([str(tmp_path)])
+        assert len(rules) == 1
+        assert rules[0].name == "brute-force-1"
+        assert "Duplicate" in caplog.text
+
+    def test_unique_names_all_loaded(self, tmp_path: Path) -> None:
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        def _yaml(name: str) -> str:
+            return f"""
+name: {name}
+entity_type: ip
+window_seconds: 600
+min_sources: 1
+alert_severity: 3
+sources:
+  - source_type: syslog
+    conditions:
+      message: "test.*"
+    min_count: 1
+"""
+
+        (tmp_path / "rule1.yml").write_text(_yaml("rule1"))
+        (tmp_path / "rule2.yml").write_text(_yaml("rule2"))
+        rules = load_correlation_rules([str(tmp_path)])
+        assert len(rules) == 2
+
+
+_VALID_RULE_YAML = """\
+name: symlink-test
+entity_type: ip
+window_seconds: 600
+min_sources: 1
+alert_severity: 3
+sources:
+  - source_type: syslog
+    conditions:
+      message: "test.*"
+    min_count: 1
+"""
+
+
+class TestPathSafety:
+    """S-156: Symlink rejection in load_correlation_rules."""
+
+    def test_symlinked_file_skipped(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        real_file = real_dir / "rule.yml"
+        real_file.write_text(_VALID_RULE_YAML)
+
+        link_dir = tmp_path / "links"
+        link_dir.mkdir()
+        link_file = link_dir / "rule.yml"
+        link_file.symlink_to(real_file)
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            rules = load_correlation_rules([str(link_dir)])
+
+        assert len(rules) == 0
+        assert "symlink" in caplog.text.lower()
+
+    def test_regular_file_loaded(self, tmp_path: Path) -> None:
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        rule_file = tmp_path / "rule.yml"
+        rule_file.write_text(_VALID_RULE_YAML)
+
+        rules = load_correlation_rules([str(tmp_path)])
+        assert len(rules) == 1
+        assert rules[0].name == "symlink-test"

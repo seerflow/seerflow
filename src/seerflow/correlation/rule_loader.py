@@ -19,6 +19,9 @@ from seerflow.models.event import SeverityLevel
 
 _log = logging.getLogger("seerflow")
 
+_RULE_NAME_RE = re.compile(r"^[a-z0-9]{2}$|^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$")
+_MAX_WINDOW_SECONDS = 604_800
+
 _VALID_ENTITY_TYPES = frozenset({"user", "ip", "host", "process", "file", "domain"})
 _MAX_PATTERN_LENGTH = 512
 _VALID_CONDITION_FIELDS = frozenset(
@@ -104,6 +107,9 @@ def parse_rule_yaml(data: dict[str, Any]) -> CorrelationRule:
     if not name or not isinstance(name, str):
         msg = "Rule must have a 'name' string field"
         raise RuleValidationError(msg)
+    if not _RULE_NAME_RE.match(name):
+        msg = f"Invalid rule name: {name!r} (must be 2-64 lowercase alphanumeric + hyphens)"
+        raise RuleValidationError(msg)
 
     # --- required: entity_type ---
     entity_type = data.get("entity_type")
@@ -119,6 +125,9 @@ def parse_rule_yaml(data: dict[str, Any]) -> CorrelationRule:
         or window_seconds <= 0
     ):
         msg = f"window_seconds must be a positive integer, got {window_seconds!r}"
+        raise RuleValidationError(msg)
+    if window_seconds > _MAX_WINDOW_SECONDS:
+        msg = f"window_seconds must be <= {_MAX_WINDOW_SECONDS} (7 days), got {window_seconds!r}"
         raise RuleValidationError(msg)
 
     # --- optional: min_sources (default 1) ---
@@ -149,6 +158,14 @@ def parse_rule_yaml(data: dict[str, Any]) -> CorrelationRule:
     description = str(data.get("description", ""))
     mitre_tactics = tuple(data.get("mitre_tactics", ()))
     mitre_techniques = tuple(data.get("mitre_techniques", ()))
+    for tactic in mitre_tactics:
+        if not isinstance(tactic, str) or not tactic:
+            msg = f"mitre_tactics elements must be non-empty strings, got {tactic!r}"
+            raise RuleValidationError(msg)
+    for technique in mitre_techniques:
+        if not isinstance(technique, str) or not technique:
+            msg = f"mitre_techniques elements must be non-empty strings, got {technique!r}"
+            raise RuleValidationError(msg)
 
     return CorrelationRule(
         name=name,
@@ -171,12 +188,20 @@ def load_correlation_rules(
     Skips invalid rules with a warning log. Returns valid rules only.
     """
     rules: list[CorrelationRule] = []
+    seen_names: set[str] = set()
     for dir_path in dirs:
-        path = Path(dir_path)
+        raw_path = Path(dir_path)
+        if raw_path.is_symlink():
+            _log.warning("Skipping symlinked rule directory: %s", dir_path)
+            continue
+        path = raw_path.resolve()
         if not path.is_dir():
             _log.warning("Correlation rule directory does not exist: %s", dir_path)
             continue
         for yml_file in sorted({*path.glob("*.yml"), *path.glob("*.yaml")}):
+            if yml_file.is_symlink():
+                _log.warning("Skipping symlinked rule file: %s", yml_file)
+                continue
             try:
                 with yml_file.open() as f:
                     data = yaml.safe_load(f)
@@ -184,6 +209,14 @@ def load_correlation_rules(
                     _log.warning("Skipping %s: not a valid YAML mapping", yml_file)
                     continue
                 rule = parse_rule_yaml(data)
+                if rule.name in seen_names:
+                    _log.warning(
+                        "Duplicate rule name '%s' in %s — skipping",
+                        rule.name,
+                        yml_file.name,
+                    )
+                    continue
+                seen_names.add(rule.name)
                 rules.append(rule)
             except (RuleValidationError, yaml.YAMLError) as exc:
                 _log.warning(
