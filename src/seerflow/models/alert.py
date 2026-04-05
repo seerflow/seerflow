@@ -125,23 +125,17 @@ def create_ml_alerts(
         "process": event.related_processes,
     }
 
-    # Map each entity_uuid to its raw display value by consuming the type's
-    # raw-value list in encounter order.
+    # Single-pass: resolve raw value by index, validate type, create alert.
     type_counters: dict[str, int] = {}
-    raw_values: dict[str, str] = {}
-    for entity_type, entity_uuid in typed_entities:
-        idx = type_counters.get(entity_type, 0)
-        raw_vals = type_to_raw.get(entity_type, ())
-        if idx < len(raw_vals):
-            raw_values[entity_uuid] = raw_vals[idx]
-        type_counters[entity_type] = idx + 1
-
     alerts: list[Alert] = []
     for entity_type, entity_uuid in typed_entities:
         if entity_type not in _VALID_ENTITY_TYPES:
             _log.warning("Skipping unknown entity_type %r in create_ml_alerts", entity_type)
             continue
-        entity_value = raw_values.get(entity_uuid, "")
+        idx = type_counters.get(entity_type, 0)
+        raw_vals = type_to_raw.get(entity_type, ())
+        entity_value = raw_vals[idx] if idx < len(raw_vals) else ""
+        type_counters[entity_type] = idx + 1
         alert = Alert(
             alert_id=str(
                 uuid.uuid5(
