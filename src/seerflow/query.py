@@ -453,8 +453,16 @@ async def run_query_health(args: argparse.Namespace) -> None:
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.storage.sqlite import SqliteBackend
 
-    config = load_config(args.config)
-    storage = await SqliteBackend.connect(config.storage)
+    try:
+        config = load_config(args.config)
+    except Exception as exc:
+        print(f"Error loading config: {exc}", file=sys.stderr)
+        return
+    try:
+        storage = await SqliteBackend.connect(config.storage)
+    except Exception as exc:
+        print(f"Error connecting to storage: {exc}", file=sys.stderr)
+        return
     try:
         ensemble = DetectionEnsemble(config.detection)
         await ensemble.load_all_state(storage)

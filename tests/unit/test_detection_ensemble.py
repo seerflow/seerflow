@@ -1286,3 +1286,43 @@ class TestRunQueryHealth:
 
         captured = capsys.readouterr()
         assert "Detection Ensemble Health" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_config_error_prints_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """S-158: load_config failure prints to stderr and returns gracefully."""
+        from argparse import Namespace
+        from unittest.mock import patch
+
+        from seerflow.query import run_query_health
+
+        with patch("seerflow.config.load_config", side_effect=Exception("bad config")):
+            args = Namespace(config=None, json=False)
+            await run_query_health(args)
+
+        captured = capsys.readouterr()
+        assert "Error loading config: bad config" in captured.err
+
+    @pytest.mark.asyncio
+    async def test_storage_connect_error_prints_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """S-158: SqliteBackend.connect failure prints to stderr and returns gracefully."""
+        from argparse import Namespace
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.query import run_query_health
+
+        with (
+            patch("seerflow.config.load_config") as mock_cfg,
+            patch(
+                "seerflow.storage.sqlite.SqliteBackend.connect",
+                new_callable=AsyncMock,
+                side_effect=Exception("no db"),
+            ),
+        ):
+            mock_cfg.return_value.storage = None
+            args = Namespace(config=None, json=False)
+            await run_query_health(args)
+
+        captured = capsys.readouterr()
+        assert "Error connecting to storage: no db" in captured.err
