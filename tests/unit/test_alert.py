@@ -584,7 +584,7 @@ class TestCreateMlAlerts:
         assert alerts[1].entity_value == ""
 
     def test_unknown_entity_type_skipped(self) -> None:
-        """Unknown entity_type is silently skipped; only valid entities produce alerts."""
+        """Unknown entity_type is skipped with a warning; only valid entities produce alerts."""
         from seerflow.models.alert import create_ml_alerts
 
         ip_uuid = str(uuid.uuid4())
@@ -633,5 +633,7 @@ class TestCreateMlAlerts:
             event, self._make_result(), [("ip", shared_uuid), ("ip", shared_uuid)]
         )
         assert len(alerts) == 2
+        assert alerts[0].entity_uuid == shared_uuid
+        assert alerts[1].entity_uuid == shared_uuid
         assert alerts[0].entity_value == "10.0.0.1"
         assert alerts[1].entity_value == "10.0.0.2"

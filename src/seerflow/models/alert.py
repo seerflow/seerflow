@@ -17,6 +17,17 @@ from seerflow.models.event import SeverityLevel
 
 _log = logging.getLogger(__name__)
 _VALID_ENTITY_TYPES: frozenset[str] = frozenset(get_args(EntityType))
+assert _VALID_ENTITY_TYPES, (
+    "get_args(EntityType) returned an empty set — "
+    "EntityType must be a plain Literal at module scope"
+)
+# Keys must match EntityType members — update both together when adding a type.
+_TYPE_TO_RAW_KEYS: frozenset[str] = frozenset(
+    {"ip", "user", "host", "domain", "file", "process"}
+)
+assert _VALID_ENTITY_TYPES == _TYPE_TO_RAW_KEYS, (
+    f"type_to_raw keys {_TYPE_TO_RAW_KEYS} must match EntityType {_VALID_ENTITY_TYPES}"
+)
 
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionResult
