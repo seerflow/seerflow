@@ -14,6 +14,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
+import msgspec.structs
 from sigma.rule import SigmaRule
 
 from seerflow.models.alert import Alert
@@ -36,22 +37,26 @@ logger = logging.getLogger(__name__)
 _NAMESPACE_SIGMA = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 
+# Fields to exclude from Sigma rule matching (large/binary or not useful).
+_EXCLUDED_FIELDS = frozenset({"body", "raw_event"})
+
+
 def _event_to_dict(event: SeerflowEvent) -> dict[str, object]:
-    """Convert a SeerflowEvent to a flat dict for matcher evaluation."""
-    return {
-        "message": event.message,
-        "source_type": event.source_type,
-        "template_id": event.template_id,
-        "template_str": event.template_str,
-        "related_ips": event.related_ips,
-        "related_users": event.related_users,
-        "related_hosts": event.related_hosts,
-        "related_hashes": event.related_hashes,
-        "severity_id": event.severity_id.value,
-        "event_category": event.event_category,
-        "event_type": event.event_type,
-        "event_action": event.event_action,
-    }
+    """Convert a SeerflowEvent to a flat dict for matcher evaluation.
+
+    Uses msgspec struct introspection to include all fields dynamically,
+    so new SeerflowEvent fields are automatically available to Sigma rules.
+    """
+    d: dict[str, object] = {}
+    for field in msgspec.structs.fields(event):
+        if field.name in _EXCLUDED_FIELDS:
+            continue
+        val = getattr(event, field.name)
+        # Convert enums to their value for string-based Sigma matching
+        if hasattr(val, "value"):
+            val = val.value
+        d[field.name] = val
+    return d
 
 
 class SigmaEngine:
