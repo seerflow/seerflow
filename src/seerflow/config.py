@@ -170,6 +170,7 @@ class SeerflowConfig:
     alerting: AlertingConfig = field(default_factory=AlertingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     dashboard_port: int = 8080
+    health_bind_address: str = "127.0.0.1"
     log_level: str = "INFO"
 
 
@@ -602,6 +603,12 @@ def load_config(
     dashboard_port = raw.get("dashboard_port", 8080)
     _require_valid_port("dashboard_port", dashboard_port)
 
+    health_bind_address = raw.get("health_bind_address", "127.0.0.1")
+    if not isinstance(health_bind_address, str):
+        raise ConfigError(
+            f"health_bind_address must be a string, got {type(health_bind_address).__name__}"
+        )
+
     return SeerflowConfig(
         storage=_build_storage(raw.get("storage", {})),
         receivers=_build_receivers(raw.get("receivers", {})),
@@ -610,5 +617,6 @@ def load_config(
         alerting=_build_alerting(raw.get("alerting", {})),
         llm=_build_llm(raw.get("llm", {})),
         dashboard_port=dashboard_port,
+        health_bind_address=health_bind_address,
         log_level=log_level,
     )
