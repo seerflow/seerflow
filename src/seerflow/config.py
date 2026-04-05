@@ -7,6 +7,7 @@ are used (zero-config first run per NFR-006).
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 import re
@@ -608,6 +609,12 @@ def load_config(
         raise ConfigError(
             f"health_bind_address must be a string, got {type(health_bind_address).__name__}"
         )
+    try:
+        ipaddress.ip_address(health_bind_address)
+    except ValueError as exc:
+        raise ConfigError(
+            f"health_bind_address is not a valid IP address: {health_bind_address!r}"
+        ) from exc
 
     return SeerflowConfig(
         storage=_build_storage(raw.get("storage", {})),

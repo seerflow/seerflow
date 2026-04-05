@@ -953,3 +953,9 @@ class TestHealthBindAddress:
         yaml_file.write_text("health_bind_address: 12345\n")
         with pytest.raises(ConfigError, match="health_bind_address"):
             load_config(str(yaml_file))
+
+    def test_invalid_ip_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text('health_bind_address: "not-an-ip"\n')
+        with pytest.raises(ConfigError, match="not a valid IP address"):
+            load_config(str(yaml_file))

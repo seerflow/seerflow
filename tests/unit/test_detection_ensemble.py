@@ -1350,13 +1350,17 @@ class TestRunQueryHealth:
 
     @pytest.mark.asyncio
     async def test_config_error_prints_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """S-158: load_config failure prints to stderr and returns gracefully."""
+        """S-158: load_config failure prints to stderr and exits with code 1."""
         from argparse import Namespace
         from unittest.mock import patch
 
+        from seerflow.config import ConfigError
         from seerflow.query import run_query_health
 
-        with patch("seerflow.config.load_config", side_effect=Exception("bad config")):
+        with (
+            patch("seerflow.config.load_config", side_effect=ConfigError("bad config")),
+            pytest.raises(SystemExit, match="1"),
+        ):
             args = Namespace(config=None, json=False)
             await run_query_health(args)
 
@@ -1367,7 +1371,7 @@ class TestRunQueryHealth:
     async def test_storage_connect_error_prints_stderr(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """S-158: SqliteBackend.connect failure prints to stderr and returns gracefully."""
+        """S-158: SqliteBackend.connect failure prints to stderr and exits with code 1."""
         from argparse import Namespace
         from unittest.mock import AsyncMock, patch
 
@@ -1378,8 +1382,9 @@ class TestRunQueryHealth:
             patch(
                 "seerflow.storage.sqlite.SqliteBackend.connect",
                 new_callable=AsyncMock,
-                side_effect=Exception("no db"),
+                side_effect=OSError("no db"),
             ),
+            pytest.raises(SystemExit, match="1"),
         ):
             mock_cfg.return_value.storage = None
             args = Namespace(config=None, json=False)
