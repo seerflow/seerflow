@@ -582,3 +582,58 @@ class TestCreateMlAlerts:
         assert len(alerts) == 2
         assert alerts[0].entity_value == "1.2.3.4"
         assert alerts[1].entity_value == ""
+
+    def test_unknown_entity_type_skipped(self) -> None:
+        """Unknown entity_type is skipped with a warning; only valid entities produce alerts."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        bogus_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("10.0.0.1",),
+            related_users=(),
+            related_hosts=(),
+        )
+        typed_entities = [("ip", ip_uuid), ("bogus", bogus_uuid)]
+        alerts = create_ml_alerts(event, self._make_result(), typed_entities)
+
+        assert len(alerts) == 1
+        assert alerts[0].entity_type == "ip"
+        assert alerts[0].entity_uuid == ip_uuid
+
+    def test_unknown_entity_type_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Unknown entity_type emits a WARNING log mentioning the bad type."""
+        import logging
+
+        from seerflow.models.alert import create_ml_alerts
+
+        bogus_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=(),
+            related_users=(),
+            related_hosts=(),
+        )
+        with caplog.at_level(logging.WARNING, logger="seerflow.models.alert"):
+            alerts = create_ml_alerts(event, self._make_result(), [("bogus", bogus_uuid)])
+
+        assert len(alerts) == 0
+        assert "bogus" in caplog.text
+
+    def test_duplicate_uuid_preserves_both_values(self) -> None:
+        """Two entities sharing the same UUID get correct raw values (no overwrite)."""
+        from seerflow.models.alert import create_ml_alerts
+
+        shared_uuid = str(uuid.uuid4())
+        event = self._make_event(
+            related_ips=("10.0.0.1", "10.0.0.2"),
+            related_users=(),
+            related_hosts=(),
+        )
+        alerts = create_ml_alerts(
+            event, self._make_result(), [("ip", shared_uuid), ("ip", shared_uuid)]
+        )
+        assert len(alerts) == 2
+        assert alerts[0].entity_uuid == shared_uuid
+        assert alerts[1].entity_uuid == shared_uuid
+        assert alerts[0].entity_value == "10.0.0.1"
+        assert alerts[1].entity_value == "10.0.0.2"

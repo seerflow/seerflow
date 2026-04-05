@@ -5,14 +5,27 @@ CorrelationRule defines YAML-loaded cross-source correlation rules.
 SourceCondition defines per-source match conditions within a rule.
 """
 
+import logging
 import uuid
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, get_args
 
 import msgspec
 
 from seerflow.models._types import AlertType, EntityType, FeedbackType
 from seerflow.models.entity import infer_entity_type, primary_entity_value
 from seerflow.models.event import SeverityLevel
+
+_log = logging.getLogger(__name__)
+_VALID_ENTITY_TYPES: frozenset[str] = frozenset(get_args(EntityType))
+assert _VALID_ENTITY_TYPES, (
+    "get_args(EntityType) returned an empty set — "
+    "EntityType must be a plain Literal at module scope"
+)
+# Keys must match EntityType members — update both together when adding a type.
+_TYPE_TO_RAW_KEYS: frozenset[str] = frozenset({"ip", "user", "host", "domain", "file", "process"})
+assert _VALID_ENTITY_TYPES == _TYPE_TO_RAW_KEYS, (
+    f"type_to_raw keys {_TYPE_TO_RAW_KEYS} must match EntityType {_VALID_ENTITY_TYPES}"
+)
 
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionResult
@@ -121,20 +134,17 @@ def create_ml_alerts(
         "process": event.related_processes,
     }
 
-    # Map each entity_uuid to its raw display value by consuming the type's
-    # raw-value list in encounter order.
+    # Single-pass: resolve raw value by index, validate type, create alert.
     type_counters: dict[str, int] = {}
-    raw_values: dict[str, str] = {}
-    for entity_type, entity_uuid in typed_entities:
-        idx = type_counters.get(entity_type, 0)
-        raw_vals = type_to_raw.get(entity_type, ())
-        if idx < len(raw_vals):
-            raw_values[entity_uuid] = raw_vals[idx]
-        type_counters[entity_type] = idx + 1
-
     alerts: list[Alert] = []
     for entity_type, entity_uuid in typed_entities:
-        entity_value = raw_values.get(entity_uuid, "")
+        if entity_type not in _VALID_ENTITY_TYPES:
+            _log.warning("Skipping unknown entity_type %r in create_ml_alerts", entity_type)
+            continue
+        idx = type_counters.get(entity_type, 0)
+        raw_vals = type_to_raw.get(entity_type, ())
+        entity_value = raw_vals[idx] if idx < len(raw_vals) else ""
+        type_counters[entity_type] = idx + 1
         alert = Alert(
             alert_id=str(
                 uuid.uuid5(
