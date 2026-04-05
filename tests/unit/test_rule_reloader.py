@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -137,3 +138,32 @@ class TestRuleReloader:
         reloader = RuleReloader()
         # Should not block — returns immediately
         await asyncio.wait_for(reloader.watch(), timeout=1.0)
+
+    async def test_reload_uses_asyncio_to_thread(self, tmp_path: Path) -> None:
+        """Initial _reload_correlation call is dispatched via asyncio.to_thread."""
+        window = EntityWindowBuffer(window_ns=600_000_000_000)
+        holder: EngineHolder = EngineHolder(engine=None)
+        reloader = RuleReloader(
+            correlation_holder=holder,
+            correlation_dirs=[str(tmp_path)],
+            window_buffer=window,
+        )
+
+        to_thread_calls: list[object] = []
+
+        async def fake_to_thread(fn: object, *args: object, **kwargs: object) -> None:
+            to_thread_calls.append(fn)
+            if callable(fn):
+                fn(*args, **kwargs)  # type: ignore[call-arg]
+
+        with patch("seerflow.correlation.reloader.asyncio.to_thread", side_effect=fake_to_thread):
+            task = asyncio.create_task(reloader.watch())
+            try:
+                await asyncio.sleep(0.3)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        assert len(to_thread_calls) >= 1, "asyncio.to_thread was not called"
+        assert to_thread_calls[0] == reloader._reload_correlation
