@@ -86,20 +86,20 @@ class TestRunLoop:
         assert len(processed) == 1
         assert processed[0].source_type == "test"
 
-    async def test_make_handler_processes_event(self) -> None:
-        """_make_handler creates a handler that processes events through ensemble."""
+    async def testmake_handler_processes_event(self) -> None:
+        """make_handler creates a handler that processes events through ensemble."""
         from unittest.mock import AsyncMock
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"test message",
@@ -161,7 +161,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig(
@@ -171,7 +171,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_templates = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         # Send 55 events — each should call write_events individually
         for i in range(55):
@@ -201,7 +201,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -209,7 +209,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_templates = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         # Send 55 events — template flush triggers at event_count % 10 == 0
         for i in range(55):
@@ -243,7 +243,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -251,7 +251,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_templates = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         with caplog.at_level(logging.INFO, logger="seerflow"):
             event = RawEvent(
@@ -273,7 +273,7 @@ class TestRunLoop:
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.alert import Alert
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -288,7 +288,7 @@ class TestRunLoop:
 
         from seerflow.correlation.holders import EngineHolder
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble, mock_storage, sigma_holder=EngineHolder(engine=mock_sigma)
         )
 
@@ -311,7 +311,7 @@ class TestRunLoop:
         from seerflow.config import SeerflowConfig
         from seerflow.correlation.holders import EngineHolder
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -322,7 +322,7 @@ class TestRunLoop:
         mock_sigma = MagicMock()
         mock_sigma.evaluate.side_effect = RuntimeError("sigma broke")
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble, mock_storage, sigma_holder=EngineHolder(engine=mock_sigma)
         )
 
@@ -384,14 +384,14 @@ class TestRunLoop:
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.event import SeverityLevel
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"kernel panic - not syncing",
@@ -412,14 +412,14 @@ class TestRunLoop:
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.event import SeverityLevel
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"normal log line",
@@ -439,14 +439,14 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"Failed login from 192.168.1.1 by user root on host web01",
@@ -476,14 +476,14 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"simple log message with no entities",
@@ -506,7 +506,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -514,7 +514,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_alert = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         anomaly_result = DetectionResult(
             score=0.95,
@@ -547,7 +547,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -555,7 +555,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_alert = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"normal log message",
@@ -574,7 +574,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -582,7 +582,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_alert = AsyncMock(side_effect=Exception("disk full"))
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         anomaly_result = DetectionResult(
             score=0.95,

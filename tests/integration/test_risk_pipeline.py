@@ -11,7 +11,7 @@ from seerflow.config import SeerflowConfig
 from seerflow.correlation.holders import EngineHolder
 from seerflow.correlation.risk import RiskRegister
 from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
-from seerflow.pipeline.handler import _make_handler
+from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 
 pytestmark = pytest.mark.integration
@@ -44,7 +44,7 @@ class TestRiskPipelineIntegration:
             max_entities=config.detection.risk_max_entities,
         )
 
-        handler = _make_handler(ensemble, mock, risk_register=risk_register)
+        handler = make_handler(ensemble, mock, risk_register=risk_register)
 
         event = RawEvent(
             data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
@@ -88,7 +88,7 @@ class TestRiskPipelineIntegration:
 
         sigma_engine = SigmaEngine()
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             risk_register=risk_register,
@@ -146,7 +146,7 @@ class TestRiskPipelineIntegration:
         mock = _mock_storage()
 
         # No risk_register passed — should not error
-        handler = _make_handler(ensemble, mock)
+        handler = make_handler(ensemble, mock)
 
         event = RawEvent(
             data=b"simple message",
@@ -171,7 +171,7 @@ class TestRiskPipelineIntegration:
             max_entities=config.detection.risk_max_entities,
         )
 
-        handler = _make_handler(ensemble, mock, risk_register=risk_register)
+        handler = make_handler(ensemble, mock, risk_register=risk_register)
 
         event = RawEvent(
             data=b"Failed password for root from 192.168.1.100 port 22 ssh2",

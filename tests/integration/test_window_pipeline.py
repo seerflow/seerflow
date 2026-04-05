@@ -10,7 +10,7 @@ import pytest
 from seerflow.config import SeerflowConfig
 from seerflow.correlation.window import EntityWindowBuffer
 from seerflow.detection.ensemble import DetectionEnsemble
-from seerflow.pipeline.handler import _make_handler
+from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 
 pytestmark = pytest.mark.integration
@@ -42,7 +42,7 @@ class TestWindowPipelineIntegration:
             max_entities=config.correlation.max_entities,
         )
 
-        handler = _make_handler(ensemble, mock, window_buffer=window)
+        handler = make_handler(ensemble, mock, window_buffer=window)
 
         event = RawEvent(
             data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
@@ -64,7 +64,7 @@ class TestWindowPipelineIntegration:
         ensemble = DetectionEnsemble(config.detection)
         mock = _mock_storage()
 
-        handler = _make_handler(ensemble, mock)
+        handler = make_handler(ensemble, mock)
 
         event = RawEvent(
             data=b"simple message",
@@ -87,7 +87,7 @@ class TestWindowPipelineIntegration:
             max_entities=config.correlation.max_entities,
         )
 
-        handler = _make_handler(ensemble, mock, window_buffer=window)
+        handler = make_handler(ensemble, mock, window_buffer=window)
 
         event = RawEvent(
             data=b"System started successfully",
@@ -111,7 +111,7 @@ class TestWindowPipelineIntegration:
             max_entities=config.correlation.max_entities,
         )
 
-        handler = _make_handler(ensemble, mock, window_buffer=window)
+        handler = make_handler(ensemble, mock, window_buffer=window)
 
         event = RawEvent(
             data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
@@ -143,7 +143,7 @@ class TestWindowPipelineIntegration:
             tolerance_ns=config.correlation.late_tolerance_seconds * 1_000_000_000,
         )
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             window_buffer=window,
@@ -185,7 +185,7 @@ class TestWindowPipelineIntegration:
             max_entities=10_000,
         )
 
-        handler = _make_handler(ensemble, mock, window_buffer=window)
+        handler = make_handler(ensemble, mock, window_buffer=window)
 
         event = RawEvent(
             data=b"simple message",

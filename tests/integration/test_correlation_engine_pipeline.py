@@ -14,7 +14,7 @@ from seerflow.correlation.window import EntityWindowBuffer
 from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
 from seerflow.models.alert import CorrelationRule, SourceCondition
 from seerflow.models.event import SeverityLevel
-from seerflow.pipeline.handler import _make_handler
+from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 
 pytestmark = pytest.mark.integration
@@ -66,7 +66,7 @@ class TestCorrelationEnginePipelineIntegration:
         rule = _make_rule()
         engine = CorrelationEngine(rules=[rule], window=window)
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             window_buffer=window,
@@ -115,7 +115,7 @@ class TestCorrelationEnginePipelineIntegration:
         mock = _mock_storage()
 
         # No correlation_engine passed — should not error
-        handler = _make_handler(ensemble, mock)
+        handler = make_handler(ensemble, mock)
 
         event = RawEvent(
             data=b"simple message",
@@ -141,7 +141,7 @@ class TestCorrelationEnginePipelineIntegration:
         rule = _make_rule()
         engine = CorrelationEngine(rules=[rule], window=window)
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             window_buffer=window,
@@ -194,7 +194,7 @@ class TestCorrelationEnginePipelineIntegration:
         rule = _make_rule()
         engine = CorrelationEngine(rules=[rule], window=window)
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             window_buffer=window,
@@ -250,7 +250,7 @@ class TestCorrelationRiskFeed:
             threshold=100.0,
         )
 
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             window_buffer=window,
@@ -308,7 +308,7 @@ class TestCorrelationRiskFeed:
         engine = CorrelationEngine(rules=[rule], window=window)
 
         # No risk_register passed
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             window_buffer=window,

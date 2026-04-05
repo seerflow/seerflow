@@ -23,7 +23,7 @@ from seerflow.config import load_config
 from seerflow.correlation.holders import EngineHolder
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.models.query import AlertQuery, EventQuery
-from seerflow.pipeline.handler import _make_handler
+from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 from seerflow.sigma.engine import SigmaEngine
 from seerflow.storage.sqlite import SqliteBackend
@@ -100,7 +100,7 @@ async def e2e_env(tmp_path: Path) -> tuple[SqliteBackend, object]:
     sigma = SigmaEngine()
     sigma.load_bundled()
 
-    handler = _make_handler(
+    handler = make_handler(
         ensemble,
         storage,
         save_interval_ns=999_999_999_999,
@@ -286,7 +286,7 @@ async def test_six_type_entities_flow_through_pipeline(tmp_path: Path) -> None:
     sigma.load_bundled()
     graph = EntityGraph()
 
-    handler = _make_handler(
+    handler = make_handler(
         ensemble,
         storage,
         save_interval_ns=999_999_999_999,
@@ -365,7 +365,7 @@ async def test_entity_store_timeline_and_related(tmp_path: Path) -> None:
 
     storage.set_entity_graph(entity_graph)
 
-    handler = _make_handler(
+    handler = make_handler(
         ensemble,
         storage,
         save_interval_ns=999_999_999_999,

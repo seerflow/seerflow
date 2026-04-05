@@ -82,7 +82,7 @@ async def run_import(
     """
     from seerflow.config import StorageConfig, load_config
     from seerflow.detection.ensemble import DetectionEnsemble
-    from seerflow.pipeline.handler import _make_handler
+    from seerflow.pipeline.handler import make_handler
     from seerflow.receivers.base import RawEvent
     from seerflow.storage.sqlite import SqliteBackend
 
@@ -107,7 +107,7 @@ async def run_import(
 
     try:
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble, storage)
+        handler = make_handler(ensemble, storage)
 
         files_processed = 0
         lines_read = 0
