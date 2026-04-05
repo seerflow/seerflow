@@ -86,7 +86,7 @@ class TestRunLoop:
         assert len(processed) == 1
         assert processed[0].source_type == "test"
 
-    async def testmake_handler_processes_event(self) -> None:
+    async def test_make_handler_processes_event(self) -> None:
         """make_handler creates a handler that processes events through ensemble."""
         from unittest.mock import AsyncMock
 
