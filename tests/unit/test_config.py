@@ -935,3 +935,27 @@ class TestGranularHWConfig:
         assert config.detection.min_events_for_scoring == 25
         assert config.detection.weights_template_volume == 0.12
         assert config.detection.weights_entity_volume == 0.18
+
+
+class TestHealthBindAddress:
+    def test_default_is_localhost(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.health_bind_address == "127.0.0.1"
+
+    def test_yaml_override(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text('health_bind_address: "0.0.0.0"\n')
+        config = load_config(str(yaml_file))
+        assert config.health_bind_address == "0.0.0.0"  # noqa: S104
+
+    def test_non_string_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("health_bind_address: 12345\n")
+        with pytest.raises(ConfigError, match="health_bind_address"):
+            load_config(str(yaml_file))
+
+    def test_invalid_ip_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text('health_bind_address: "not-an-ip"\n')
+        with pytest.raises(ConfigError, match="not a valid IP address"):
+            load_config(str(yaml_file))

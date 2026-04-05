@@ -85,4 +85,5 @@ alerting:
 #   ollama_url: http://localhost:11434
 
 dashboard_port: 8080
+health_bind_address: "127.0.0.1"         # address to bind health endpoint; use 0.0.0.0 for container access
 log_level: INFO                          # DEBUG | INFO | WARNING | ERROR

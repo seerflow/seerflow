@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import msgspec.json
+import yaml
 
 from seerflow.sigma.attack import format_tactic, format_technique
 
@@ -449,12 +450,20 @@ def format_health_table(health: dict[str, Any]) -> str:
 
 async def run_query_health(args: argparse.Namespace) -> None:
     """Execute health query — load ensemble from storage, print stats."""
-    from seerflow.config import load_config
+    from seerflow.config import ConfigError, load_config
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.storage.sqlite import SqliteBackend
 
-    config = load_config(args.config)
-    storage = await SqliteBackend.connect(config.storage)
+    try:
+        config = load_config(args.config)
+    except (ConfigError, FileNotFoundError, yaml.YAMLError) as exc:
+        print(f"Error loading config: {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        storage = await SqliteBackend.connect(config.storage)
+    except OSError as exc:
+        print(f"Error connecting to storage: {exc}", file=sys.stderr)
+        sys.exit(1)
     try:
         ensemble = DetectionEnsemble(config.detection)
         await ensemble.load_all_state(storage)

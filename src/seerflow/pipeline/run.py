@@ -181,11 +181,15 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     await health_runner.setup()
     health_site = aiohttp.web.TCPSite(
         health_runner,
-        "0.0.0.0",  # noqa: S104  # nosec B104
+        config.health_bind_address,
         config.dashboard_port,
     )
     await health_site.start()
-    _log.info("Health endpoint listening on port %d", config.dashboard_port)
+    _log.info(
+        "Health endpoint listening on %s:%d",
+        config.health_bind_address,
+        config.dashboard_port,
+    )
 
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000

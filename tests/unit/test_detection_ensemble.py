@@ -11,6 +11,7 @@ import pytest
 
 from seerflow.config import DetectionConfig
 from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
+from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.models import SeerflowEvent, SeverityLevel
 
 
@@ -967,6 +968,66 @@ class TestHWEvictionCounters:
             ensemble.process_event(_make_event(template_id=i))
         assert ensemble._template_hw_eviction_count == 4
 
+    def test_get_or_create_hw_returns_tuple(self) -> None:
+        """S-158: _get_or_create_hw returns (HoltWintersDetector, bool)."""
+        config = _granular_config(max_template_hw=10)
+        ensemble = DetectionEnsemble(config)
+        result = ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        hw, evicted = result
+        assert isinstance(hw, HoltWintersDetector)
+        assert evicted is False
+
+    def test_get_or_create_hw_eviction_returns_true(self) -> None:
+        """S-158: _get_or_create_hw returns evicted=True when pool is full."""
+        config = _granular_config(max_template_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        ensemble._get_or_create_hw(
+            "src:2",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        result = ensemble._get_or_create_hw(
+            "src:3",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        _, evicted = result
+        assert evicted is True
+
+    def test_existing_key_returns_false(self) -> None:
+        """S-158: _get_or_create_hw returns evicted=False for existing key."""
+        config = _granular_config(max_template_hw=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        result = ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        _, evicted = result
+        assert evicted is False
+
 
 class TestHealthMethod:
     """S-140: get_health() returns memory estimation and Markov entity counts."""
@@ -1286,3 +1347,48 @@ class TestRunQueryHealth:
 
         captured = capsys.readouterr()
         assert "Detection Ensemble Health" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_config_error_prints_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """S-158: load_config failure prints to stderr and exits with code 1."""
+        from argparse import Namespace
+        from unittest.mock import patch
+
+        from seerflow.config import ConfigError
+        from seerflow.query import run_query_health
+
+        with (
+            patch("seerflow.config.load_config", side_effect=ConfigError("bad config")),
+            pytest.raises(SystemExit, match="1"),
+        ):
+            args = Namespace(config=None, json=False)
+            await run_query_health(args)
+
+        captured = capsys.readouterr()
+        assert "Error loading config: bad config" in captured.err
+
+    @pytest.mark.asyncio
+    async def test_storage_connect_error_prints_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """S-158: SqliteBackend.connect failure prints to stderr and exits with code 1."""
+        from argparse import Namespace
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.query import run_query_health
+
+        with (
+            patch("seerflow.config.load_config") as mock_cfg,
+            patch(
+                "seerflow.storage.sqlite.SqliteBackend.connect",
+                new_callable=AsyncMock,
+                side_effect=OSError("no db"),
+            ),
+            pytest.raises(SystemExit, match="1"),
+        ):
+            mock_cfg.return_value.storage = None
+            args = Namespace(config=None, json=False)
+            await run_query_health(args)
+
+        captured = capsys.readouterr()
+        assert "Error connecting to storage: no db" in captured.err
