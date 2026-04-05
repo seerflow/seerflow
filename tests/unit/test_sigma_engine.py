@@ -152,9 +152,7 @@ class TestEventToDict:
         event = make_event(message="test", related_ips=("10.0.0.1",))
         d = _event_to_dict(event)
 
-        expected_fields = {
-            f.name for f in msgspec.structs.fields(event)
-        } - {"body", "raw_event"}
+        expected_fields = {f.name for f in msgspec.structs.fields(event)} - {"body", "raw_event"}
         assert set(d.keys()) == expected_fields
 
     def test_excludes_body_and_raw_event(self) -> None:
