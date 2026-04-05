@@ -295,7 +295,7 @@ class TestRuleNameValidation:
         with pytest.raises(RuleValidationError, match="Invalid rule name"):
             parse_rule_yaml(_rule_data(name="brute-force-"))
 
-    def test_too_long_rejected(self) -> None:
+    def test_max_length_accepted(self) -> None:
         long_name = "a" + "-" * 62 + "b"  # 64 chars — valid boundary
         rule = parse_rule_yaml(_rule_data(name=long_name))
         assert rule.name == long_name

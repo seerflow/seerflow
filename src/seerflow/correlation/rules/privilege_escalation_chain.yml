@@ -11,9 +11,9 @@ mitre_techniques:
 sources:
   - source_type: syslog
     conditions:
-      message: "(?i)(sudo\\b|su\\b|privilege.*change|role.*change|usermod\\b|passwd\\b|chmod.*\\+s)"
+      message: "(?i)(sudo\\b|su\\b|privilege[^\n]{0,200}change|role[^\n]{0,200}change|usermod\\b|passwd\\b|chmod[^\n]{0,200}\\+s)"
     min_count: 1
   - source_type: syslog
     conditions:
-      message: "(?i)(/etc/shadow|/etc/sudoers|/etc/passwd|root.*shell|sensitive.*file)"
+      message: "(?i)(/etc/shadow|/etc/sudoers|/etc/passwd|root[^\n]{0,200}shell|sensitive[^\n]{0,200}file)"
     min_count: 1

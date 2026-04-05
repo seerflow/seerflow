@@ -19,7 +19,7 @@ from seerflow.models.event import SeverityLevel
 
 _log = logging.getLogger("seerflow")
 
-_RULE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$")
+_RULE_NAME_RE = re.compile(r"^[a-z0-9]{2}$|^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$")
 _MAX_WINDOW_SECONDS = 604_800
 
 _VALID_ENTITY_TYPES = frozenset({"user", "ip", "host", "process", "file", "domain"})
@@ -190,7 +190,7 @@ def load_correlation_rules(
     rules: list[CorrelationRule] = []
     seen_names: set[str] = set()
     for dir_path in dirs:
-        path = Path(dir_path)
+        path = Path(dir_path).resolve()
         if not path.is_dir():
             _log.warning("Correlation rule directory does not exist: %s", dir_path)
             continue
