@@ -415,3 +415,54 @@ sources:
         (tmp_path / "rule2.yml").write_text(_yaml("rule2"))
         rules = load_correlation_rules([str(tmp_path)])
         assert len(rules) == 2
+
+
+_VALID_RULE_YAML = """\
+name: symlink-test
+entity_type: ip
+window_seconds: 600
+min_sources: 1
+alert_severity: 3
+sources:
+  - source_type: syslog
+    conditions:
+      message: "test.*"
+    min_count: 1
+"""
+
+
+class TestPathSafety:
+    """S-156: Symlink rejection in load_correlation_rules."""
+
+    def test_symlinked_file_skipped(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        real_file = real_dir / "rule.yml"
+        real_file.write_text(_VALID_RULE_YAML)
+
+        link_dir = tmp_path / "links"
+        link_dir.mkdir()
+        link_file = link_dir / "rule.yml"
+        link_file.symlink_to(real_file)
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            rules = load_correlation_rules([str(link_dir)])
+
+        assert len(rules) == 0
+        assert "symlink" in caplog.text.lower()
+
+    def test_regular_file_loaded(self, tmp_path: Path) -> None:
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        rule_file = tmp_path / "rule.yml"
+        rule_file.write_text(_VALID_RULE_YAML)
+
+        rules = load_correlation_rules([str(tmp_path)])
+        assert len(rules) == 1
+        assert rules[0].name == "symlink-test"

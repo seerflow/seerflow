@@ -195,6 +195,9 @@ def load_correlation_rules(
             _log.warning("Correlation rule directory does not exist: %s", dir_path)
             continue
         for yml_file in sorted({*path.glob("*.yml"), *path.glob("*.yaml")}):
+            if yml_file.is_symlink():
+                _log.warning("Skipping symlinked rule file: %s", yml_file)
+                continue
             try:
                 with yml_file.open() as f:
                     data = yaml.safe_load(f)
