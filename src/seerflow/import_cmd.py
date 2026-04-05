@@ -9,6 +9,7 @@ import logging
 import lzma
 import time
 from pathlib import Path
+from contextlib import AbstractContextManager
 from typing import IO
 
 _log = logging.getLogger("seerflow")
@@ -17,7 +18,7 @@ _BINARY_CHECK_SIZE = 8192
 _COMPRESSED_SUFFIXES = frozenset({".gz", ".bz2", ".xz", ".lzma"})
 
 
-def open_log(path: Path) -> IO[str]:
+def open_log(path: Path) -> AbstractContextManager[IO[str]]:
     """Open a log file for reading, auto-detecting compression.
 
     Supports: .gz (gzip), .bz2 (bzip2), .xz/.lzma (lzma).
