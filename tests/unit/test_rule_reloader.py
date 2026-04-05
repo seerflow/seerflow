@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 # Valid YAML rule content for writing to temp files.
 VALID_RULE_YAML = """\
-name: test_rule
+name: test-rule
 entity_type: ip
 window_seconds: 600
 min_sources: 1
@@ -61,7 +61,7 @@ class TestRuleReloader:
             await asyncio.sleep(2)
 
             assert len(holder.engine._rules) == 1
-            assert holder.engine._rules[0].name == "test_rule"
+            assert holder.engine._rules[0].name == "test-rule"
         finally:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
@@ -94,7 +94,7 @@ class TestRuleReloader:
             # Engine should still have exactly the valid rule
             assert holder.engine is not None
             assert len(holder.engine._rules) == 1
-            assert holder.engine._rules[0].name == "test_rule"
+            assert holder.engine._rules[0].name == "test-rule"
         finally:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):

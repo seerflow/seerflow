@@ -132,7 +132,9 @@ class CorrelationEngine:
                 return False
             # Handle tuple fields (related_ips, related_users, etc.)
             if isinstance(value, tuple):
-                if not any(pattern.search(str(v)[:_MAX_MATCH_INPUT]) for v in value[:_MAX_TUPLE_ENTRIES]):
+                if not any(
+                    pattern.search(str(v)[:_MAX_MATCH_INPUT]) for v in value[:_MAX_TUPLE_ENTRIES]
+                ):
                     return False
             else:
                 if not pattern.search(str(value)[:_MAX_MATCH_INPUT]):

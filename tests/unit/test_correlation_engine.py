@@ -907,7 +907,7 @@ class TestMatchEventBounds:
         target = "192.0.2.99"
         # 20 non-matching IPs followed by the target at index 20 (0-based),
         # which is the 21st element — beyond the cap of 20.
-        ips = tuple(f"10.0.0.{i}" for i in range(20)) + (target,)
+        ips = (*tuple(f"10.0.0.{i}" for i in range(20)), target)
 
         rule = _make_rule(
             sources=(
