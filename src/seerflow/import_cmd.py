@@ -9,8 +9,10 @@ import logging
 import lzma
 import time
 from pathlib import Path
-from contextlib import AbstractContextManager
-from typing import IO
+from typing import IO, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 _log = logging.getLogger("seerflow")
 
