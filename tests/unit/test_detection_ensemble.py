@@ -11,6 +11,7 @@ import pytest
 
 from seerflow.config import DetectionConfig
 from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
+from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.models import SeerflowEvent, SeverityLevel
 
 
@@ -966,6 +967,66 @@ class TestHWEvictionCounters:
         for i in range(5):
             ensemble.process_event(_make_event(template_id=i))
         assert ensemble._template_hw_eviction_count == 4
+
+    def test_get_or_create_hw_returns_tuple(self) -> None:
+        """S-158: _get_or_create_hw returns (HoltWintersDetector, bool)."""
+        config = _granular_config(max_template_hw=10)
+        ensemble = DetectionEnsemble(config)
+        result = ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        hw, evicted = result
+        assert isinstance(hw, HoltWintersDetector)
+        assert evicted is False
+
+    def test_get_or_create_hw_eviction_returns_true(self) -> None:
+        """S-158: _get_or_create_hw returns evicted=True when pool is full."""
+        config = _granular_config(max_template_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        ensemble._get_or_create_hw(
+            "src:2",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        result = ensemble._get_or_create_hw(
+            "src:3",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        _, evicted = result
+        assert evicted is True
+
+    def test_existing_key_returns_false(self) -> None:
+        """S-158: _get_or_create_hw returns evicted=False for existing key."""
+        config = _granular_config(max_template_hw=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        result = ensemble._get_or_create_hw(
+            "src:1",
+            ensemble._template_hw,
+            ensemble._template_event_counts,
+            ensemble._max_template_hw,
+        )
+        _, evicted = result
+        assert evicted is False
 
 
 class TestHealthMethod:

@@ -279,11 +279,11 @@ class DetectionEnsemble:
             return 0.0
         key = f"{source}:{tid}"[:_MAX_SOURCE_KEY_LEN]
         self._template_event_counts[key] = self._template_event_counts.get(key, 0) + 1
-        if key not in self._template_hw and len(self._template_hw) >= self._max_template_hw:
-            self._template_hw_eviction_count += 1
-        hw = self._get_or_create_hw(
+        hw, evicted = self._get_or_create_hw(
             key, self._template_hw, self._template_event_counts, self._max_template_hw
         )
+        if evicted:
+            self._template_hw_eviction_count += 1
         score = (
             hw.score(event)
             if self._template_event_counts[key] >= self._min_events_for_scoring
@@ -303,11 +303,11 @@ class DetectionEnsemble:
                 continue
             key = f"{source}:{safe_val}"[:_MAX_SOURCE_KEY_LEN]
             self._entity_event_counts[key] = self._entity_event_counts.get(key, 0) + 1
-            if key not in self._entity_hw and len(self._entity_hw) >= self._max_entity_hw:
-                self._entity_hw_eviction_count += 1
-            hw = self._get_or_create_hw(
+            hw, evicted = self._get_or_create_hw(
                 key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
             )
+            if evicted:
+                self._entity_hw_eviction_count += 1
             score = (
                 hw.score(event)
                 if self._entity_event_counts[key] >= self._min_events_for_scoring
@@ -324,14 +324,20 @@ class DetectionEnsemble:
         hw_dict: OrderedDict[str, HoltWintersDetector],
         counts_dict: dict[str, int],
         max_items: int,
-    ) -> HoltWintersDetector:
-        """Return (or create) an HW detector in the given pool with LRU eviction."""
+    ) -> tuple[HoltWintersDetector, bool]:
+        """Return (or create) an HW detector in the given pool with LRU eviction.
+
+        Returns a ``(detector, evicted)`` tuple where *evicted* is ``True``
+        when adding the new key required evicting the LRU entry.
+        """
         if key in hw_dict:
             hw_dict.move_to_end(key)
-            return hw_dict[key]
+            return hw_dict[key], False
+        evicted = False
         if len(hw_dict) >= max_items:
             evicted_key, _ = hw_dict.popitem(last=False)
             counts_dict.pop(evicted_key, None)
+            evicted = True
         hw = HoltWintersDetector(
             seasonal_period=self._config.hw_seasonal_period,
             alpha=self._config.hw_alpha,
@@ -340,7 +346,7 @@ class DetectionEnsemble:
             n_std=self._config.hw_n_std,
         )
         hw_dict[key] = hw
-        return hw
+        return hw, evicted
 
     def _get_threshold(self, source: str) -> DSpotThreshold:
         """Return (or create) the DSPOT threshold for *source*.
