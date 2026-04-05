@@ -5,14 +5,18 @@ CorrelationRule defines YAML-loaded cross-source correlation rules.
 SourceCondition defines per-source match conditions within a rule.
 """
 
+import logging
 import uuid
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, get_args
 
 import msgspec
 
 from seerflow.models._types import AlertType, EntityType, FeedbackType
 from seerflow.models.entity import infer_entity_type, primary_entity_value
 from seerflow.models.event import SeverityLevel
+
+_log = logging.getLogger(__name__)
+_VALID_ENTITY_TYPES: frozenset[str] = frozenset(get_args(EntityType))
 
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionResult
@@ -134,6 +138,9 @@ def create_ml_alerts(
 
     alerts: list[Alert] = []
     for entity_type, entity_uuid in typed_entities:
+        if entity_type not in _VALID_ENTITY_TYPES:
+            _log.warning("Skipping unknown entity_type %r in create_ml_alerts", entity_type)
+            continue
         entity_value = raw_values.get(entity_uuid, "")
         alert = Alert(
             alert_id=str(
