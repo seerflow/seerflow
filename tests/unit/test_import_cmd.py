@@ -8,10 +8,10 @@ import logging
 import lzma
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 
 class TestOpenLog:
