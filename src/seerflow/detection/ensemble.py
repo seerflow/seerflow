@@ -177,6 +177,8 @@ class DetectionEnsemble:
         entity_score = self._score_entity_hw(source, event)
         scores = [
             *scores,
+            # nan is intentional (warmup sentinel) — preserved for z-norm filter at step 2.
+            # Only ±inf (unexpected overflow) is clamped to 0.0.
             template_score if not math.isinf(template_score) else 0.0,
             entity_score if not math.isinf(entity_score) else 0.0,
         ]
@@ -337,6 +339,9 @@ class DetectionEnsemble:
         max_items: int,
     ) -> tuple[HoltWintersDetector, bool]:
         """Return (or create) an HW detector in the given pool with LRU eviction.
+
+        Pools are also eagerly cleaned on source eviction in ``_get_detectors``
+        (prefix-scan removes all keys for the evicted source).
 
         Returns a ``(detector, evicted)`` tuple where *evicted* is ``True``
         when adding the new key required evicting the LRU entry.

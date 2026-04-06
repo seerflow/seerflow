@@ -1446,6 +1446,15 @@ class TestWarmupAmplification:
         assert math.isfinite(result.score)
         assert not math.isnan(result.score)
 
+    def test_all_channels_warmup_returns_zero(self) -> None:
+        """When ALL channels are in warmup, score is 0.0 and not anomaly."""
+        config = _granular_config(min_events_for_scoring=10_000)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(template_id=1, entity_refs=("e1",))
+        result = ensemble.process_event(event)
+        assert result.score == 0.0
+        assert result.is_anomaly is False
+
 
 class TestSourceEvictionHWCleanup:
     """S-161: Source eviction should clean up orphaned template/entity HW entries."""
