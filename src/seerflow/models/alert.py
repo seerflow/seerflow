@@ -165,7 +165,7 @@ def create_ml_alerts(
             entity_value=entity_value,
             entity_type=cast("EntityType", entity_type),
             contributing_events=(event.event_id,),
-            risk_score=result.score,
+            risk_score=max(0.0, min(1.0, result.score)),
             dedup_key=f"hst:{event.template_id}:{event.source_type}:{entity_uuid}",
         )
         alerts.append(alert)
@@ -201,6 +201,6 @@ def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
         entity_value=primary_entity_value(event),
         entity_type=infer_entity_type(event),
         contributing_events=(event.event_id,),
-        risk_score=result.score,
+        risk_score=max(0.0, min(1.0, result.score)),
         dedup_key=f"hst:{event.template_id}:{event.source_type}",
     )
