@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import msgspec.structs
 
@@ -24,6 +25,18 @@ if TYPE_CHECKING:
     from seerflow.storage.sqlite import SqliteBackend
 
 _log = logging.getLogger("seerflow")
+
+
+@dataclass(frozen=True, slots=True)
+class EntityDispatch:
+    """Named dispatch record for entity resolution."""
+
+    type_name: str
+    raw_vals: tuple[str, ...]
+    ips: tuple[str, ...]
+    users: tuple[str, ...]
+    hosts: tuple[str, ...]
+    kwargs: dict[str, Any]
 
 
 def make_handler(
@@ -63,59 +76,44 @@ def make_handler(
         # inference) in a single pass.
         typed_for_edges: list[tuple[str, str]] = []
         entity_refs_list: list[str] = []
-        for _type_name, _raw_vals, _ips, _users, _hosts, _kw in (
-            (
-                "ip",
-                seerflow_event.related_ips,
-                seerflow_event.related_ips,
-                (),
-                (),
-                {},
-            ),
-            (
-                "user",
-                seerflow_event.related_users,
-                (),
-                seerflow_event.related_users,
-                (),
-                {},
-            ),
-            (
-                "host",
-                seerflow_event.related_hosts,
-                (),
-                (),
-                seerflow_event.related_hosts,
-                {},
-            ),
-            (
+        _ips = seerflow_event.related_ips
+        _users = seerflow_event.related_users
+        _hosts = seerflow_event.related_hosts
+        _domains = seerflow_event.related_domains
+        _files = seerflow_event.related_files
+        _procs = seerflow_event.related_processes
+        for d in (
+            EntityDispatch("ip", _ips, _ips, (), (), {}),
+            EntityDispatch("user", _users, (), _users, (), {}),
+            EntityDispatch("host", _hosts, (), (), _hosts, {}),
+            EntityDispatch(
                 "domain",
-                seerflow_event.related_domains,
+                _domains,
                 (),
                 (),
                 (),
-                {"domains": seerflow_event.related_domains},
+                {"domains": _domains},
             ),
-            (
+            EntityDispatch(
                 "file",
-                seerflow_event.related_files,
+                _files,
                 (),
                 (),
                 (),
-                {"files": seerflow_event.related_files},
+                {"files": _files},
             ),
-            (
+            EntityDispatch(
                 "process",
-                seerflow_event.related_processes,
+                _procs,
                 (),
                 (),
                 (),
-                {"processes": seerflow_event.related_processes},
+                {"processes": _procs},
             ),
         ):
-            if _raw_vals:
-                for _uid in resolve_entities(_ips, _users, _hosts, **_kw):
-                    typed_for_edges.append((_type_name, _uid))
+            if d.raw_vals:
+                for _uid in resolve_entities(d.ips, d.users, d.hosts, **d.kwargs):
+                    typed_for_edges.append((d.type_name, _uid))
                     entity_refs_list.append(_uid)
         entity_refs = tuple(entity_refs_list)
         if entity_refs:
@@ -169,6 +167,9 @@ def make_handler(
             except Exception:
                 _log.warning("Correlation evaluation failed", exc_info=True)
 
+        # Dedup typed_for_edges to avoid redundant edge inference
+        typed_for_edges = list(dict.fromkeys(typed_for_edges))
+
         # Update entity graph with inferred edges
         if entity_graph is not None and typed_for_edges:
             edges = infer_edges(typed_for_edges)
@@ -195,7 +196,7 @@ def make_handler(
                 _log.info(
                     "New template discovered: [%d] %s",
                     seerflow_event.template_id,
-                    seerflow_event.template_str[:120],
+                    seerflow_event.template_str[:120].replace("\x00", ""),
                 )
                 template_meta[seerflow_event.template_id] = TemplateInfo(
                     template_id=seerflow_event.template_id,
@@ -259,7 +260,7 @@ def make_handler(
             _log.warning(
                 "  template: [%d] %s",
                 seerflow_event.template_id,
-                seerflow_event.template_str[:120],
+                seerflow_event.template_str[:120].replace("\x00", ""),
             )
             _log.debug(
                 "  message:  %s",
