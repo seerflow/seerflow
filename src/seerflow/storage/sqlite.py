@@ -715,6 +715,29 @@ class SqliteBackend:
             _log.exception("update_feedback failed for alert %s", alert_id)
             raise
 
+    async def get_alert_by_id(self, alert_id: str) -> Alert | None:
+        """Retrieve a single alert by ID, or None if not found."""
+        async with await self._conn.execute(
+            "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return msgspec.msgpack.decode(row[0], type=Alert)
+
+    async def get_feedback_stats(self) -> dict[str, int]:
+        """Return feedback counts: tp, fp, total."""
+        async with await self._conn.execute(
+            "SELECT feedback, COUNT(*) FROM alerts WHERE feedback != '' GROUP BY feedback"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        stats: dict[str, int] = {"tp": 0, "fp": 0, "total": 0}
+        for fb_type, count in rows:
+            if fb_type in ("tp", "fp"):
+                stats[fb_type] = count
+                stats["total"] += count
+        return stats
+
     async def save_state(self, key: str, data: bytes) -> None:
         """Persist serialized model state (upsert by key)."""
         _validate_state_key(key)

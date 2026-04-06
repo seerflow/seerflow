@@ -692,6 +692,7 @@ class TestBuildQuery:
 
 def _make_alert(
     *,
+    alert_id: str = "",
     alert_type: str = "ml",
     message: str = "test alert",
     entity_uuid: str = "entity-aaa",
@@ -700,7 +701,7 @@ def _make_alert(
     timestamp_ns: int = 1_710_000_000_000_000_000,
 ) -> Alert:
     return Alert(
-        alert_id=str(uuid.uuid4()),
+        alert_id=alert_id or str(uuid.uuid4()),
         alert_type=alert_type,
         timestamp_ns=timestamp_ns,
         severity_id=severity,
@@ -1282,3 +1283,53 @@ class TestFlush:
         backend = await SqliteBackend.connect(config)
         await backend.close()
         await backend.flush()  # Must not raise ProgrammingError
+
+
+class TestFeedbackStorage:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_get_alert_by_id_returns_alert(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(alert_id="test-123")
+            await backend.write_alert(alert, dedup_window_ns=0)
+            result = await backend.get_alert_by_id("test-123")
+            assert result is not None
+            assert result.alert_id == "test-123"
+        finally:
+            await backend.close()
+
+    async def test_get_alert_by_id_returns_none_for_missing(self) -> None:
+        backend = await self._make_backend()
+        try:
+            result = await backend.get_alert_by_id("nonexistent")
+            assert result is None
+        finally:
+            await backend.close()
+
+    async def test_get_feedback_stats_empty(self) -> None:
+        backend = await self._make_backend()
+        try:
+            stats = await backend.get_feedback_stats()
+            assert stats == {"tp": 0, "fp": 0, "total": 0}
+        finally:
+            await backend.close()
+
+    async def test_get_feedback_stats_with_data(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert1 = _make_alert(alert_id="a1")
+            alert2 = _make_alert(alert_id="a2")
+            alert3 = _make_alert(alert_id="a3")
+            await backend.write_alert(alert1, dedup_window_ns=0)
+            await backend.write_alert(alert2, dedup_window_ns=0)
+            await backend.write_alert(alert3, dedup_window_ns=0)
+            await backend.update_feedback("a1", "tp")
+            await backend.update_feedback("a2", "fp")
+            await backend.update_feedback("a3", "tp")
+            stats = await backend.get_feedback_stats()
+            assert stats == {"tp": 2, "fp": 1, "total": 3}
+        finally:
+            await backend.close()
