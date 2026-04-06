@@ -1,4 +1,4 @@
-"""Alert delivery sinks: webhook, PagerDuty, OTLP."""
+"""Alert delivery sinks: PagerDuty (OTLP planned)."""
 
 from seerflow.alerting.sinks.pagerduty import PagerDutySink
 

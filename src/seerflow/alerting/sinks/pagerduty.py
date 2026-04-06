@@ -45,7 +45,7 @@ def _build_trigger_payload(alert: Alert, routing_key: str) -> dict[str, object]:
         "event_action": "trigger",
         "dedup_key": f"{alert.alert_type}:{alert.rule_name}:{alert.entity_uuid}",
         "payload": {
-            "summary": f"{alert.description} [{alert.rule_name}]",
+            "summary": f"{alert.description} [{alert.rule_name}]"[:1024],
             "source": "seerflow",
             "severity": _map_severity(alert.severity_id),
             "timestamp": datetime.fromtimestamp(alert.timestamp_ns / 1e9, tz=UTC).isoformat(),
@@ -73,7 +73,7 @@ def _build_resolve_payload(dedup_key: str, routing_key: str) -> dict[str, object
     }
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class _PagerDutyEvent:
     """Internal queue item for the PagerDuty sink."""
 
