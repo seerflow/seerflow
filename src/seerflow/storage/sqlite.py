@@ -728,7 +728,8 @@ class SqliteBackend:
     async def get_feedback_stats(self) -> dict[str, int]:
         """Return feedback counts: tp, fp, total."""
         async with await self._conn.execute(
-            "SELECT feedback, COUNT(*) FROM alerts WHERE feedback != '' GROUP BY feedback"
+            "SELECT feedback, COUNT(*) FROM alerts"
+            " WHERE feedback IN ('tp', 'fp') GROUP BY feedback"
         ) as cursor:
             rows = await cursor.fetchall()
         stats: dict[str, int] = {"tp": 0, "fp": 0, "total": 0}

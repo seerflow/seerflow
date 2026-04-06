@@ -391,7 +391,7 @@ class DetectionEnsemble:
         dspot = self._thresholds.get(source_key)
         if dspot is None or not dspot.is_calibrated:
             return 0.0
-        return dspot._upper_z_q
+        return dspot.threshold
 
     def get_stats(self) -> dict[str, int]:
         """Return operational statistics about the ensemble."""

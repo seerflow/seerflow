@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.models._types import FeedbackType
     from seerflow.models.alert import Alert
-    from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.storage.protocols import AlertStore
 
 _log = logging.getLogger("seerflow")
 
@@ -32,7 +32,7 @@ def _derive_source_key(alert: Alert) -> str:
 async def process_feedback(
     alert_id: str,
     feedback: FeedbackType,
-    storage: SqliteBackend,
+    storage: AlertStore,
     ensemble: DetectionEnsemble | None = None,
     pagerduty_routing_key: str = "",
 ) -> str:
