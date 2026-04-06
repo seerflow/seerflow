@@ -35,6 +35,29 @@ def _make_alert(
     )
 
 
+class TestDeriveSourceKey:
+    def test_hst_dedup_key_extracts_source_type(self) -> None:
+        """HST dedup_key 'hst:42:syslog:entity' yields 'syslog'."""
+        from seerflow.alerting.feedback import _derive_source_key
+
+        alert = _make_alert(dedup_key="hst:42:syslog:entity-abc")
+        assert _derive_source_key(alert) == "syslog"
+
+    def test_non_hst_dedup_key_falls_back_to_alert_type(self) -> None:
+        """Non-HST dedup_key falls back to alert_type."""
+        from seerflow.alerting.feedback import _derive_source_key
+
+        alert = _make_alert(alert_type="sigma", dedup_key="sigma:rule1:entity")
+        assert _derive_source_key(alert) == "sigma"
+
+    def test_risk_dedup_key_falls_back(self) -> None:
+        """Risk dedup_key 'risk:entity-uuid' falls back to alert_type."""
+        from seerflow.alerting.feedback import _derive_source_key
+
+        alert = _make_alert(alert_type="ml", dedup_key="risk:entity-abc")
+        assert _derive_source_key(alert) == "ml"
+
+
 class TestProcessFeedback:
     async def test_fp_updates_storage(self) -> None:
         """FP feedback writes feedback to storage via update_feedback."""
@@ -73,10 +96,10 @@ class TestProcessFeedback:
         assert "tp" in result.lower() or "TP" in result
 
     async def test_fp_adjusts_dspot_threshold(self) -> None:
-        """FP feedback calls adjust_upper_threshold on ensemble."""
+        """FP feedback calls adjust_upper_threshold on ensemble with source_type from dedup_key."""
         from seerflow.alerting.feedback import process_feedback
 
-        alert = _make_alert(alert_type="syslog")
+        alert = _make_alert(dedup_key="hst:42:syslog:entity-abc")
         storage = AsyncMock()
         storage.get_alert_by_id = AsyncMock(return_value=alert)
         storage.update_feedback = AsyncMock()
@@ -91,7 +114,7 @@ class TestProcessFeedback:
             ensemble=ensemble,
         )
 
-        ensemble.adjust_upper_threshold.assert_called_once_with(alert.alert_type, 1.05)
+        ensemble.adjust_upper_threshold.assert_called_once_with("syslog", 1.05)
         assert "threshold" in result.lower() or "DSPOT" in result
 
     async def test_tp_does_not_adjust_threshold(self) -> None:

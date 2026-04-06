@@ -8,11 +8,25 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.models._types import FeedbackType
+    from seerflow.models.alert import Alert
     from seerflow.storage.sqlite import SqliteBackend
 
 _log = logging.getLogger("seerflow")
 
 _FP_THRESHOLD_FACTOR = 1.05  # Multiplicative increase per FP
+
+
+def _derive_source_key(alert: Alert) -> str:
+    """Extract the DSPOT source key from an alert's dedup_key.
+
+    HST alerts use ``hst:{template_id}:{source_type}:{entity_uuid}``
+    so the source_type lives at index 2.  For other formats, fall back
+    to *alert_type* (threshold lookup will simply return False).
+    """
+    parts = alert.dedup_key.split(":")
+    if len(parts) >= 3 and parts[0] == "hst":
+        return parts[2]
+    return alert.alert_type
 
 
 async def process_feedback(
@@ -32,7 +46,7 @@ async def process_feedback(
     msg = f"Alert {alert_id[:8]}... marked as {feedback.upper()}"
 
     if feedback == "fp" and ensemble is not None:
-        source_key = alert.alert_type  # Use alert_type as source key
+        source_key = _derive_source_key(alert)
         adjusted = ensemble.adjust_upper_threshold(source_key, _FP_THRESHOLD_FACTOR)
         if adjusted:
             msg += f". DSPOT threshold adjusted for source '{source_key}'"
