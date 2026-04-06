@@ -138,6 +138,10 @@ class DSpotThreshold:
         """Lower anomaly threshold (z_q)."""
         return self._lower_z_q
 
+    def adjust_upper_threshold(self, factor: float) -> None:
+        """Multiply the upper anomaly threshold by *factor*."""
+        self._upper_z_q *= factor
+
     def update(self, score: float) -> ThresholdResult:
         """Process a new score. Returns threshold result."""
         if not self._calibrated:

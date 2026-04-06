@@ -1485,3 +1485,79 @@ class TestSourceEvictionHWCleanup:
         ensemble.process_event(_make_event(source_type="s2", template_id=2))
         ensemble.process_event(_make_event(source_type="s3", template_id=3))
         assert "s1:1" not in ensemble._template_event_counts
+
+
+class TestDspotThresholdAdjustment:
+    """S-050: DSPOT threshold adjustment for false-positive feedback."""
+
+    def test_adjust_upper_threshold_increases_on_fp(self) -> None:
+        """FP feedback should increase DSPOT upper threshold by the given factor."""
+        from seerflow.detection.threshold import DSpotThreshold
+
+        dspot = DSpotThreshold(calibration_window=200)
+        # Feed enough data to calibrate (200 samples)
+        for i in range(200):
+            dspot.update(float(i % 10))
+        assert dspot.is_calibrated
+
+        old_threshold = dspot.threshold
+        dspot.adjust_upper_threshold(1.05)
+        assert dspot.threshold == pytest.approx(old_threshold * 1.05)
+
+    def test_adjust_returns_false_for_unknown_source(self) -> None:
+        """Adjusting an unknown source key should return False."""
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
+        ensemble = DetectionEnsemble(config)
+        assert ensemble.adjust_upper_threshold("nonexistent", 1.05) is False
+
+    def test_adjust_returns_false_if_not_calibrated(self) -> None:
+        """Adjusting a source that exists but isn't calibrated should return False."""
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
+        ensemble = DetectionEnsemble(config)
+        # Process 1 event — not enough to calibrate (needs 200)
+        ensemble.process_event(_make_event(source_type="syslog"))
+        assert ensemble.adjust_upper_threshold("syslog", 1.05) is False
+
+    def test_adjust_returns_true_when_calibrated(self) -> None:
+        """Adjusting a calibrated source should return True."""
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
+        ensemble = DetectionEnsemble(config)
+        for i in range(200):
+            ensemble.process_event(_make_event(source_type="syslog", template_id=i % 5))
+        assert ensemble.adjust_upper_threshold("syslog", 1.05) is True
+
+    def test_get_upper_threshold_returns_zero_for_unknown(self) -> None:
+        """get_upper_threshold returns 0.0 for unknown source."""
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
+        ensemble = DetectionEnsemble(config)
+        assert ensemble.get_upper_threshold("nonexistent") == 0.0
+
+    def test_get_upper_threshold_returns_zero_if_not_calibrated(self) -> None:
+        """get_upper_threshold returns 0.0 if source exists but not calibrated."""
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog"))
+        assert ensemble.get_upper_threshold("syslog") == 0.0
+
+    def test_get_upper_threshold_returns_value_when_calibrated(self) -> None:
+        """get_upper_threshold returns the actual _upper_z_q when calibrated."""
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
+        ensemble = DetectionEnsemble(config)
+        for i in range(200):
+            ensemble.process_event(_make_event(source_type="syslog", template_id=i % 5))
+        dspot = ensemble._thresholds["syslog"]
+        assert dspot.is_calibrated
+        threshold = ensemble.get_upper_threshold("syslog")
+        assert threshold == dspot._upper_z_q
+        assert math.isfinite(threshold)
+
+    def test_adjust_changes_get_upper_threshold(self) -> None:
+        """After adjust, get_upper_threshold reflects the new value."""
+        config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
+        ensemble = DetectionEnsemble(config)
+        for i in range(200):
+            ensemble.process_event(_make_event(source_type="syslog", template_id=i % 5))
+        before = ensemble.get_upper_threshold("syslog")
+        ensemble.adjust_upper_threshold("syslog", 1.10)
+        after = ensemble.get_upper_threshold("syslog")
+        assert after == pytest.approx(before * 1.10)
