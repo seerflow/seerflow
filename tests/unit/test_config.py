@@ -985,3 +985,21 @@ class TestDedupWindowOverrides:
         yaml_file.write_text("alerting:\n  dedup_window_overrides: not-a-dict\n")
         config = load_config(str(yaml_file))
         assert config.alerting.dedup_window_overrides == ()
+
+    def test_overrides_non_integer_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_overrides:\n    hst-anomaly: fast\n")
+        with pytest.raises(ConfigError, match="must be an integer"):
+            load_config(str(yaml_file))
+
+    def test_overrides_zero_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_overrides:\n    hst-anomaly: 0\n")
+        with pytest.raises(ConfigError, match="must be >= 1"):
+            load_config(str(yaml_file))
+
+    def test_dedup_window_seconds_zero_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_seconds: 0\n")
+        with pytest.raises(ConfigError, match="must be an integer >= 1"):
+            load_config(str(yaml_file))
