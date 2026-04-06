@@ -21,6 +21,8 @@ _log = logging.getLogger("seerflow")
 def _masked_url(url: str) -> str:
     """Mask a webhook URL to avoid logging embedded auth tokens."""
     parsed = urlparse(url)
+    if not parsed.scheme or not parsed.hostname:
+        return "<invalid-url>"
     return f"{parsed.scheme}://{parsed.hostname}/***"
 
 
@@ -126,6 +128,14 @@ class AlertDispatcher:
                     allow_redirects=False,
                 ) as resp:
                     if resp.status < 400:
+                        return
+                    if resp.status < 500:
+                        _log.error(
+                            "Webhook %s returned client error %d for alert %s — not retrying",
+                            _masked_url(target.url),
+                            resp.status,
+                            alert_id,
+                        )
                         return
                     _log.warning(
                         "Webhook %s returned %d (attempt %d)",
