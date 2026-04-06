@@ -20,7 +20,8 @@ async def run_feedback(args: argparse.Namespace) -> None:
     from seerflow.storage.sqlite import SqliteBackend
 
     if args.note:
-        _log.info("Feedback note: %s", args.note)
+        safe_note = args.note[:512].replace("\n", " ").replace("\r", " ")
+        _log.info("Feedback note: %s", safe_note)
 
     config = load_config(args.config)
     storage = await SqliteBackend.connect(config.storage)
