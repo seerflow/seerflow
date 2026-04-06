@@ -1445,3 +1445,34 @@ class TestWarmupAmplification:
         result = ensemble.process_event(event)
         assert math.isfinite(result.score)
         assert not math.isnan(result.score)
+
+
+class TestSourceEvictionHWCleanup:
+    """S-161: Source eviction should clean up orphaned template/entity HW entries."""
+
+    def test_template_hw_cleaned_on_source_eviction(self) -> None:
+        config = _granular_config(max_sources=2, max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="s1", template_id=1))
+        ensemble.process_event(_make_event(source_type="s2", template_id=2))
+        assert "s1:1" in ensemble._template_hw
+        ensemble.process_event(_make_event(source_type="s3", template_id=3))
+        assert "s1:1" not in ensemble._template_hw
+
+    def test_entity_hw_cleaned_on_source_eviction(self) -> None:
+        config = _granular_config(max_sources=2, max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="s1", entity_refs=("e1",)))
+        ensemble.process_event(_make_event(source_type="s2", entity_refs=("e2",)))
+        assert "s1:e1" in ensemble._entity_hw
+        ensemble.process_event(_make_event(source_type="s3", entity_refs=("e3",)))
+        assert "s1:e1" not in ensemble._entity_hw
+
+    def test_event_counts_cleaned_on_source_eviction(self) -> None:
+        config = _granular_config(max_sources=2, max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="s1", template_id=1))
+        assert "s1:1" in ensemble._template_event_counts
+        ensemble.process_event(_make_event(source_type="s2", template_id=2))
+        ensemble.process_event(_make_event(source_type="s3", template_id=3))
+        assert "s1:1" not in ensemble._template_event_counts
