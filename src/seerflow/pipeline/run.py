@@ -207,6 +207,17 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         _dispatcher_task = asyncio.create_task(dispatcher.run())
         _log.info("Webhook dispatcher: %d targets", len(webhook_targets))
 
+    from seerflow.alerting.sinks.pagerduty import PagerDutySink
+
+    pd_sink: PagerDutySink | None = None
+    _pd_task: asyncio.Task[None] | None = None
+    pd_session: aiohttp.ClientSession | None = None
+    if config.alerting.pagerduty_routing_key:
+        pd_session = webhook_session or aiohttp.ClientSession()
+        pd_sink = PagerDutySink(config.alerting.pagerduty_routing_key, pd_session)
+        _pd_task = asyncio.create_task(pd_sink.run())
+        _log.info("PagerDuty sink: routing key configured")
+
     handler = make_handler(
         ensemble,
         storage,
@@ -220,6 +231,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         correlation_holder=correlation_holder,
         alerting_config=config.alerting,
         alert_dispatcher=dispatcher,
+        pagerduty_sink=pd_sink,
     )
     await pipeline.run(handler)
 
@@ -262,6 +274,13 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         if _dispatcher_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await _dispatcher_task
+        if pd_sink is not None:
+            await pd_sink.stop()
+        if _pd_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await _pd_task
+        if pd_session is not None and pd_session is not webhook_session:
+            await pd_session.close()
         if webhook_session is not None:
             await webhook_session.close()
         await health_runner.cleanup()
