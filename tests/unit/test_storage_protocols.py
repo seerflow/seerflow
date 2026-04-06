@@ -9,6 +9,7 @@ import seerflow.storage as storage_mod
 from seerflow.storage import AlertStore, EntityStore, GraphStore, LogStore, ModelStore
 
 if TYPE_CHECKING:
+    from seerflow.graph.entity_graph import EntityGraph
     from seerflow.models._types import FeedbackType
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
@@ -41,6 +42,7 @@ class _MockEntityStore(EntityStore):
         self, entity_uuid: str, time_range: TimeRange
     ) -> list[SeerflowEvent]: ...
     async def get_related(self, entity_uuid: str) -> list[EntityRelation]: ...
+    def set_entity_graph(self, graph: EntityGraph) -> None: ...
 
 
 class _MockGraphStore(GraphStore):

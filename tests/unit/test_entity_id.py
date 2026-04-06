@@ -78,6 +78,14 @@ class TestGenerateUserId:
         with pytest.raises(ValueError, match="empty"):
             generate_user_id("   ", "corp")
 
+    def test_null_byte_in_username_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            generate_user_id("admin\x00evil", "")
+
+    def test_null_byte_in_user_domain_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            generate_user_id("admin", "corp\x00evil")
+
 
 class TestGenerateIpId:
     def test_ipv4_deterministic(self) -> None:
@@ -134,6 +142,14 @@ class TestGenerateHostId:
         with pytest.raises(ValueError, match="empty"):
             generate_host_id("   ")
 
+    def test_null_byte_in_hostname_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            generate_host_id("web\x00evil", "")
+
+    def test_null_byte_in_host_domain_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            generate_host_id("web01", "corp\x00evil")
+
 
 class TestGenerateProcessId:
     def test_deterministic(self) -> None:
@@ -154,6 +170,10 @@ class TestGenerateProcessId:
 
     def test_pid_zero_allowed(self) -> None:
         generate_process_id("h", 0, 0)
+
+    def test_null_byte_in_hostname_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            generate_process_id("web\x00evil", 1, 0)
 
 
 class TestGenerateFileId:

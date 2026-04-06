@@ -164,6 +164,9 @@ def generate_user_id(username: str, domain: str) -> uuid.UUID:
         msg = "username is empty"
         raise ValueError(msg)
     canonical = f"{domain}:{username}" if domain else username
+    if "\x00" in canonical:
+        msg = "username contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_USER, canonical)
 
 
@@ -181,6 +184,9 @@ def generate_host_id(hostname: str, domain: str = "") -> uuid.UUID:
         msg = "hostname is empty"
         raise ValueError(msg)
     canonical = f"{h}.{domain}" if domain and "." not in h else h
+    if "\x00" in canonical:
+        msg = "hostname contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_HOST, canonical)
 
 
@@ -188,6 +194,9 @@ def generate_process_id(hostname: str, pid: int, start_time: int) -> uuid.UUID:
     """Deterministic UUID5 for a process entity."""
     if pid < 0:
         msg = f"pid must be >= 0, got {pid}"
+        raise ValueError(msg)
+    if "\x00" in hostname:
+        msg = "hostname contains null byte"
         raise ValueError(msg)
     return uuid.uuid5(NS_PROCESS, f"{hostname}:{pid}:{start_time}")
 
