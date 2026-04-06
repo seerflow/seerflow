@@ -91,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_query_subparsers(subparsers)
 
+    feedback_parser = subparsers.add_parser("feedback", help="Mark alert as TP/FP")
+    feedback_parser.add_argument("alert_id", help="Alert ID")
+    feedback_parser.add_argument("type", choices=["tp", "fp"], help="Feedback type")
+    feedback_parser.add_argument("--note", default="", help="Optional note")
+
     return parser
 
 
