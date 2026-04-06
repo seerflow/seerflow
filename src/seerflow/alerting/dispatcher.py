@@ -83,25 +83,46 @@ class AlertDispatcher:
     async def _dispatch(self, alert: Alert) -> None:
         """Send the alert to all configured targets, respecting severity filters."""
         for target in self._targets:
-            if int(alert.severity_id) < target.min_severity:
-                continue
-            payload = _format(alert, target.format)
-            for attempt in range(self._MAX_RETRIES):
-                try:
-                    async with self._session.post(
+            try:
+                if int(alert.severity_id) < target.min_severity:
+                    continue
+                payload = _format(alert, target.format)
+                await self._post_with_retry(target, payload, alert.alert_id)
+            except Exception:
+                _log.exception(
+                    "Dispatch failed for target %s, alert %s", target.url, alert.alert_id
+                )
+
+    async def _post_with_retry(
+        self,
+        target: WebhookTarget,
+        payload: dict[str, object],
+        alert_id: str,
+    ) -> None:
+        """POST payload to target with exponential backoff retry."""
+        for attempt in range(self._MAX_RETRIES):
+            try:
+                async with self._session.post(
+                    target.url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status < 400:
+                        return
+                    _log.warning(
+                        "Webhook %s returned %d (attempt %d)",
                         target.url,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status < 400:
-                            break
-                        _log.warning(
-                            "Webhook %s returned %d (attempt %d)",
-                            target.url,
-                            resp.status,
-                            attempt + 1,
-                        )
-                except Exception:
-                    _log.warning("Webhook %s failed (attempt %d)", target.url, attempt + 1)
-                if attempt < self._MAX_RETRIES - 1:
-                    await asyncio.sleep(self._RETRY_DELAYS[attempt])
+                        resp.status,
+                        attempt + 1,
+                    )
+            except Exception as exc:
+                _log.warning("Webhook %s failed (attempt %d): %s", target.url, attempt + 1, exc)
+            if attempt < self._MAX_RETRIES - 1:
+                await asyncio.sleep(self._RETRY_DELAYS[attempt])
+        else:
+            _log.error(
+                "Webhook %s: all %d retries exhausted for alert %s",
+                target.url,
+                self._MAX_RETRIES,
+                alert_id,
+            )

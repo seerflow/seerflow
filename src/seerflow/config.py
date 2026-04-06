@@ -551,7 +551,7 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
             valid = sorted(_VALID_WEBHOOK_FORMATS)
             raise ConfigError(f"alerting.webhooks[*].format must be one of {valid}, got {fmt!r}")
         min_severity = wh.get("min_severity", 0)
-        if not isinstance(min_severity, int) or min_severity < 0:
+        if not isinstance(min_severity, int) or isinstance(min_severity, bool) or min_severity < 0:
             raise ConfigError(
                 f"alerting.webhooks[*].min_severity must be an integer >= 0, got {min_severity!r}"
             )

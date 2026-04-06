@@ -8,6 +8,7 @@ import logging
 import sys
 import time
 
+import aiohttp
 import aiohttp.web
 
 from seerflow import __version__

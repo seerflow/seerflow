@@ -178,6 +178,13 @@ class TestFormatTeams:
         assert "TA0006" in text
         assert "T1110" in text
 
+    def test_no_mitre_facts_when_empty(self) -> None:
+        alert = _make_alert(mitre_tactics=(), mitre_techniques=())
+        payload = format_teams(alert)
+        text = str(payload)
+        assert "MITRE Tactics" not in text
+        assert "MITRE Techniques" not in text
+
     def test_json_serializable(self) -> None:
         alert = _make_alert(mitre_tactics=("TA0001",))
         payload = format_teams(alert)
