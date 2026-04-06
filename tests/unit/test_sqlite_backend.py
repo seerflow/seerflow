@@ -697,11 +697,12 @@ def _make_alert(
     entity_uuid: str = "entity-aaa",
     dedup_key: str = "",
     severity: SeverityLevel = SeverityLevel.WARNING,
+    timestamp_ns: int = 1_710_000_000_000_000_000,
 ) -> Alert:
     return Alert(
         alert_id=str(uuid.uuid4()),
         alert_type=alert_type,
-        timestamp_ns=1_710_000_000_000_000_000,
+        timestamp_ns=timestamp_ns,
         severity_id=severity,
         rule_name="test-rule",
         description=message,
@@ -797,6 +798,95 @@ class TestWriteAlert:
                 row = await cur.fetchone()
             decoded = msgspec.msgpack.decode(row[0], type=Alert)
             assert decoded.description == "second"
+        finally:
+            await backend.close()
+
+
+class TestDedupWindow:
+    """Time-windowed dedup: within window increments count, outside resets."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_within_window_increments_count(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_100s_ns = 100_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="win-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="win-key", timestamp_ns=base_ns + gap_100s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            async with await backend._conn.execute(
+                "SELECT dedup_count FROM alerts WHERE dedup_key = 'win-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == 2
+        finally:
+            await backend.close()
+
+    async def test_outside_window_resets_count(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_1000s_ns = 1_000_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="out-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="out-key", timestamp_ns=base_ns + gap_1000s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            async with await backend._conn.execute(
+                "SELECT dedup_count FROM alerts WHERE dedup_key = 'out-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == 1
+        finally:
+            await backend.close()
+
+    async def test_window_preserves_original_timestamp(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_100s_ns = 100_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="ts-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="ts-key", timestamp_ns=base_ns + gap_100s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            async with await backend._conn.execute(
+                "SELECT timestamp_ns FROM alerts WHERE dedup_key = 'ts-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == base_ns
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_late_arriving_event_within_window_deduplicates(self) -> None:
+        """Late-arriving alert (earlier timestamp) within window still deduplicates."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_100s_ns = 100_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="late-key", timestamp_ns=base_ns + gap_100s_ns)
+            a2 = _make_alert(dedup_key="late-key", timestamp_ns=base_ns)  # earlier!
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            page = await backend.query_alerts(AlertQuery())
+            deduped = [a for a in page.items if a.dedup_key == "late-key"]
+            assert len(deduped) == 1
+            assert deduped[0].dedup_count == 2
         finally:
             await backend.close()
 

@@ -136,6 +136,7 @@ class AlertingConfig:
     """Alert routing configuration."""
 
     dedup_window_seconds: int = 900
+    dedup_window_overrides: tuple[tuple[str, int], ...] = ()
     webhooks: tuple[dict[str, Any], ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
 
@@ -533,8 +534,31 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
         webhooks = tuple(webhooks)
+    raw_overrides = data.get("dedup_window_overrides", {})
+    overrides: tuple[tuple[str, int], ...] = ()
+    if isinstance(raw_overrides, dict):
+        parsed: list[tuple[str, int]] = []
+        for k, v in raw_overrides.items():
+            try:
+                seconds = int(v)
+            except (TypeError, ValueError) as exc:
+                raise ConfigError(
+                    f"alerting.dedup_window_overrides[{k!r}] must be an integer, got {v!r}"
+                ) from exc
+            if seconds < 1:
+                raise ConfigError(
+                    f"alerting.dedup_window_overrides[{k!r}] must be >= 1, got {seconds}"
+                )
+            parsed.append((str(k), seconds))
+        overrides = tuple(parsed)
+    dedup_window_seconds = data.get("dedup_window_seconds", 900)
+    if not isinstance(dedup_window_seconds, int) or dedup_window_seconds < 1:
+        raise ConfigError(
+            f"alerting.dedup_window_seconds must be an integer >= 1, got {dedup_window_seconds!r}"
+        )
     return AlertingConfig(
-        dedup_window_seconds=data.get("dedup_window_seconds", 900),
+        dedup_window_seconds=dedup_window_seconds,
+        dedup_window_overrides=overrides,
         webhooks=webhooks,
         pagerduty_routing_key=data.get("pagerduty_routing_key", ""),
     )

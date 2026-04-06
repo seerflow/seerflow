@@ -355,6 +355,24 @@ class TestCreateMlAlert:
         assert alert.entity_value == ""
         assert alert.entity_type == "ip"  # fallback
 
+    def test_risk_score_clamped_to_valid_range(self) -> None:
+        """risk_score > 1.0 is clamped to 1.0."""
+        from seerflow.models.alert import create_ml_alert
+
+        result = self._make_result(score=1.5)
+        event = self._make_event()
+        alert = create_ml_alert(event, result)
+        assert alert.risk_score == 1.0
+
+    def test_risk_score_negative_clamped_to_zero(self) -> None:
+        """risk_score < 0.0 is clamped to 0.0."""
+        from seerflow.models.alert import create_ml_alert
+
+        result = self._make_result(score=-0.5)
+        event = self._make_event()
+        alert = create_ml_alert(event, result)
+        assert alert.risk_score == 0.0
+
     def test_first_entity_used(self) -> None:
         from seerflow.models.alert import create_ml_alert
 
@@ -618,6 +636,30 @@ class TestCreateMlAlerts:
 
         assert len(alerts) == 0
         assert "bogus" in caplog.text
+
+    def test_risk_score_clamped_in_multi_entity(self) -> None:
+        """risk_score > 1.0 is clamped to 1.0 in per-entity alerts."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        event = self._make_event(related_ips=("10.0.0.1",), related_users=(), related_hosts=())
+        result = self._make_result(score=2.3)
+        alerts = create_ml_alerts(event, result, [("ip", ip_uuid)])
+
+        assert len(alerts) == 1
+        assert alerts[0].risk_score == 1.0
+
+    def test_risk_score_negative_clamped_in_multi_entity(self) -> None:
+        """risk_score < 0.0 is clamped to 0.0 in per-entity alerts."""
+        from seerflow.models.alert import create_ml_alerts
+
+        ip_uuid = str(uuid.uuid4())
+        event = self._make_event(related_ips=("10.0.0.1",), related_users=(), related_hosts=())
+        result = self._make_result(score=-1.0)
+        alerts = create_ml_alerts(event, result, [("ip", ip_uuid)])
+
+        assert len(alerts) == 1
+        assert alerts[0].risk_score == 0.0
 
     def test_duplicate_uuid_preserves_both_values(self) -> None:
         """Two entities sharing the same UUID get correct raw values (no overwrite)."""

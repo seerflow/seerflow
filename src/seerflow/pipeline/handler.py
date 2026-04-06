@@ -13,6 +13,7 @@ import msgspec.structs
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
+    from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.holders import EngineHolder
     from seerflow.correlation.risk import RiskRegister
@@ -39,6 +40,18 @@ class EntityDispatch:
     kwargs: Mapping[str, tuple[str, ...]]
 
 
+def _dedup_window_ns(rule_name: str, alerting_config: AlertingConfig) -> int:
+    """Return the dedup window in nanoseconds for a given rule name.
+
+    Checks ``alerting_config.dedup_window_overrides`` for a per-rule override;
+    falls back to the global ``dedup_window_seconds``.
+    """
+    for override_name, seconds in alerting_config.dedup_window_overrides:
+        if rule_name == override_name:
+            return seconds * 1_000_000_000
+    return alerting_config.dedup_window_seconds * 1_000_000_000
+
+
 def make_handler(
     ensemble: DetectionEnsemble,
     storage: SqliteBackend,
@@ -50,14 +63,17 @@ def make_handler(
     watermark: Watermark | None = None,
     risk_register: RiskRegister | None = None,
     correlation_holder: EngineHolder[CorrelationEngine | None] | None = None,
+    alerting_config: AlertingConfig | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
+    from seerflow.config import AlertingConfig as _AlertingConfig
     from seerflow.graph.edges import infer_edges
     from seerflow.models.alert import create_ml_alerts
     from seerflow.models.entity import resolve_entities, sanitize_for_log
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
 
+    _alerting = alerting_config if alerting_config is not None else _AlertingConfig()
     normalizer = EventNormalizer()
     event_count = 0
     anomaly_count = 0
@@ -147,7 +163,10 @@ def make_handler(
                 corr_alerts = correlation_engine.evaluate(seerflow_event, entity_refs)
                 for corr_alert in corr_alerts:
                     try:
-                        await storage.write_alert(corr_alert)
+                        await storage.write_alert(
+                            corr_alert,
+                            dedup_window_ns=_dedup_window_ns(corr_alert.rule_name, _alerting),
+                        )
                     except Exception:
                         _log.warning("Correlation alert write failed", exc_info=True)
 
@@ -287,7 +306,10 @@ def make_handler(
             alerts = create_ml_alerts(seerflow_event, result, typed_for_edges)
             for alert in alerts:
                 try:
-                    await storage.write_alert(alert)
+                    await storage.write_alert(
+                        alert,
+                        dedup_window_ns=_dedup_window_ns(alert.rule_name, _alerting),
+                    )
                 except Exception:
                     _log.warning("Alert write failed", exc_info=True)
 
@@ -313,7 +335,10 @@ def make_handler(
                 sigma_alerts = sigma_engine.evaluate(seerflow_event)
                 for sigma_alert in sigma_alerts:
                     try:
-                        await storage.write_alert(sigma_alert)
+                        await storage.write_alert(
+                            sigma_alert,
+                            dedup_window_ns=_dedup_window_ns(sigma_alert.rule_name, _alerting),
+                        )
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
 
@@ -365,7 +390,10 @@ def make_handler(
                         dedup_key=f"risk:{entity_uuid}",
                     )
                     try:
-                        await storage.write_alert(risk_alert)
+                        await storage.write_alert(
+                            risk_alert,
+                            dedup_window_ns=_dedup_window_ns(risk_alert.rule_name, _alerting),
+                        )
                     except Exception:
                         _log.warning("Risk alert write failed", exc_info=True)
 

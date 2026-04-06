@@ -52,7 +52,11 @@ class LogStore(Protocol):  # pragma: no cover
 class AlertStore(Protocol):  # pragma: no cover
     """Alert CRUD interface."""
 
-    async def write_alert(self, alert: Alert) -> None: ...
+    async def write_alert(
+        self,
+        alert: Alert,
+        dedup_window_ns: int = 900_000_000_000,
+    ) -> None: ...
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]: ...
 

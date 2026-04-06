@@ -322,7 +322,16 @@ INSERT INTO alerts (
     risk_score, feedback, data
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(dedup_key) DO UPDATE SET
-    dedup_count = dedup_count + 1,
+    dedup_count = CASE
+        WHEN ABS(excluded.timestamp_ns - alerts.timestamp_ns) <= ?
+        THEN alerts.dedup_count + 1
+        ELSE 1
+    END,
+    timestamp_ns = CASE
+        WHEN ABS(excluded.timestamp_ns - alerts.timestamp_ns) <= ?
+        THEN alerts.timestamp_ns
+        ELSE excluded.timestamp_ns
+    END,
     alert_id = excluded.alert_id,
     data = excluded.data"""
 
@@ -610,8 +619,18 @@ class SqliteBackend:
             rows = await cursor.fetchall()
         return [msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows]
 
-    async def write_alert(self, alert: Alert) -> None:
-        """Persist an alert with dedup upsert on conflict."""
+    async def write_alert(
+        self,
+        alert: Alert,
+        dedup_window_ns: int = 900_000_000_000,
+    ) -> None:
+        """Persist an alert with time-windowed dedup upsert on conflict.
+
+        Within *dedup_window_ns* nanoseconds of the existing alert the
+        ``dedup_count`` is incremented and the original ``timestamp_ns`` is
+        preserved.  Outside the window the count resets to 1 and the
+        timestamp is replaced.
+        """
         data = msgspec.msgpack.encode(alert)
         params = (
             alert.alert_id,
@@ -627,6 +646,8 @@ class SqliteBackend:
             alert.risk_score,
             alert.feedback,
             data,
+            dedup_window_ns,
+            dedup_window_ns,
         )
         try:
             await self._conn.execute(_INSERT_ALERT_SQL, params)

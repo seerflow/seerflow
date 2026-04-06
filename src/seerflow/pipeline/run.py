@@ -204,6 +204,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         watermark=watermark,
         risk_register=risk_register,
         correlation_holder=correlation_holder,
+        alerting_config=config.alerting,
     )
     await pipeline.run(handler)
 
