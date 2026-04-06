@@ -63,6 +63,8 @@ class TestMainFeedbackDispatch:
     """Test that __main__.py dispatches 'feedback' command."""
 
     def test_main_dispatches_feedback(self) -> None:
+        import asyncio
+
         from seerflow.__main__ import main
 
         mock_args = argparse.Namespace(
@@ -72,11 +74,16 @@ class TestMainFeedbackDispatch:
             type="fp",
             note="",
         )
+
+        def _consuming_run_async(coro: object) -> None:
+            if asyncio.iscoroutine(coro):
+                coro.close()
+
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_run_async.return_value = None
+            mock_run_async.side_effect = _consuming_run_async
             main()
             mock_run_async.assert_called_once()
 
