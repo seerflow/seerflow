@@ -136,6 +136,7 @@ class AlertingConfig:
     """Alert routing configuration."""
 
     dedup_window_seconds: int = 900
+    dedup_window_overrides: tuple[tuple[str, int], ...] = ()
     webhooks: tuple[dict[str, Any], ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
 
@@ -533,8 +534,15 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
         webhooks = tuple(webhooks)
+    raw_overrides = data.get("dedup_window_overrides", {})
+    overrides = (
+        tuple((str(k), int(v)) for k, v in raw_overrides.items())
+        if isinstance(raw_overrides, dict)
+        else ()
+    )
     return AlertingConfig(
         dedup_window_seconds=data.get("dedup_window_seconds", 900),
+        dedup_window_overrides=overrides,
         webhooks=webhooks,
         pagerduty_routing_key=data.get("pagerduty_routing_key", ""),
     )

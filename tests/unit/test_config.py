@@ -959,3 +959,29 @@ class TestHealthBindAddress:
         yaml_file.write_text('health_bind_address: "not-an-ip"\n')
         with pytest.raises(ConfigError, match="not a valid IP address"):
             load_config(str(yaml_file))
+
+
+class TestDedupWindowOverrides:
+    def test_overrides_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n"
+            "  dedup_window_overrides:\n"
+            "    hst-anomaly: 300\n"
+            "    sigma-brute-force: 3600\n"
+        )
+        config = load_config(str(yaml_file))
+        assert config.alerting.dedup_window_overrides == (
+            ("hst-anomaly", 300),
+            ("sigma-brute-force", 3600),
+        )
+
+    def test_overrides_default_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.alerting.dedup_window_overrides == ()
+
+    def test_overrides_non_dict_ignored(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_overrides: not-a-dict\n")
+        config = load_config(str(yaml_file))
+        assert config.alerting.dedup_window_overrides == ()
