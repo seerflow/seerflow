@@ -6,12 +6,12 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import msgspec.structs
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Mapping
 
     from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.holders import EngineHolder
@@ -36,7 +36,7 @@ class EntityDispatch:
     ips: tuple[str, ...]
     users: tuple[str, ...]
     hosts: tuple[str, ...]
-    kwargs: dict[str, Any]
+    kwargs: Mapping[str, tuple[str, ...]]
 
 
 def make_handler(

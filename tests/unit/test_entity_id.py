@@ -171,6 +171,10 @@ class TestGenerateProcessId:
     def test_pid_zero_allowed(self) -> None:
         generate_process_id("h", 0, 0)
 
+    def test_null_byte_in_hostname_raises(self) -> None:
+        with pytest.raises(ValueError, match="null byte"):
+            generate_process_id("web\x00evil", 1, 0)
+
 
 class TestGenerateFileId:
     def test_deterministic(self) -> None:

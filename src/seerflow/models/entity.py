@@ -195,6 +195,9 @@ def generate_process_id(hostname: str, pid: int, start_time: int) -> uuid.UUID:
     if pid < 0:
         msg = f"pid must be >= 0, got {pid}"
         raise ValueError(msg)
+    if "\x00" in hostname:
+        msg = "hostname contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_PROCESS, f"{hostname}:{pid}:{start_time}")
 
 

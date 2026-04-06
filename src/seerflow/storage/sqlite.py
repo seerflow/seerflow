@@ -798,6 +798,7 @@ def get_related_from_graph(
     for neighbor_id, rel_type in neighbors:
         if not rel_type:
             _log.debug("No rel_type for edge %s -> %s", entity_uuid, neighbor_id)
+            continue
         results.append(
             EntityRelation(
                 entity_uuid=neighbor_id,
