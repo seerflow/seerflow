@@ -39,7 +39,7 @@ async def run_feedback(args: argparse.Namespace) -> None:
             )
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
-            return
+            sys.exit(1)
         print(result)  # noqa: T201
 
         saved = await ensemble.save_all_state(storage)

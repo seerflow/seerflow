@@ -126,10 +126,10 @@ class TestRunFeedback:
         mock_ensemble.save_all_state.assert_awaited_once_with(mock_storage)
         mock_storage.close.assert_awaited_once()
 
-    async def test_run_feedback_closes_storage_on_error(
+    async def test_run_feedback_exits_nonzero_on_error(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Storage is closed and error printed when process_feedback raises."""
+        """ValueError prints error to stderr and exits with code 1."""
         from seerflow.feedback_cmd import run_feedback
 
         mock_storage = AsyncMock()
@@ -156,6 +156,7 @@ class TestRunFeedback:
                 _PATCH_PROCESS,
                 new_callable=AsyncMock,
             ) as mock_pf,
+            pytest.raises(SystemExit, match="1"),
         ):
             mock_pf.side_effect = ValueError("Alert bad-id not found")
             await run_feedback(args)
