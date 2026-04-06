@@ -75,6 +75,7 @@ async def _resolve_pagerduty(dedup_key: str, routing_key: str) -> None:
                 "https://events.pagerduty.com/v2/enqueue",
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=10),
+                allow_redirects=False,
             ) as resp,
         ):
             if resp.status >= 400:

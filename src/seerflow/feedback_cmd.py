@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,13 +29,17 @@ async def run_feedback(args: argparse.Namespace) -> None:
         loaded = await ensemble.load_all_state(storage)
         _log.info("Loaded %d model states", loaded)
 
-        result = await process_feedback(
-            alert_id=args.alert_id,
-            feedback=args.type,
-            storage=storage,
-            ensemble=ensemble,
-            pagerduty_routing_key=config.alerting.pagerduty_routing_key,
-        )
+        try:
+            result = await process_feedback(
+                alert_id=args.alert_id,
+                feedback=args.type,
+                storage=storage,
+                ensemble=ensemble,
+                pagerduty_routing_key=config.alerting.pagerduty_routing_key,
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
+            return
         print(result)  # noqa: T201
 
         saved = await ensemble.save_all_state(storage)
