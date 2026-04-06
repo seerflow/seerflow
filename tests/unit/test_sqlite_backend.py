@@ -869,6 +869,27 @@ class TestDedupWindow:
         finally:
             await backend.close()
 
+    @pytest.mark.asyncio
+    async def test_late_arriving_event_within_window_deduplicates(self) -> None:
+        """Late-arriving alert (earlier timestamp) within window still deduplicates."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_100s_ns = 100_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="late-key", timestamp_ns=base_ns + gap_100s_ns)
+            a2 = _make_alert(dedup_key="late-key", timestamp_ns=base_ns)  # earlier!
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            page = await backend.query_alerts(AlertQuery())
+            deduped = [a for a in page.items if a.dedup_key == "late-key"]
+            assert len(deduped) == 1
+            assert deduped[0].dedup_count == 2
+        finally:
+            await backend.close()
+
 
 class TestQueryAlerts:
     async def _make_backend_with_alerts(self, alerts: list[Alert] | None = None) -> SqliteBackend:

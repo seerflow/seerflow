@@ -323,12 +323,12 @@ INSERT INTO alerts (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(dedup_key) DO UPDATE SET
     dedup_count = CASE
-        WHEN (excluded.timestamp_ns - alerts.timestamp_ns) <= ?
+        WHEN ABS(excluded.timestamp_ns - alerts.timestamp_ns) <= ?
         THEN alerts.dedup_count + 1
         ELSE 1
     END,
     timestamp_ns = CASE
-        WHEN (excluded.timestamp_ns - alerts.timestamp_ns) <= ?
+        WHEN ABS(excluded.timestamp_ns - alerts.timestamp_ns) <= ?
         THEN alerts.timestamp_ns
         ELSE excluded.timestamp_ns
     END,
