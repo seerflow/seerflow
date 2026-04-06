@@ -248,6 +248,8 @@ class DetectionEnsemble:
             self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
             # Clean up orphaned template/entity HW entries for the evicted source.
+            # O(max_template_hw + max_entity_hw) scan — acceptable because source
+            # eviction is rare and prevents unbounded HW pool growth.
             prefix = f"{evicted_source}:"
             for key in [k for k in self._template_hw if k.startswith(prefix)]:
                 del self._template_hw[key]
@@ -293,11 +295,11 @@ class DetectionEnsemble:
         )
         if evicted:
             self._template_hw_eviction_count += 1
-        score = (
-            hw.score(event)
-            if self._template_event_counts[key] >= self._min_events_for_scoring
-            else float("nan")
-        )
+        if self._template_event_counts[key] >= self._min_events_for_scoring:
+            raw = hw.score(event)
+            score = raw if math.isfinite(raw) else float("nan")
+        else:
+            score = float("nan")
         hw.learn(event)
         return score
 
@@ -317,11 +319,11 @@ class DetectionEnsemble:
             )
             if evicted:
                 self._entity_hw_eviction_count += 1
-            score = (
-                hw.score(event)
-                if self._entity_event_counts[key] >= self._min_events_for_scoring
-                else float("nan")
-            )
+            if self._entity_event_counts[key] >= self._min_events_for_scoring:
+                raw = hw.score(event)
+                score = raw if math.isfinite(raw) else float("nan")
+            else:
+                score = float("nan")
             hw.learn(event)
             if math.isnan(max_score) or score > max_score:
                 max_score = score
