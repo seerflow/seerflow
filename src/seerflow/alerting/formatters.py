@@ -247,6 +247,5 @@ def format_json(alert: Alert) -> dict:  # type: ignore[type-arg]
         "mitre_tactics": list(alert.mitre_tactics),
         "mitre_techniques": list(alert.mitre_techniques),
         "risk_score": alert.risk_score,
-        "dedup_key": alert.dedup_key,
         "dedup_count": alert.dedup_count,
     }

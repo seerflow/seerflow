@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -17,11 +18,17 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 
+def _masked_url(url: str) -> str:
+    """Mask a webhook URL to avoid logging embedded auth tokens."""
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.hostname}/***"
+
+
 @dataclass(frozen=True, slots=True)
 class WebhookTarget:
     """A configured webhook delivery target."""
 
-    url: str
+    url: str = field(repr=False)
     format: str  # "slack" | "teams" | "json"
     min_severity: int = 0
 
@@ -83,14 +90,24 @@ class AlertDispatcher:
     async def _dispatch(self, alert: Alert) -> None:
         """Send the alert to all configured targets, respecting severity filters."""
         for target in self._targets:
+            if int(alert.severity_id) < target.min_severity:
+                continue
             try:
-                if int(alert.severity_id) < target.min_severity:
-                    continue
                 payload = _format(alert, target.format)
+            except Exception:
+                _log.exception(
+                    "Formatter failed for target %s, alert %s",
+                    _masked_url(target.url),
+                    alert.alert_id,
+                )
+                continue
+            try:
                 await self._post_with_retry(target, payload, alert.alert_id)
             except Exception:
                 _log.exception(
-                    "Dispatch failed for target %s, alert %s", target.url, alert.alert_id
+                    "Delivery failed for target %s, alert %s",
+                    _masked_url(target.url),
+                    alert.alert_id,
                 )
 
     async def _post_with_retry(
@@ -106,23 +123,29 @@ class AlertDispatcher:
                     target.url,
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=10),
+                    allow_redirects=False,
                 ) as resp:
                     if resp.status < 400:
                         return
                     _log.warning(
                         "Webhook %s returned %d (attempt %d)",
-                        target.url,
+                        _masked_url(target.url),
                         resp.status,
                         attempt + 1,
                     )
             except Exception as exc:
-                _log.warning("Webhook %s failed (attempt %d): %s", target.url, attempt + 1, exc)
+                _log.warning(
+                    "Webhook %s failed (attempt %d): %s",
+                    _masked_url(target.url),
+                    attempt + 1,
+                    exc,
+                )
             if attempt < self._MAX_RETRIES - 1:
                 await asyncio.sleep(self._RETRY_DELAYS[attempt])
-        else:
-            _log.error(
-                "Webhook %s: all %d retries exhausted for alert %s",
-                target.url,
-                self._MAX_RETRIES,
-                alert_id,
-            )
+        # All retries exhausted — log at ERROR level for monitoring
+        _log.error(
+            "Webhook %s: all %d retries exhausted for alert %s",
+            _masked_url(target.url),
+            self._MAX_RETRIES,
+            alert_id,
+        )
