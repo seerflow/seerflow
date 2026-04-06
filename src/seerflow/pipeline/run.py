@@ -8,6 +8,7 @@ import logging
 import sys
 import time
 
+import aiohttp
 import aiohttp.web
 
 from seerflow import __version__
@@ -193,6 +194,19 @@ async def _run_with_config(config: SeerflowConfig) -> None:
 
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
+
+    from seerflow.alerting.dispatcher import AlertDispatcher
+
+    webhook_session: aiohttp.ClientSession | None = None
+    dispatcher: AlertDispatcher | None = None
+    _dispatcher_task: asyncio.Task[None] | None = None
+    webhook_targets = config.alerting.webhook_targets
+    if webhook_targets:
+        webhook_session = aiohttp.ClientSession()
+        dispatcher = AlertDispatcher(webhook_targets, webhook_session)
+        _dispatcher_task = asyncio.create_task(dispatcher.run())
+        _log.info("Webhook dispatcher: %d targets", len(webhook_targets))
+
     handler = make_handler(
         ensemble,
         storage,
@@ -205,6 +219,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         risk_register=risk_register,
         correlation_holder=correlation_holder,
         alerting_config=config.alerting,
+        alert_dispatcher=dispatcher,
     )
     await pipeline.run(handler)
 
@@ -242,6 +257,13 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         except Exception:
             _log.warning("Final model save failed", exc_info=True)
     finally:
+        if dispatcher is not None:
+            await dispatcher.stop()
+        if _dispatcher_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await _dispatcher_task
+        if webhook_session is not None:
+            await webhook_session.close()
         await health_runner.cleanup()
         await storage.close()
         _log.info("Seerflow stopped")

@@ -13,6 +13,7 @@ import msgspec.structs
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
+    from seerflow.alerting.dispatcher import AlertDispatcher
     from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.holders import EngineHolder
@@ -64,6 +65,7 @@ def make_handler(
     risk_register: RiskRegister | None = None,
     correlation_holder: EngineHolder[CorrelationEngine | None] | None = None,
     alerting_config: AlertingConfig | None = None,
+    alert_dispatcher: AlertDispatcher | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -167,6 +169,8 @@ def make_handler(
                             corr_alert,
                             dedup_window_ns=_dedup_window_ns(corr_alert.rule_name, _alerting),
                         )
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(corr_alert)
                     except Exception:
                         _log.warning("Correlation alert write failed", exc_info=True)
 
@@ -310,6 +314,8 @@ def make_handler(
                         alert,
                         dedup_window_ns=_dedup_window_ns(alert.rule_name, _alerting),
                     )
+                    if alert_dispatcher is not None:
+                        alert_dispatcher.enqueue(alert)
                 except Exception:
                     _log.warning("Alert write failed", exc_info=True)
 
@@ -339,6 +345,8 @@ def make_handler(
                             sigma_alert,
                             dedup_window_ns=_dedup_window_ns(sigma_alert.rule_name, _alerting),
                         )
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
 
@@ -394,6 +402,8 @@ def make_handler(
                             risk_alert,
                             dedup_window_ns=_dedup_window_ns(risk_alert.rule_name, _alerting),
                         )
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(risk_alert)
                     except Exception:
                         _log.warning("Risk alert write failed", exc_info=True)
 

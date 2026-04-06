@@ -1003,3 +1003,86 @@ class TestDedupWindowOverrides:
         yaml_file.write_text("alerting:\n  dedup_window_seconds: 0\n")
         with pytest.raises(ConfigError, match="must be an integer >= 1"):
             load_config(str(yaml_file))
+
+
+class TestWebhookConfigParsing:
+    def test_webhooks_parsed_from_yaml(self, tmp_path: Path) -> None:
+        from seerflow.alerting import WebhookTarget
+
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n"
+            "  webhooks:\n"
+            "    - url: https://hooks.slack.com/xxx\n"
+            "      format: slack\n"
+            "    - url: https://outlook.webhook.office.com/xxx\n"
+            "      format: teams\n"
+            "      min_severity: 4\n"
+        )
+        config = load_config(str(yaml_file))
+        assert len(config.alerting.webhook_targets) == 2
+        assert isinstance(config.alerting.webhook_targets[0], WebhookTarget)
+        assert config.alerting.webhook_targets[0].url == "https://hooks.slack.com/xxx"
+        assert config.alerting.webhook_targets[0].format == "slack"
+        assert config.alerting.webhook_targets[0].min_severity == 0
+        assert config.alerting.webhook_targets[1].url == "https://outlook.webhook.office.com/xxx"
+        assert config.alerting.webhook_targets[1].format == "teams"
+        assert config.alerting.webhook_targets[1].min_severity == 4
+
+    def test_webhooks_default_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.alerting.webhook_targets == ()
+
+    def test_webhook_targets_is_tuple(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n  webhooks:\n    - url: https://hooks.slack.com/xxx\n      format: slack\n"
+        )
+        config = load_config(str(yaml_file))
+        assert isinstance(config.alerting.webhook_targets, tuple)
+
+    def test_webhook_target_frozen(self, tmp_path: Path) -> None:
+        from seerflow.alerting import WebhookTarget
+
+        target = WebhookTarget(url="https://example.com", format="json")
+        with pytest.raises((AttributeError, TypeError)):
+            target.url = "https://other.com"  # type: ignore[misc]
+
+    def test_invalid_url_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="url"):
+            _build_alerting({"webhooks": [{"url": "", "format": "slack"}]})
+
+    def test_invalid_format_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="format"):
+            _build_alerting({"webhooks": [{"url": "https://example.com", "format": "discord"}]})
+
+    def test_negative_min_severity_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="min_severity"):
+            _build_alerting(
+                {
+                    "webhooks": [
+                        {"url": "https://example.com", "format": "json", "min_severity": -1}
+                    ]
+                }
+            )
+
+    def test_json_format_valid(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"webhooks": [{"url": "https://example.com", "format": "json"}]})
+        assert result.webhook_targets[0].format == "json"
+
+    def test_webhook_raw_dicts_preserved(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n  webhooks:\n    - url: https://hooks.slack.com/xxx\n      format: slack\n"
+        )
+        config = load_config(str(yaml_file))
+        assert isinstance(config.alerting.webhooks, tuple)
+        assert config.alerting.webhooks[0]["format"] == "slack"
