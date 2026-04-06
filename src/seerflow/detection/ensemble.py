@@ -177,8 +177,10 @@ class DetectionEnsemble:
         entity_score = self._score_entity_hw(source, event)
         scores = [
             *scores,
-            template_score if math.isfinite(template_score) else 0.0,
-            entity_score if math.isfinite(entity_score) else 0.0,
+            # nan is intentional (warmup sentinel) — preserved for z-norm filter at step 2.
+            # Only ±inf (unexpected overflow) is clamped to 0.0.
+            template_score if not math.isinf(template_score) else 0.0,
+            entity_score if not math.isinf(entity_score) else 0.0,
         ]
 
         # --- Blended scoring pipeline ---
@@ -195,6 +197,9 @@ class DetectionEnsemble:
         # Compute z-score from historical window BEFORE adding current score
         z_scores: list[float] = []
         for i, raw in enumerate(scores):
+            if math.isnan(raw):
+                z_scores.append(float("nan"))
+                continue
             acc = windows[i]
             if acc._n >= 2:
                 std = max(acc.stdev(), 1e-10)
@@ -203,18 +208,19 @@ class DetectionEnsemble:
                 z_scores.append(raw)
             acc.update(raw)  # append AFTER normalization
 
-        # 3. Weighted average
+        # 3. Weighted average (skip nan — warmup channels)
         weights = self._weights[: len(z_scores)]
-        weight_sum = sum(weights)
-        if weight_sum > 0:
-            combined = sum(z * w for z, w in zip(z_scores, weights, strict=False)) / weight_sum
-        else:
-            combined = 0.0
+        active_pairs = [
+            (z, w) for z, w in zip(z_scores, weights, strict=False) if not math.isnan(z)
+        ]
+        weight_sum = sum(w for _, w in active_pairs)
+        combined = sum(z * w for z, w in active_pairs) / weight_sum if weight_sum > 0 else 0.0
 
         # 4. Signal amplification -- thresholds scale with detector count:
         # 2x when >=2/3 converge, 1.5x when >=1/2 converge
-        n_signals = len(z_scores)
-        converging = sum(1 for z in z_scores if z > 1.0)
+        active_z = [z for z in z_scores if not math.isnan(z)]
+        n_signals = len(active_z)
+        converging = sum(1 for z in active_z if z > 1.0)
         if converging >= max(n_signals * 2 // 3, 2):
             combined *= 2.0
         elif converging >= max(n_signals // 2, 2):
@@ -243,9 +249,16 @@ class DetectionEnsemble:
             self._score_windows.pop(evicted_source, None)
             self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
-            # Note: _template_hw / _entity_hw entries keyed by this source
-            # are NOT cleaned here — they have independent LRU eviction and
-            # will age out naturally.  Prefix-scanning would add O(n) cost.
+            # Clean up orphaned template/entity HW entries for the evicted source.
+            # O(max_template_hw + max_entity_hw) scan — acceptable because source
+            # eviction is rare and prevents unbounded HW pool growth.
+            prefix = f"{evicted_source}:"
+            for key in [k for k in self._template_hw if k.startswith(prefix)]:
+                del self._template_hw[key]
+                self._template_event_counts.pop(key, None)
+            for key in [k for k in self._entity_hw if k.startswith(prefix)]:
+                del self._entity_hw[key]
+                self._entity_event_counts.pop(key, None)
         self._detectors[source] = [
             HSTDetector(
                 n_trees=self._config.hst_n_trees,
@@ -276,7 +289,7 @@ class DetectionEnsemble:
         """Score and learn template-level volume anomaly."""
         tid = event.template_id
         if tid < 0:
-            return 0.0
+            return float("nan")
         key = f"{source}:{tid}"[:_MAX_SOURCE_KEY_LEN]
         self._template_event_counts[key] = self._template_event_counts.get(key, 0) + 1
         hw, evicted = self._get_or_create_hw(
@@ -284,19 +297,19 @@ class DetectionEnsemble:
         )
         if evicted:
             self._template_hw_eviction_count += 1
-        score = (
-            hw.score(event)
-            if self._template_event_counts[key] >= self._min_events_for_scoring
-            else 0.0
-        )
+        if self._template_event_counts[key] >= self._min_events_for_scoring:
+            raw = hw.score(event)
+            score = raw if math.isfinite(raw) else float("nan")
+        else:
+            score = float("nan")
         hw.learn(event)
         return score
 
     def _score_entity_hw(self, source: str, event: SeerflowEvent) -> float:
         """Score and learn entity-level volume anomaly (max across entities)."""
         if not event.entity_refs:
-            return 0.0
-        max_score = 0.0
+            return float("nan")
+        max_score = float("nan")
         for entity_val in event.entity_refs[:_MAX_ENTITIES_PER_SCORE]:
             safe_val = entity_val.replace("\x00", "")
             if not safe_val:
@@ -308,13 +321,13 @@ class DetectionEnsemble:
             )
             if evicted:
                 self._entity_hw_eviction_count += 1
-            score = (
-                hw.score(event)
-                if self._entity_event_counts[key] >= self._min_events_for_scoring
-                else 0.0
-            )
+            if self._entity_event_counts[key] >= self._min_events_for_scoring:
+                raw = hw.score(event)
+                score = raw if math.isfinite(raw) else float("nan")
+            else:
+                score = float("nan")
             hw.learn(event)
-            if score > max_score:
+            if math.isnan(max_score) or score > max_score:
                 max_score = score
         return max_score
 
@@ -326,6 +339,9 @@ class DetectionEnsemble:
         max_items: int,
     ) -> tuple[HoltWintersDetector, bool]:
         """Return (or create) an HW detector in the given pool with LRU eviction.
+
+        Pools are also eagerly cleaned on source eviction in ``_get_detectors``
+        (prefix-scan removes all keys for the evicted source).
 
         Returns a ``(detector, evicted)`` tuple where *evicted* is ``True``
         when adding the new key required evicting the LRU entry.

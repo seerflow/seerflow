@@ -1392,3 +1392,96 @@ class TestRunQueryHealth:
 
         captured = capsys.readouterr()
         assert "Error connecting to storage: no db" in captured.err
+
+
+class TestWarmupAmplification:
+    """S-161: Amplification should not be diluted by warmup channels."""
+
+    def test_warmup_returns_nan_for_template_hw(self) -> None:
+        """Template HW returns nan during warmup (before min_events_for_scoring)."""
+        config = _granular_config(min_events_for_scoring=100)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(template_id=1)
+        score = ensemble._score_template_hw("syslog", event)
+        assert math.isnan(score)
+
+    def test_warmup_returns_nan_for_negative_template_id(self) -> None:
+        """Template HW returns nan for negative template_id."""
+        config = _granular_config(min_events_for_scoring=100)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(template_id=-1)
+        score = ensemble._score_template_hw("syslog", event)
+        assert math.isnan(score)
+
+    def test_warmup_returns_nan_for_entity_hw_no_refs(self) -> None:
+        """Entity HW returns nan when no entity_refs."""
+        config = _granular_config(min_events_for_scoring=100)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(entity_refs=())
+        score = ensemble._score_entity_hw("syslog", event)
+        assert math.isnan(score)
+
+    def test_warmup_returns_nan_for_entity_hw_below_threshold(self) -> None:
+        """Entity HW returns nan during warmup (before min_events_for_scoring)."""
+        config = _granular_config(min_events_for_scoring=100)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(entity_refs=("e1",))
+        score = ensemble._score_entity_hw("syslog", event)
+        assert math.isnan(score)
+
+    def test_amplification_not_diluted_by_warmup(self) -> None:
+        """When template/entity HW are in warmup, amplification uses only active channels."""
+        config = _granular_config(min_events_for_scoring=100)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(template_id=1, entity_refs=("e1",))
+        result = ensemble.process_event(event)
+        assert math.isfinite(result.score)
+
+    def test_nan_not_in_final_score(self) -> None:
+        """Final detection score must never be nan even with warmup channels."""
+        config = _granular_config(min_events_for_scoring=1000)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(template_id=5, entity_refs=("host1",))
+        result = ensemble.process_event(event)
+        assert math.isfinite(result.score)
+        assert not math.isnan(result.score)
+
+    def test_all_channels_warmup_returns_zero(self) -> None:
+        """When ALL channels are in warmup, score is 0.0 and not anomaly."""
+        config = _granular_config(min_events_for_scoring=10_000)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(template_id=1, entity_refs=("e1",))
+        result = ensemble.process_event(event)
+        assert result.score == 0.0
+        assert result.is_anomaly is False
+
+
+class TestSourceEvictionHWCleanup:
+    """S-161: Source eviction should clean up orphaned template/entity HW entries."""
+
+    def test_template_hw_cleaned_on_source_eviction(self) -> None:
+        config = _granular_config(max_sources=2, max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="s1", template_id=1))
+        ensemble.process_event(_make_event(source_type="s2", template_id=2))
+        assert "s1:1" in ensemble._template_hw
+        ensemble.process_event(_make_event(source_type="s3", template_id=3))
+        assert "s1:1" not in ensemble._template_hw
+
+    def test_entity_hw_cleaned_on_source_eviction(self) -> None:
+        config = _granular_config(max_sources=2, max_entity_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="s1", entity_refs=("e1",)))
+        ensemble.process_event(_make_event(source_type="s2", entity_refs=("e2",)))
+        assert "s1:e1" in ensemble._entity_hw
+        ensemble.process_event(_make_event(source_type="s3", entity_refs=("e3",)))
+        assert "s1:e1" not in ensemble._entity_hw
+
+    def test_event_counts_cleaned_on_source_eviction(self) -> None:
+        config = _granular_config(max_sources=2, max_template_hw=100)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="s1", template_id=1))
+        assert "s1:1" in ensemble._template_event_counts
+        ensemble.process_event(_make_event(source_type="s2", template_id=2))
+        ensemble.process_event(_make_event(source_type="s3", template_id=3))
+        assert "s1:1" not in ensemble._template_event_counts
