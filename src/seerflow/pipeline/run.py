@@ -274,8 +274,6 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         if _dispatcher_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await _dispatcher_task
-        if webhook_session is not None:
-            await webhook_session.close()
         if pd_sink is not None:
             await pd_sink.stop()
         if _pd_task is not None:
@@ -283,6 +281,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
                 await _pd_task
         if pd_session is not None and pd_session is not webhook_session:
             await pd_session.close()
+        if webhook_session is not None:
+            await webhook_session.close()
         await health_runner.cleanup()
         await storage.close()
         _log.info("Seerflow stopped")
