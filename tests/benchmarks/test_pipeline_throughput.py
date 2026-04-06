@@ -23,7 +23,7 @@ from seerflow.config import load_config
 from seerflow.correlation.holders import EngineHolder
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.models.query import EventQuery
-from seerflow.pipeline.handler import _make_handler
+from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 from seerflow.sigma.engine import SigmaEngine
 from seerflow.storage.sqlite import SqliteBackend
@@ -144,7 +144,7 @@ async def _build_pipeline(
     sigma = SigmaEngine()
     sigma.load_bundled()
 
-    handler = _make_handler(
+    handler = make_handler(
         ensemble,
         storage,
         save_interval_ns=999_999_999_999,

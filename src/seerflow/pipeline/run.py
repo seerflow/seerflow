@@ -14,7 +14,7 @@ from seerflow import __version__
 from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
-from seerflow.pipeline.handler import _make_handler
+from seerflow.pipeline.handler import make_handler
 
 _log = logging.getLogger("seerflow")
 
@@ -193,7 +193,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
 
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
-    handler = _make_handler(
+    handler = make_handler(
         ensemble,
         storage,
         save_interval_ns=save_interval_ns,

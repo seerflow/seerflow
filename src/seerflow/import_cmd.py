@@ -9,7 +9,10 @@ import logging
 import lzma
 import time
 from pathlib import Path
-from typing import IO
+from typing import IO, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 _log = logging.getLogger("seerflow")
 
@@ -17,7 +20,7 @@ _BINARY_CHECK_SIZE = 8192
 _COMPRESSED_SUFFIXES = frozenset({".gz", ".bz2", ".xz", ".lzma"})
 
 
-def open_log(path: Path) -> IO[str]:
+def open_log(path: Path) -> AbstractContextManager[IO[str]]:
     """Open a log file for reading, auto-detecting compression.
 
     Supports: .gz (gzip), .bz2 (bzip2), .xz/.lzma (lzma).
@@ -82,7 +85,7 @@ async def run_import(
     """
     from seerflow.config import StorageConfig, load_config
     from seerflow.detection.ensemble import DetectionEnsemble
-    from seerflow.pipeline.handler import _make_handler
+    from seerflow.pipeline.handler import make_handler
     from seerflow.receivers.base import RawEvent
     from seerflow.storage.sqlite import SqliteBackend
 
@@ -107,7 +110,7 @@ async def run_import(
 
     try:
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble, storage)
+        handler = make_handler(ensemble, storage)
 
         files_processed = 0
         lines_read = 0

@@ -9,7 +9,7 @@ import pytest
 from seerflow.config import SeerflowConfig
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.graph.entity_graph import EntityGraph
-from seerflow.pipeline.handler import _make_handler
+from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 
 pytestmark = pytest.mark.integration
@@ -37,7 +37,7 @@ class TestGraphPipelineIntegration:
         mock = _mock_storage()
         graph = EntityGraph()
 
-        handler = _make_handler(ensemble, mock, entity_graph=graph)
+        handler = make_handler(ensemble, mock, entity_graph=graph)
 
         event = RawEvent(
             data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
@@ -59,7 +59,7 @@ class TestGraphPipelineIntegration:
         mock = _mock_storage()
         graph = EntityGraph()
 
-        handler = _make_handler(ensemble, mock, entity_graph=graph)
+        handler = make_handler(ensemble, mock, entity_graph=graph)
 
         event = RawEvent(
             data=b"Accepted publickey for admin from 10.0.1.42 port 43210 ssh2",
@@ -81,7 +81,7 @@ class TestGraphPipelineIntegration:
         mock = _mock_storage()
         graph = EntityGraph()
 
-        handler = _make_handler(ensemble, mock, entity_graph=graph)
+        handler = make_handler(ensemble, mock, entity_graph=graph)
 
         event = RawEvent(
             data=b"System started successfully",
@@ -101,7 +101,7 @@ class TestGraphPipelineIntegration:
         ensemble = DetectionEnsemble(config.detection)
         mock = _mock_storage()
 
-        handler = _make_handler(ensemble, mock)
+        handler = make_handler(ensemble, mock)
 
         event = RawEvent(
             data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
@@ -123,7 +123,7 @@ class TestGraphPipelineIntegration:
         mock.write_edge = AsyncMock(side_effect=OSError("disk full"))
         graph = EntityGraph()
 
-        handler = _make_handler(ensemble, mock, entity_graph=graph)
+        handler = make_handler(ensemble, mock, entity_graph=graph)
 
         event = RawEvent(
             data=b"Failed password for root from 192.168.1.100 port 22 ssh2",
@@ -150,7 +150,7 @@ class TestGraphPipelineIntegration:
         graph.add_edge("seed-a", "seed-b", "has_ip", 1000)
 
         # Set interval to 3 for testing
-        handler = _make_handler(
+        handler = make_handler(
             ensemble,
             mock,
             entity_graph=graph,

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 
-def _make_handler(
+def make_handler(
     ensemble: DetectionEnsemble,
     storage: SqliteBackend,
     save_interval_ns: int = 300_000_000_000,

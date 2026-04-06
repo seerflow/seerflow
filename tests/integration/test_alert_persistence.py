@@ -21,14 +21,14 @@ class TestAlertPersistenceIntegration:
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import AlertQuery
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.storage.sqlite import SqliteBackend
 
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble, storage)
+        handler = make_handler(ensemble, storage)
 
         anomaly_result = DetectionResult(
             score=0.92,
@@ -69,14 +69,14 @@ class TestAlertPersistenceIntegration:
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import AlertQuery
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.storage.sqlite import SqliteBackend
 
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble, storage)
+        handler = make_handler(ensemble, storage)
 
         anomaly_result = DetectionResult(
             score=0.88,
