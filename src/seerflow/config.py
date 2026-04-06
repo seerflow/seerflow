@@ -13,7 +13,10 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from seerflow.alerting.dispatcher import WebhookTarget
 
 import yaml
 
@@ -138,6 +141,7 @@ class AlertingConfig:
     dedup_window_seconds: int = 900
     dedup_window_overrides: tuple[tuple[str, int], ...] = ()
     webhooks: tuple[dict[str, Any], ...] = ()
+    webhook_targets: tuple[WebhookTarget, ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
 
 
@@ -530,6 +534,31 @@ def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
     return config
 
 
+_VALID_WEBHOOK_FORMATS = frozenset({"slack", "teams", "json"})
+
+
+def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[WebhookTarget, ...]:
+    """Parse raw webhook dicts into a tuple of WebhookTarget objects."""
+    from seerflow.alerting.dispatcher import WebhookTarget
+
+    targets: list[WebhookTarget] = []
+    for wh in raw_webhooks:
+        url = wh.get("url", "")
+        if not url:
+            raise ConfigError("alerting.webhooks[*].url must be a non-empty string")
+        fmt = wh.get("format", "")
+        if fmt not in _VALID_WEBHOOK_FORMATS:
+            valid = sorted(_VALID_WEBHOOK_FORMATS)
+            raise ConfigError(f"alerting.webhooks[*].format must be one of {valid}, got {fmt!r}")
+        min_severity = wh.get("min_severity", 0)
+        if not isinstance(min_severity, int) or min_severity < 0:
+            raise ConfigError(
+                f"alerting.webhooks[*].min_severity must be an integer >= 0, got {min_severity!r}"
+            )
+        targets.append(WebhookTarget(url=url, format=fmt, min_severity=min_severity))
+    return tuple(targets)
+
+
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
@@ -556,10 +585,12 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         raise ConfigError(
             f"alerting.dedup_window_seconds must be an integer >= 1, got {dedup_window_seconds!r}"
         )
+    webhook_targets = _build_webhook_targets(webhooks)
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
         webhooks=webhooks,
+        webhook_targets=webhook_targets,
         pagerduty_routing_key=data.get("pagerduty_routing_key", ""),
     )
 
