@@ -176,3 +176,70 @@ class TestHealthWithDetection:
         response = await health_handler(request)
         body = json.loads(response.body)
         assert body["detection"]["estimated_memory_bytes"] > 0
+
+
+class TestHealthWithFeedbackStats:
+    """S-050: Health endpoint includes feedback stats when storage is available."""
+
+    @pytest.mark.asyncio
+    async def test_includes_feedback_when_storage_present(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from aiohttp.test_utils import make_mocked_request
+
+        from seerflow.api.health import _STORAGE_KEY, create_health_app, health_handler
+
+        mock_storage = AsyncMock()
+        mock_storage.get_feedback_stats.return_value = {"tp": 3, "fp": 1, "total": 4}
+        app = create_health_app()
+        app[_STORAGE_KEY] = mock_storage
+        request = make_mocked_request("GET", "/api/v1/health", app=app)
+        response = await health_handler(request)
+        body = json.loads(response.body)
+        assert "feedback" in body
+        assert body["feedback"] == {"tp": 3, "fp": 1, "total": 4}
+
+    @pytest.mark.asyncio
+    async def test_omits_feedback_when_no_storage(self) -> None:
+        from aiohttp.test_utils import make_mocked_request
+
+        from seerflow.api.health import create_health_app, health_handler
+
+        app = create_health_app()
+        request = make_mocked_request("GET", "/api/v1/health", app=app)
+        response = await health_handler(request)
+        body = json.loads(response.body)
+        assert "feedback" not in body
+
+    @pytest.mark.asyncio
+    async def test_feedback_stats_with_zero_counts(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from aiohttp.test_utils import make_mocked_request
+
+        from seerflow.api.health import _STORAGE_KEY, create_health_app, health_handler
+
+        mock_storage = AsyncMock()
+        mock_storage.get_feedback_stats.return_value = {"tp": 0, "fp": 0, "total": 0}
+        app = create_health_app()
+        app[_STORAGE_KEY] = mock_storage
+        request = make_mocked_request("GET", "/api/v1/health", app=app)
+        response = await health_handler(request)
+        body = json.loads(response.body)
+        assert body["feedback"] == {"tp": 0, "fp": 0, "total": 0}
+
+    @pytest.mark.asyncio
+    async def test_feedback_stats_called_once(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from aiohttp.test_utils import make_mocked_request
+
+        from seerflow.api.health import _STORAGE_KEY, create_health_app, health_handler
+
+        mock_storage = AsyncMock()
+        mock_storage.get_feedback_stats.return_value = {"tp": 0, "fp": 0, "total": 0}
+        app = create_health_app()
+        app[_STORAGE_KEY] = mock_storage
+        request = make_mocked_request("GET", "/api/v1/health", app=app)
+        await health_handler(request)
+        mock_storage.get_feedback_stats.assert_awaited_once()

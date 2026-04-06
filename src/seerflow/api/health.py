@@ -13,12 +13,16 @@ from aiohttp import web
 
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.storage.protocols import AlertStore
 
 # Typed app key for health state (avoids string-key deprecation warning).
 _HEALTH_STATE_KEY: web.AppKey[dict[str, str]] = web.AppKey("health_state")
 
 # Optional typed app key for detection ensemble — absent when no ensemble is wired.
 _ENSEMBLE_KEY: web.AppKey[DetectionEnsemble | None] = web.AppKey("ensemble")
+
+# Optional typed app key for storage — absent when no storage backend is wired.
+_STORAGE_KEY: web.AppKey[AlertStore | None] = web.AppKey("storage")
 
 # Default state used when no state dict is injected (e.g., in tests).
 _DEFAULT_STATE: dict[str, str] = {
@@ -41,6 +45,9 @@ async def health_handler(request: web.Request) -> web.Response:
     ensemble = request.app.get(_ENSEMBLE_KEY)
     if ensemble is not None:
         body["detection"] = ensemble.get_health()
+    storage = request.app.get(_STORAGE_KEY)
+    if storage is not None:
+        body["feedback"] = await storage.get_feedback_stats()
     return web.json_response(body, status=http_status)
 
 
