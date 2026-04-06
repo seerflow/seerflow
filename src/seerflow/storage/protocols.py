@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from seerflow.graph.entity_graph import EntityGraph
     from seerflow.models._types import FeedbackType
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
@@ -95,6 +96,8 @@ class EntityStore(Protocol):  # pragma: no cover
     ) -> list[SeerflowEvent]: ...
 
     async def get_related(self, entity_uuid: str) -> list[EntityRelation]: ...
+
+    def set_entity_graph(self, graph: EntityGraph) -> None: ...
 
 
 @runtime_checkable

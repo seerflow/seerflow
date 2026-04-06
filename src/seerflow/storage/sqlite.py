@@ -787,30 +787,17 @@ def get_related_from_graph(
     graph: EntityGraph,
     entity_uuid: str,
 ) -> list[EntityRelation]:
-    """Get related entities from the in-memory EntityGraph.
-
-    Delegates to EntityGraph.get_neighbors() and maps results
-    to EntityRelation objects.  Edge metadata (rel_type) is resolved
-    by inspecting incident edges in both directions.
-    """
+    """Get related entities from the in-memory EntityGraph."""
     from seerflow.models.query import EntityRelation
 
-    neighbors = graph.get_neighbors(entity_uuid, depth=1)
+    neighbors = graph.get_neighbors_with_rel(entity_uuid)
     if not neighbors:
         return []
 
-    src_idx = graph._vertex_map.get(entity_uuid)
-    if src_idx is None:
-        return []
-
     results: list[EntityRelation] = []
-    for neighbor in neighbors:
-        neighbor_id = neighbor["entity_id"]
-        tgt_idx = graph._vertex_map.get(neighbor_id)
-        if tgt_idx is None:
-            continue
-
-        rel_type = _find_edge_rel_type(graph, src_idx, tgt_idx)
+    for neighbor_id, rel_type in neighbors:
+        if not rel_type:
+            _log.debug("No rel_type for edge %s -> %s", entity_uuid, neighbor_id)
         results.append(
             EntityRelation(
                 entity_uuid=neighbor_id,
@@ -820,17 +807,3 @@ def get_related_from_graph(
             )
         )
     return results
-
-
-def _find_edge_rel_type(
-    graph: EntityGraph,
-    src_idx: int,
-    tgt_idx: int,
-) -> str:
-    """Find the rel_type of the edge connecting two vertices (either direction)."""
-    for eid in graph._graph.incident(src_idx, mode="all"):
-        edge = graph._graph.es[eid]
-        other = edge.target if edge.source == src_idx else edge.source
-        if other == tgt_idx:
-            return str(edge["rel_type"])
-    return ""
