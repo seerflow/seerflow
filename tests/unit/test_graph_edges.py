@@ -169,6 +169,17 @@ class TestInferEdgesExtended:
         assert spawned[0].source_id == proc1_uuid
         assert spawned[0].target_id == proc2_uuid
 
+    def test_three_processes_produce_full_mesh(self) -> None:
+        """Three process entities produce 3 spawned_by edges (full mesh)."""
+        entities = [("process", "uuid-p1"), ("process", "uuid-p2"), ("process", "uuid-p3")]
+        edges = infer_edges(entities)
+        spawned = [e for e in edges if e.rel_type == "spawned_by"]
+        assert len(spawned) == 3
+        pairs = {(e.source_id, e.target_id) for e in spawned}
+        assert ("uuid-p1", "uuid-p2") in pairs
+        assert ("uuid-p1", "uuid-p3") in pairs
+        assert ("uuid-p2", "uuid-p3") in pairs
+
 
 class TestInferEdgesTypedInput:
     """Tests for infer_edges with pre-resolved typed entity list."""
