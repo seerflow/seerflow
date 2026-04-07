@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -69,8 +70,47 @@ class KillChainTracker:
 
     def _check_threshold(self, entity_id: str, timestamp_ns: int) -> list[Alert]:
         """Return a kill-chain alert if the entity has reached the tactic threshold."""
-        # Placeholder -- implemented in Task 3
-        return []
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+
+        tactics = self._entity_tactics.get(entity_id, {})
+        if len(tactics) < self._config.tactic_threshold:
+            return []
+
+        sorted_tactics = sorted(tactics.items(), key=lambda x: x[1][0])
+        tactic_names = tuple(t for t, _ in sorted_tactics)
+
+        contributing_ids: list[uuid.UUID] = []
+        for _, (_, aid) in sorted_tactics:
+            with contextlib.suppress(ValueError, AttributeError):
+                contributing_ids.append(uuid.UUID(aid))
+
+        return [
+            Alert(
+                alert_id=str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_DNS,
+                        f"kill-chain:{entity_id}:{timestamp_ns}",
+                    )
+                ),
+                alert_type="correlation",
+                timestamp_ns=timestamp_ns,
+                severity_id=SeverityLevel.ERROR,
+                rule_name="kill-chain-progression",
+                description=(
+                    f"Kill-chain: {len(tactic_names)} tactics for "
+                    f"{entity_id[:8]}... — {', '.join(tactic_names)}"
+                ),
+                entity_uuid=entity_id,
+                entity_value=entity_id[:16],
+                entity_type="host",
+                contributing_events=tuple(contributing_ids),
+                mitre_tactics=tactic_names,
+                mitre_techniques=(),
+                risk_score=min(1.0, len(tactic_names) / 5.0),
+                dedup_key=f"kill-chain:{entity_id}",
+            )
+        ]
 
     def get_entity_state(self, entity_id: str) -> dict[str, tuple[int, str]]:
         """Return a copy of the current tactic state for an entity."""

@@ -155,3 +155,68 @@ class TestKillChainTrackerRecord:
         assert tracker.get_entity_state("e1") == {}
         assert "tactic-b" in tracker.get_entity_state("e2")
         assert "tactic-c" in tracker.get_entity_state("e3")
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Kill-chain threshold alert
+# ---------------------------------------------------------------------------
+
+
+class TestKillChainThresholdAlert:
+    def test_alert_at_threshold(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=3))
+        tracker.record_alert(_make_alert(mitre_tactics=("initial-access",), timestamp_ns=1000))
+        tracker.record_alert(_make_alert(mitre_tactics=("execution",), timestamp_ns=2000))
+        result = tracker.record_alert(
+            _make_alert(mitre_tactics=("persistence",), timestamp_ns=3000)
+        )
+        assert len(result) == 1
+        assert result[0].alert_type == "correlation"
+        assert result[0].rule_name == "kill-chain-progression"
+
+    def test_no_alert_below_threshold(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=3))
+        tracker.record_alert(_make_alert(mitre_tactics=("initial-access",), timestamp_ns=1000))
+        result = tracker.record_alert(_make_alert(mitre_tactics=("execution",), timestamp_ns=2000))
+        assert result == []
+
+    def test_alert_includes_all_tactics(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=3))
+        tracker.record_alert(_make_alert(mitre_tactics=("initial-access",), timestamp_ns=1000))
+        tracker.record_alert(_make_alert(mitre_tactics=("execution",), timestamp_ns=2000))
+        result = tracker.record_alert(
+            _make_alert(mitre_tactics=("persistence",), timestamp_ns=3000)
+        )
+        assert len(result) == 1
+        alert = result[0]
+        assert set(alert.mitre_tactics) == {
+            "initial-access",
+            "execution",
+            "persistence",
+        }
+
+    def test_dedup_key_format(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=3))
+        tracker.record_alert(
+            _make_alert(
+                entity_uuid="abc-123",
+                mitre_tactics=("initial-access",),
+                timestamp_ns=1000,
+            )
+        )
+        tracker.record_alert(
+            _make_alert(
+                entity_uuid="abc-123",
+                mitre_tactics=("execution",),
+                timestamp_ns=2000,
+            )
+        )
+        result = tracker.record_alert(
+            _make_alert(
+                entity_uuid="abc-123",
+                mitre_tactics=("persistence",),
+                timestamp_ns=3000,
+            )
+        )
+        assert len(result) == 1
+        assert result[0].dedup_key == "kill-chain:abc-123"
