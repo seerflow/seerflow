@@ -140,3 +140,139 @@ class TestLoadDefaults:
         tactics, techniques = mapper.lookup("INFO: server started on port 8080")
         assert tactics == ()
         assert techniques == ()
+
+
+class TestMlAlertMitreParams:
+    def test_create_ml_alert_with_mitre(self) -> None:
+        import uuid
+
+        from seerflow.detection.ensemble import DetectionResult
+        from seerflow.models.alert import create_ml_alert
+        from seerflow.models.event import SeerflowEvent, SeverityLevel
+
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            message="error: maximum authentication attempts exceeded for admin",
+            template_id=42,
+            template_str="error: maximum authentication attempts exceeded for <*>",
+            severity_id=SeverityLevel.WARNING,
+            source_type="syslog",
+        )
+        result = DetectionResult(
+            score=0.95,
+            upper_threshold=0.80,
+            lower_threshold=0.10,
+            is_anomaly=True,
+            anomaly_direction="upper",
+            source_type="syslog",
+        )
+        alert = create_ml_alert(
+            event,
+            result,
+            mitre_tactics=("credential-access",),
+            mitre_techniques=("T1110",),
+        )
+        assert alert.mitre_tactics == ("credential-access",)
+        assert alert.mitre_techniques == ("T1110",)
+
+    def test_create_ml_alert_default_empty_mitre(self) -> None:
+        import uuid
+
+        from seerflow.detection.ensemble import DetectionResult
+        from seerflow.models.alert import create_ml_alert
+        from seerflow.models.event import SeerflowEvent, SeverityLevel
+
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            message="normal log",
+            template_id=1,
+            severity_id=SeverityLevel.INFORMATIONAL,
+            source_type="test",
+        )
+        result = DetectionResult(
+            score=0.5,
+            upper_threshold=0.8,
+            lower_threshold=0.1,
+            is_anomaly=True,
+            anomaly_direction="upper",
+            source_type="test",
+        )
+        alert = create_ml_alert(event, result)
+        assert alert.mitre_tactics == ()
+        assert alert.mitre_techniques == ()
+
+    def test_create_ml_alerts_passes_mitre_params(self) -> None:
+        import uuid
+
+        from seerflow.detection.ensemble import DetectionResult
+        from seerflow.models.alert import create_ml_alerts
+        from seerflow.models.event import SeerflowEvent, SeverityLevel
+
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            message="error: authentication failed for admin",
+            template_id=42,
+            severity_id=SeverityLevel.WARNING,
+            source_type="syslog",
+            related_ips=("10.0.0.1",),
+        )
+        result = DetectionResult(
+            score=0.9,
+            upper_threshold=0.8,
+            lower_threshold=0.1,
+            is_anomaly=True,
+            anomaly_direction="upper",
+            source_type="syslog",
+        )
+        entity_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, "ip:10.0.0.1"))
+        alerts = create_ml_alerts(
+            event,
+            result,
+            [("ip", entity_uuid)],
+            mitre_tactics=("credential-access",),
+            mitre_techniques=("T1110",),
+        )
+        assert len(alerts) == 1
+        assert alerts[0].mitre_tactics == ("credential-access",)
+        assert alerts[0].mitre_techniques == ("T1110",)
+
+    def test_create_ml_alerts_fallback_passes_mitre_params(self) -> None:
+        import uuid
+
+        from seerflow.detection.ensemble import DetectionResult
+        from seerflow.models.alert import create_ml_alerts
+        from seerflow.models.event import SeerflowEvent, SeverityLevel
+
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            message="error: authentication failed",
+            template_id=42,
+            severity_id=SeverityLevel.WARNING,
+            source_type="syslog",
+        )
+        result = DetectionResult(
+            score=0.9,
+            upper_threshold=0.8,
+            lower_threshold=0.1,
+            is_anomaly=True,
+            anomaly_direction="upper",
+            source_type="syslog",
+        )
+        alerts = create_ml_alerts(
+            event,
+            result,
+            [],
+            mitre_tactics=("initial-access",),
+            mitre_techniques=("T1078",),
+        )
+        assert len(alerts) == 1
+        assert alerts[0].mitre_tactics == ("initial-access",)
+        assert alerts[0].mitre_techniques == ("T1078",)
