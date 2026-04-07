@@ -284,6 +284,10 @@ class EntityGraph:
     # Properties
     # ------------------------------------------------------------------
 
+    def all_entity_ids(self) -> list[str]:
+        """Return all entity IDs currently in the graph."""
+        return list(self._vertex_map.keys())
+
     @property
     def vertex_count(self) -> int:
         """Number of unique entity vertices."""
