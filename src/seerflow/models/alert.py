@@ -115,6 +115,9 @@ def create_ml_alerts(
     event: "SeerflowEvent",
     result: "DetectionResult",
     typed_entities: list[tuple[str, str]],
+    *,
+    mitre_tactics: tuple[str, ...] = (),
+    mitre_techniques: tuple[str, ...] = (),
 ) -> list[Alert]:
     """Create one ML anomaly Alert per entity.
 
@@ -122,7 +125,14 @@ def create_ml_alerts(
     Falls back to a single alert with empty entity if typed_entities is empty.
     """
     if not typed_entities:
-        return [create_ml_alert(event, result)]
+        return [
+            create_ml_alert(
+                event,
+                result,
+                mitre_tactics=mitre_tactics,
+                mitre_techniques=mitre_techniques,
+            )
+        ]
 
     # Build a type -> ordered raw values map from the event.
     type_to_raw: dict[str, tuple[str, ...]] = {
@@ -165,6 +175,8 @@ def create_ml_alerts(
             entity_value=entity_value,
             entity_type=cast("EntityType", entity_type),
             contributing_events=(event.event_id,),
+            mitre_tactics=mitre_tactics,
+            mitre_techniques=mitre_techniques,
             risk_score=max(0.0, min(1.0, result.score)),
             dedup_key=f"hst:{event.template_id}:{event.source_type}:{entity_uuid}",
         )
@@ -172,7 +184,13 @@ def create_ml_alerts(
     return alerts
 
 
-def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
+def create_ml_alert(
+    event: "SeerflowEvent",
+    result: "DetectionResult",
+    *,
+    mitre_tactics: tuple[str, ...] = (),
+    mitre_techniques: tuple[str, ...] = (),
+) -> Alert:
     """Create an ML anomaly Alert from a SeerflowEvent and DetectionResult.
 
     Uses the first entity from ``event.entity_refs`` as ``entity_uuid``
@@ -201,6 +219,8 @@ def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
         entity_value=primary_entity_value(event),
         entity_type=infer_entity_type(event),
         contributing_events=(event.event_id,),
+        mitre_tactics=mitre_tactics,
+        mitre_techniques=mitre_techniques,
         risk_score=max(0.0, min(1.0, result.score)),
         dedup_key=f"hst:{event.template_id}:{event.source_type}",
     )

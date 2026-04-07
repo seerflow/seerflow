@@ -52,6 +52,22 @@ async def _run_with_config(config: SeerflowConfig) -> None:
             _log.info("Restored %d model states from storage", loaded)
     except Exception:
         _log.warning("Failed to restore model state — starting fresh", exc_info=True)
+
+    from seerflow.detection.attack_mapping import AttackMapper
+
+    try:
+        if config.detection.attack_mappings:
+            attack_mapper = AttackMapper.from_config(list(config.detection.attack_mappings))
+            _log.info("ATT&CK mapper: %d user-defined mappings", len(attack_mapper))
+        else:
+            attack_mapper = AttackMapper.load_defaults()
+            _log.info("ATT&CK mapper: %d default mappings", len(attack_mapper))
+    except (ValueError, OSError) as exc:
+        _log.error("ATT&CK mapper init failed — falling back to defaults: %s", exc)
+        attack_mapper = AttackMapper.load_defaults()
+    if len(attack_mapper) == 0:
+        _log.warning("ATT&CK mapper has 0 mappings — ML alerts will have empty MITRE fields")
+
     try:
         pipeline = await build_pipeline(config)
     except RuntimeError as exc:
@@ -233,6 +249,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         alerting_config=config.alerting,
         alert_dispatcher=dispatcher,
         pagerduty_sink=pd_sink,
+        attack_mapper=attack_mapper,
     )
     await pipeline.run(handler)
 

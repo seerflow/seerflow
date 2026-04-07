@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from seerflow.correlation.risk import RiskRegister
     from seerflow.correlation.watermark import Watermark
     from seerflow.correlation.window import EntityWindowBuffer
+    from seerflow.detection.attack_mapping import AttackMapper
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.graph.entity_graph import EntityGraph
     from seerflow.receivers.base import RawEvent
@@ -68,6 +69,7 @@ def make_handler(
     alerting_config: AlertingConfig | None = None,
     alert_dispatcher: AlertDispatcher | None = None,
     pagerduty_sink: PagerDutySink | None = None,
+    attack_mapper: AttackMapper | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -311,7 +313,19 @@ def make_handler(
                     )
             if entity_parts:
                 _log.warning("  entities: %s", ", ".join(entity_parts))
-            alerts = create_ml_alerts(seerflow_event, result, typed_for_edges)
+            _mitre_tactics: tuple[str, ...] = ()
+            _mitre_techniques: tuple[str, ...] = ()
+            if attack_mapper is not None and seerflow_event.template_str:
+                _mitre_tactics, _mitre_techniques = attack_mapper.lookup(
+                    seerflow_event.template_str
+                )
+            alerts = create_ml_alerts(
+                seerflow_event,
+                result,
+                typed_for_edges,
+                mitre_tactics=_mitre_tactics,
+                mitre_techniques=_mitre_techniques,
+            )
             for alert in alerts:
                 try:
                     await storage.write_alert(
@@ -335,8 +349,8 @@ def make_handler(
                         risk_points=result.score * 10,
                         source="ml",
                         rule_name="hst-anomaly",
-                        mitre_tactics=(),
-                        mitre_techniques=(),
+                        mitre_tactics=_mitre_tactics,
+                        mitre_techniques=_mitre_techniques,
                     )
                     risk_register.add_risk(entity_uuid, risk_entry)
 

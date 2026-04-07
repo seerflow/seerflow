@@ -132,6 +132,7 @@ class DetectionConfig:
     weights_template_volume: float = 0.15
     weights_entity_volume: float = 0.15
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
+    attack_mappings: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -499,6 +500,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_template_volume=data.get("weights_template_volume", 0.15),
         weights_entity_volume=data.get("weights_entity_volume", 0.15),
         sigma_rules_dirs=sigma_rules_dirs,
+        attack_mappings=tuple(data.get("attack_mappings", ())),
     )
     _validate_detection_config(config)
     return config
