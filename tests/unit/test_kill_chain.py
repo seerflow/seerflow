@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from seerflow.config import (
@@ -9,6 +11,33 @@ from seerflow.config import (
     KillChainConfig,
     _build_detection,
 )
+from seerflow.correlation.kill_chain import KillChainTracker
+from seerflow.models.alert import Alert
+from seerflow.models.event import SeverityLevel
+
+
+def _make_alert(
+    *,
+    entity_uuid: str = "ent-1",
+    mitre_tactics: tuple[str, ...] = ("initial-access",),
+    timestamp_ns: int = 1_000_000_000_000,
+    alert_id: str | None = None,
+) -> Alert:
+    """Create a minimal Alert for kill-chain tests."""
+    return Alert(
+        alert_id=alert_id or str(uuid.uuid4()),
+        alert_type="ml",
+        timestamp_ns=timestamp_ns,
+        severity_id=SeverityLevel.WARNING,
+        rule_name="test-rule",
+        description="test alert",
+        entity_uuid=entity_uuid,
+        entity_value=entity_uuid[:16],
+        entity_type="host",
+        contributing_events=(),
+        mitre_tactics=mitre_tactics,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Task 1: KillChainConfig
@@ -63,3 +92,66 @@ class TestKillChainConfigValidation:
         cfg = _build_detection({"kill_chain": {"tactic_threshold": 4, "window_seconds": 7200}})
         assert cfg.kill_chain.tactic_threshold == 4
         assert cfg.kill_chain.window_seconds == 7200
+
+
+# ---------------------------------------------------------------------------
+# Task 2: KillChainTracker — record + eviction
+# ---------------------------------------------------------------------------
+
+
+class TestKillChainTrackerRecord:
+    def test_record_stores_tactic(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=5))
+        alert = _make_alert(mitre_tactics=("initial-access",))
+        tracker.record_alert(alert)
+        state = tracker.get_entity_state("ent-1")
+        assert "initial-access" in state
+
+    def test_record_multiple_tactics(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=5))
+        tracker.record_alert(_make_alert(mitre_tactics=("initial-access",), timestamp_ns=1000))
+        tracker.record_alert(_make_alert(mitre_tactics=("execution",), timestamp_ns=2000))
+        state = tracker.get_entity_state("ent-1")
+        assert len(state) == 2
+        assert "initial-access" in state
+        assert "execution" in state
+
+    def test_eviction_removes_stale_tactics(self) -> None:
+        cfg = KillChainConfig(tactic_threshold=5, window_seconds=60)
+        tracker = KillChainTracker(cfg)
+        early_ns = 1_000_000_000_000
+        tracker.record_alert(_make_alert(mitre_tactics=("initial-access",), timestamp_ns=early_ns))
+        late_ns = early_ns + 61 * 1_000_000_000
+        tracker.record_alert(_make_alert(mitre_tactics=("execution",), timestamp_ns=late_ns))
+        state = tracker.get_entity_state("ent-1")
+        assert "initial-access" not in state
+        assert "execution" in state
+
+    def test_skip_empty_tactics(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=5))
+        result = tracker.record_alert(_make_alert(mitre_tactics=()))
+        assert result == []
+        assert tracker.get_entity_state("ent-1") == {}
+
+    def test_skip_empty_entity(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=5))
+        result = tracker.record_alert(
+            _make_alert(entity_uuid="", mitre_tactics=("initial-access",))
+        )
+        assert result == []
+
+    def test_max_entities_lru_eviction(self) -> None:
+        cfg = KillChainConfig(tactic_threshold=5, max_entities=2)
+        tracker = KillChainTracker(cfg)
+        tracker.record_alert(
+            _make_alert(entity_uuid="e1", mitre_tactics=("tactic-a",), timestamp_ns=1000)
+        )
+        tracker.record_alert(
+            _make_alert(entity_uuid="e2", mitre_tactics=("tactic-b",), timestamp_ns=2000)
+        )
+        tracker.record_alert(
+            _make_alert(entity_uuid="e3", mitre_tactics=("tactic-c",), timestamp_ns=3000)
+        )
+        assert tracker.get_entity_state("e1") == {}
+        assert "tactic-b" in tracker.get_entity_state("e2")
+        assert "tactic-c" in tracker.get_entity_state("e3")
