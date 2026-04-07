@@ -125,6 +125,12 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         _log.warning("Graph edge loading failed — starting with empty graph", exc_info=True)
     storage.set_entity_graph(entity_graph)
 
+    # Build graph-structural evaluator for community-crossing / betweenness / fan-out
+    from seerflow.correlation.graph_structural import GraphStructuralEvaluator
+
+    graph_structural = GraphStructuralEvaluator(config.detection.graph_structural, entity_graph)
+    _log.info("Graph-structural evaluator: enabled")
+
     # Build entity window buffer for temporal correlation
     from seerflow.correlation.window import EntityWindowBuffer
 
@@ -250,6 +256,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         alert_dispatcher=dispatcher,
         pagerduty_sink=pd_sink,
         attack_mapper=attack_mapper,
+        graph_structural=graph_structural,
     )
     await pipeline.run(handler)
 

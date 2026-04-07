@@ -93,6 +93,17 @@ class ReceiverConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class GraphStructuralConfig:
+    """Graph-structural correlation thresholds."""
+
+    community_crossing_enabled: bool = True
+    betweenness_threshold: float = 0.3
+    fan_out_sigma: float = 3.0
+    fan_out_min_floor: int = 5
+    fan_out_history_size: int = 20
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class DetectionConfig:
     """ML detection configuration."""
 
@@ -133,6 +144,7 @@ class DetectionConfig:
     weights_entity_volume: float = 0.15
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
     attack_mappings: tuple[dict[str, Any], ...] = ()
+    graph_structural: GraphStructuralConfig = field(default_factory=GraphStructuralConfig)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -444,6 +456,39 @@ def _validate_detection_config(config: DetectionConfig) -> None:
             f"got {config.min_events_for_scoring!r}"
         )
 
+    # Graph-structural config
+    gs = config.graph_structural
+    if not (0.0 < gs.betweenness_threshold <= 1.0):
+        raise ConfigError(
+            f"detection.graph_structural.betweenness_threshold must be in (0, 1], "
+            f"got {gs.betweenness_threshold!r}"
+        )
+    if gs.fan_out_sigma <= 0.0:
+        raise ConfigError(
+            f"detection.graph_structural.fan_out_sigma must be > 0, got {gs.fan_out_sigma!r}"
+        )
+    if gs.fan_out_min_floor < 1:
+        raise ConfigError(
+            f"detection.graph_structural.fan_out_min_floor must be >= 1, "
+            f"got {gs.fan_out_min_floor!r}"
+        )
+    if gs.fan_out_history_size < 3:
+        raise ConfigError(
+            f"detection.graph_structural.fan_out_history_size must be >= 3, "
+            f"got {gs.fan_out_history_size!r}"
+        )
+
+
+def _build_graph_structural(data: dict[str, Any]) -> GraphStructuralConfig:
+    """Build GraphStructuralConfig from a YAML ``graph_structural:`` section."""
+    return GraphStructuralConfig(
+        community_crossing_enabled=data.get("community_crossing_enabled", True),
+        betweenness_threshold=data.get("betweenness_threshold", 0.3),
+        fan_out_sigma=data.get("fan_out_sigma", 3.0),
+        fan_out_min_floor=data.get("fan_out_min_floor", 5),
+        fan_out_history_size=data.get("fan_out_history_size", 20),
+    )
+
 
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     """Build DetectionConfig from a YAML ``detection:`` section.
@@ -501,6 +546,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_entity_volume=data.get("weights_entity_volume", 0.15),
         sigma_rules_dirs=sigma_rules_dirs,
         attack_mappings=tuple(data.get("attack_mappings", ())),
+        graph_structural=_build_graph_structural(data.get("graph_structural", {})),
     )
     _validate_detection_config(config)
     return config
