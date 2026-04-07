@@ -8,11 +8,16 @@ first match wins.
 from __future__ import annotations
 
 import importlib.resources
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 
 import yaml
+
+_log = logging.getLogger("seerflow")
+
+_MAX_PATTERN_LEN = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +37,12 @@ class AttackMapping:
         techniques: list[str],
     ) -> AttackMapping:
         """Compile *pattern* (case-insensitive) and wrap in a mapping."""
+        if not isinstance(pattern, str):
+            msg = f"attack mapping pattern must be a str, got {type(pattern).__name__!r}"
+            raise ValueError(msg)
+        if len(pattern) > _MAX_PATTERN_LEN:
+            msg = f"attack mapping pattern exceeds {_MAX_PATTERN_LEN} chars: {len(pattern)}"
+            raise ValueError(msg)
         try:
             compiled = re.compile(pattern, re.IGNORECASE)
         except re.error as exc:

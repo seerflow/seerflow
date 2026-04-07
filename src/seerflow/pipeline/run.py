@@ -55,12 +55,16 @@ async def _run_with_config(config: SeerflowConfig) -> None:
 
     from seerflow.detection.attack_mapping import AttackMapper
 
-    if config.detection.attack_mappings:
-        attack_mapper = AttackMapper.from_config(list(config.detection.attack_mappings))
-        _log.info("ATT&CK mapper: %d user-defined mappings", len(attack_mapper))
-    else:
+    try:
+        if config.detection.attack_mappings:
+            attack_mapper = AttackMapper.from_config(list(config.detection.attack_mappings))
+            _log.info("ATT&CK mapper: %d user-defined mappings", len(attack_mapper))
+        else:
+            attack_mapper = AttackMapper.load_defaults()
+            _log.info("ATT&CK mapper: %d default mappings", len(attack_mapper))
+    except (ValueError, OSError) as exc:
+        _log.error("ATT&CK mapper init failed — falling back to defaults: %s", exc)
         attack_mapper = AttackMapper.load_defaults()
-        _log.info("ATT&CK mapper: %d default mappings", len(attack_mapper))
     if len(attack_mapper) == 0:
         _log.warning("ATT&CK mapper has 0 mappings — ML alerts will have empty MITRE fields")
 
