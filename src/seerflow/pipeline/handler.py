@@ -234,9 +234,7 @@ def make_handler(
                         try:
                             await storage.write_alert(
                                 cc_alert,
-                                dedup_window_ns=_dedup_window_ns(
-                                    cc_alert.rule_name, _alerting
-                                ),
+                                dedup_window_ns=_dedup_window_ns(cc_alert.rule_name, _alerting),
                             )
                             if alert_dispatcher is not None:
                                 alert_dispatcher.enqueue(cc_alert)
@@ -498,9 +496,7 @@ def make_handler(
                     try:
                         await storage.write_alert(
                             pa,
-                            dedup_window_ns=_dedup_window_ns(
-                                pa.rule_name, _alerting
-                            ),
+                            dedup_window_ns=_dedup_window_ns(pa.rule_name, _alerting),
                         )
                         if alert_dispatcher is not None:
                             alert_dispatcher.enqueue(pa)

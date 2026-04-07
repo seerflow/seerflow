@@ -465,8 +465,7 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         )
     if gs.fan_out_sigma <= 0.0:
         raise ConfigError(
-            f"detection.graph_structural.fan_out_sigma must be > 0, "
-            f"got {gs.fan_out_sigma!r}"
+            f"detection.graph_structural.fan_out_sigma must be > 0, got {gs.fan_out_sigma!r}"
         )
     if gs.fan_out_min_floor < 1:
         raise ConfigError(
