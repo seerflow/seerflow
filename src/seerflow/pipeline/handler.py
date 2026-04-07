@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
     from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
+    from seerflow.correlation.graph_structural import GraphStructuralEvaluator
     from seerflow.correlation.holders import EngineHolder
     from seerflow.correlation.risk import RiskRegister
     from seerflow.correlation.watermark import Watermark
@@ -70,6 +71,7 @@ def make_handler(
     alert_dispatcher: AlertDispatcher | None = None,
     pagerduty_sink: PagerDutySink | None = None,
     attack_mapper: AttackMapper | None = None,
+    graph_structural: GraphStructuralEvaluator | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -218,6 +220,31 @@ def make_handler(
                     )
                 except Exception:
                     _log.warning("Graph edge write failed", exc_info=True)
+
+            # Check community-crossing after all edges are added
+            if graph_structural is not None:
+                for edge in edges:
+                    cc_alerts = graph_structural.check_community_crossing(
+                        edge.source_id,
+                        edge.target_id,
+                        edge.rel_type,
+                        seerflow_event.timestamp_ns,
+                    )
+                    for cc_alert in cc_alerts:
+                        try:
+                            await storage.write_alert(
+                                cc_alert,
+                                dedup_window_ns=300_000_000_000,
+                            )
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(cc_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(cc_alert)
+                        except Exception:
+                            _log.warning(
+                                "Graph structural alert write failed",
+                                exc_info=True,
+                            )
 
         # Track template metadata
         if seerflow_event.template_id != -1:
@@ -457,6 +484,27 @@ def make_handler(
                     )
             except Exception:
                 _log.warning("Graph algorithm execution failed", exc_info=True)
+
+            # Evaluate post-algorithm graph-structural anomalies
+            if graph_structural is not None and event_count % graph_algo_interval == 0:
+                post_alerts = graph_structural.check_post_algorithms(
+                    timestamp_ns=seerflow_event.timestamp_ns,
+                )
+                for pa in post_alerts:
+                    try:
+                        await storage.write_alert(
+                            pa,
+                            dedup_window_ns=300_000_000_000,
+                        )
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(pa)
+                        if pagerduty_sink is not None:
+                            pagerduty_sink.enqueue_trigger(pa)
+                    except Exception:
+                        _log.warning(
+                            "Graph structural alert write failed",
+                            exc_info=True,
+                        )
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler
