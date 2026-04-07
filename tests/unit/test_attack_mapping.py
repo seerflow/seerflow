@@ -86,6 +86,12 @@ class TestAttackMapper:
                 [{"pattern": "[invalid", "tactics": ["x"], "techniques": ["T1"]}]
             )
 
+    def test_from_config_raises_on_missing_pattern_key(self) -> None:
+        from seerflow.detection.attack_mapping import AttackMapper
+
+        with pytest.raises(ValueError, match="missing required 'pattern'"):
+            AttackMapper.from_config([{"tactics": ["x"], "techniques": ["T1"]}])
+
     def test_case_insensitive_matching(self) -> None:
         from seerflow.detection.attack_mapping import AttackMapper, AttackMapping
 

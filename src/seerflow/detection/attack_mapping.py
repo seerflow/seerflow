@@ -7,14 +7,12 @@ first match wins.
 
 from __future__ import annotations
 
+import importlib.resources
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import yaml
-
-_EMPTY: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,27 +60,35 @@ class AttackMapper:
         for mapping in self._mappings:
             if mapping.pattern.search(template):
                 return mapping.tactics, mapping.techniques
-        return _EMPTY, _EMPTY
+        return (), ()
 
     @classmethod
     def from_config(cls, raw: list[dict[str, Any]]) -> AttackMapper:
         """Build a mapper from a list of raw config dicts."""
-        mappings = [
-            AttackMapping.from_raw(
-                pattern=entry["pattern"],
-                tactics=entry.get("tactics", []),
-                techniques=entry.get("techniques", []),
+        mappings: list[AttackMapping] = []
+        for i, entry in enumerate(raw):
+            if "pattern" not in entry:
+                msg = f"attack_mappings[{i}] is missing required 'pattern' key: {entry!r}"
+                raise ValueError(msg)
+            mappings.append(
+                AttackMapping.from_raw(
+                    pattern=entry["pattern"],
+                    tactics=entry.get("tactics", []),
+                    techniques=entry.get("techniques", []),
+                )
             )
-            for entry in raw
-        ]
         return cls(mappings)
 
     @classmethod
     def load_defaults(cls) -> AttackMapper:
         """Load bundled default ATT&CK mappings."""
-        defaults_path = Path(__file__).parent / "default_attack_mappings.yaml"
-        with defaults_path.open() as f:
-            data = yaml.safe_load(f)
+        ref = importlib.resources.files("seerflow.detection").joinpath(
+            "default_attack_mappings.yaml"
+        )
+        data = yaml.safe_load(ref.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("mappings"), list):
+            msg = "default_attack_mappings.yaml must contain a 'mappings' list"
+            raise ValueError(msg)
         return cls.from_config(data["mappings"])
 
     def __len__(self) -> int:
