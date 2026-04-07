@@ -61,6 +61,8 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     else:
         attack_mapper = AttackMapper.load_defaults()
         _log.info("ATT&CK mapper: %d default mappings", len(attack_mapper))
+    if len(attack_mapper) == 0:
+        _log.warning("ATT&CK mapper has 0 mappings — ML alerts will have empty MITRE fields")
 
     try:
         pipeline = await build_pipeline(config)
