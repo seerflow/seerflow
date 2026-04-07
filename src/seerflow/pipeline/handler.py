@@ -234,7 +234,9 @@ def make_handler(
                         try:
                             await storage.write_alert(
                                 cc_alert,
-                                dedup_window_ns=300_000_000_000,
+                                dedup_window_ns=_dedup_window_ns(
+                                    cc_alert.rule_name, _alerting
+                                ),
                             )
                             if alert_dispatcher is not None:
                                 alert_dispatcher.enqueue(cc_alert)
@@ -473,10 +475,12 @@ def make_handler(
                     )
 
         # Run graph algorithms periodically
+        _algo_ran = False
         if entity_graph is not None and entity_graph.vertex_count > 0:
             try:
                 if event_count % graph_algo_interval == 0:
                     entity_graph.run_algorithms()
+                    _algo_ran = True
                     _log.info(
                         "Graph algorithms: %d vertices, %d edges",
                         entity_graph.vertex_count,
@@ -485,8 +489,8 @@ def make_handler(
             except Exception:
                 _log.warning("Graph algorithm execution failed", exc_info=True)
 
-            # Evaluate post-algorithm graph-structural anomalies
-            if graph_structural is not None and event_count % graph_algo_interval == 0:
+            # Evaluate post-algorithm graph-structural anomalies (only if algorithms ran)
+            if graph_structural is not None and _algo_ran:
                 post_alerts = graph_structural.check_post_algorithms(
                     timestamp_ns=seerflow_event.timestamp_ns,
                 )
@@ -494,7 +498,9 @@ def make_handler(
                     try:
                         await storage.write_alert(
                             pa,
-                            dedup_window_ns=300_000_000_000,
+                            dedup_window_ns=_dedup_window_ns(
+                                pa.rule_name, _alerting
+                            ),
                         )
                         if alert_dispatcher is not None:
                             alert_dispatcher.enqueue(pa)

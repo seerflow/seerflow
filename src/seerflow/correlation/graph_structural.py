@@ -26,8 +26,8 @@ _MIN_FAN_OUT_HISTORY = 3
 class GraphStructuralEvaluator:
     """Evaluate graph-structural anomalies on the entity graph.
 
-    Currently supports community-crossing detection.  Future tasks will
-    add betweenness-centrality spikes and fan-out burst detection.
+    Supports community-crossing detection, betweenness-centrality spikes,
+    and fan-out burst detection.
     """
 
     __slots__ = ("_config", "_fan_out_history", "_graph")
@@ -80,12 +80,12 @@ class GraphStructuralEvaluator:
                 ),
                 entity_uuid=source_id,
                 entity_value=source_id[:16],
-                entity_type="ip",
+                entity_type="host",
                 contributing_events=(),
                 mitre_tactics=_LATERAL_TACTICS,
                 mitre_techniques=_LATERAL_TECHNIQUES,
                 risk_score=0.6,
-                dedup_key=f"graph:community_crossing:{source_id}:{target_id}",
+                dedup_key=f"graph:community_crossing:{source_id}",
             )
         ]
 
@@ -144,7 +144,7 @@ class GraphStructuralEvaluator:
                 ),
                 entity_uuid=entity_id,
                 entity_value=entity_id[:16],
-                entity_type="ip",
+                entity_type="host",
                 contributing_events=(),
                 mitre_tactics=_LATERAL_TACTICS,
                 mitre_techniques=_LATERAL_TECHNIQUES,
@@ -178,7 +178,6 @@ class GraphStructuralEvaluator:
         history.append(current_fan_out)
         if len(history) > self._config.fan_out_history_size:
             del history[: len(history) - self._config.fan_out_history_size]
-        self._fan_out_history[entity_id] = history
 
         if current_fan_out <= threshold:
             return []
@@ -205,7 +204,7 @@ class GraphStructuralEvaluator:
                 ),
                 entity_uuid=entity_id,
                 entity_value=entity_id[:16],
-                entity_type="ip",
+                entity_type="host",
                 contributing_events=(),
                 mitre_tactics=_LATERAL_TACTICS,
                 mitre_techniques=_LATERAL_TECHNIQUES,

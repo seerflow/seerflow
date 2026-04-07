@@ -457,6 +457,17 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         )
 
 
+def _build_graph_structural(data: dict[str, Any]) -> GraphStructuralConfig:
+    """Build GraphStructuralConfig from a YAML ``graph_structural:`` section."""
+    return GraphStructuralConfig(
+        community_crossing_enabled=data.get("community_crossing_enabled", True),
+        betweenness_threshold=data.get("betweenness_threshold", 0.3),
+        fan_out_sigma=data.get("fan_out_sigma", 3.0),
+        fan_out_min_floor=data.get("fan_out_min_floor", 5),
+        fan_out_history_size=data.get("fan_out_history_size", 20),
+    )
+
+
 def _build_detection(data: dict[str, Any]) -> DetectionConfig:
     """Build DetectionConfig from a YAML ``detection:`` section.
 
@@ -513,7 +524,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         weights_entity_volume=data.get("weights_entity_volume", 0.15),
         sigma_rules_dirs=sigma_rules_dirs,
         attack_mappings=tuple(data.get("attack_mappings", ())),
-        graph_structural=GraphStructuralConfig(**data.get("graph_structural", {})),
+        graph_structural=_build_graph_structural(data.get("graph_structural", {})),
     )
     _validate_detection_config(config)
     return config
