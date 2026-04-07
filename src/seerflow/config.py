@@ -456,6 +456,29 @@ def _validate_detection_config(config: DetectionConfig) -> None:
             f"got {config.min_events_for_scoring!r}"
         )
 
+    # Graph-structural config
+    gs = config.graph_structural
+    if not (0.0 < gs.betweenness_threshold <= 1.0):
+        raise ConfigError(
+            f"detection.graph_structural.betweenness_threshold must be in (0, 1], "
+            f"got {gs.betweenness_threshold!r}"
+        )
+    if gs.fan_out_sigma <= 0.0:
+        raise ConfigError(
+            f"detection.graph_structural.fan_out_sigma must be > 0, "
+            f"got {gs.fan_out_sigma!r}"
+        )
+    if gs.fan_out_min_floor < 1:
+        raise ConfigError(
+            f"detection.graph_structural.fan_out_min_floor must be >= 1, "
+            f"got {gs.fan_out_min_floor!r}"
+        )
+    if gs.fan_out_history_size < 3:
+        raise ConfigError(
+            f"detection.graph_structural.fan_out_history_size must be >= 3, "
+            f"got {gs.fan_out_history_size!r}"
+        )
+
 
 def _build_graph_structural(data: dict[str, Any]) -> GraphStructuralConfig:
     """Build GraphStructuralConfig from a YAML ``graph_structural:`` section."""
