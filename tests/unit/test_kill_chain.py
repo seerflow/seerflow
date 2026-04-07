@@ -233,3 +233,37 @@ class TestKillChainThresholdAlert:
         )
         assert len(result) == 1
         assert result[0].dedup_key == "kill-chain:abc-123"
+
+    def test_in_memory_dedup_prevents_repeat_alerts(self) -> None:
+        """Once threshold fires, subsequent record_alert calls don't re-fire."""
+        tracker = KillChainTracker(KillChainConfig(tactic_threshold=3))
+        tracker.record_alert(_make_alert(mitre_tactics=("initial-access",), timestamp_ns=1000))
+        tracker.record_alert(_make_alert(mitre_tactics=("execution",), timestamp_ns=2000))
+        first = tracker.record_alert(
+            _make_alert(mitre_tactics=("persistence",), timestamp_ns=3000)
+        )
+        assert len(first) == 1
+        # 4th alert with same entity — should NOT fire again
+        second = tracker.record_alert(
+            _make_alert(mitre_tactics=("lateral-movement",), timestamp_ns=4000)
+        )
+        assert second == []
+
+    def test_dedup_resets_after_eviction(self) -> None:
+        """After tactic eviction, entity can fire again if threshold re-crossed."""
+        cfg = KillChainConfig(tactic_threshold=3, window_seconds=1)
+        tracker = KillChainTracker(cfg)
+        # Fire at t=1s
+        tracker.record_alert(_make_alert(mitre_tactics=("t1",), timestamp_ns=1_000_000_000))
+        tracker.record_alert(_make_alert(mitre_tactics=("t2",), timestamp_ns=1_100_000_000))
+        first = tracker.record_alert(
+            _make_alert(mitre_tactics=("t3",), timestamp_ns=1_200_000_000)
+        )
+        assert len(first) == 1
+        # At t=3s, old tactics evicted (window=1s), new tactics accumulate
+        tracker.record_alert(_make_alert(mitre_tactics=("t4",), timestamp_ns=3_000_000_000))
+        tracker.record_alert(_make_alert(mitre_tactics=("t5",), timestamp_ns=3_100_000_000))
+        second = tracker.record_alert(
+            _make_alert(mitre_tactics=("t6",), timestamp_ns=3_200_000_000)
+        )
+        assert len(second) == 1  # Re-fires after eviction
