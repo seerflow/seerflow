@@ -174,10 +174,11 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     reload_task = asyncio.create_task(reloader.watch())
 
     # Start health endpoint server on dashboard_port
-    from seerflow.api.health import create_health_app
+    from seerflow.api.health import _STORAGE_KEY, create_health_app
 
     health_state = {"pipeline": "running", "storage": "connected"}
     health_app = create_health_app(state=health_state)
+    health_app[_STORAGE_KEY] = storage
     health_runner = aiohttp.web.AppRunner(health_app)
     await health_runner.setup()
     health_site = aiohttp.web.TCPSite(

@@ -10,6 +10,7 @@ Replaces ads-evt which has a non-functional streaming API on Python 3.13.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -137,6 +138,13 @@ class DSpotThreshold:
     def lower_threshold(self) -> float:
         """Lower anomaly threshold (z_q)."""
         return self._lower_z_q
+
+    def adjust_upper_threshold(self, factor: float) -> None:
+        """Multiply the upper anomaly threshold by *factor* (must be > 0)."""
+        if factor <= 0 or not math.isfinite(factor):
+            msg = f"factor must be finite and > 0, got {factor}"
+            raise ValueError(msg)
+        self._upper_z_q *= factor
 
     def update(self, score: float) -> ThresholdResult:
         """Process a new score. Returns threshold result."""

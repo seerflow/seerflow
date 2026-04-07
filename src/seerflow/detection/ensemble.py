@@ -378,6 +378,21 @@ class DetectionEnsemble:
         )
         return self._thresholds[source]
 
+    def adjust_upper_threshold(self, source_key: str, factor: float) -> bool:
+        """Adjust DSPOT upper threshold for a source. Returns True if applied."""
+        dspot = self._thresholds.get(source_key)
+        if dspot is None or not dspot.is_calibrated:
+            return False
+        dspot.adjust_upper_threshold(factor)
+        return True
+
+    def get_upper_threshold(self, source_key: str) -> float:
+        """Get current DSPOT upper threshold for a source. Returns 0.0 if not found."""
+        dspot = self._thresholds.get(source_key)
+        if dspot is None or not dspot.is_calibrated:
+            return 0.0
+        return dspot.threshold
+
     def get_stats(self) -> dict[str, int]:
         """Return operational statistics about the ensemble."""
         return {

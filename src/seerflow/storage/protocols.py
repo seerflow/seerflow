@@ -62,6 +62,10 @@ class AlertStore(Protocol):  # pragma: no cover
 
     async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None: ...
 
+    async def get_alert_by_id(self, alert_id: str) -> Alert | None: ...
+
+    async def get_feedback_stats(self) -> dict[str, int]: ...
+
 
 @runtime_checkable
 class ModelStore(Protocol):  # pragma: no cover

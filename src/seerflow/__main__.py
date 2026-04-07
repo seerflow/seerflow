@@ -58,6 +58,10 @@ def main() -> None:
                 await run_import(paths=args.paths, db_path=db_path)
 
             _run_async(_do_import())
+        elif args.command == "feedback":
+            from seerflow.feedback_cmd import run_feedback
+
+            _run_async(run_feedback(args))
         else:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:
