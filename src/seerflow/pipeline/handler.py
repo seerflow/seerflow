@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.graph_structural import GraphStructuralEvaluator
     from seerflow.correlation.holders import EngineHolder
+    from seerflow.correlation.kill_chain import KillChainTracker
     from seerflow.correlation.risk import RiskRegister
     from seerflow.correlation.watermark import Watermark
     from seerflow.correlation.window import EntityWindowBuffer
@@ -72,11 +73,12 @@ def make_handler(
     pagerduty_sink: PagerDutySink | None = None,
     attack_mapper: AttackMapper | None = None,
     graph_structural: GraphStructuralEvaluator | None = None,
+    kill_chain_tracker: KillChainTracker | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
     from seerflow.graph.edges import infer_edges
-    from seerflow.models.alert import create_ml_alerts
+    from seerflow.models.alert import Alert, create_ml_alerts
     from seerflow.models.entity import resolve_entities, sanitize_for_log
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
@@ -89,6 +91,23 @@ def make_handler(
     start_time = time.time()
     last_save_ns = time.time_ns()
     risk_alerted: set[str] = set()  # entities that already fired a risk alert
+
+    async def _feed_kill_chain(alert: Alert) -> None:
+        """Feed an alert to the kill-chain tracker and write any resulting alerts."""
+        if kill_chain_tracker is None:
+            return
+        for kc in kill_chain_tracker.record_alert(alert):
+            try:
+                await storage.write_alert(
+                    kc,
+                    dedup_window_ns=_dedup_window_ns(kc.rule_name, _alerting),
+                )
+                if alert_dispatcher is not None:
+                    alert_dispatcher.enqueue(kc)
+                if pagerduty_sink is not None:
+                    pagerduty_sink.enqueue_trigger(kc)
+            except Exception:
+                _log.warning("Kill-chain alert write failed", exc_info=True)
 
     async def handler(event: RawEvent) -> None:
         nonlocal event_count, anomaly_count, last_save_ns
@@ -179,6 +198,7 @@ def make_handler(
                             alert_dispatcher.enqueue(corr_alert)
                         if pagerduty_sink is not None:
                             pagerduty_sink.enqueue_trigger(corr_alert)
+                        await _feed_kill_chain(corr_alert)
                     except Exception:
                         _log.warning("Correlation alert write failed", exc_info=True)
 
@@ -240,6 +260,7 @@ def make_handler(
                                 alert_dispatcher.enqueue(cc_alert)
                             if pagerduty_sink is not None:
                                 pagerduty_sink.enqueue_trigger(cc_alert)
+                            await _feed_kill_chain(cc_alert)
                         except Exception:
                             _log.warning(
                                 "Graph structural alert write failed",
@@ -363,6 +384,7 @@ def make_handler(
                         alert_dispatcher.enqueue(alert)
                     if pagerduty_sink is not None:
                         pagerduty_sink.enqueue_trigger(alert)
+                    await _feed_kill_chain(alert)
                 except Exception:
                     _log.warning("Alert write failed", exc_info=True)
 
@@ -396,6 +418,7 @@ def make_handler(
                             alert_dispatcher.enqueue(sigma_alert)
                         if pagerduty_sink is not None:
                             pagerduty_sink.enqueue_trigger(sigma_alert)
+                        await _feed_kill_chain(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
 
@@ -502,6 +525,7 @@ def make_handler(
                             alert_dispatcher.enqueue(pa)
                         if pagerduty_sink is not None:
                             pagerduty_sink.enqueue_trigger(pa)
+                        await _feed_kill_chain(pa)
                     except Exception:
                         _log.warning(
                             "Graph structural alert write failed",

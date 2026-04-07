@@ -131,6 +131,18 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     graph_structural = GraphStructuralEvaluator(config.detection.graph_structural, entity_graph)
     _log.info("Graph-structural evaluator: enabled")
 
+    # Build kill-chain tracker for ATT&CK tactic progression detection
+    from seerflow.correlation.kill_chain import KillChainTracker
+
+    kill_chain_tracker: KillChainTracker | None = None
+    if config.detection.kill_chain.enabled:
+        kill_chain_tracker = KillChainTracker(config.detection.kill_chain)
+        _log.info(
+            "Kill-chain tracker: threshold=%d, window=%ds",
+            config.detection.kill_chain.tactic_threshold,
+            config.detection.kill_chain.window_seconds,
+        )
+
     # Build entity window buffer for temporal correlation
     from seerflow.correlation.window import EntityWindowBuffer
 
@@ -257,6 +269,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         pagerduty_sink=pd_sink,
         attack_mapper=attack_mapper,
         graph_structural=graph_structural,
+        kill_chain_tracker=kill_chain_tracker,
     )
     await pipeline.run(handler)
 

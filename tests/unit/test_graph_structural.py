@@ -2,6 +2,28 @@
 
 from __future__ import annotations
 
+import pytest
+
+from seerflow.config import ConfigError, _build_detection
+
+
+class TestGraphStructuralConfigValidation:
+    def test_betweenness_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="betweenness_threshold"):
+            _build_detection({"graph_structural": {"betweenness_threshold": 0.0}})
+
+    def test_fan_out_sigma_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="fan_out_sigma"):
+            _build_detection({"graph_structural": {"fan_out_sigma": 0.0}})
+
+    def test_fan_out_min_floor_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="fan_out_min_floor"):
+            _build_detection({"graph_structural": {"fan_out_min_floor": 0}})
+
+    def test_fan_out_history_size_below_3_raises(self) -> None:
+        with pytest.raises(ConfigError, match="fan_out_history_size"):
+            _build_detection({"graph_structural": {"fan_out_history_size": 2}})
+
 
 class TestGraphStructuralConfig:
     def test_default_thresholds(self) -> None:

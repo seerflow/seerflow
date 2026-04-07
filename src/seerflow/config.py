@@ -104,6 +104,16 @@ class GraphStructuralConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class KillChainConfig:
+    """Kill-chain tactic progression detection."""
+
+    enabled: bool = True
+    tactic_threshold: int = 3
+    window_seconds: int = 86400  # 24h
+    max_entities: int = 10_000
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class DetectionConfig:
     """ML detection configuration."""
 
@@ -145,6 +155,7 @@ class DetectionConfig:
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
     attack_mappings: tuple[dict[str, Any], ...] = ()
     graph_structural: GraphStructuralConfig = field(default_factory=GraphStructuralConfig)
+    kill_chain: KillChainConfig = field(default_factory=KillChainConfig)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -478,6 +489,21 @@ def _validate_detection_config(config: DetectionConfig) -> None:
             f"got {gs.fan_out_history_size!r}"
         )
 
+    # Kill-chain config
+    kc = config.kill_chain
+    if kc.tactic_threshold < 2:
+        raise ConfigError(
+            f"detection.kill_chain.tactic_threshold must be >= 2, got {kc.tactic_threshold!r}"
+        )
+    if kc.window_seconds < 60:
+        raise ConfigError(
+            f"detection.kill_chain.window_seconds must be >= 60, got {kc.window_seconds!r}"
+        )
+    if kc.max_entities < 1:
+        raise ConfigError(
+            f"detection.kill_chain.max_entities must be >= 1, got {kc.max_entities!r}"
+        )
+
 
 def _build_graph_structural(data: dict[str, Any]) -> GraphStructuralConfig:
     """Build GraphStructuralConfig from a YAML ``graph_structural:`` section."""
@@ -487,6 +513,16 @@ def _build_graph_structural(data: dict[str, Any]) -> GraphStructuralConfig:
         fan_out_sigma=data.get("fan_out_sigma", 3.0),
         fan_out_min_floor=data.get("fan_out_min_floor", 5),
         fan_out_history_size=data.get("fan_out_history_size", 20),
+    )
+
+
+def _build_kill_chain(data: dict[str, Any]) -> KillChainConfig:
+    """Build KillChainConfig from a YAML ``kill_chain:`` section."""
+    return KillChainConfig(
+        enabled=data.get("enabled", True),
+        tactic_threshold=data.get("tactic_threshold", 3),
+        window_seconds=data.get("window_seconds", 86400),
+        max_entities=data.get("max_entities", 10_000),
     )
 
 
@@ -547,6 +583,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         sigma_rules_dirs=sigma_rules_dirs,
         attack_mappings=tuple(data.get("attack_mappings", ())),
         graph_structural=_build_graph_structural(data.get("graph_structural", {})),
+        kill_chain=_build_kill_chain(data.get("kill_chain", {})),
     )
     _validate_detection_config(config)
     return config
