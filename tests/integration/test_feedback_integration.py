@@ -32,17 +32,13 @@ def _make_alert(*, alert_id: str = "", dedup_key: str = "") -> Alert:
 class TestFeedbackIntegration:
     """Integration: process_feedback → SqliteBackend round-trip."""
 
-    async def test_fp_feedback_persists_and_appears_in_stats(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_fp_feedback_persists_and_appears_in_stats(self, tmp_path: Path) -> None:
         """FP feedback stored via process_feedback is queryable."""
         from seerflow.alerting.feedback import process_feedback
         from seerflow.config import StorageConfig
         from seerflow.storage.sqlite import SqliteBackend
 
-        storage_cfg = StorageConfig(
-            backend="sqlite", sqlite_path=str(tmp_path / "test.db")
-        )
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
             alert = _make_alert()
@@ -64,17 +60,13 @@ class TestFeedbackIntegration:
         finally:
             await storage.close()
 
-    async def test_tp_feedback_persists_and_appears_in_stats(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_tp_feedback_persists_and_appears_in_stats(self, tmp_path: Path) -> None:
         """TP feedback stored via process_feedback is queryable."""
         from seerflow.alerting.feedback import process_feedback
         from seerflow.config import StorageConfig
         from seerflow.storage.sqlite import SqliteBackend
 
-        storage_cfg = StorageConfig(
-            backend="sqlite", sqlite_path=str(tmp_path / "test.db")
-        )
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
             alert = _make_alert()
@@ -92,9 +84,7 @@ class TestFeedbackIntegration:
         finally:
             await storage.close()
 
-    async def test_nonexistent_alert_raises_value_error(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_nonexistent_alert_raises_value_error(self, tmp_path: Path) -> None:
         """Feedback on a missing alert raises ValueError."""
         import pytest
 
@@ -102,9 +92,7 @@ class TestFeedbackIntegration:
         from seerflow.config import StorageConfig
         from seerflow.storage.sqlite import SqliteBackend
 
-        storage_cfg = StorageConfig(
-            backend="sqlite", sqlite_path=str(tmp_path / "test.db")
-        )
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
             with pytest.raises(ValueError, match="not found"):
