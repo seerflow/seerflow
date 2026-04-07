@@ -1,0 +1,22 @@
+# Bundled MITRE ATT&CK mappings for common log template patterns.
+# Users can override in seerflow.yaml under detection.attack_mappings.
+# Patterns are regex (case-insensitive). First match wins.
+mappings:
+  - pattern: "authentication.*(?:fail|exceeded|invalid)|login.*fail|invalid.*password"
+    tactics: ["credential-access", "initial-access"]
+    techniques: ["T1110", "T1078"]
+  - pattern: "ssh.*(?:error|fail|disconnect|maximum)|sshd.*(?:error|fail)"
+    tactics: ["credential-access", "initial-access"]
+    techniques: ["T1110", "T1078"]
+  - pattern: "sudo.*(?:incorrect|NOT|fail)|su.*(?:authentication failure|FAILED)"
+    tactics: ["privilege-escalation"]
+    techniques: ["T1548"]
+  - pattern: "segfault|core dump|signal 1[14]|SIGSEGV|SIGBUS"
+    tactics: ["execution"]
+    techniques: ["T1203"]
+  - pattern: "permission denied|access denied|unauthorized|403 Forbidden"
+    tactics: ["defense-evasion"]
+    techniques: ["T1222"]
+  - pattern: "account.*lock|too many.*attempt|brute.?force"
+    tactics: ["credential-access"]
+    techniques: ["T1110"]

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 _EMPTY: tuple[str, ...] = ()
 
@@ -73,6 +76,14 @@ class AttackMapper:
             for entry in raw
         ]
         return cls(mappings)
+
+    @classmethod
+    def load_defaults(cls) -> AttackMapper:
+        """Load bundled default ATT&CK mappings."""
+        defaults_path = Path(__file__).parent / "default_attack_mappings.yaml"
+        with defaults_path.open() as f:
+            data = yaml.safe_load(f)
+        return cls.from_config(data["mappings"])
 
     def __len__(self) -> int:
         return len(self._mappings)

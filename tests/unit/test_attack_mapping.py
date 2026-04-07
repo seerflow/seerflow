@@ -100,3 +100,43 @@ class TestAttackMapper:
         )
         tactics, _ = mapper.lookup("ssh connection failed")
         assert tactics == ("credential-access",)
+
+
+class TestLoadDefaults:
+    def test_load_defaults_returns_non_empty_mapper(self) -> None:
+        from seerflow.detection.attack_mapping import AttackMapper
+
+        mapper = AttackMapper.load_defaults()
+        assert len(mapper) >= 5
+
+    def test_default_matches_ssh_brute_force(self) -> None:
+        from seerflow.detection.attack_mapping import AttackMapper
+
+        mapper = AttackMapper.load_defaults()
+        tactics, techniques = mapper.lookup(
+            "error: maximum authentication attempts exceeded for user admin from 10.0.0.1"
+        )
+        assert "credential-access" in tactics
+        assert "T1110" in techniques
+
+    def test_default_matches_sudo_failure(self) -> None:
+        from seerflow.detection.attack_mapping import AttackMapper
+
+        mapper = AttackMapper.load_defaults()
+        tactics, _ = mapper.lookup("sudo: 3 incorrect password attempts")
+        assert "privilege-escalation" in tactics
+
+    def test_default_matches_segfault(self) -> None:
+        from seerflow.detection.attack_mapping import AttackMapper
+
+        mapper = AttackMapper.load_defaults()
+        tactics, _ = mapper.lookup("segfault at 0x0000 in /usr/bin/app")
+        assert "execution" in tactics
+
+    def test_default_no_match_normal_log(self) -> None:
+        from seerflow.detection.attack_mapping import AttackMapper
+
+        mapper = AttackMapper.load_defaults()
+        tactics, techniques = mapper.lookup("INFO: server started on port 8080")
+        assert tactics == ()
+        assert techniques == ()
