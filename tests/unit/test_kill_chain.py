@@ -93,6 +93,19 @@ class TestKillChainConfigValidation:
         assert cfg.kill_chain.tactic_threshold == 4
         assert cfg.kill_chain.window_seconds == 7200
 
+    def test_kill_chain_ignores_unknown_keys(self) -> None:
+        cfg = _build_detection({"kill_chain": {"tactic_threshold": 4, "unknown_key": True}})
+        assert cfg.kill_chain.tactic_threshold == 4
+
+    def test_kill_chain_disabled(self) -> None:
+        cfg = _build_detection({"kill_chain": {"enabled": False}})
+        assert cfg.kill_chain.enabled is False
+
+    def test_tracker_disabled_returns_empty(self) -> None:
+        tracker = KillChainTracker(KillChainConfig(enabled=False))
+        alert = _make_alert(mitre_tactics=("initial-access",))
+        assert tracker.record_alert(alert) == []
+
 
 # ---------------------------------------------------------------------------
 # Task 2: KillChainTracker — record + eviction
