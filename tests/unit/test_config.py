@@ -1127,13 +1127,15 @@ class TestWebhookConfigParsing:
             "169.254.0.1",
             "0.0.0.0",  # noqa: S104
             "100.64.0.1",
+            "::ffff:100.64.0.1",
         ],
     )
     def test_webhook_private_ip_rejected(self, ip: str) -> None:
         from seerflow.config import ConfigError, _build_alerting
 
+        host = f"[{ip}]" if ":" in ip else ip
         with pytest.raises(ConfigError, match=r"private|reserved|loopback"):
-            _build_alerting({"webhooks": [{"url": f"https://{ip}/hook", "format": "json"}]})
+            _build_alerting({"webhooks": [{"url": f"https://{host}/hook", "format": "json"}]})
 
     def test_webhook_public_ip_accepted(self) -> None:
         from seerflow.config import _build_alerting
