@@ -1104,3 +1104,15 @@ class TestWebhookConfigParsing:
 
         with pytest.raises(ConfigError, match="dashboard_url must be a string"):
             _build_alerting({"dashboard_url": 123})
+
+    def test_dashboard_url_rejects_javascript_scheme(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="must use http or https"):
+            _build_alerting({"dashboard_url": "javascript:alert(1)"})
+
+    def test_dashboard_url_rejects_no_hostname(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="must include a hostname"):
+            _build_alerting({"dashboard_url": "https://"})

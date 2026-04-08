@@ -688,6 +688,16 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         raise ConfigError(
             f"alerting.dashboard_url must be a string, got {type(dashboard_url).__name__}"
         )
+    if dashboard_url:
+        from urllib.parse import urlparse as _urlparse_url
+
+        parsed_url = _urlparse_url(dashboard_url)
+        if parsed_url.scheme not in ("http", "https"):
+            raise ConfigError(
+                f"alerting.dashboard_url must use http or https, got {parsed_url.scheme!r}"
+            )
+        if not parsed_url.hostname:
+            raise ConfigError("alerting.dashboard_url must include a hostname")
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
