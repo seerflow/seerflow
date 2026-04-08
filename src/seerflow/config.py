@@ -167,6 +167,7 @@ class AlertingConfig:
     webhooks: tuple[dict[str, Any], ...] = ()
     webhook_targets: tuple[WebhookTarget, ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
+    dashboard_url: str = ""
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
