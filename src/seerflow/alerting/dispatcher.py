@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -16,6 +17,13 @@ if TYPE_CHECKING:
     from seerflow.models.alert import Alert
 
 _log = logging.getLogger("seerflow")
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _sanitize_body(raw: str, max_len: int = 200) -> str:
+    """Strip control characters and truncate for safe logging."""
+    return _CONTROL_CHARS.sub(" ", raw)[:max_len]
 
 
 def _masked_url(url: str) -> str:
@@ -132,18 +140,23 @@ class AlertDispatcher:
                     if resp.status < 400:
                         return
                     if resp.status < 500:
+                        body = _sanitize_body(await resp.text(errors="replace"))
                         _log.error(
-                            "Webhook %s returned client error %d for alert %s — not retrying",
+                            "Webhook %s returned client error %d for alert %s"
+                            " — not retrying — response: %s",
                             _masked_url(target.url),
                             resp.status,
                             alert_id,
+                            body,
                         )
                         return
+                    body = _sanitize_body(await resp.text(errors="replace"))
                     _log.warning(
-                        "Webhook %s returned %d (attempt %d)",
+                        "Webhook %s returned %d (attempt %d) — response: %s",
                         _masked_url(target.url),
                         resp.status,
                         attempt + 1,
+                        body,
                     )
             except Exception as exc:
                 _log.warning(

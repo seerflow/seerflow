@@ -25,6 +25,29 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 _VALID_STORAGE_BACKENDS = frozenset({"sqlite", "postgresql"})
 
+_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_private_ip(hostname: str | None) -> bool:
+    """Return True if hostname is an IP literal in a private, reserved, or CGNAT range."""
+    if not hostname:
+        return False
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    # Unwrap IPv6-mapped IPv4 (e.g. ::ffff:10.0.0.1) so CGNAT check works
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr in _CGNAT_NETWORK
+    )
+
 
 def _default_data_dir() -> str:
     """Compute XDG-compliant default data directory (lazy, respects $XDG_DATA_HOME)."""
@@ -639,6 +662,10 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
             raise ConfigError(
                 f"alerting.webhooks[*].url must use http or https, got {_parsed.scheme!r}"
             )
+        if _is_private_ip(_parsed.hostname):
+            raise ConfigError(
+                f"alerting.webhooks[*].url must not target private/reserved IP: {_parsed.hostname}"
+            )
         fmt = wh.get("format", "")
         if fmt not in _VALID_WEBHOOK_FORMATS:
             valid = sorted(_VALID_WEBHOOK_FORMATS)
@@ -652,6 +679,40 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
     return tuple(targets)
 
 
+def _validate_dashboard_url(url: str) -> None:
+    """Validate dashboard_url scheme, hostname, and SSRF safety."""
+    from urllib.parse import urlparse as _urlparse_url
+
+    parsed_url = _urlparse_url(url)
+    if parsed_url.scheme not in ("http", "https"):
+        raise ConfigError(
+            f"alerting.dashboard_url must use http or https, got {parsed_url.scheme!r}"
+        )
+    if not parsed_url.hostname:
+        raise ConfigError("alerting.dashboard_url must include a hostname")
+    if _is_private_ip(parsed_url.hostname):
+        raise ConfigError(
+            f"alerting.dashboard_url must not target private/reserved IP: {parsed_url.hostname}"
+        )
+
+
+def _parse_dedup_overrides(raw: dict[str, Any]) -> tuple[tuple[str, int], ...]:
+    parsed: list[tuple[str, int]] = []
+    for k, v in raw.items():
+        try:
+            seconds = int(v)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"alerting.dedup_window_overrides[{k!r}] must be an integer, got {v!r}"
+            ) from exc
+        if seconds < 1:
+            raise ConfigError(
+                f"alerting.dedup_window_overrides[{k!r}] must be >= 1, got {seconds}"
+            )
+        parsed.append((str(k), seconds))
+    return tuple(parsed)
+
+
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
@@ -659,20 +720,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     raw_overrides = data.get("dedup_window_overrides", {})
     overrides: tuple[tuple[str, int], ...] = ()
     if isinstance(raw_overrides, dict):
-        parsed: list[tuple[str, int]] = []
-        for k, v in raw_overrides.items():
-            try:
-                seconds = int(v)
-            except (TypeError, ValueError) as exc:
-                raise ConfigError(
-                    f"alerting.dedup_window_overrides[{k!r}] must be an integer, got {v!r}"
-                ) from exc
-            if seconds < 1:
-                raise ConfigError(
-                    f"alerting.dedup_window_overrides[{k!r}] must be >= 1, got {seconds}"
-                )
-            parsed.append((str(k), seconds))
-        overrides = tuple(parsed)
+        overrides = _parse_dedup_overrides(raw_overrides)
     dedup_window_seconds = data.get("dedup_window_seconds", 900)
     if (
         not isinstance(dedup_window_seconds, int)
@@ -689,21 +737,16 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
             f"alerting.dashboard_url must be a string, got {type(dashboard_url).__name__}"
         )
     if dashboard_url:
-        from urllib.parse import urlparse as _urlparse_url
-
-        parsed_url = _urlparse_url(dashboard_url)
-        if parsed_url.scheme not in ("http", "https"):
-            raise ConfigError(
-                f"alerting.dashboard_url must use http or https, got {parsed_url.scheme!r}"
-            )
-        if not parsed_url.hostname:
-            raise ConfigError("alerting.dashboard_url must include a hostname")
+        _validate_dashboard_url(dashboard_url)
+    routing_key = data.get("pagerduty_routing_key", "")
+    if routing_key and not re.fullmatch(r"[0-9a-fA-F]{32}", routing_key):
+        raise ConfigError("alerting.pagerduty_routing_key must be a 32-character hex string")
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
         webhooks=webhooks,
         webhook_targets=webhook_targets,
-        pagerduty_routing_key=data.get("pagerduty_routing_key", ""),
+        pagerduty_routing_key=routing_key,
         dashboard_url=dashboard_url,
     )
 

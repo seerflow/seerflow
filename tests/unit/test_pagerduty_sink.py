@@ -46,8 +46,10 @@ def _make_alert(
 
 def _mock_session(status: int = 200) -> MagicMock:
     """Return a mock aiohttp.ClientSession that returns `status` on POST."""
+    resp_mock = MagicMock(status=status)
+    resp_mock.text = AsyncMock(return_value="")
     resp_cm = AsyncMock()
-    resp_cm.__aenter__ = AsyncMock(return_value=MagicMock(status=status))
+    resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
     resp_cm.__aexit__ = AsyncMock(return_value=False)
     session = MagicMock()
     session.post = MagicMock(return_value=resp_cm)
@@ -413,3 +415,55 @@ class TestPagerDutySinkAsync:
         await asyncio.wait_for(sink.run(), timeout=5.0)
         call_args = session.post.call_args[0][0]
         assert call_args == _PD_ENDPOINT
+
+
+class TestPDResponseBodyLogging:
+    @pytest.mark.asyncio
+    async def test_4xx_reads_response_body(self) -> None:
+        """On 4xx, PD sink reads response body via text() for logging."""
+        resp_mock = MagicMock(status=400)
+        resp_mock.text = AsyncMock(return_value="Invalid routing key")
+
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        from seerflow.alerting.sinks.pagerduty import PagerDutySink
+
+        sink = PagerDutySink(routing_key="key", session=session)
+        sink.enqueue_trigger(_make_alert())
+        await sink.stop()
+        await asyncio.wait_for(sink.run(), timeout=5.0)
+
+        resp_mock.text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_5xx_reads_response_body(self) -> None:
+        """On 5xx, PD sink reads response body via text() for logging."""
+        resp_mock = MagicMock(status=500)
+        resp_mock.text = AsyncMock(return_value="Internal Server Error")
+
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        from seerflow.alerting.sinks.pagerduty import PagerDutySink
+
+        sink = PagerDutySink(routing_key="key", session=session)
+        sink.enqueue_trigger(_make_alert())
+        await sink.stop()
+
+        with patch("seerflow.alerting.sinks.pagerduty.asyncio") as mock_asyncio:
+            mock_asyncio.Queue = asyncio.Queue
+            mock_asyncio.QueueFull = asyncio.QueueFull
+            mock_asyncio.wait_for = asyncio.wait_for
+            mock_asyncio.sleep = AsyncMock()
+            await asyncio.wait_for(sink.run(), timeout=5.0)
+
+        assert resp_mock.text.call_count == 3  # 3 retries

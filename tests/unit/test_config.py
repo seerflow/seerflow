@@ -1116,3 +1116,70 @@ class TestWebhookConfigParsing:
 
         with pytest.raises(ConfigError, match="must include a hostname"):
             _build_alerting({"dashboard_url": "https://"})
+
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "127.0.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.0.1",
+            "0.0.0.0",  # noqa: S104
+            "100.64.0.1",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:100.64.0.1",
+        ],
+    )
+    def test_webhook_private_ip_rejected(self, ip: str) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        host = f"[{ip}]" if ":" in ip else ip
+        with pytest.raises(ConfigError, match=r"private|reserved|loopback"):
+            _build_alerting({"webhooks": [{"url": f"https://{host}/hook", "format": "json"}]})
+
+    def test_webhook_public_ip_accepted(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"webhooks": [{"url": "https://8.8.8.8/hook", "format": "json"}]})
+        assert len(result.webhook_targets) == 1
+
+    def test_webhook_hostname_not_blocked(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting(
+            {"webhooks": [{"url": "https://hooks.slack.com/services/T00", "format": "slack"}]}
+        )
+        assert len(result.webhook_targets) == 1
+
+    def test_dashboard_url_private_ip_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match=r"private|reserved|loopback"):
+            _build_alerting({"dashboard_url": "https://192.168.1.1/dashboard"})
+
+    def test_pagerduty_routing_key_valid_hex(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"pagerduty_routing_key": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"})
+        assert result.pagerduty_routing_key == "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+
+    def test_pagerduty_routing_key_empty_allowed(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.pagerduty_routing_key == ""
+
+    def test_pagerduty_routing_key_invalid_format_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="32-character hex"):
+            _build_alerting({"pagerduty_routing_key": "not-a-valid-key"})
+
+    def test_pagerduty_routing_key_wrong_length_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="32-character hex"):
+            _build_alerting({"pagerduty_routing_key": "abcdef1234"})

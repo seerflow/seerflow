@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
+from seerflow.alerting.dispatcher import _sanitize_body
+
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeverityLevel
@@ -147,15 +149,19 @@ class PagerDutySink:
                     if resp.status < 400:
                         return
                     if resp.status < 500:
+                        body = _sanitize_body(await resp.text(errors="replace"))
                         _log.error(
-                            "PagerDuty returned client error %d — not retrying",
+                            "PagerDuty returned client error %d — not retrying — response: %s",
                             resp.status,
+                            body,
                         )
                         return
+                    body = _sanitize_body(await resp.text(errors="replace"))
                     _log.warning(
-                        "PagerDuty returned %d (attempt %d)",
+                        "PagerDuty returned %d (attempt %d) — response: %s",
                         resp.status,
                         attempt + 1,
+                        body,
                     )
             except Exception as exc:
                 _log.warning("PagerDuty request failed (attempt %d): %s", attempt + 1, exc)
