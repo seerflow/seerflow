@@ -113,8 +113,8 @@ class TestAlertPersistenceIntegration:
             await handler(event2)
             second_call_count = mock_dispatcher.enqueue.call_count
 
-        assert first_call_count >= 1, "First alert should have been dispatched"
-        assert second_call_count == first_call_count, "Dedup bump should NOT dispatch"
+        assert first_call_count == 1, "First alert should have been dispatched exactly once"
+        assert second_call_count == 1, "Dedup bump should NOT dispatch"
 
         await storage.close()
 

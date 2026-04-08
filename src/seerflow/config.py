@@ -683,12 +683,18 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
             f"alerting.dedup_window_seconds must be an integer >= 1, got {dedup_window_seconds!r}"
         )
     webhook_targets = _build_webhook_targets(webhooks)
+    dashboard_url = data.get("dashboard_url", "")
+    if not isinstance(dashboard_url, str):
+        raise ConfigError(
+            f"alerting.dashboard_url must be a string, got {type(dashboard_url).__name__}"
+        )
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
         webhooks=webhooks,
         webhook_targets=webhook_targets,
         pagerduty_routing_key=data.get("pagerduty_routing_key", ""),
+        dashboard_url=dashboard_url,
     )
 
 
