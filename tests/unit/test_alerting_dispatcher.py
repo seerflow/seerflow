@@ -44,8 +44,11 @@ def _make_alert(
 
 def _mock_session(status: int = 200) -> MagicMock:
     """Return a mock aiohttp.ClientSession that returns `status` on POST."""
+    resp_mock = MagicMock(status=status)
+    resp_mock.text = AsyncMock(return_value="")
+
     resp_cm = AsyncMock()
-    resp_cm.__aenter__ = AsyncMock(return_value=MagicMock(status=status))
+    resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
     resp_cm.__aexit__ = AsyncMock(return_value=False)
 
     session = MagicMock()
@@ -474,7 +477,7 @@ class TestResponseBodyLogging:
 
         dispatcher.enqueue(_make_alert())
         await dispatcher.stop()
-        await _run_and_cancel(dispatcher)
+        await asyncio.wait_for(dispatcher.run(), timeout=5.0)
 
         resp_mock.text.assert_called_once()
 
