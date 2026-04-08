@@ -135,15 +135,19 @@ def format_slack(alert: Alert, *, dashboard_url: str = "") -> dict:  # type: ign
     )
 
     if dashboard_url:
-        blocks.append({
-            "type": "actions",
-            "elements": [{
-                "type": "button",
-                "text": {"type": "plain_text", "text": "View in Dashboard"},
-                "url": dashboard_url,
-                "action_id": "view_dashboard",
-            }],
-        })
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "View in Dashboard"},
+                        "url": dashboard_url,
+                        "action_id": "view_dashboard",
+                    }
+                ],
+            }
+        )
 
     return {"blocks": blocks}
 
@@ -225,11 +229,13 @@ def format_teams(alert: Alert, *, dashboard_url: str = "") -> dict:  # type: ign
     }
 
     if dashboard_url:
-        card_content["actions"] = [{
-            "type": "Action.OpenUrl",
-            "title": "View in Dashboard",
-            "url": dashboard_url,
-        }]
+        card_content["actions"] = [
+            {
+                "type": "Action.OpenUrl",
+                "title": "View in Dashboard",
+                "url": dashboard_url,
+            }
+        ]
 
     return {
         "type": "message",

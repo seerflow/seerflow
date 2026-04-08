@@ -117,6 +117,7 @@ class TestAlertPersistenceIntegration:
         assert second_call_count == first_call_count, "Dedup bump should NOT dispatch"
 
         await storage.close()
+
     async def test_dedup_increments_count(self, tmp_path: Path) -> None:
         """Two anomalies with same template+source → dedup_count >= 2."""
         from seerflow.config import SeerflowConfig, StorageConfig

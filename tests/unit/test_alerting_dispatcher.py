@@ -383,7 +383,9 @@ class TestDispatcherDashboardUrl:
     async def test_dashboard_url_passed_to_formatter(self) -> None:
         """Dashboard URL is forwarded from dispatcher to the formatter."""
         session = _mock_session(status=200)
-        target = WebhookTarget(url="https://hooks.example.com/slack", format="slack", min_severity=0)
+        target = WebhookTarget(
+            url="https://hooks.example.com/slack", format="slack", min_severity=0
+        )
         dispatcher = AlertDispatcher(
             targets=(target,),
             session=session,
@@ -402,7 +404,9 @@ class TestDispatcherDashboardUrl:
     async def test_no_dashboard_url_no_actions_block(self) -> None:
         """Without dashboard_url, Slack payload has no actions block."""
         session = _mock_session(status=200)
-        target = WebhookTarget(url="https://hooks.example.com/slack", format="slack", min_severity=0)
+        target = WebhookTarget(
+            url="https://hooks.example.com/slack", format="slack", min_severity=0
+        )
         dispatcher = AlertDispatcher(targets=(target,), session=session)
         alert = _make_alert()
         dispatcher.enqueue(alert)
