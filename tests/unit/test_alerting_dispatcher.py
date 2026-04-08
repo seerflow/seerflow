@@ -449,3 +449,64 @@ class TestDispatcherDashboardUrl:
         posted_payload = session.post.call_args[1]["json"]
         actions = [b for b in posted_payload["blocks"] if b.get("type") == "actions"]
         assert len(actions) == 0
+
+
+class TestResponseBodyLogging:
+    @pytest.mark.asyncio
+    async def test_4xx_reads_response_body(self) -> None:
+        """On 4xx, dispatcher reads response body via text() for logging."""
+        resp_mock = MagicMock(status=400)
+        resp_mock.text = AsyncMock(return_value="Bad Request: missing field")
+
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        target = WebhookTarget(
+            url="https://hooks.example.com/json",
+            format="json",
+            min_severity=0,
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+
+        dispatcher.enqueue(_make_alert())
+        await dispatcher.stop()
+        await _run_and_cancel(dispatcher)
+
+        resp_mock.text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_5xx_reads_response_body(self) -> None:
+        """On 5xx, dispatcher reads response body via text() for logging."""
+        resp_mock = MagicMock(status=500)
+        resp_mock.text = AsyncMock(return_value="Internal Server Error")
+
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        target = WebhookTarget(
+            url="https://hooks.example.com/json",
+            format="json",
+            min_severity=0,
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+
+        dispatcher.enqueue(_make_alert())
+        await dispatcher.stop()
+
+        sleep_mock = AsyncMock(return_value=None)
+        with patch("seerflow.alerting.dispatcher.asyncio") as mock_asyncio:
+            mock_asyncio.Queue = asyncio.Queue
+            mock_asyncio.QueueFull = asyncio.QueueFull
+            mock_asyncio.wait_for = asyncio.wait_for
+            mock_asyncio.sleep = sleep_mock
+            await asyncio.wait_for(dispatcher.run(), timeout=5.0)
+
+        assert resp_mock.text.call_count == 3  # 3 retries

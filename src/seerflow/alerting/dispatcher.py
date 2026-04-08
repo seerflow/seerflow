@@ -132,18 +132,24 @@ class AlertDispatcher:
                     if resp.status < 400:
                         return
                     if resp.status < 500:
+                        body = await resp.text(errors="replace")
                         _log.error(
-                            "Webhook %s returned client error %d for alert %s — not retrying",
+                            "Webhook %s returned client error %d for alert %s"
+                            " — not retrying — response: %.200s",
                             _masked_url(target.url),
                             resp.status,
                             alert_id,
+                            body,
                         )
                         return
+                    body = await resp.text(errors="replace")
                     _log.warning(
-                        "Webhook %s returned %d (attempt %d)",
+                        "Webhook %s returned %d (attempt %d)"
+                        " — response: %.200s",
                         _masked_url(target.url),
                         resp.status,
                         attempt + 1,
+                        body,
                     )
             except Exception as exc:
                 _log.warning(
