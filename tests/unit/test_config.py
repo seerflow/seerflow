@@ -1125,24 +1125,20 @@ class TestWebhookConfigParsing:
             "172.16.0.1",
             "192.168.1.1",
             "169.254.0.1",
-            "0.0.0.0",
+            "0.0.0.0",  # noqa: S104
             "100.64.0.1",
         ],
     )
     def test_webhook_private_ip_rejected(self, ip: str) -> None:
         from seerflow.config import ConfigError, _build_alerting
 
-        with pytest.raises(ConfigError, match="private|reserved|loopback"):
-            _build_alerting(
-                {"webhooks": [{"url": f"https://{ip}/hook", "format": "json"}]}
-            )
+        with pytest.raises(ConfigError, match=r"private|reserved|loopback"):
+            _build_alerting({"webhooks": [{"url": f"https://{ip}/hook", "format": "json"}]})
 
     def test_webhook_public_ip_accepted(self) -> None:
         from seerflow.config import _build_alerting
 
-        result = _build_alerting(
-            {"webhooks": [{"url": "https://8.8.8.8/hook", "format": "json"}]}
-        )
+        result = _build_alerting({"webhooks": [{"url": "https://8.8.8.8/hook", "format": "json"}]})
         assert len(result.webhook_targets) == 1
 
     def test_webhook_hostname_not_blocked(self) -> None:
@@ -1156,15 +1152,13 @@ class TestWebhookConfigParsing:
     def test_dashboard_url_private_ip_rejected(self) -> None:
         from seerflow.config import ConfigError, _build_alerting
 
-        with pytest.raises(ConfigError, match="private|reserved|loopback"):
+        with pytest.raises(ConfigError, match=r"private|reserved|loopback"):
             _build_alerting({"dashboard_url": "https://192.168.1.1/dashboard"})
 
     def test_pagerduty_routing_key_valid_hex(self) -> None:
         from seerflow.config import _build_alerting
 
-        result = _build_alerting(
-            {"pagerduty_routing_key": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"}
-        )
+        result = _build_alerting({"pagerduty_routing_key": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"})
         assert result.pagerduty_routing_key == "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
 
     def test_pagerduty_routing_key_empty_allowed(self) -> None:

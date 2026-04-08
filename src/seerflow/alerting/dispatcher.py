@@ -144,8 +144,7 @@ class AlertDispatcher:
                         return
                     body = await resp.text(errors="replace")
                     _log.warning(
-                        "Webhook %s returned %d (attempt %d)"
-                        " — response: %.200s",
+                        "Webhook %s returned %d (attempt %d) — response: %.200s",
                         _masked_url(target.url),
                         resp.status,
                         attempt + 1,

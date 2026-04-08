@@ -149,16 +149,14 @@ class PagerDutySink:
                     if resp.status < 500:
                         body = await resp.text(errors="replace")
                         _log.error(
-                            "PagerDuty returned client error %d"
-                            " — not retrying — response: %.200s",
+                            "PagerDuty returned client error %d — not retrying — response: %.200s",
                             resp.status,
                             body,
                         )
                         return
                     body = await resp.text(errors="replace")
                     _log.warning(
-                        "PagerDuty returned %d (attempt %d)"
-                        " — response: %.200s",
+                        "PagerDuty returned %d (attempt %d) — response: %.200s",
                         resp.status,
                         attempt + 1,
                         body,
