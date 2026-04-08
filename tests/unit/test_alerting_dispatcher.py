@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget
+from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget, _masked_url
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 
@@ -67,7 +67,40 @@ async def _run_and_cancel(dispatcher: AlertDispatcher, delay: float = 0.05) -> N
 # ---------------------------------------------------------------------------
 
 
+class TestMaskedUrl:
+    def test_valid_url_masks_path(self) -> None:
+        assert _masked_url("https://hooks.slack.com/services/T00/B00/xxx") == "https://hooks.slack.com/***"
+
+    def test_invalid_url_returns_placeholder(self) -> None:
+        assert _masked_url("not-a-url") == "<invalid-url>"
+
+    def test_empty_string_returns_placeholder(self) -> None:
+        assert _masked_url("") == "<invalid-url>"
+
+
 class TestAlertDispatcher:
+    @pytest.mark.asyncio
+    async def test_formatter_error_logs_and_continues(self) -> None:
+        """If the formatter raises, the dispatcher logs and skips that target."""
+        session = _mock_session(status=200)
+        target = WebhookTarget(
+            url="https://hooks.example.com/json",
+            format="json",
+            min_severity=0,
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+
+        alert = _make_alert()
+        dispatcher.enqueue(alert)
+        await dispatcher.stop()
+
+        with patch(
+            "seerflow.alerting.dispatcher._format", side_effect=ValueError("boom")
+        ):
+            await _run_and_cancel(dispatcher)
+
+        session.post.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_enqueue_and_dispatch(self) -> None:
         """Alert enqueued is dispatched to the configured target URL."""
