@@ -94,10 +94,10 @@ class TestAlertDispatcher:
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
         alert = _make_alert()
-        dispatcher.enqueue(alert)
-        await dispatcher.stop()
 
         with patch("seerflow.alerting.dispatcher._format", side_effect=ValueError("boom")):
+            dispatcher.enqueue(alert)
+            await dispatcher.stop()
             await _run_and_cancel(dispatcher)
 
         session.post.assert_not_called()
