@@ -1333,3 +1333,47 @@ class TestFeedbackStorage:
             assert stats == {"tp": 2, "fp": 1, "total": 3}
         finally:
             await backend.close()
+
+
+class TestWriteAlertDedupReturn:
+    """write_alert() return value: True on new insert, False on dedup bump."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_new_insert_returns_true(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(dedup_key="fresh-key")
+            result = await backend.write_alert(alert)
+            assert result is True
+        finally:
+            await backend.close()
+
+    async def test_dedup_bump_returns_false(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            window_900s_ns = 900_000_000_000
+            a1 = _make_alert(dedup_key="dedup-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="dedup-key", timestamp_ns=base_ns + 100_000_000_000)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            result = await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+            assert result is False
+        finally:
+            await backend.close()
+
+    async def test_window_reset_returns_true(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            window_900s_ns = 900_000_000_000
+            gap_1000s_ns = 1_000_000_000_000
+            a1 = _make_alert(dedup_key="reset-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="reset-key", timestamp_ns=base_ns + gap_1000s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            result = await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+            assert result is True
+        finally:
+            await backend.close()
