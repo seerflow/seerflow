@@ -167,6 +167,7 @@ class AlertingConfig:
     webhooks: tuple[dict[str, Any], ...] = ()
     webhook_targets: tuple[WebhookTarget, ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
+    dashboard_url: str = ""
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -682,12 +683,28 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
             f"alerting.dedup_window_seconds must be an integer >= 1, got {dedup_window_seconds!r}"
         )
     webhook_targets = _build_webhook_targets(webhooks)
+    dashboard_url = data.get("dashboard_url", "")
+    if not isinstance(dashboard_url, str):
+        raise ConfigError(
+            f"alerting.dashboard_url must be a string, got {type(dashboard_url).__name__}"
+        )
+    if dashboard_url:
+        from urllib.parse import urlparse as _urlparse_url
+
+        parsed_url = _urlparse_url(dashboard_url)
+        if parsed_url.scheme not in ("http", "https"):
+            raise ConfigError(
+                f"alerting.dashboard_url must use http or https, got {parsed_url.scheme!r}"
+            )
+        if not parsed_url.hostname:
+            raise ConfigError("alerting.dashboard_url must include a hostname")
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
         webhooks=webhooks,
         webhook_targets=webhook_targets,
         pagerduty_routing_key=data.get("pagerduty_routing_key", ""),
+        dashboard_url=dashboard_url,
     )
 
 

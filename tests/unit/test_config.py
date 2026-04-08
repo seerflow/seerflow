@@ -1086,3 +1086,33 @@ class TestWebhookConfigParsing:
         config = load_config(str(yaml_file))
         assert isinstance(config.alerting.webhooks, tuple)
         assert config.alerting.webhooks[0]["format"] == "slack"
+
+    def test_dashboard_url_read_from_data(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"dashboard_url": "https://dash.example.com"})
+        assert result.dashboard_url == "https://dash.example.com"
+
+    def test_dashboard_url_defaults_to_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.dashboard_url == ""
+
+    def test_dashboard_url_non_string_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="dashboard_url must be a string"):
+            _build_alerting({"dashboard_url": 123})
+
+    def test_dashboard_url_rejects_javascript_scheme(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="must use http or https"):
+            _build_alerting({"dashboard_url": "javascript:alert(1)"})
+
+    def test_dashboard_url_rejects_no_hostname(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="must include a hostname"):
+            _build_alerting({"dashboard_url": "https://"})

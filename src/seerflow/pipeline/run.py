@@ -238,7 +238,11 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     webhook_targets = config.alerting.webhook_targets
     if webhook_targets:
         webhook_session = aiohttp.ClientSession()
-        dispatcher = AlertDispatcher(webhook_targets, webhook_session)
+        dispatcher = AlertDispatcher(
+            webhook_targets,
+            webhook_session,
+            dashboard_url=config.alerting.dashboard_url,
+        )
         _dispatcher_task = asyncio.create_task(dispatcher.run())
         _log.info("Webhook dispatcher: %d targets", len(webhook_targets))
 

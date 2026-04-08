@@ -333,7 +333,8 @@ ON CONFLICT(dedup_key) DO UPDATE SET
         ELSE excluded.timestamp_ns
     END,
     alert_id = excluded.alert_id,
-    data = excluded.data"""
+    data = excluded.data
+RETURNING dedup_count"""
 
 
 async def _init_schema(conn: aiosqlite.Connection) -> None:
@@ -623,13 +624,18 @@ class SqliteBackend:
         self,
         alert: Alert,
         dedup_window_ns: int = 900_000_000_000,
-    ) -> None:
+    ) -> bool:
         """Persist an alert with time-windowed dedup upsert on conflict.
 
         Within *dedup_window_ns* nanoseconds of the existing alert the
         ``dedup_count`` is incremented and the original ``timestamp_ns`` is
         preserved.  Outside the window the count resets to 1 and the
         timestamp is replaced.
+
+        Returns:
+            True if this was a new insert or a window-reset (dedup_count == 1),
+            False if the alert was a dedup bump within the window
+            (dedup_count > 1).
         """
         data = msgspec.msgpack.encode(alert)
         params = (
@@ -650,12 +656,14 @@ class SqliteBackend:
             dedup_window_ns,
         )
         try:
-            await self._conn.execute(_INSERT_ALERT_SQL, params)
+            async with await self._conn.execute(_INSERT_ALERT_SQL, params) as cursor:
+                row = await cursor.fetchone()
             await self._conn.commit()
         except Exception:
             await self._conn.rollback()
             _log.exception("write_alert failed for alert %s", alert.alert_id)
             raise
+        return row is not None and row[0] == 1
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
         """Query alerts with composable filters and pagination."""

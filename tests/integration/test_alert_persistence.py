@@ -64,6 +64,60 @@ class TestAlertPersistenceIntegration:
 
         await storage.close()
 
+    async def test_dedup_suppresses_webhook_dispatch(self, tmp_path: Path) -> None:
+        """Second anomaly with same dedup_key does NOT trigger webhook dispatch."""
+        from unittest.mock import MagicMock
+
+        from seerflow.config import SeerflowConfig, StorageConfig
+        from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
+        from seerflow.pipeline.handler import make_handler
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        config = SeerflowConfig()
+        ensemble = DetectionEnsemble(config.detection)
+
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.enqueue = MagicMock()
+
+        handler = make_handler(ensemble, storage, alert_dispatcher=mock_dispatcher)
+
+        anomaly_result = DetectionResult(
+            score=0.92,
+            upper_threshold=0.65,
+            lower_threshold=0.10,
+            is_anomaly=True,
+            anomaly_direction="upper",
+            source_type="syslog",
+        )
+
+        with patch.object(type(ensemble), "process_event", return_value=anomaly_result):
+            event1 = RawEvent(
+                data=b"segfault in module xyz",
+                source_type="syslog",
+                source_id="test",
+                received_ns=1_700_000_000_000_000_000,
+                metadata={"seerflow_severity": SeverityLevel.CRITICAL.value},
+            )
+            await handler(event1)
+            first_call_count = mock_dispatcher.enqueue.call_count
+
+            event2 = RawEvent(
+                data=b"segfault in module xyz",
+                source_type="syslog",
+                source_id="test",
+                received_ns=1_700_000_001_000_000_000,
+                metadata={"seerflow_severity": SeverityLevel.CRITICAL.value},
+            )
+            await handler(event2)
+            second_call_count = mock_dispatcher.enqueue.call_count
+
+        assert first_call_count == 1, "First alert should have been dispatched exactly once"
+        assert second_call_count == 1, "Dedup bump should NOT dispatch"
+
+        await storage.close()
+
     async def test_dedup_increments_count(self, tmp_path: Path) -> None:
         """Two anomalies with same template+source → dedup_count >= 2."""
         from seerflow.config import SeerflowConfig, StorageConfig

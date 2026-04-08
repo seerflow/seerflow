@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget
+from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget, _masked_url
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 
@@ -67,7 +67,41 @@ async def _run_and_cancel(dispatcher: AlertDispatcher, delay: float = 0.05) -> N
 # ---------------------------------------------------------------------------
 
 
+class TestMaskedUrl:
+    def test_valid_url_masks_path(self) -> None:
+        assert (
+            _masked_url("https://hooks.slack.com/services/T00/B00/xxx")
+            == "https://hooks.slack.com/***"
+        )
+
+    def test_invalid_url_returns_placeholder(self) -> None:
+        assert _masked_url("not-a-url") == "<invalid-url>"
+
+    def test_empty_string_returns_placeholder(self) -> None:
+        assert _masked_url("") == "<invalid-url>"
+
+
 class TestAlertDispatcher:
+    @pytest.mark.asyncio
+    async def test_formatter_error_logs_and_continues(self) -> None:
+        """If the formatter raises, the dispatcher logs and skips that target."""
+        session = _mock_session(status=200)
+        target = WebhookTarget(
+            url="https://hooks.example.com/json",
+            format="json",
+            min_severity=0,
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+
+        alert = _make_alert()
+
+        with patch("seerflow.alerting.dispatcher._format", side_effect=ValueError("boom")):
+            dispatcher.enqueue(alert)
+            await dispatcher.stop()
+            await _run_and_cancel(dispatcher)
+
+        session.post.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_enqueue_and_dispatch(self) -> None:
         """Alert enqueued is dispatched to the configured target URL."""
@@ -376,3 +410,42 @@ class TestAlertDispatcher:
         await _run_and_cancel(dispatcher)
 
         assert captured_payload == [expected]
+
+
+class TestDispatcherDashboardUrl:
+    @pytest.mark.asyncio
+    async def test_dashboard_url_passed_to_formatter(self) -> None:
+        """Dashboard URL is forwarded from dispatcher to the formatter."""
+        session = _mock_session(status=200)
+        target = WebhookTarget(
+            url="https://hooks.example.com/slack", format="slack", min_severity=0
+        )
+        dispatcher = AlertDispatcher(
+            targets=(target,),
+            session=session,
+            dashboard_url="https://seerflow.example.com",
+        )
+        alert = _make_alert()
+        dispatcher.enqueue(alert)
+        await dispatcher.stop()
+        await _run_and_cancel(dispatcher)
+        posted_payload = session.post.call_args[1]["json"]
+        actions = [b for b in posted_payload["blocks"] if b.get("type") == "actions"]
+        assert len(actions) == 1
+        assert actions[0]["elements"][0]["url"] == "https://seerflow.example.com"
+
+    @pytest.mark.asyncio
+    async def test_no_dashboard_url_no_actions_block(self) -> None:
+        """Without dashboard_url, Slack payload has no actions block."""
+        session = _mock_session(status=200)
+        target = WebhookTarget(
+            url="https://hooks.example.com/slack", format="slack", min_severity=0
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+        alert = _make_alert()
+        dispatcher.enqueue(alert)
+        await dispatcher.stop()
+        await _run_and_cancel(dispatcher)
+        posted_payload = session.post.call_args[1]["json"]
+        actions = [b for b in posted_payload["blocks"] if b.get("type") == "actions"]
+        assert len(actions) == 0

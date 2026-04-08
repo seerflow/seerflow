@@ -98,14 +98,15 @@ def make_handler(
             return
         for kc in kill_chain_tracker.record_alert(alert):
             try:
-                await storage.write_alert(
+                is_new = await storage.write_alert(
                     kc,
                     dedup_window_ns=_dedup_window_ns(kc.rule_name, _alerting),
                 )
-                if alert_dispatcher is not None:
-                    alert_dispatcher.enqueue(kc)
-                if pagerduty_sink is not None:
-                    pagerduty_sink.enqueue_trigger(kc)
+                if is_new:
+                    if alert_dispatcher is not None:
+                        alert_dispatcher.enqueue(kc)
+                    if pagerduty_sink is not None:
+                        pagerduty_sink.enqueue_trigger(kc)
             except Exception:
                 _log.warning("Kill-chain alert write failed", exc_info=True)
 
@@ -190,14 +191,15 @@ def make_handler(
                 corr_alerts = correlation_engine.evaluate(seerflow_event, entity_refs)
                 for corr_alert in corr_alerts:
                     try:
-                        await storage.write_alert(
+                        is_new = await storage.write_alert(
                             corr_alert,
                             dedup_window_ns=_dedup_window_ns(corr_alert.rule_name, _alerting),
                         )
-                        if alert_dispatcher is not None:
-                            alert_dispatcher.enqueue(corr_alert)
-                        if pagerduty_sink is not None:
-                            pagerduty_sink.enqueue_trigger(corr_alert)
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(corr_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(corr_alert)
                         await _feed_kill_chain(corr_alert)
                     except Exception:
                         _log.warning("Correlation alert write failed", exc_info=True)
@@ -252,14 +254,15 @@ def make_handler(
                     )
                     for cc_alert in cc_alerts:
                         try:
-                            await storage.write_alert(
+                            is_new = await storage.write_alert(
                                 cc_alert,
                                 dedup_window_ns=_dedup_window_ns(cc_alert.rule_name, _alerting),
                             )
-                            if alert_dispatcher is not None:
-                                alert_dispatcher.enqueue(cc_alert)
-                            if pagerduty_sink is not None:
-                                pagerduty_sink.enqueue_trigger(cc_alert)
+                            if is_new:
+                                if alert_dispatcher is not None:
+                                    alert_dispatcher.enqueue(cc_alert)
+                                if pagerduty_sink is not None:
+                                    pagerduty_sink.enqueue_trigger(cc_alert)
                             await _feed_kill_chain(cc_alert)
                         except Exception:
                             _log.warning(
@@ -376,14 +379,15 @@ def make_handler(
             )
             for alert in alerts:
                 try:
-                    await storage.write_alert(
+                    is_new = await storage.write_alert(
                         alert,
                         dedup_window_ns=_dedup_window_ns(alert.rule_name, _alerting),
                     )
-                    if alert_dispatcher is not None:
-                        alert_dispatcher.enqueue(alert)
-                    if pagerduty_sink is not None:
-                        pagerduty_sink.enqueue_trigger(alert)
+                    if is_new:
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(alert)
+                        if pagerduty_sink is not None:
+                            pagerduty_sink.enqueue_trigger(alert)
                     await _feed_kill_chain(alert)
                 except Exception:
                     _log.warning("Alert write failed", exc_info=True)
@@ -410,14 +414,15 @@ def make_handler(
                 sigma_alerts = sigma_engine.evaluate(seerflow_event)
                 for sigma_alert in sigma_alerts:
                     try:
-                        await storage.write_alert(
+                        is_new = await storage.write_alert(
                             sigma_alert,
                             dedup_window_ns=_dedup_window_ns(sigma_alert.rule_name, _alerting),
                         )
-                        if alert_dispatcher is not None:
-                            alert_dispatcher.enqueue(sigma_alert)
-                        if pagerduty_sink is not None:
-                            pagerduty_sink.enqueue_trigger(sigma_alert)
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(sigma_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(sigma_alert)
                         await _feed_kill_chain(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
@@ -470,14 +475,15 @@ def make_handler(
                         dedup_key=f"risk:{entity_uuid}",
                     )
                     try:
-                        await storage.write_alert(
+                        is_new = await storage.write_alert(
                             risk_alert,
                             dedup_window_ns=_dedup_window_ns(risk_alert.rule_name, _alerting),
                         )
-                        if alert_dispatcher is not None:
-                            alert_dispatcher.enqueue(risk_alert)
-                        if pagerduty_sink is not None:
-                            pagerduty_sink.enqueue_trigger(risk_alert)
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(risk_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(risk_alert)
                     except Exception:
                         _log.warning("Risk alert write failed", exc_info=True)
 
@@ -517,14 +523,15 @@ def make_handler(
                 )
                 for pa in post_alerts:
                     try:
-                        await storage.write_alert(
+                        is_new = await storage.write_alert(
                             pa,
                             dedup_window_ns=_dedup_window_ns(pa.rule_name, _alerting),
                         )
-                        if alert_dispatcher is not None:
-                            alert_dispatcher.enqueue(pa)
-                        if pagerduty_sink is not None:
-                            pagerduty_sink.enqueue_trigger(pa)
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(pa)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(pa)
                         await _feed_kill_chain(pa)
                     except Exception:
                         _log.warning(

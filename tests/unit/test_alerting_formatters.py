@@ -131,6 +131,31 @@ class TestFormatSlack:
         assert "T1078" in text
         assert "T1059" in text
 
+    def test_dashboard_link_present_when_configured(self) -> None:
+        alert = _make_alert()
+        payload = format_slack(alert, dashboard_url="https://seerflow.example.com/alerts")
+        blocks = payload["blocks"]
+        action_blocks = [b for b in blocks if b.get("type") == "actions"]
+        assert len(action_blocks) == 1
+        elements = action_blocks[0]["elements"]
+        assert len(elements) == 1
+        assert elements[0]["type"] == "button"
+        assert elements[0]["url"] == "https://seerflow.example.com/alerts"
+
+    def test_no_dashboard_link_when_empty(self) -> None:
+        alert = _make_alert()
+        payload = format_slack(alert, dashboard_url="")
+        blocks = payload["blocks"]
+        action_blocks = [b for b in blocks if b.get("type") == "actions"]
+        assert len(action_blocks) == 0
+
+    def test_no_dashboard_link_default(self) -> None:
+        alert = _make_alert()
+        payload = format_slack(alert)
+        blocks = payload["blocks"]
+        action_blocks = [b for b in blocks if b.get("type") == "actions"]
+        assert len(action_blocks) == 0
+
 
 class TestFormatTeams:
     def test_contains_adaptive_card(self) -> None:
@@ -201,6 +226,28 @@ class TestFormatTeams:
         payload = format_teams(alert)
         card = payload["attachments"][0]["content"]
         assert card.get("$schema") or card.get("version")
+
+    def test_dashboard_link_present_when_configured(self) -> None:
+        alert = _make_alert()
+        payload = format_teams(alert, dashboard_url="https://seerflow.example.com/alerts")
+        card = payload["attachments"][0]["content"]
+        assert "actions" in card
+        actions = card["actions"]
+        assert len(actions) == 1
+        assert actions[0]["type"] == "Action.OpenUrl"
+        assert actions[0]["url"] == "https://seerflow.example.com/alerts"
+
+    def test_no_dashboard_link_when_empty(self) -> None:
+        alert = _make_alert()
+        payload = format_teams(alert, dashboard_url="")
+        card = payload["attachments"][0]["content"]
+        assert "actions" not in card
+
+    def test_no_dashboard_link_default(self) -> None:
+        alert = _make_alert()
+        payload = format_teams(alert)
+        card = payload["attachments"][0]["content"]
+        assert "actions" not in card
 
 
 class TestFormatJson:
@@ -293,3 +340,19 @@ class TestFormatJson:
         alert = _make_alert(alert_id="my-alert-id-001")
         payload = format_json(alert)
         assert payload["alert_id"] == "my-alert-id-001"
+
+    def test_dashboard_url_present_when_configured(self) -> None:
+        alert = _make_alert()
+        payload = format_json(alert, dashboard_url="https://seerflow.example.com/alerts")
+        assert "dashboard_url" in payload
+        assert payload["dashboard_url"] == "https://seerflow.example.com/alerts"
+
+    def test_no_dashboard_url_when_empty(self) -> None:
+        alert = _make_alert()
+        payload = format_json(alert, dashboard_url="")
+        assert "dashboard_url" not in payload
+
+    def test_no_dashboard_url_default(self) -> None:
+        alert = _make_alert()
+        payload = format_json(alert)
+        assert "dashboard_url" not in payload

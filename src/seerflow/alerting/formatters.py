@@ -56,15 +56,16 @@ def _iso_timestamp(timestamp_ns: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def format_slack(alert: Alert) -> dict:  # type: ignore[type-arg]
+def format_slack(alert: Alert, *, dashboard_url: str = "") -> dict:  # type: ignore[type-arg]
     """Return a Slack Block Kit payload for the given alert.
 
     Structure:
-    - Header block  — severity emoji + rule name
-    - Section block — description + entity info
-    - Fields block  — severity, entity type, risk score, dedup count
-    - ATT&CK block  — tactics + techniques (omitted when both are empty)
-    - Context block — alert_id + timestamp
+    - Header block   — severity emoji + rule name
+    - Section block  — description + entity info
+    - Fields block   — severity, entity type, risk score, dedup count
+    - ATT&CK block   — tactics + techniques (omitted when both are empty)
+    - Context block  — alert_id + timestamp
+    - Actions block  — dashboard link button (omitted when dashboard_url is empty)
     """
     severity = _severity_name(alert)
     emoji = _SEVERITY_EMOJI.get(severity, ":large_orange_circle:")
@@ -133,6 +134,21 @@ def format_slack(alert: Alert) -> dict:  # type: ignore[type-arg]
         }
     )
 
+    if dashboard_url:
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "View in Dashboard"},
+                        "url": dashboard_url,
+                        "action_id": "view_dashboard",
+                    }
+                ],
+            }
+        )
+
     return {"blocks": blocks}
 
 
@@ -141,13 +157,14 @@ def format_slack(alert: Alert) -> dict:  # type: ignore[type-arg]
 # ---------------------------------------------------------------------------
 
 
-def format_teams(alert: Alert) -> dict:  # type: ignore[type-arg]
+def format_teams(alert: Alert, *, dashboard_url: str = "") -> dict:  # type: ignore[type-arg]
     """Return a Teams message payload containing an Adaptive Card.
 
     Structure: ``{"type": "message", "attachments": [<adaptive-card>]}``
 
     The card uses a FactSet for structured key/value fields and a plain
-    TextBlock for the description.
+    TextBlock for the description. An ``actions`` list with an ``Action.OpenUrl``
+    entry is appended when ``dashboard_url`` is non-empty.
     """
     severity = _severity_name(alert)
     color = _TEAMS_SEVERITY_COLOR.get(severity, "default")
@@ -211,6 +228,15 @@ def format_teams(alert: Alert) -> dict:  # type: ignore[type-arg]
         "body": body,
     }
 
+    if dashboard_url:
+        card_content["actions"] = [
+            {
+                "type": "Action.OpenUrl",
+                "title": "View in Dashboard",
+                "url": dashboard_url,
+            }
+        ]
+
     return {
         "type": "message",
         "attachments": [
@@ -227,14 +253,15 @@ def format_teams(alert: Alert) -> dict:  # type: ignore[type-arg]
 # ---------------------------------------------------------------------------
 
 
-def format_json(alert: Alert) -> dict:  # type: ignore[type-arg]
+def format_json(alert: Alert, *, dashboard_url: str = "") -> dict:  # type: ignore[type-arg]
     """Return a flat, JSON-serializable dict representation of the alert.
 
     The ``timestamp`` field is ISO 8601 UTC.
     ``mitre_tactics`` and ``mitre_techniques`` are plain lists (not tuples).
     ``severity`` is the uppercase enum name string (e.g. ``"CRITICAL"``).
+    ``dashboard_url`` is included only when non-empty.
     """
-    return {
+    result: dict = {  # type: ignore[type-arg]
         "alert_id": alert.alert_id,
         "alert_type": alert.alert_type,
         "timestamp": _iso_timestamp(alert.timestamp_ns),
@@ -249,3 +276,6 @@ def format_json(alert: Alert) -> dict:  # type: ignore[type-arg]
         "risk_score": alert.risk_score,
         "dedup_count": alert.dedup_count,
     }
+    if dashboard_url:
+        result["dashboard_url"] = dashboard_url
+    return result

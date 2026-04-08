@@ -35,13 +35,13 @@ class WebhookTarget:
     min_severity: int = 0
 
 
-def _format(alert: Alert, fmt: str) -> dict:  # type: ignore[type-arg]
+def _format(alert: Alert, fmt: str, *, dashboard_url: str = "") -> dict:  # type: ignore[type-arg]
     """Dispatch to the correct formatter based on format name."""
     if fmt == "slack":
-        return format_slack(alert)
+        return format_slack(alert, dashboard_url=dashboard_url)
     if fmt == "teams":
-        return format_teams(alert)
-    return format_json(alert)
+        return format_teams(alert, dashboard_url=dashboard_url)
+    return format_json(alert, dashboard_url=dashboard_url)
 
 
 class AlertDispatcher:
@@ -63,11 +63,13 @@ class AlertDispatcher:
         targets: tuple[WebhookTarget, ...],
         session: aiohttp.ClientSession,
         queue_maxsize: int = 10_000,
+        dashboard_url: str = "",
     ) -> None:
         self._targets = targets
         self._session = session
         self._queue: asyncio.Queue[Alert] = asyncio.Queue(maxsize=queue_maxsize)
         self._running = True
+        self._dashboard_url = dashboard_url
 
     def enqueue(self, alert: Alert) -> None:
         """Enqueue an alert for delivery. Drops silently if queue is full."""
@@ -95,7 +97,7 @@ class AlertDispatcher:
             if int(alert.severity_id) < target.min_severity:
                 continue
             try:
-                payload = _format(alert, target.format)
+                payload = _format(alert, target.format, dashboard_url=self._dashboard_url)
             except Exception:
                 _log.exception(
                     "Formatter failed for target %s, alert %s",
