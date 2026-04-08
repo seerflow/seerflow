@@ -726,12 +726,17 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
                 "alerting.dashboard_url must not target private/reserved IP: "
                 f"{parsed_url.hostname}"
             )
+    routing_key = data.get("pagerduty_routing_key", "")
+    if routing_key and not re.fullmatch(r"[0-9a-fA-F]{32}", routing_key):
+        raise ConfigError(
+            "alerting.pagerduty_routing_key must be a 32-character hex string"
+        )
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
         webhooks=webhooks,
         webhook_targets=webhook_targets,
-        pagerduty_routing_key=data.get("pagerduty_routing_key", ""),
+        pagerduty_routing_key=routing_key,
         dashboard_url=dashboard_url,
     )
 

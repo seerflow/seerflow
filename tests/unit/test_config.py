@@ -1158,3 +1158,29 @@ class TestWebhookConfigParsing:
 
         with pytest.raises(ConfigError, match="private|reserved|loopback"):
             _build_alerting({"dashboard_url": "https://192.168.1.1/dashboard"})
+
+    def test_pagerduty_routing_key_valid_hex(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting(
+            {"pagerduty_routing_key": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"}
+        )
+        assert result.pagerduty_routing_key == "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+
+    def test_pagerduty_routing_key_empty_allowed(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.pagerduty_routing_key == ""
+
+    def test_pagerduty_routing_key_invalid_format_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="32-character hex"):
+            _build_alerting({"pagerduty_routing_key": "not-a-valid-key"})
+
+    def test_pagerduty_routing_key_wrong_length_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="32-character hex"):
+            _build_alerting({"pagerduty_routing_key": "abcdef1234"})
