@@ -1126,6 +1126,7 @@ class TestWebhookConfigParsing:
             "192.168.1.1",
             "169.254.0.1",
             "0.0.0.0",
+            "100.64.0.1",
         ],
     )
     def test_webhook_private_ip_rejected(self, ip: str) -> None:

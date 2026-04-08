@@ -25,6 +25,8 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 _VALID_STORAGE_BACKENDS = frozenset({"sqlite", "postgresql"})
 
+_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
 
 def _is_private_ip(hostname: str | None) -> bool:
     """Return True if hostname is an IP literal in a private/reserved range."""
@@ -39,6 +41,7 @@ def _is_private_ip(hostname: str | None) -> bool:
         or addr.is_loopback
         or addr.is_link_local
         or addr.is_reserved
+        or addr in _CGNAT_NETWORK
     )
 
 
@@ -720,7 +723,8 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
             raise ConfigError("alerting.dashboard_url must include a hostname")
         if _is_private_ip(parsed_url.hostname):
             raise ConfigError(
-                f"alerting.dashboard_url must not target private/reserved IP: {parsed_url.hostname}"
+                "alerting.dashboard_url must not target private/reserved IP: "
+                f"{parsed_url.hostname}"
             )
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
