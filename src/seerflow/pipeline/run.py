@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import ssl as _ssl
 import sys
 import time
 
@@ -237,7 +238,11 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     _dispatcher_task: asyncio.Task[None] | None = None
     webhook_targets = config.alerting.webhook_targets
     if webhook_targets:
-        webhook_session = aiohttp.ClientSession()
+        _webhook_connector = aiohttp.TCPConnector(
+            ssl=_ssl.create_default_context(),
+            limit_per_host=10,
+        )
+        webhook_session = aiohttp.ClientSession(connector=_webhook_connector)
         dispatcher = AlertDispatcher(
             webhook_targets,
             webhook_session,
@@ -252,7 +257,11 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     _pd_task: asyncio.Task[None] | None = None
     pd_session: aiohttp.ClientSession | None = None
     if config.alerting.pagerduty_routing_key:
-        pd_session = webhook_session or aiohttp.ClientSession()
+        _pd_connector = aiohttp.TCPConnector(
+            ssl=_ssl.create_default_context(),
+            limit_per_host=10,
+        )
+        pd_session = aiohttp.ClientSession(connector=_pd_connector)
         pd_sink = PagerDutySink(config.alerting.pagerduty_routing_key, pd_session)
         _pd_task = asyncio.create_task(pd_sink.run())
         _log.info("PagerDuty sink: routing key configured")
@@ -321,7 +330,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         if _pd_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await _pd_task
-        if pd_session is not None and pd_session is not webhook_session:
+        if pd_session is not None:
             await pd_session.close()
         if webhook_session is not None:
             await webhook_session.close()
