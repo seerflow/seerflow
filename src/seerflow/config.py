@@ -26,6 +26,22 @@ _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 _VALID_STORAGE_BACKENDS = frozenset({"sqlite", "postgresql"})
 
 
+def _is_private_ip(hostname: str | None) -> bool:
+    """Return True if hostname is an IP literal in a private/reserved range."""
+    if not hostname:
+        return False
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+    )
+
+
 def _default_data_dir() -> str:
     """Compute XDG-compliant default data directory (lazy, respects $XDG_DATA_HOME)."""
     xdg_data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
@@ -639,6 +655,10 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
             raise ConfigError(
                 f"alerting.webhooks[*].url must use http or https, got {_parsed.scheme!r}"
             )
+        if _is_private_ip(_parsed.hostname):
+            raise ConfigError(
+                f"alerting.webhooks[*].url must not target private/reserved IP: {_parsed.hostname}"
+            )
         fmt = wh.get("format", "")
         if fmt not in _VALID_WEBHOOK_FORMATS:
             valid = sorted(_VALID_WEBHOOK_FORMATS)
@@ -698,6 +718,10 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
             )
         if not parsed_url.hostname:
             raise ConfigError("alerting.dashboard_url must include a hostname")
+        if _is_private_ip(parsed_url.hostname):
+            raise ConfigError(
+                f"alerting.dashboard_url must not target private/reserved IP: {parsed_url.hostname}"
+            )
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
