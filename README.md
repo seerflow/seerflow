@@ -8,7 +8,7 @@ A streaming, entity-centric log intelligence agent that detects operational fail
 
 [![CI](https://github.com/seerflow/seerflow/actions/workflows/ci.yml/badge.svg)](https://github.com/seerflow/seerflow/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/seerflow)](https://pypi.org/project/seerflow/)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-green)](LICENSE)
 
 ## Quick Start
@@ -177,7 +177,7 @@ Log Sources → Receivers → Drain3 → UUID5 Entities → ML Ensemble → Sigm
 
 ## Development
 
-Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 # Install dependencies
