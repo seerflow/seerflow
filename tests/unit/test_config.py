@@ -1183,3 +1183,57 @@ class TestWebhookConfigParsing:
 
         with pytest.raises(ConfigError, match="32-character hex"):
             _build_alerting({"pagerduty_routing_key": "abcdef1234"})
+
+    def test_otlp_endpoint_default_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_endpoint == ""
+
+    def test_otlp_endpoint_set(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_endpoint": "http://collector:4317"})
+        assert result.otlp_endpoint == "http://collector:4317"
+
+    def test_otlp_protocol_default_grpc(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_protocol == "grpc"
+
+    def test_otlp_protocol_http_valid(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_protocol": "http"})
+        assert result.otlp_protocol == "http"
+
+    def test_otlp_protocol_invalid_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_protocol"):
+            _build_alerting({"otlp_protocol": "websocket"})
+
+    def test_otlp_export_interval_default_5(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_export_interval_seconds == 5
+
+    def test_otlp_export_interval_custom(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_export_interval_seconds": 10})
+        assert result.otlp_export_interval_seconds == 10
+
+    def test_otlp_export_interval_zero_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_export_interval_seconds"):
+            _build_alerting({"otlp_export_interval_seconds": 0})
+
+    def test_otlp_export_interval_negative_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_export_interval_seconds"):
+            _build_alerting({"otlp_export_interval_seconds": -1})
