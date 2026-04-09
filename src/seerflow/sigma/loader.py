@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,7 +48,10 @@ def discover_custom_rules(dirs: Sequence[str]) -> list[Path]:
             continue
 
         try:
-            yml_files = list(dir_path.rglob("*.yml", recurse_symlinks=False))
+            if sys.version_info >= (3, 13):
+                yml_files = list(dir_path.rglob("*.yml", recurse_symlinks=False))
+            else:
+                yml_files = list(dir_path.rglob("*.yml"))
         except OSError:
             logger.warning(
                 "Error reading custom sigma rules dir: %s — skipping",
