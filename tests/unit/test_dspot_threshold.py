@@ -160,6 +160,72 @@ class TestDSpotSerialization:
         assert restored.threshold == ds.threshold
         assert restored.lower_threshold == ds.lower_threshold
 
+    def test_null_z_q_payload_deserializes(self) -> None:
+        """JSON with null z_q (from float inf) deserializes without error."""
+        import msgspec
+
+        payload = msgspec.json.encode(
+            {
+                "calibration_window": 500,
+                "risk_level": 0.01,
+                "initial_percentile": 80,
+                "upper": {
+                    "threshold": 1.5,
+                    "z_q": None,
+                    "excesses": [0.1, 0.2],
+                    "n_exceed": 2,
+                },
+                "lower": {
+                    "threshold": -1.5,
+                    "z_q": None,
+                    "excesses": [0.1],
+                    "n_exceed": 1,
+                },
+                "n_total": 500,
+                "calibrated": True,
+            }
+        )
+        restored = DSpotThreshold.deserialize(payload)
+        assert restored.threshold == float("inf")
+        assert restored.lower_threshold == float("-inf")
+        assert restored.is_calibrated is True
+
+    def test_pre_calibration_infinity_round_trip(self) -> None:
+        """Uncalibrated threshold with ±inf z_q survives serialize/deserialize."""
+        import math
+
+        ds = DSpotThreshold(calibration_window=200)
+        for i in range(50):
+            ds.update(float(i))
+        assert ds.is_calibrated is False
+        assert math.isinf(ds.threshold)
+        assert math.isinf(ds.lower_threshold)
+
+        data = ds.serialize()
+        restored = DSpotThreshold.deserialize(data)
+        assert restored.is_calibrated is False
+        assert math.isinf(restored.threshold)
+        assert restored.threshold > 0
+        assert math.isinf(restored.lower_threshold)
+        assert restored.lower_threshold < 0
+
+    def test_calibrated_round_trip_preserves_finite_z_q(self) -> None:
+        """Calibrated threshold with finite z_q values preserved exactly."""
+        import math
+
+        ds = _calibrated_detector()
+        assert math.isfinite(ds.threshold)
+        assert math.isfinite(ds.lower_threshold)
+        original_upper = ds.threshold
+        original_lower = ds.lower_threshold
+
+        data = ds.serialize()
+        restored = DSpotThreshold.deserialize(data)
+        assert restored.threshold == original_upper
+        assert restored.lower_threshold == original_lower
+        assert math.isfinite(restored.threshold)
+        assert math.isfinite(restored.lower_threshold)
+
 
 class TestDSpotExcessTrimming:
     """Test the MAX_EXCESSES trimming paths (lines 181, 183, 190, 192)."""
