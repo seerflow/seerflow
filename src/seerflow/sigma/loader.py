@@ -47,7 +47,7 @@ def discover_custom_rules(dirs: Sequence[str]) -> list[Path]:
             continue
 
         try:
-            yml_files = list(dir_path.rglob("*.yml", recurse_symlinks=False))
+            yml_files = list(dir_path.rglob("*.yml"))
         except OSError:
             logger.warning(
                 "Error reading custom sigma rules dir: %s — skipping",

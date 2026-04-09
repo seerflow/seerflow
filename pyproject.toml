@@ -7,7 +7,7 @@ name = "seerflow"
 version = "0.4.0"
 description = "Streaming log intelligence agent — detects operational failures and security threats with online ML"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = "AGPL-3.0-only"
 authors = [{ name = "Fernando Flores", email = "ferjflores@gmail.com" }]
 keywords = ["log-analysis", "anomaly-detection", "siem", "observability", "streaming", "machine-learning", "syslog", "opentelemetry"]
@@ -16,7 +16,10 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Logging",
     "Topic :: System :: Monitoring",
     "Topic :: Security",
@@ -68,7 +71,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py311"
 line-length = 99
 src = ["src"]
 
@@ -100,7 +103,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

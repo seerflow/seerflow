@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
 
 
 @dataclass
-class EngineHolder[T]:
+class EngineHolder(Generic[T]):
     """Mutable wrapper allowing atomic engine replacement.
 
     Used to hold references to ``SigmaEngine`` and ``CorrelationEngine``

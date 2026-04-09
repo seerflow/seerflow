@@ -11,10 +11,12 @@ String interpolation into SQL or query DSL strings is forbidden.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 if TYPE_CHECKING:
     from seerflow.models._types import AlertType
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +73,7 @@ class AlertQuery:
 
 
 @dataclass(frozen=True, slots=True)
-class Page[T]:
+class Page(Generic[T]):
     """Paginated result wrapper returned by storage queries."""
 
     items: tuple[T, ...]
