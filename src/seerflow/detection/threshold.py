@@ -27,7 +27,7 @@ class _TailState(msgspec.Struct):
     """State for one tail (upper or lower) of the biDSPOT threshold."""
 
     threshold: float
-    z_q: float
+    z_q: float | None
     excesses: list[float]
     n_exceed: int
 
@@ -318,11 +318,11 @@ class DSpotThreshold:
         obj._risk_level = state.risk_level
         obj._initial_percentile = state.initial_percentile
         obj._upper_threshold = state.upper.threshold
-        obj._upper_z_q = state.upper.z_q
+        obj._upper_z_q = state.upper.z_q if state.upper.z_q is not None else float("inf")
         obj._upper_excesses = state.upper.excesses
         obj._upper_n_exceed = state.upper.n_exceed
         obj._lower_threshold = state.lower.threshold
-        obj._lower_z_q = state.lower.z_q
+        obj._lower_z_q = state.lower.z_q if state.lower.z_q is not None else float("-inf")
         obj._lower_excesses = state.lower.excesses
         obj._lower_n_exceed = state.lower.n_exceed
         obj._n_total = state.n_total
