@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import random
 
+import msgspec
 import pytest
 
 from seerflow.detection.threshold import DSpotThreshold, ThresholdResult
@@ -162,8 +164,6 @@ class TestDSpotSerialization:
 
     def test_null_z_q_payload_deserializes(self) -> None:
         """JSON with null z_q (from float inf) deserializes without error."""
-        import msgspec
-
         payload = msgspec.json.encode(
             {
                 "calibration_window": 500,
@@ -192,8 +192,6 @@ class TestDSpotSerialization:
 
     def test_pre_calibration_infinity_round_trip(self) -> None:
         """Uncalibrated threshold with ±inf z_q survives serialize/deserialize."""
-        import math
-
         ds = DSpotThreshold(calibration_window=200)
         for i in range(50):
             ds.update(float(i))
@@ -211,8 +209,6 @@ class TestDSpotSerialization:
 
     def test_calibrated_round_trip_preserves_finite_z_q(self) -> None:
         """Calibrated threshold with finite z_q values preserved exactly."""
-        import math
-
         ds = _calibrated_detector()
         assert math.isfinite(ds.threshold)
         assert math.isfinite(ds.lower_threshold)
