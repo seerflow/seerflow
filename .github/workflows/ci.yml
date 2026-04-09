@@ -9,6 +9,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.11"]') || fromJSON('["3.11", "3.12", "3.13", "3.14"]') }}
     permissions:
       contents: write  # required by benchmark-action auto-push to gh-pages
     steps:
@@ -18,8 +21,8 @@ jobs:
         with:
           version: "latest"
 
-      - name: Set up Python
-        run: uv python install 3.13
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: uv sync
@@ -78,7 +81,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Store benchmark result
-        if: github.ref == 'refs/heads/dev'
+        if: github.ref == 'refs/heads/dev' && matrix.python-version == '3.11'
         uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c  # v1.9.0
         with:
           tool: 'pytest'
