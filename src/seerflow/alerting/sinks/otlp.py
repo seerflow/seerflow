@@ -12,6 +12,9 @@ import aiohttp
 from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
     ExportLogsServiceRequest,
 )
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2_grpc import (
+    LogsServiceStub,
+)
 from opentelemetry.proto.common.v1.common_pb2 import (
     AnyValue,
     ArrayValue,
@@ -254,10 +257,6 @@ class OtlpSink:
     async def _send_grpc(self, request: ExportLogsServiceRequest) -> None:
         """Send batch via gRPC with retry."""
         import grpc
-
-        from opentelemetry.proto.collector.logs.v1.logs_service_pb2_grpc import (
-            LogsServiceStub,
-        )
 
         if self._grpc_channel is None:
             target = _normalize_grpc_endpoint(self._endpoint)
