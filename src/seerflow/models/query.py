@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Generic, TypeVar
 if TYPE_CHECKING:
     from seerflow.models._types import AlertType
 
-T = TypeVar("T")
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,10 +73,10 @@ class AlertQuery:
 
 
 @dataclass(frozen=True, slots=True)
-class Page(Generic[T]):
+class Page(Generic[_T]):
     """Paginated result wrapper returned by storage queries."""
 
-    items: tuple[T, ...]
+    items: tuple[_T, ...]
     total: int
     page: int
     limit: int
