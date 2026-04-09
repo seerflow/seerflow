@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
     from seerflow.alerting.dispatcher import AlertDispatcher
+    from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
     from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
@@ -71,6 +72,7 @@ def make_handler(
     alerting_config: AlertingConfig | None = None,
     alert_dispatcher: AlertDispatcher | None = None,
     pagerduty_sink: PagerDutySink | None = None,
+    otlp_sink: OtlpSink | None = None,
     attack_mapper: AttackMapper | None = None,
     graph_structural: GraphStructuralEvaluator | None = None,
     kill_chain_tracker: KillChainTracker | None = None,
@@ -107,6 +109,8 @@ def make_handler(
                         alert_dispatcher.enqueue(kc)
                     if pagerduty_sink is not None:
                         pagerduty_sink.enqueue_trigger(kc)
+                    if otlp_sink is not None:
+                        otlp_sink.enqueue(kc)
             except Exception:
                 _log.warning("Kill-chain alert write failed", exc_info=True)
 
@@ -200,6 +204,8 @@ def make_handler(
                                 alert_dispatcher.enqueue(corr_alert)
                             if pagerduty_sink is not None:
                                 pagerduty_sink.enqueue_trigger(corr_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(corr_alert)
                         await _feed_kill_chain(corr_alert)
                     except Exception:
                         _log.warning("Correlation alert write failed", exc_info=True)
@@ -263,6 +269,8 @@ def make_handler(
                                     alert_dispatcher.enqueue(cc_alert)
                                 if pagerduty_sink is not None:
                                     pagerduty_sink.enqueue_trigger(cc_alert)
+                                if otlp_sink is not None:
+                                    otlp_sink.enqueue(cc_alert)
                             await _feed_kill_chain(cc_alert)
                         except Exception:
                             _log.warning(
@@ -388,6 +396,8 @@ def make_handler(
                             alert_dispatcher.enqueue(alert)
                         if pagerduty_sink is not None:
                             pagerduty_sink.enqueue_trigger(alert)
+                        if otlp_sink is not None:
+                            otlp_sink.enqueue(alert)
                     await _feed_kill_chain(alert)
                 except Exception:
                     _log.warning("Alert write failed", exc_info=True)
@@ -423,6 +433,8 @@ def make_handler(
                                 alert_dispatcher.enqueue(sigma_alert)
                             if pagerduty_sink is not None:
                                 pagerduty_sink.enqueue_trigger(sigma_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(sigma_alert)
                         await _feed_kill_chain(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
@@ -484,6 +496,8 @@ def make_handler(
                                 alert_dispatcher.enqueue(risk_alert)
                             if pagerduty_sink is not None:
                                 pagerduty_sink.enqueue_trigger(risk_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(risk_alert)
                     except Exception:
                         _log.warning("Risk alert write failed", exc_info=True)
 
@@ -532,6 +546,8 @@ def make_handler(
                                 alert_dispatcher.enqueue(pa)
                             if pagerduty_sink is not None:
                                 pagerduty_sink.enqueue_trigger(pa)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(pa)
                         await _feed_kill_chain(pa)
                     except Exception:
                         _log.warning(
