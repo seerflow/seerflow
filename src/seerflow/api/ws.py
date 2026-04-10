@@ -60,42 +60,46 @@ class ClientFilter:
         return int(alert.severity_id) >= self.min_severity
 
 
+def _event_data(event: SeerflowEvent) -> dict[str, Any]:
+    """Build the inner ``data`` payload for an event wire message."""
+    return {
+        "event_id": str(event.event_id),
+        "timestamp_ns": event.timestamp_ns,
+        "severity_id": int(event.severity_id),
+        "source_type": event.source_type,
+        "message": event.message,
+        "template_id": event.template_id,
+        "entity_refs": list(event.entity_refs),
+    }
+
+
+def _alert_data(alert: Alert) -> dict[str, Any]:
+    """Build the inner ``data`` payload for an alert wire message."""
+    return {
+        "alert_id": alert.alert_id,
+        "timestamp_ns": alert.timestamp_ns,
+        "alert_type": alert.alert_type,
+        "rule_name": alert.rule_name,
+        "severity": int(alert.severity_id),
+        "risk_score": alert.risk_score,
+        "entity_uuid": alert.entity_uuid,
+        "entity_type": alert.entity_type,
+        "entity_value": alert.entity_value,
+        "message": alert.description,
+        "mitre_tactics": list(alert.mitre_tactics),
+        "mitre_techniques": list(alert.mitre_techniques),
+        "dedup_count": alert.dedup_count,
+    }
+
+
 def serialize_event(event: SeerflowEvent) -> dict[str, Any]:
     """Serialize a SeerflowEvent to a dict suitable for JSON wire format."""
-    return {
-        "type": "event",
-        "data": {
-            "event_id": str(event.event_id),
-            "timestamp_ns": event.timestamp_ns,
-            "severity_id": int(event.severity_id),
-            "source_type": event.source_type,
-            "message": event.message,
-            "template_id": event.template_id,
-            "entity_refs": list(event.entity_refs),
-        },
-    }
+    return {"type": "event", "data": _event_data(event)}
 
 
 def serialize_alert(alert: Alert) -> dict[str, Any]:
     """Serialize an Alert to a dict suitable for JSON wire format."""
-    return {
-        "type": "alert",
-        "data": {
-            "alert_id": alert.alert_id,
-            "timestamp_ns": alert.timestamp_ns,
-            "alert_type": alert.alert_type,
-            "rule_name": alert.rule_name,
-            "severity": int(alert.severity_id),
-            "risk_score": alert.risk_score,
-            "entity_uuid": alert.entity_uuid,
-            "entity_type": alert.entity_type,
-            "entity_value": alert.entity_value,
-            "message": alert.description,
-            "mitre_tactics": list(alert.mitre_tactics),
-            "mitre_techniques": list(alert.mitre_techniques),
-            "dedup_count": alert.dedup_count,
-        },
-    }
+    return {"type": "alert", "data": _alert_data(alert)}
 
 
 @dataclass(slots=True)
@@ -222,15 +226,27 @@ class ConnectionManager:
         cap: int,
         errors: list[str],
     ) -> list[Any]:
-        """Parse and cap a list field from a filter message."""
+        """Parse and cap a list field from a filter message.
+
+        Non-matching element types are rejected with an error rather than
+        silently coerced — a client sending ``{"sources": [1, 2]}`` gets
+        a clear error instead of a filter that secretly matches nothing.
+        """
         raw = filter_msg.get(key, [])
         if not isinstance(raw, list):
             errors.append(f"{key} must be a list")
             return []
         trimmed = raw[:cap]
         if item_type is str:
-            return [str(v) for v in trimmed]
-        return [int(v) for v in trimmed if isinstance(v, int) and not isinstance(v, bool)]
+            if not all(isinstance(v, str) for v in trimmed):
+                errors.append(f"{key} items must be strings")
+                return []
+            return list(trimmed)
+        # item_type is int — reject bool since isinstance(True, int) is True
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in trimmed):
+            errors.append(f"{key} items must be integers")
+            return []
+        return list(trimmed)
 
     def _parse_alert_types(
         self,
@@ -344,10 +360,7 @@ class ConnectionManager:
         elif events:
             await _send_bytes(
                 client.websocket,
-                {
-                    "type": "batch",
-                    "events": [serialize_event(e)["data"] for e in events],
-                },
+                {"type": "batch", "events": [_event_data(e) for e in events]},
             )
 
     async def _drain_alerts(self, client: ClientState) -> None:
@@ -360,10 +373,7 @@ class ConnectionManager:
         elif alerts:
             await _send_bytes(
                 client.websocket,
-                {
-                    "type": "alert_batch",
-                    "alerts": [serialize_alert(a)["data"] for a in alerts],
-                },
+                {"type": "alert_batch", "alerts": [_alert_data(a) for a in alerts]},
             )
 
     def start_status_task(self) -> None:
@@ -374,42 +384,51 @@ class ConnectionManager:
         self._status_task = asyncio.create_task(self._status_broadcaster())
 
     async def _status_broadcaster(self) -> None:
-        """Emit periodic status messages to all connected clients."""
-        try:
-            while True:
+        """Emit periodic status messages to all connected clients.
+
+        The inner ``try`` wraps the full per-tick body so any transient
+        failure (e.g. a broken ``_query_alerts_24h`` call or a corrupted
+        status payload) is logged and the loop continues — the task must
+        not terminate silently on a single bad tick.
+        """
+        while True:
+            try:
                 await asyncio.sleep(self._status_interval_s)
+                await self._emit_status_tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _log.warning("status broadcaster tick failed", exc_info=True)
 
-                now_ns = time.monotonic_ns()
-                elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
-                events_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
-                self._events_broadcast_count = 0
-                self._broadcast_window_start_ns = now_ns
+    async def _emit_status_tick(self) -> None:
+        """Compute and broadcast one status tick to all connected clients."""
+        now_ns = time.monotonic_ns()
+        elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
+        events_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
+        self._events_broadcast_count = 0
+        self._broadcast_window_start_ns = now_ns
 
-                alerts_24h = await self._query_alerts_24h()
+        alerts_24h = await self._query_alerts_24h()
 
-                for client in list(self._clients.values()):
-                    status_msg = {
-                        "type": "status",
-                        "data": {
-                            "events_per_sec": events_per_sec,
-                            "alerts_24h": alerts_24h,
-                            "connected_clients": len(self._clients),
-                            "dropped_events": client.dropped_events,
-                            "dropped_alerts": client.dropped_alerts,
-                        },
-                    }
-                    try:
-                        await _send_bytes(client.websocket, status_msg)
-                    except Exception:
-                        _log.debug(
-                            "failed to send status to client %s",
-                            client.client_id,
-                            exc_info=True,
-                        )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            _log.warning("status broadcaster task crashed", exc_info=True)
+        for client in list(self._clients.values()):
+            status_msg = {
+                "type": "status",
+                "data": {
+                    "events_per_sec": events_per_sec,
+                    "alerts_24h": alerts_24h,
+                    "connected_clients": len(self._clients),
+                    "dropped_events": client.dropped_events,
+                    "dropped_alerts": client.dropped_alerts,
+                },
+            }
+            try:
+                await _send_bytes(client.websocket, status_msg)
+            except Exception:
+                _log.debug(
+                    "failed to send status to client %s",
+                    client.client_id,
+                    exc_info=True,
+                )
 
     async def _query_alerts_24h(self) -> int:
         """Query AlertStore for the 24h alert count. Returns 0 on failure."""

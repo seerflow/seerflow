@@ -9,6 +9,7 @@ import msgspec
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -31,11 +32,11 @@ def _recv(ws: WebSocketTestSession) -> dict[str, Any]:
 
 
 @pytest.fixture
-async def backend(tmp_path: Path) -> SqliteBackend:
+async def backend(tmp_path: Path) -> AsyncIterator[SqliteBackend]:
     db_path = str(tmp_path / "test_ws.db")
     config = StorageConfig(backend="sqlite", sqlite_path=db_path)
     b = await SqliteBackend.connect(config)
-    yield b  # type: ignore[misc]
+    yield b
     await b.close()
 
 
