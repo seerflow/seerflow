@@ -230,6 +230,11 @@ class SeerflowConfig:
     dashboard_port: int = 8080
     health_bind_address: str = "127.0.0.1"
     log_level: str = "INFO"
+    ws_max_connections: int = 20
+    ws_queue_maxlen: int = 1000
+    ws_tick_interval_s: float = 0.01
+    ws_batch_max_events: int = 10
+    ws_status_interval_s: float = 5.0
 
 
 # ---------------------------------------------------------------------------

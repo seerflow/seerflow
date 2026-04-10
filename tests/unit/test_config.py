@@ -1255,3 +1255,29 @@ class TestWebhookConfigParsing:
 
         with pytest.raises(ConfigError, match="otlp_export_interval_seconds"):
             _build_alerting({"otlp_export_interval_seconds": -1})
+
+
+class TestWebSocketConfig:
+    def test_default_ws_fields(self) -> None:
+        from seerflow.config import SeerflowConfig
+
+        config = SeerflowConfig()
+        assert config.ws_max_connections == 20
+        assert config.ws_queue_maxlen == 1000
+        assert config.ws_tick_interval_s == 0.01
+        assert config.ws_batch_max_events == 10
+        assert config.ws_status_interval_s == 5.0
+
+    def test_ws_fields_can_be_overridden(self) -> None:
+        from seerflow.config import SeerflowConfig
+
+        config = SeerflowConfig(
+            ws_max_connections=5,
+            ws_queue_maxlen=500,
+            ws_tick_interval_s=0.02,
+            ws_batch_max_events=20,
+            ws_status_interval_s=10.0,
+        )
+        assert config.ws_max_connections == 5
+        assert config.ws_queue_maxlen == 500
+
