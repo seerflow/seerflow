@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from seerflow.api.deps import StorageDeps
-from seerflow.api.routes.entities import router
+from seerflow.api.routes.entities import DEFAULT_TIMELINE_WINDOW_NS, router
 from seerflow.models.entity import generate_ip_id
 from seerflow.models.event import SeerflowEvent
 from seerflow.models.query import EntityRelation, Page
@@ -218,9 +218,6 @@ class TestEntitySearchUuidQuery:
         assert resp.json() == []
 
 
-from seerflow.api.routes.entities import DEFAULT_TIMELINE_WINDOW_NS
-
-
 def _make_timeline_app(
     entity_store: AsyncMock | None,
     log_store: AsyncMock | None = None,
@@ -288,9 +285,7 @@ class TestEntityTimeline:
         entity_store.get_timeline.return_value = []
         entity_store.get_related.return_value = []
         client = TestClient(_make_timeline_app(entity_store))
-        resp = client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline?source_type=syslog"
-        )
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?source_type=syslog")
         assert resp.status_code == 200
         assert entity_store.get_timeline.await_args.kwargs["source_type"] == "syslog"
 
@@ -300,9 +295,7 @@ class TestEntityTimeline:
         entity_store.get_timeline.return_value = []
         entity_store.get_related.return_value = []
         client = TestClient(_make_timeline_app(entity_store))
-        resp = client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline?severity_min=4"
-        )
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?severity_min=4")
         assert resp.status_code == 200
         assert entity_store.get_timeline.await_args.kwargs["severity_min"] == 4
 
@@ -312,9 +305,7 @@ class TestEntityTimeline:
         entity_store.get_timeline.return_value = []
         entity_store.get_related.return_value = []
         client = TestClient(_make_timeline_app(entity_store))
-        resp = client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline?start_ns=1000&end_ns=2000"
-        )
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?start_ns=1000&end_ns=2000")
         assert resp.status_code == 200
         tr = entity_store.get_timeline.await_args.kwargs["time_range"]
         assert tr.start_ns == 1000
@@ -326,24 +317,18 @@ class TestEntityTimeline:
         entity_store.get_timeline.return_value = []
         entity_store.get_related.return_value = []
         client = TestClient(_make_timeline_app(entity_store))
-        resp = client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline?limit=500"
-        )
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?limit=500")
         assert resp.status_code == 200
         assert entity_store.get_timeline.await_args.kwargs["limit"] == 500
 
-        resp = client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline?limit=999999"
-        )
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?limit=999999")
         assert resp.status_code == 422
 
     def test_severity_out_of_range_returns_422(self) -> None:
         entity_uuid = str(uuid.uuid4())
         entity_store = AsyncMock()
         client = TestClient(_make_timeline_app(entity_store))
-        resp = client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline?severity_min=7"
-        )
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?severity_min=7")
         assert resp.status_code == 422
 
     def test_malformed_uuid_returns_422(self) -> None:
@@ -363,7 +348,5 @@ class TestEntityTimeline:
         entity_uuid = str(uuid.uuid4())
         entity_store = AsyncMock()
         client = TestClient(_make_timeline_app(entity_store))
-        resp = client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline?start_ns=5000&end_ns=1000"
-        )
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?start_ns=5000&end_ns=1000")
         assert resp.status_code == 422
