@@ -250,10 +250,11 @@ class TestEntityTimelineIntegration:
             await backend.write_events(events)
         await backend.flush()
 
-        entity_client.get(
+        warmup = entity_client.get(
             f"/api/v1/entities/{expected_uuid}/timeline"
             f"?start_ns=0&end_ns=9000000000000000000&limit=10000"
         )
+        assert warmup.status_code == 200
 
         t0 = _time.perf_counter()
         resp = entity_client.get(

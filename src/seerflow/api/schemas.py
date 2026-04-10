@@ -146,7 +146,13 @@ class EntityRelationResponse(BaseModel):
 
 
 class EntityTimelineResponse(BaseModel):
-    """Entity timeline detail: events + related entities."""
+    """Entity timeline detail: events + related entities.
+
+    ``total`` is the count of returned events in this page, equal to
+    ``len(events)``. When ``total`` equals the handler's ``limit`` query
+    parameter, the result may be truncated — callers should narrow the
+    time range or raise ``limit`` to retrieve more.
+    """
 
     entity_uuid: str
     events: list[EventResponse]
