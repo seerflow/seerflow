@@ -12,7 +12,7 @@ from seerflow.api.deps import StorageDeps
 from seerflow.api.routes.entities import router
 from seerflow.models.entity import generate_ip_id
 from seerflow.models.event import SeerflowEvent
-from seerflow.models.query import Page
+from seerflow.models.query import EntityRelation, Page
 
 
 def _make_app(
@@ -216,3 +216,68 @@ class TestEntitySearchUuidQuery:
         resp = client.get(f"/api/v1/entities/search?q={target_uuid}")
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+from seerflow.api.routes.entities import DEFAULT_TIMELINE_WINDOW_NS
+
+
+def _make_timeline_app(
+    entity_store: AsyncMock | None,
+    log_store: AsyncMock | None = None,
+) -> FastAPI:
+    app = FastAPI()
+    app.state.storage = StorageDeps(
+        log_store=log_store or AsyncMock(),
+        alert_store=AsyncMock(),
+        entity_store=entity_store,
+    )
+    app.include_router(router, prefix="/api/v1")
+    return app
+
+
+class TestEntityTimeline:
+    """GET /api/v1/entities/{entity_uuid}/timeline."""
+
+    def test_happy_path_returns_events_and_related(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=1_000,
+            observed_ns=1_001,
+            source_type="syslog",
+            message="login failure",
+        )
+        relation = EntityRelation(
+            entity_uuid=str(uuid.uuid4()),
+            entity_type="host",
+            entity_value="web-01",
+            relation_type="seen_on",
+        )
+        entity_store = AsyncMock()
+        entity_store.get_timeline.return_value = [event]
+        entity_store.get_related.return_value = [relation]
+
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_uuid"] == entity_uuid
+        assert body["total"] == 1
+        assert len(body["events"]) == 1
+        assert body["events"][0]["source_type"] == "syslog"
+        assert body["events"][0]["message"] == "login failure"
+        assert len(body["related"]) == 1
+        assert body["related"][0]["relation_type"] == "seen_on"
+
+    def test_default_time_range_spans_last_24h(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        entity_store.get_timeline.return_value = []
+        entity_store.get_related.return_value = []
+
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline")
+        assert resp.status_code == 200
+        call = entity_store.get_timeline.await_args
+        time_range = call.kwargs["time_range"]
+        assert time_range.end_ns - time_range.start_ns == DEFAULT_TIMELINE_WINDOW_NS
