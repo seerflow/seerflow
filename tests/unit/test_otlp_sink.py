@@ -568,32 +568,26 @@ class TestOtlpSinkGrpcChannelCreation:
 
 class TestOtlpSinkGrpcGenericException:
     @pytest.mark.asyncio
-    async def test_grpc_generic_exception_triggers_retry(self) -> None:
+    async def test_grpc_generic_exception_propagates_to_flush(self) -> None:
+        """Non-RpcError exceptions in _send_grpc propagate to _flush's try/except."""
         from seerflow.alerting.sinks.otlp import OtlpSink
 
-        call_count = 0
-
-        async def flaky_export(request: object) -> None:
-            nonlocal call_count
-            call_count += 1
-            if call_count < 2:
-                raise ConnectionError("network blip")
+        async def always_fail(request: object) -> None:
+            raise ConnectionError("network blip")
 
         mock_channel = MagicMock()
         mock_stub = MagicMock()
-        mock_stub.Export = flaky_export
+        mock_stub.Export = always_fail
         sink = OtlpSink(endpoint="localhost:4317", protocol="grpc")
         sink._grpc_channel = mock_channel
 
         with (
             patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
-            patch("seerflow.alerting.sinks.otlp.asyncio") as mock_asyncio,
+            patch("seerflow.alerting.sinks.otlp._log") as mock_log,
         ):
-            mock_asyncio.sleep = AsyncMock()
             sink.enqueue(_make_alert())
             await sink._flush()
-
-        assert call_count == 2
+            mock_log.exception.assert_called_once()
 
 
 class TestOtlpSinkHttpExhaustsRetries:

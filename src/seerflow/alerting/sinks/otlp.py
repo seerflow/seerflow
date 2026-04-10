@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 import aiohttp
@@ -201,7 +201,7 @@ class OtlpSink:
     def __init__(
         self,
         endpoint: str,
-        protocol: str,
+        protocol: Literal["grpc", "http"],
         export_interval: int = 5,
         max_pending: int = 10_000,
     ) -> None:
@@ -280,13 +280,6 @@ class OtlpSink:
                     attempt + 1,
                     exc.details() if hasattr(exc, "details") else str(exc),
                     code,
-                )
-            except Exception as exc:
-                _log.warning(
-                    "OTLP gRPC export to %s failed (attempt %d): %s",
-                    _masked_url(self._endpoint),
-                    attempt + 1,
-                    exc,
                 )
             if attempt < self._MAX_RETRIES - 1:
                 await asyncio.sleep(self._RETRY_DELAYS[attempt])
