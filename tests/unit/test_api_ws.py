@@ -55,3 +55,48 @@ class TestClientFilterDefaults:
     def test_empty_filter_matches_any_alert(self) -> None:
         f = ClientFilter()
         assert f.matches_alert(_make_alert()) is True
+
+
+class TestClientFilterMatching:
+    def test_source_filter_matches_whitelisted_source(self) -> None:
+        f = ClientFilter(sources=frozenset({"syslog"}))
+        assert f.matches_event(_make_event(source_type="syslog")) is True
+
+    def test_source_filter_rejects_non_whitelisted_source(self) -> None:
+        f = ClientFilter(sources=frozenset({"syslog"}))
+        assert f.matches_event(_make_event(source_type="otlp-grpc")) is False
+
+    def test_min_severity_accepts_equal(self) -> None:
+        f = ClientFilter(min_severity=3)
+        assert f.matches_event(_make_event(severity_id=3)) is True
+
+    def test_min_severity_rejects_below(self) -> None:
+        f = ClientFilter(min_severity=4)
+        assert f.matches_event(_make_event(severity_id=3)) is False
+
+    def test_template_filter_matches_whitelisted_template(self) -> None:
+        f = ClientFilter(template_ids=frozenset({42}))
+        assert f.matches_event(_make_event(template_id=42)) is True
+
+    def test_template_filter_rejects_non_whitelisted_template(self) -> None:
+        f = ClientFilter(template_ids=frozenset({42}))
+        assert f.matches_event(_make_event(template_id=99)) is False
+
+    def test_alert_type_filter_matches_whitelisted_type(self) -> None:
+        f = ClientFilter(alert_types=frozenset({"sigma"}))
+        assert f.matches_alert(_make_alert(alert_type="sigma")) is True
+
+    def test_alert_type_filter_rejects_non_whitelisted_type(self) -> None:
+        f = ClientFilter(alert_types=frozenset({"ml"}))
+        assert f.matches_alert(_make_alert(alert_type="sigma")) is False
+
+    def test_combined_filter_applies_and_semantics(self) -> None:
+        f = ClientFilter(
+            sources=frozenset({"syslog"}),
+            min_severity=3,
+            template_ids=frozenset({42}),
+        )
+        event = _make_event(source_type="syslog", severity_id=4, template_id=42)
+        assert f.matches_event(event) is True
+        bad_source = _make_event(source_type="otlp-grpc", severity_id=4, template_id=42)
+        assert f.matches_event(bad_source) is False
