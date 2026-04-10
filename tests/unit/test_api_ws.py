@@ -331,3 +331,60 @@ class TestBroadcastEvent:
         # Corrupt the filter to force a TypeError in matches_event
         mgr._clients[client_id].filter = "not-a-filter"  # type: ignore[assignment]
         mgr.broadcast_event(_make_event())  # Must not raise
+
+
+class TestBroadcastAlert:
+    @pytest.mark.asyncio
+    async def _connect(self, mgr: ConnectionManager) -> str:
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        return await mgr.connect(ws)
+
+    @pytest.mark.asyncio
+    async def test_broadcast_alert_appends_to_alert_deque(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+
+        mgr.broadcast_alert(_make_alert())
+
+        client = mgr._clients[client_id]
+        assert len(client.alert_deque) == 1
+        assert len(client.event_deque) == 0  # separate deque
+
+    @pytest.mark.asyncio
+    async def test_broadcast_alert_respects_alert_type_filter(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        mgr.set_filter(client_id, {"type": "filter", "alert_types": ["ml"]})
+
+        mgr.broadcast_alert(_make_alert(alert_type="sigma"))
+        assert len(mgr._clients[client_id].alert_deque) == 0
+
+        mgr.broadcast_alert(_make_alert(alert_type="ml"))
+        assert len(mgr._clients[client_id].alert_deque) == 1
+
+    @pytest.mark.asyncio
+    async def test_event_flood_does_not_evict_alerts(self) -> None:
+        mgr = ConnectionManager(queue_maxlen=3)
+        client_id = await self._connect(mgr)
+
+        mgr.broadcast_alert(_make_alert())
+        for i in range(10):
+            mgr.broadcast_event(_make_event(template_id=i))
+
+        client = mgr._clients[client_id]
+        assert len(client.alert_deque) == 1
+        assert len(client.event_deque) == 3
+        assert client.dropped_alerts == 0
+
+    @pytest.mark.asyncio
+    async def test_alert_deque_overflow_drops_oldest(self) -> None:
+        mgr = ConnectionManager(queue_maxlen=2)
+        client_id = await self._connect(mgr)
+
+        for i in range(5):
+            mgr.broadcast_alert(_make_alert(alert_type="sigma", severity=i + 1))
+
+        client = mgr._clients[client_id]
+        assert len(client.alert_deque) == 2
+        assert client.dropped_alerts == 3

@@ -212,3 +212,23 @@ class ConnectionManager:
                     client.client_id,
                     exc_info=True,
                 )
+
+    def broadcast_alert(self, alert: Alert) -> None:
+        """Fan-out an alert to all matching clients (sync, non-blocking).
+
+        Must never raise — the pipeline hot path depends on this.
+        """
+        for client in self._clients.values():
+            try:
+                if not client.filter.matches_alert(alert):
+                    continue
+                if len(client.alert_deque) == client.alert_deque.maxlen:
+                    client.dropped_alerts += 1
+                client.alert_deque.append(alert)
+                client.wakeup.set()
+            except Exception:
+                _log.warning(
+                    "broadcast_alert failed for client %s",
+                    client.client_id,
+                    exc_info=True,
+                )
