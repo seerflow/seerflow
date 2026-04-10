@@ -270,3 +270,63 @@ class ConnectionManager:
                     client.client_id,
                     exc_info=True,
                 )
+
+    def start_client_sender(self, client_id: str) -> None:
+        """Start the per-client sender task. Called after connect()."""
+        client = self._clients.get(client_id)
+        if client is None or client.sender_task is not None:
+            return
+        client.sender_task = asyncio.create_task(self._client_sender(client))
+
+    async def _client_sender(self, client: ClientState) -> None:
+        """Drain deques on wakeup or tick timeout; send batched JSON."""
+        from fastapi import WebSocketDisconnect
+
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(
+                        client.wakeup.wait(),
+                        timeout=self._tick_interval_s,
+                    )
+                except TimeoutError:
+                    pass
+                client.wakeup.clear()
+
+                events_to_send: list[SeerflowEvent] = []
+                while client.event_deque and len(events_to_send) < self._batch_max_events:
+                    events_to_send.append(client.event_deque.popleft())
+
+                if len(events_to_send) == 1:
+                    await client.websocket.send_json(serialize_event(events_to_send[0]))
+                elif events_to_send:
+                    await client.websocket.send_json(
+                        {
+                            "type": "batch",
+                            "events": [serialize_event(e)["data"] for e in events_to_send],
+                        }
+                    )
+
+                alerts_to_send: list[Alert] = []
+                while client.alert_deque and len(alerts_to_send) < self._batch_max_events:
+                    alerts_to_send.append(client.alert_deque.popleft())
+
+                if len(alerts_to_send) == 1:
+                    await client.websocket.send_json(serialize_alert(alerts_to_send[0]))
+                elif alerts_to_send:
+                    await client.websocket.send_json(
+                        {
+                            "type": "alert_batch",
+                            "alerts": [serialize_alert(a)["data"] for a in alerts_to_send],
+                        }
+                    )
+        except WebSocketDisconnect:
+            pass
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _log.warning(
+                "client sender task failed for %s",
+                client.client_id,
+                exc_info=True,
+            )
