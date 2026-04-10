@@ -388,3 +388,39 @@ class TestBroadcastAlert:
         client = mgr._clients[client_id]
         assert len(client.alert_deque) == 2
         assert client.dropped_alerts == 3
+
+
+import json as _json
+
+from seerflow.api.ws import serialize_alert, serialize_event
+
+
+class TestSerialization:
+    def test_serialize_event_has_core_fields(self) -> None:
+        event = _make_event(source_type="syslog", severity_id=3, template_id=42)
+        payload = serialize_event(event)
+        assert payload["type"] == "event"
+        data = payload["data"]
+        assert data["source_type"] == "syslog"
+        assert data["severity_id"] == 3
+        assert data["template_id"] == 42
+        assert "event_id" in data
+        assert "timestamp_ns" in data
+
+    def test_serialize_alert_has_core_fields(self) -> None:
+        alert = _make_alert(alert_type="sigma", severity=4)
+        payload = serialize_alert(alert)
+        assert payload["type"] == "alert"
+        data = payload["data"]
+        assert data["alert_type"] == "sigma"
+        assert data["severity"] == 4
+        assert "alert_id" in data
+        assert "rule_name" in data
+        assert "entity_value" in data
+
+    def test_serialize_event_is_json_encodable(self) -> None:
+        payload = serialize_event(_make_event())
+        # Round-trips through json.dumps/loads
+        s = _json.dumps(payload)
+        parsed = _json.loads(s)
+        assert parsed["type"] == "event"

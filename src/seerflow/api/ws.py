@@ -44,6 +44,44 @@ class ClientFilter:
         return int(alert.severity_id) >= self.min_severity
 
 
+def serialize_event(event: SeerflowEvent) -> dict[str, Any]:
+    """Serialize a SeerflowEvent to a dict suitable for JSON wire format."""
+    return {
+        "type": "event",
+        "data": {
+            "event_id": str(event.event_id),
+            "timestamp_ns": event.timestamp_ns,
+            "severity_id": int(event.severity_id),
+            "source_type": event.source_type,
+            "message": event.message,
+            "template_id": event.template_id,
+            "entity_refs": list(event.entity_refs),
+        },
+    }
+
+
+def serialize_alert(alert: Alert) -> dict[str, Any]:
+    """Serialize an Alert to a dict suitable for JSON wire format."""
+    return {
+        "type": "alert",
+        "data": {
+            "alert_id": alert.alert_id,
+            "timestamp_ns": alert.timestamp_ns,
+            "alert_type": alert.alert_type,
+            "rule_name": alert.rule_name,
+            "severity": int(alert.severity_id),
+            "risk_score": alert.risk_score,
+            "entity_uuid": alert.entity_uuid,
+            "entity_type": alert.entity_type,
+            "entity_value": alert.entity_value,
+            "message": alert.description,
+            "mitre_tactics": list(alert.mitre_tactics),
+            "mitre_techniques": list(alert.mitre_techniques),
+            "dedup_count": alert.dedup_count,
+        },
+    }
+
+
 @dataclass(slots=True)
 class ClientState:
     """Runtime state for one connected WebSocket client."""
