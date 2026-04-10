@@ -35,12 +35,20 @@ def get_health_state(request: Request) -> dict[str, str]:
     return request.app.state.health_state  # type: ignore[no-any-return]
 
 
+_MAX_TIMESTAMP_NS = 2**63 - 1  # SQLite int64 ceiling (~year 2262)
+
+
 def parse_timestamp_ns(iso_str: str) -> int:
     """Convert an ISO-8601 string to nanoseconds since epoch.
 
     Assumes UTC if no timezone info is present.
+    Raises ValueError if the result is out of int64 range.
     """
     dt = datetime.fromisoformat(iso_str)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-    return int(dt.timestamp() * 1_000_000_000)
+    ns = int(dt.timestamp() * 1_000_000_000)
+    if ns < 0 or ns > _MAX_TIMESTAMP_NS:
+        msg = f"Timestamp out of supported range: {iso_str!r}"
+        raise ValueError(msg)
+    return ns

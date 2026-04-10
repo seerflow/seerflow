@@ -33,8 +33,10 @@ async def list_alerts(
         int | None, Query(ge=0, le=6, description="Minimum severity (0-6)")
     ] = None,
     entity: Annotated[str | None, Query(description="Entity UUID")] = None,
-    tactic: Annotated[str | None, Query(description="MITRE ATT&CK tactic")] = None,
-    technique: Annotated[str | None, Query(description="MITRE ATT&CK technique")] = None,
+    tactic: Annotated[str | None, Query(description="MITRE ATT&CK tactic", max_length=64)] = None,
+    technique: Annotated[
+        str | None, Query(description="MITRE ATT&CK technique", max_length=16)
+    ] = None,
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     limit: Annotated[int, Query(ge=1, description="Results per page")] = 50,
 ) -> PaginatedResponse[AlertResponse]:
@@ -50,9 +52,7 @@ async def list_alerts(
             start_ns = parse_timestamp_ns(since) if since else 0
             end_ns = parse_timestamp_ns(until) if until else 2**63 - 1
         except ValueError as exc:
-            raise HTTPException(
-                status_code=422, detail=f"Invalid ISO-8601 timestamp: {exc}"
-            ) from exc
+            raise HTTPException(status_code=422, detail="Invalid ISO-8601 timestamp") from exc
         if start_ns > end_ns:
             raise HTTPException(status_code=400, detail="since must be before until")
         time_range = TimeRange(start_ns=start_ns, end_ns=end_ns)

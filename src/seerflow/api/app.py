@@ -42,6 +42,7 @@ def create_api_app(
         version="1.0.0",
         docs_url=f"{_API_PREFIX}/docs",
         openapi_url=f"{_API_PREFIX}/openapi.json",
+        redoc_url=None,
     )
 
     # Storage dependency injection

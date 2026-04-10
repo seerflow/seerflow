@@ -47,7 +47,7 @@ def _extract_entities(events: list[SeerflowEvent]) -> list[EntitySearchResult]:
 @router.get("/entities/search", response_model=list[EntitySearchResult])
 async def search_entities(
     storage: Storage,
-    q: str = Query(..., min_length=1, description="Search query"),
+    q: str = Query(..., min_length=1, max_length=256, description="Search query"),
 ) -> list[EntitySearchResult]:
     """Search entities by value.
 

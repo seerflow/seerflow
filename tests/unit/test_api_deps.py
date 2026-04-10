@@ -30,6 +30,10 @@ class TestParseTimestampNs:
         with pytest.raises(ValueError):
             parse_timestamp_ns("not-a-date")
 
+    def test_far_future_overflows_raises(self) -> None:
+        with pytest.raises(ValueError, match="out of supported range"):
+            parse_timestamp_ns("9999-12-31T23:59:59+00:00")
+
 
 class TestStorageDeps:
     """Tests for the StorageDeps container."""
