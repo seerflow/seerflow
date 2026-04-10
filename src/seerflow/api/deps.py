@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from fastapi import Request  # noqa: TC002 - runtime dep for FastAPI DI
+from fastapi import HTTPException, Request
 
 if TYPE_CHECKING:
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -52,3 +52,13 @@ def parse_timestamp_ns(iso_str: str) -> int:
         msg = f"Timestamp out of supported range: {iso_str!r}"
         raise ValueError(msg)
     return ns
+
+
+def require_entity_store(storage: StorageDeps) -> EntityStore:
+    """FastAPI Depends -- return entity_store or 503 if missing."""
+    if storage.entity_store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="entity_store not configured",
+        )
+    return storage.entity_store
