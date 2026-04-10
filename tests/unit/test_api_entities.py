@@ -281,3 +281,67 @@ class TestEntityTimeline:
         call = entity_store.get_timeline.await_args
         time_range = call.kwargs["time_range"]
         assert time_range.end_ns - time_range.start_ns == DEFAULT_TIMELINE_WINDOW_NS
+
+    def test_source_type_filter_propagates(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        entity_store.get_timeline.return_value = []
+        entity_store.get_related.return_value = []
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(
+            f"/api/v1/entities/{entity_uuid}/timeline?source_type=syslog"
+        )
+        assert resp.status_code == 200
+        assert entity_store.get_timeline.await_args.kwargs["source_type"] == "syslog"
+
+    def test_severity_min_filter_propagates(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        entity_store.get_timeline.return_value = []
+        entity_store.get_related.return_value = []
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(
+            f"/api/v1/entities/{entity_uuid}/timeline?severity_min=4"
+        )
+        assert resp.status_code == 200
+        assert entity_store.get_timeline.await_args.kwargs["severity_min"] == 4
+
+    def test_explicit_time_range_propagates(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        entity_store.get_timeline.return_value = []
+        entity_store.get_related.return_value = []
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(
+            f"/api/v1/entities/{entity_uuid}/timeline?start_ns=1000&end_ns=2000"
+        )
+        assert resp.status_code == 200
+        tr = entity_store.get_timeline.await_args.kwargs["time_range"]
+        assert tr.start_ns == 1000
+        assert tr.end_ns == 2000
+
+    def test_limit_propagates_and_clamped(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        entity_store.get_timeline.return_value = []
+        entity_store.get_related.return_value = []
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(
+            f"/api/v1/entities/{entity_uuid}/timeline?limit=500"
+        )
+        assert resp.status_code == 200
+        assert entity_store.get_timeline.await_args.kwargs["limit"] == 500
+
+        resp = client.get(
+            f"/api/v1/entities/{entity_uuid}/timeline?limit=999999"
+        )
+        assert resp.status_code == 422
+
+    def test_severity_out_of_range_returns_422(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(
+            f"/api/v1/entities/{entity_uuid}/timeline?severity_min=7"
+        )
+        assert resp.status_code == 422
