@@ -181,3 +181,82 @@ class TestConnectionManagerLifecycle:
         with pytest.raises(WebSocketException):
             await mgr.connect(overflow_ws)
         assert mgr.connected_count == 2
+
+
+class TestSetFilter:
+    @pytest.mark.asyncio
+    async def _connect(self, mgr: ConnectionManager) -> str:
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        return await mgr.connect(ws)
+
+    @pytest.mark.asyncio
+    async def test_valid_filter_updates_state(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+
+        errors = mgr.set_filter(
+            client_id,
+            {
+                "type": "filter",
+                "sources": ["syslog", "otlp-grpc"],
+                "min_severity": 3,
+                "alert_types": ["sigma"],
+                "template_ids": [42],
+            },
+        )
+
+        assert errors == []
+        client = mgr._clients[client_id]
+        assert client.filter.sources == frozenset({"syslog", "otlp-grpc"})
+        assert client.filter.min_severity == 3
+        assert client.filter.alert_types == frozenset({"sigma"})
+        assert client.filter.template_ids == frozenset({42})
+
+    @pytest.mark.asyncio
+    async def test_min_severity_clamped_to_lower_bound(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        mgr.set_filter(client_id, {"type": "filter", "min_severity": 0})
+        assert mgr._clients[client_id].filter.min_severity == 1
+
+    @pytest.mark.asyncio
+    async def test_min_severity_clamped_to_upper_bound(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        mgr.set_filter(client_id, {"type": "filter", "min_severity": 99})
+        assert mgr._clients[client_id].filter.min_severity == 24
+
+    @pytest.mark.asyncio
+    async def test_unknown_alert_type_rejected(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        errors = mgr.set_filter(
+            client_id,
+            {"type": "filter", "alert_types": ["sigma", "foobar"]},
+        )
+        assert errors, "expected validation error for unknown alert_type"
+        # Filter must NOT be partially applied on failure
+        assert mgr._clients[client_id].filter.alert_types == frozenset()
+
+    @pytest.mark.asyncio
+    async def test_sources_list_capped_at_50(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        huge = [f"src-{i}" for i in range(100)]
+        mgr.set_filter(client_id, {"type": "filter", "sources": huge})
+        assert len(mgr._clients[client_id].filter.sources) == 50
+
+    @pytest.mark.asyncio
+    async def test_template_ids_list_capped_at_100(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        huge = list(range(500))
+        mgr.set_filter(client_id, {"type": "filter", "template_ids": huge})
+        assert len(mgr._clients[client_id].filter.template_ids) == 100
+
+    @pytest.mark.asyncio
+    async def test_set_filter_on_unknown_client_is_noop(self) -> None:
+        mgr = ConnectionManager()
+        errors = mgr.set_filter("not-a-real-id", {"type": "filter"})
+        assert errors == []

@@ -125,3 +125,69 @@ class ConnectionManager:
                 await client.sender_task
             except (asyncio.CancelledError, Exception):
                 pass
+
+    _VALID_ALERT_TYPES: frozenset[str] = frozenset(
+        {"ml", "sigma", "correlation", "ueba", "ioc"}
+    )
+    _MAX_SOURCES = 50
+    _MAX_TEMPLATE_IDS = 100
+    _MAX_ALERT_TYPES = 10
+    _SEVERITY_MIN = 1
+    _SEVERITY_MAX = 24
+
+    def set_filter(self, client_id: str, filter_msg: dict[str, Any]) -> list[str]:
+        """Validate and apply a filter message. Returns list of error strings.
+
+        On validation failure, the existing filter is preserved (atomic update).
+        """
+        client = self._clients.get(client_id)
+        if client is None:
+            return []
+
+        errors: list[str] = []
+
+        sources_raw = filter_msg.get("sources", [])
+        if not isinstance(sources_raw, list):
+            errors.append("sources must be a list")
+            sources_raw = []
+        sources = frozenset(str(s) for s in sources_raw[: self._MAX_SOURCES])
+
+        templates_raw = filter_msg.get("template_ids", [])
+        if not isinstance(templates_raw, list):
+            errors.append("template_ids must be a list")
+            templates_raw = []
+        template_ids = frozenset(
+            int(t) for t in templates_raw[: self._MAX_TEMPLATE_IDS] if isinstance(t, int)
+        )
+
+        alert_types_raw = filter_msg.get("alert_types", [])
+        if not isinstance(alert_types_raw, list):
+            errors.append("alert_types must be a list")
+            alert_types_raw = []
+        alert_types_trimmed = alert_types_raw[: self._MAX_ALERT_TYPES]
+        unknown = [
+            at for at in alert_types_trimmed if at not in self._VALID_ALERT_TYPES
+        ]
+        if unknown:
+            errors.append(f"unknown alert_types: {unknown}")
+        alert_types = frozenset(
+            at for at in alert_types_trimmed if at in self._VALID_ALERT_TYPES
+        )
+
+        min_sev_raw = filter_msg.get("min_severity", 1)
+        if not isinstance(min_sev_raw, int):
+            errors.append("min_severity must be an integer")
+            min_sev = 1
+        else:
+            min_sev = max(self._SEVERITY_MIN, min(self._SEVERITY_MAX, min_sev_raw))
+
+        if errors:
+            return errors
+
+        client.filter = ClientFilter(
+            sources=sources,
+            min_severity=min_sev,
+            alert_types=alert_types,
+            template_ids=template_ids,
+        )
+        return []
