@@ -174,5 +174,26 @@ class TestEntitySearchResult:
     """Tests for entity search result model."""
 
     def test_basic_result(self) -> None:
-        result = EntitySearchResult(entity_type="ip", entity_value="10.0.0.1")
+        result = EntitySearchResult(
+            entity_type="ip",
+            entity_value="10.0.0.1",
+            entity_uuid="00000000-0000-0000-0000-000000000001",
+        )
         assert result.entity_type == "ip"
+
+
+def test_entity_search_result_requires_entity_uuid() -> None:
+    from seerflow.api.schemas import EntitySearchResult
+
+    result = EntitySearchResult(
+        entity_type="ip",
+        entity_value="10.0.0.1",
+        entity_uuid="3e1b9c5c-8f3e-5a0e-9d2a-8b1e6f0a1234",
+    )
+    assert result.entity_uuid == "3e1b9c5c-8f3e-5a0e-9d2a-8b1e6f0a1234"
+    dumped = result.model_dump()
+    assert dumped == {
+        "entity_type": "ip",
+        "entity_value": "10.0.0.1",
+        "entity_uuid": "3e1b9c5c-8f3e-5a0e-9d2a-8b1e6f0a1234",
+    }

@@ -122,3 +122,4 @@ class EntitySearchResult(BaseModel):
 
     entity_type: str
     entity_value: str
+    entity_uuid: str
