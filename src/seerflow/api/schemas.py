@@ -142,3 +142,12 @@ class EntityRelationResponse(BaseModel):
             entity_value=relation.entity_value,
             relation_type=relation.relation_type,
         )
+
+
+class EntityTimelineResponse(BaseModel):
+    """Entity timeline detail: events + related entities."""
+
+    entity_uuid: str
+    events: list[EventResponse]
+    related: list[EntityRelationResponse]
+    total: int

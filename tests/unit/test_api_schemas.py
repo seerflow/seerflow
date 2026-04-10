@@ -214,3 +214,38 @@ def test_entity_search_result_requires_entity_uuid() -> None:
         "entity_value": "10.0.0.1",
         "entity_uuid": "3e1b9c5c-8f3e-5a0e-9d2a-8b1e6f0a1234",
     }
+
+
+def test_entity_timeline_response_envelope() -> None:
+    from seerflow.api.schemas import (
+        EntityRelationResponse,
+        EntityTimelineResponse,
+        EventResponse,
+    )
+
+    event = EventResponse(
+        event_id="abc",
+        timestamp_ns=1_775_736_000_000_000_000,
+        observed_ns=1_775_736_000_000_000_001,
+        severity_id=3,
+        severity_text="INFO",
+        source_type="syslog",
+        message="hi",
+        template_id=-1,
+        entity_refs=[],
+    )
+    relation = EntityRelationResponse(
+        entity_uuid="abc",
+        entity_type="ip",
+        entity_value="10.0.0.1",
+        relation_type="seen_on",
+    )
+    envelope = EntityTimelineResponse(
+        entity_uuid="3e1b9c5c-8f3e-5a0e-9d2a-8b1e6f0a1234",
+        events=[event],
+        related=[relation],
+        total=1,
+    )
+    assert envelope.total == 1
+    assert envelope.events[0].message == "hi"
+    assert envelope.related[0].relation_type == "seen_on"
