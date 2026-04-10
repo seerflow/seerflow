@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -28,7 +28,7 @@ class EventResponse(BaseModel):
     source_type: str
     message: str
     template_id: int
-    entity_refs: list[str] = []
+    entity_refs: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_event(cls, event: SeerflowEvent) -> EventResponse:
@@ -61,8 +61,8 @@ class AlertResponse(BaseModel):
     message: str
     dedup_count: int = 1
     feedback: str | None = None
-    mitre_tactic: str | None = None
-    mitre_technique: str | None = None
+    mitre_tactics: list[str] = Field(default_factory=list)
+    mitre_techniques: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_alert(cls, alert: Alert) -> AlertResponse:
@@ -79,9 +79,9 @@ class AlertResponse(BaseModel):
             entity_value=alert.entity_value,
             message=alert.description,
             dedup_count=alert.dedup_count,
-            feedback=alert.feedback if alert.feedback else None,
-            mitre_tactic=alert.mitre_tactics[0] if alert.mitre_tactics else None,
-            mitre_technique=alert.mitre_techniques[0] if alert.mitre_techniques else None,
+            feedback=alert.feedback or None,
+            mitre_tactics=list(alert.mitre_tactics),
+            mitre_techniques=list(alert.mitre_techniques),
         )
 
 

@@ -25,7 +25,9 @@ async def list_events(
     since: Annotated[str | None, Query(description="Start time (ISO-8601)")] = None,
     until: Annotated[str | None, Query(description="End time (ISO-8601)")] = None,
     source: Annotated[str | None, Query(description="Source type filter")] = None,
-    severity: Annotated[int | None, Query(description="Minimum severity (0-6)")] = None,
+    severity: Annotated[
+        int | None, Query(ge=0, le=6, description="Minimum severity (0-6)")
+    ] = None,
     template_id: Annotated[int | None, Query(description="Drain3 template ID")] = None,
     entity: Annotated[str | None, Query(description="Entity UUID")] = None,
     q: Annotated[str | None, Query(description="Full-text search query")] = None,

@@ -7,37 +7,42 @@ POST /api/v1/alerts/{id}/feedback -- TP/FP feedback
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import Annotated, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from seerflow.api.deps import StorageDeps, get_storage, parse_timestamp_ns
 from seerflow.api.schemas import AlertResponse, FeedbackRequest, PaginatedResponse
+from seerflow.models._types import AlertType
 from seerflow.models.query import AlertQuery, TimeRange
-
-if TYPE_CHECKING:
-    from seerflow.models._types import AlertType
 
 router = APIRouter(tags=["alerts"])
 
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 
+_VALID_ALERT_TYPES = frozenset(get_args(AlertType))
+
 
 @router.get("/alerts", response_model=PaginatedResponse[AlertResponse])
 async def list_alerts(
     storage: Storage,
-    since: str | None = Query(None, description="Start time (ISO-8601)"),
-    until: str | None = Query(None, description="End time (ISO-8601)"),
-    alert_type: str | None = Query(None, alias="type", description="Alert type"),
-    severity: int | None = Query(None, description="Minimum severity (0-6)"),
-    entity: str | None = Query(None, description="Entity UUID"),
-    tactic: str | None = Query(None, description="MITRE ATT&CK tactic"),
-    technique: str | None = Query(None, description="MITRE ATT&CK technique"),
-    page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(50, ge=1, description="Results per page"),
+    since: Annotated[str | None, Query(description="Start time (ISO-8601)")] = None,
+    until: Annotated[str | None, Query(description="End time (ISO-8601)")] = None,
+    alert_type: Annotated[str | None, Query(alias="type", description="Alert type")] = None,
+    severity: Annotated[
+        int | None, Query(ge=0, le=6, description="Minimum severity (0-6)")
+    ] = None,
+    entity: Annotated[str | None, Query(description="Entity UUID")] = None,
+    tactic: Annotated[str | None, Query(description="MITRE ATT&CK tactic")] = None,
+    technique: Annotated[str | None, Query(description="MITRE ATT&CK technique")] = None,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    limit: Annotated[int, Query(ge=1, description="Results per page")] = 50,
 ) -> PaginatedResponse[AlertResponse]:
     """Query alerts with filtering and pagination."""
     limit = min(limit, 1000)
+
+    if alert_type is not None and alert_type not in _VALID_ALERT_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid alert type: {alert_type!r}")
 
     time_range: TimeRange | None = None
     if since is not None or until is not None:
@@ -52,10 +57,9 @@ async def list_alerts(
             raise HTTPException(status_code=400, detail="since must be before until")
         time_range = TimeRange(start_ns=start_ns, end_ns=end_ns)
 
-    typed_alert: AlertType | None = cast("AlertType | None", alert_type)
     query = AlertQuery(
         time_range=time_range,
-        alert_type=typed_alert,
+        alert_type=alert_type,  # type: ignore[arg-type]
         severity_min=severity,
         entity_uuid=entity,
         tactic=tactic,

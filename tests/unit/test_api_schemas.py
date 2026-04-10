@@ -81,8 +81,8 @@ class TestAlertResponse:
         assert resp.entity_type == "ip"
         assert resp.message == "Anomaly detected"
         assert resp.dedup_count == 3
-        assert resp.mitre_tactic == "initial-access"
-        assert resp.mitre_technique == "T1190"
+        assert resp.mitre_tactics == ["initial-access"]
+        assert resp.mitre_techniques == ["T1190"]
 
     def test_from_alert_no_mitre(self) -> None:
         from seerflow.models.alert import Alert
@@ -100,8 +100,8 @@ class TestAlertResponse:
             contributing_events=(),
         )
         resp = AlertResponse.from_alert(alert)
-        assert resp.mitre_tactic is None
-        assert resp.mitre_technique is None
+        assert resp.mitre_tactics == []
+        assert resp.mitre_techniques == []
 
 
 class TestFeedbackRequest:

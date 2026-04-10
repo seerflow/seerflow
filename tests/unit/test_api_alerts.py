@@ -75,6 +75,12 @@ class TestListAlerts:
         call_args = alert_store.query_alerts.call_args[0][0]
         assert call_args.alert_type == "sigma"
 
+    def test_invalid_type_returns_422(self) -> None:
+        alert_store = AsyncMock()
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?type=garbage")
+        assert resp.status_code == 422
+
     def test_since_until_filtering(self) -> None:
         alert_store = AsyncMock()
         alert_store.query_alerts.return_value = Page(
