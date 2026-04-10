@@ -12,9 +12,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from fastapi import WebSocket
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
+if TYPE_CHECKING:
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
     from seerflow.storage.protocols import AlertStore
@@ -130,10 +130,8 @@ class ConnectionManager:
         Raises:
             WebSocketException: if ``max_connections`` is already reached.
         """
-        from fastapi import WebSocketException
-
         if len(self._clients) >= self.max_connections:
-            await websocket.close(code=1013)  # Try Again Later
+            await websocket.close(code=1013)
             msg = f"max_connections={self.max_connections} reached"
             raise WebSocketException(code=1013, reason=msg)
 
@@ -280,8 +278,6 @@ class ConnectionManager:
 
     async def _client_sender(self, client: ClientState) -> None:
         """Drain deques on wakeup or tick timeout; send batched JSON."""
-        from fastapi import WebSocketDisconnect
-
         try:
             while True:
                 try:
@@ -416,3 +412,34 @@ class ConnectionManager:
                 pass
         for client_id in list(self._clients.keys()):
             await self.disconnect(client_id)
+
+
+router = APIRouter(tags=["websocket"])
+
+
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    """WebSocket endpoint for real-time event/alert streaming."""
+    manager: ConnectionManager = websocket.app.state.ws_manager
+    try:
+        client_id = await manager.connect(websocket)
+    except Exception:
+        return
+
+    manager.start_client_sender(client_id)
+
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("type") == "filter":
+                errors = manager.set_filter(client_id, msg)
+                if errors:
+                    await websocket.send_json(
+                        {"type": "error", "message": "; ".join(errors)}
+                    )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await manager.disconnect(client_id)

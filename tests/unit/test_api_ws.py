@@ -586,3 +586,12 @@ class TestStatusBroadcaster:
         last_rate = status_calls[-1].args[0]["data"]["events_per_sec"]
         assert first_rate > 0 or last_rate >= 0  # smoke check
         await mgr.shutdown()
+
+
+class TestWebSocketRoute:
+    def test_router_exists(self) -> None:
+        from seerflow.api.ws import router
+
+        assert router is not None
+        routes = [r.path for r in router.routes]
+        assert "/ws" in routes
