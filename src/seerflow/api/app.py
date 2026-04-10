@@ -8,6 +8,7 @@ Usage::
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
@@ -19,10 +20,29 @@ from seerflow.api.routes import alerts, entities, events, health, stats
 from seerflow.api.ws import ConnectionManager
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from seerflow.config import SeerflowConfig
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
 
 _API_PREFIX = "/api/v1"
+
+
+def _build_ws_manager(
+    alert_store: AlertStore,
+    config: SeerflowConfig | None,
+) -> ConnectionManager:
+    """Construct a ConnectionManager from SeerflowConfig ws_* fields."""
+    if config is None:
+        return ConnectionManager(alert_store=alert_store)
+    return ConnectionManager(
+        alert_store=alert_store,
+        max_connections=config.ws_max_connections,
+        queue_maxlen=config.ws_queue_maxlen,
+        tick_interval_s=config.ws_tick_interval_s,
+        batch_max_events=config.ws_batch_max_events,
+        status_interval_s=config.ws_status_interval_s,
+    )
 
 
 def create_api_app(
@@ -38,16 +58,30 @@ def create_api_app(
         log_store: Event persistence backend.
         alert_store: Alert persistence backend.
         entity_store: Optional entity query backend.
-        config: Optional application configuration.
-        ws_manager: Optional WebSocket ConnectionManager. A default is created
-            if not supplied.
+        config: Optional application configuration. ``ws_*`` fields are
+            applied to the default ``ConnectionManager`` when ``ws_manager``
+            is not supplied.
+        ws_manager: Optional WebSocket ConnectionManager. A default is
+            created from ``config.ws_*`` fields (or hard defaults) if not
+            supplied.
     """
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Start the WebSocket status task on startup and shut down cleanly."""
+        app.state.ws_manager.start_status_task()
+        try:
+            yield
+        finally:
+            await app.state.ws_manager.shutdown()
+
     app = FastAPI(
         title="Seerflow API",
         version="1.0.0",
         docs_url=f"{_API_PREFIX}/docs",
         openapi_url=f"{_API_PREFIX}/openapi.json",
         redoc_url=None,
+        lifespan=lifespan,
     )
 
     # Storage dependency injection
@@ -58,7 +92,7 @@ def create_api_app(
     )
     app.state.config = config
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
-    app.state.ws_manager = ws_manager or ConnectionManager(alert_store=alert_store)
+    app.state.ws_manager = ws_manager or _build_ws_manager(alert_store, config)
 
     # CORS — wide open for v1 (localhost-only, no auth).
     # Configurable origins deferred to v2 when auth is added.
@@ -76,13 +110,5 @@ def create_api_app(
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
     app.include_router(ws_module.router, prefix=_API_PREFIX)
-
-    @app.on_event("startup")
-    async def _start_ws_status_task() -> None:
-        app.state.ws_manager.start_status_task()
-
-    @app.on_event("shutdown")
-    async def _stop_ws_manager() -> None:
-        await app.state.ws_manager.shutdown()
 
     return app

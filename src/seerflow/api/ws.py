@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import msgspec
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
 if TYPE_CHECKING:
@@ -21,6 +25,9 @@ if TYPE_CHECKING:
     from seerflow.storage.protocols import AlertStore
 
 _log = logging.getLogger("seerflow.api.ws")
+
+# Reused across all broadcasts to avoid per-call allocation on the hot path.
+_JSON_ENCODER = msgspec.json.Encoder()
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +108,13 @@ class ClientState:
 class ConnectionManager:
     """Fan-out WebSocket broadcaster with per-client filtering and backpressure."""
 
+    _VALID_ALERT_TYPES: frozenset[str] = frozenset({"ml", "sigma", "correlation", "ueba", "ioc"})
+    _MAX_SOURCES = 50
+    _MAX_TEMPLATE_IDS = 100
+    _MAX_ALERT_TYPES = 10
+    _SEVERITY_MIN = 1
+    _SEVERITY_MAX = 24
+
     def __init__(
         self,
         alert_store: AlertStore | None = None,
@@ -118,7 +132,9 @@ class ConnectionManager:
         self._status_interval_s = status_interval_s
         self._clients: dict[str, ClientState] = {}
         self._events_broadcast_count = 0
-        self._broadcast_window_start_ns = 0
+        # Initialize window start at construction so broadcasts before
+        # start_status_task are attributed to a non-zero window.
+        self._broadcast_window_start_ns = time.monotonic_ns()
         self._status_task: asyncio.Task[None] | None = None
 
     @property
@@ -132,14 +148,13 @@ class ConnectionManager:
             WebSocketException: if ``max_connections`` is already reached.
         """
         if len(self._clients) >= self.max_connections:
-            await websocket.close(code=1013)
             msg = f"max_connections={self.max_connections} reached"
+            # Let Starlette perform the close via the exception handler;
+            # do not pre-close and raise (that's a redundant double-signal).
             raise WebSocketException(code=1013, reason=msg)
 
         await websocket.accept()
-        import uuid as _uuid
-
-        client_id = _uuid.uuid4().hex
+        client_id = uuid.uuid4().hex
         client = ClientState(
             client_id=client_id,
             websocket=websocket,
@@ -160,13 +175,6 @@ class ConnectionManager:
             client.sender_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await client.sender_task
-
-    _VALID_ALERT_TYPES: frozenset[str] = frozenset({"ml", "sigma", "correlation", "ueba", "ioc"})
-    _MAX_SOURCES = 50
-    _MAX_TEMPLATE_IDS = 100
-    _MAX_ALERT_TYPES = 10
-    _SEVERITY_MIN = 1
-    _SEVERITY_MAX = 24
 
     def set_filter(self, client_id: str, filter_msg: dict[str, Any]) -> list[str]:
         """Validate and apply a filter message. Returns list of error strings.
@@ -278,6 +286,9 @@ class ConnectionManager:
                         client.wakeup.wait(),
                         timeout=self._tick_interval_s,
                     )
+                # Clearing before draining: any broadcast that arrives while
+                # we're awaiting send will re-set wakeup and be picked up on
+                # the next iteration. Spurious wakes are harmless.
                 client.wakeup.clear()
 
                 events_to_send: list[SeerflowEvent] = []
@@ -285,13 +296,14 @@ class ConnectionManager:
                     events_to_send.append(client.event_deque.popleft())
 
                 if len(events_to_send) == 1:
-                    await client.websocket.send_json(serialize_event(events_to_send[0]))
+                    await _send_bytes(client.websocket, serialize_event(events_to_send[0]))
                 elif events_to_send:
-                    await client.websocket.send_json(
+                    await _send_bytes(
+                        client.websocket,
                         {
                             "type": "batch",
                             "events": [serialize_event(e)["data"] for e in events_to_send],
-                        }
+                        },
                     )
 
                 alerts_to_send: list[Alert] = []
@@ -299,13 +311,14 @@ class ConnectionManager:
                     alerts_to_send.append(client.alert_deque.popleft())
 
                 if len(alerts_to_send) == 1:
-                    await client.websocket.send_json(serialize_alert(alerts_to_send[0]))
+                    await _send_bytes(client.websocket, serialize_alert(alerts_to_send[0]))
                 elif alerts_to_send:
-                    await client.websocket.send_json(
+                    await _send_bytes(
+                        client.websocket,
                         {
                             "type": "alert_batch",
                             "alerts": [serialize_alert(a)["data"] for a in alerts_to_send],
-                        }
+                        },
                     )
         except WebSocketDisconnect:
             pass
@@ -322,20 +335,16 @@ class ConnectionManager:
         """Start the periodic status broadcaster task."""
         if self._status_task is not None and not self._status_task.done():
             return
-        import time as _time
-
-        self._broadcast_window_start_ns = _time.monotonic_ns()
+        self._broadcast_window_start_ns = time.monotonic_ns()
         self._status_task = asyncio.create_task(self._status_broadcaster())
 
     async def _status_broadcaster(self) -> None:
         """Emit periodic status messages to all connected clients."""
-        import time as _time
-
         try:
             while True:
                 await asyncio.sleep(self._status_interval_s)
 
-                now_ns = _time.monotonic_ns()
+                now_ns = time.monotonic_ns()
                 elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
                 events_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
                 self._events_broadcast_count = 0
@@ -355,7 +364,7 @@ class ConnectionManager:
                         },
                     }
                     try:
-                        await client.websocket.send_json(status_msg)
+                        await _send_bytes(client.websocket, status_msg)
                     except Exception:
                         _log.debug(
                             "failed to send status to client %s",
@@ -372,11 +381,9 @@ class ConnectionManager:
         if self._alert_store is None:
             return 0
         try:
-            import time as _time
-
             from seerflow.models.query import AlertQuery, TimeRange
 
-            now_ns = _time.time_ns()
+            now_ns = time.time_ns()
             page = await self._alert_store.query_alerts(
                 AlertQuery(
                     time_range=TimeRange(
@@ -401,6 +408,15 @@ class ConnectionManager:
             await self.disconnect(client_id)
 
 
+async def _send_bytes(websocket: WebSocket, payload: dict[str, Any]) -> None:
+    """Encode ``payload`` with msgspec and send as bytes over the WebSocket.
+
+    Using ``msgspec.json.Encoder`` + ``send_bytes`` is ~10-30x faster than
+    Starlette's ``send_json`` (which uses ``json.dumps``) on the hot path.
+    """
+    await websocket.send_bytes(_JSON_ENCODER.encode(payload))
+
+
 router = APIRouter(tags=["websocket"])
 
 
@@ -410,20 +426,31 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     manager: ConnectionManager = websocket.app.state.ws_manager
     try:
         client_id = await manager.connect(websocket)
-    except Exception:
+    except WebSocketException as exc:
+        _log.info("ws connect rejected: %s", exc.reason)
         return
 
     manager.start_client_sender(client_id)
 
     try:
         while True:
-            msg = await websocket.receive_json()
+            try:
+                msg = await websocket.receive_json()
+            except json.JSONDecodeError:
+                await _send_bytes(
+                    websocket,
+                    {"type": "error", "message": "invalid JSON"},
+                )
+                continue
             if not isinstance(msg, dict):
                 continue
             if msg.get("type") == "filter":
                 errors = manager.set_filter(client_id, msg)
                 if errors:
-                    await websocket.send_json({"type": "error", "message": "; ".join(errors)})
+                    await _send_bytes(
+                        websocket,
+                        {"type": "error", "message": "; ".join(errors)},
+                    )
     except WebSocketDisconnect:
         pass
     finally:

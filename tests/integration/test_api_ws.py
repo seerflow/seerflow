@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import msgspec
 import pytest
 
 if TYPE_CHECKING:
@@ -18,6 +19,15 @@ from seerflow.config import StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent
 from seerflow.storage.sqlite import SqliteBackend
+
+if TYPE_CHECKING:
+    from starlette.testclient import WebSocketTestSession
+
+
+def _recv(ws: WebSocketTestSession) -> dict[str, Any]:
+    """Receive a binary WebSocket frame and decode it as JSON."""
+    raw = ws.receive_bytes()
+    return msgspec.json.decode(raw)  # type: ignore[no-any-return]
 
 
 @pytest.fixture
@@ -79,7 +89,7 @@ class TestWebSocketIntegration:
     ) -> None:
         with client.websocket_connect("/api/v1/ws") as ws:
             ws_manager.broadcast_event(_make_event())
-            msg = ws.receive_json()
+            msg = _recv(ws)
             assert msg["type"] == "event"
             assert msg["data"]["source_type"] == "syslog"
 
@@ -94,14 +104,14 @@ class TestWebSocketIntegration:
             _t.sleep(0.05)
             ws_manager.broadcast_event(_make_event(severity_id=2))
             ws_manager.broadcast_event(_make_event(severity_id=5))
-            msg = ws.receive_json()
+            msg = _recv(ws)
             assert msg["type"] == "event"
             assert msg["data"]["severity_id"] == 5
 
     def test_receive_alert(self, client: TestClient, ws_manager: ConnectionManager) -> None:
         with client.websocket_connect("/api/v1/ws") as ws:
             ws_manager.broadcast_alert(_make_alert())
-            msg = ws.receive_json()
+            msg = _recv(ws)
             assert msg["type"] == "alert"
             assert msg["data"]["alert_type"] == "sigma"
 
@@ -110,9 +120,23 @@ class TestWebSocketIntegration:
     ) -> None:
         with client.websocket_connect("/api/v1/ws") as ws:
             ws.send_json({"type": "filter", "alert_types": ["not-a-real-type"]})
-            msg = ws.receive_json()
+            msg = _recv(ws)
             assert msg["type"] == "error"
             assert "not-a-real-type" in msg["message"]
+
+    def test_invalid_json_returns_error(
+        self, client: TestClient, ws_manager: ConnectionManager
+    ) -> None:
+        """Invalid JSON must be rejected with an error and keep the connection alive."""
+        with client.websocket_connect("/api/v1/ws") as ws:
+            ws.send_text("this is not json")
+            msg = _recv(ws)
+            assert msg["type"] == "error"
+            assert "invalid JSON" in msg["message"]
+            # Connection still alive — send a valid filter and broadcast
+            ws_manager.broadcast_event(_make_event())
+            event_msg = _recv(ws)
+            assert event_msg["type"] == "event"
 
     def test_disconnect_removes_client(
         self, client: TestClient, ws_manager: ConnectionManager
@@ -133,7 +157,7 @@ class TestWebSocketIntegration:
             ws.send_json(["not", "a", "dict"])
             # Broadcast an event and confirm we still receive it — connection is alive
             ws_manager.broadcast_event(_make_event())
-            msg = ws.receive_json()
+            msg = _recv(ws)
             assert msg["type"] == "event"
 
     def test_non_filter_message_is_ignored(
@@ -143,12 +167,10 @@ class TestWebSocketIntegration:
         with client.websocket_connect("/api/v1/ws") as ws:
             ws.send_json({"type": "subscribe", "topic": "foo"})
             ws_manager.broadcast_event(_make_event())
-            msg = ws.receive_json()
+            msg = _recv(ws)
             assert msg["type"] == "event"
 
-    def test_startup_and_shutdown_hooks_exercised(
-        self, backend: SqliteBackend
-    ) -> None:
+    def test_startup_and_shutdown_hooks_exercised(self, backend: SqliteBackend) -> None:
         """Using ``with TestClient(app)`` triggers the startup/shutdown lifespan."""
         app = create_api_app(log_store=backend, alert_store=backend)
         with TestClient(app):
@@ -157,4 +179,6 @@ class TestWebSocketIntegration:
             assert mgr is not None
             assert mgr._status_task is not None
         # After exit, shutdown hook has fired — status task is done
-        assert app.state.ws_manager._status_task is None or app.state.ws_manager._status_task.done()
+        assert (
+            app.state.ws_manager._status_task is None or app.state.ws_manager._status_task.done()
+        )

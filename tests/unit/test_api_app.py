@@ -113,3 +113,42 @@ class TestWebSocketWiring:
         )
         ws_routes = [r for r in app.routes if getattr(r, "path", "") == "/api/v1/ws"]
         assert len(ws_routes) == 1
+
+    def test_config_ws_fields_propagate_to_default_manager(self) -> None:
+        """Setting ws_* fields on SeerflowConfig must reach the default ConnectionManager."""
+        from seerflow.config import SeerflowConfig
+
+        config = SeerflowConfig(
+            ws_max_connections=7,
+            ws_queue_maxlen=500,
+            ws_tick_interval_s=0.02,
+            ws_batch_max_events=3,
+            ws_status_interval_s=10.0,
+        )
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+            config=config,
+        )
+        mgr = app.state.ws_manager
+        assert mgr.max_connections == 7
+        assert mgr._queue_maxlen == 500
+        assert mgr._tick_interval_s == 0.02
+        assert mgr._batch_max_events == 3
+        assert mgr._status_interval_s == 10.0
+
+    def test_explicit_ws_manager_overrides_config(self) -> None:
+        """An explicit ws_manager parameter wins over config."""
+        from seerflow.api.ws import ConnectionManager
+        from seerflow.config import SeerflowConfig
+
+        custom = ConnectionManager(max_connections=99)
+        config = SeerflowConfig(ws_max_connections=7)
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+            config=config,
+            ws_manager=custom,
+        )
+        assert app.state.ws_manager is custom
+        assert app.state.ws_manager.max_connections == 99
