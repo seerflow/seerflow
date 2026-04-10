@@ -85,3 +85,43 @@ class ConnectionManager:
     @property
     def connected_count(self) -> int:
         return len(self._clients)
+
+    async def connect(self, websocket: WebSocket) -> str:
+        """Accept a WebSocket connection, register client, return client_id.
+
+        Raises:
+            WebSocketException: if ``max_connections`` is already reached.
+        """
+        from fastapi import WebSocketException
+
+        if len(self._clients) >= self.max_connections:
+            await websocket.close(code=1013)  # Try Again Later
+            msg = f"max_connections={self.max_connections} reached"
+            raise WebSocketException(code=1013, reason=msg)
+
+        await websocket.accept()
+        import uuid as _uuid
+
+        client_id = _uuid.uuid4().hex
+        client = ClientState(
+            client_id=client_id,
+            websocket=websocket,
+            filter=ClientFilter(),
+            event_deque=deque(maxlen=self._queue_maxlen),
+            alert_deque=deque(maxlen=self._queue_maxlen),
+            wakeup=asyncio.Event(),
+        )
+        self._clients[client_id] = client
+        return client_id
+
+    async def disconnect(self, client_id: str) -> None:
+        """Remove client and cancel its sender task. Idempotent."""
+        client = self._clients.pop(client_id, None)
+        if client is None:
+            return
+        if client.sender_task is not None and not client.sender_task.done():
+            client.sender_task.cancel()
+            try:
+                await client.sender_task
+            except (asyncio.CancelledError, Exception):
+                pass

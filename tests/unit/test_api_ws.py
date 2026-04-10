@@ -120,3 +120,64 @@ class TestConnectionManagerConstruction:
             status_interval_s=2.0,
         )
         assert mgr.max_connections == 5
+
+
+from unittest.mock import AsyncMock, MagicMock
+
+from fastapi import WebSocketException
+
+
+class TestConnectionManagerLifecycle:
+    @pytest.mark.asyncio
+    async def test_connect_assigns_unique_id(self) -> None:
+        mgr = ConnectionManager()
+        ws_a = MagicMock()
+        ws_a.accept = AsyncMock()
+        ws_b = MagicMock()
+        ws_b.accept = AsyncMock()
+
+        id_a = await mgr.connect(ws_a)
+        id_b = await mgr.connect(ws_b)
+
+        assert id_a != id_b
+        assert mgr.connected_count == 2
+        ws_a.accept.assert_awaited_once()
+        ws_b.accept.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_removes_client(self) -> None:
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        client_id = await mgr.connect(ws)
+
+        await mgr.disconnect(client_id)
+
+        assert mgr.connected_count == 0
+
+    @pytest.mark.asyncio
+    async def test_disconnect_is_idempotent(self) -> None:
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        client_id = await mgr.connect(ws)
+
+        await mgr.disconnect(client_id)
+        await mgr.disconnect(client_id)  # Must not raise
+
+        assert mgr.connected_count == 0
+
+    @pytest.mark.asyncio
+    async def test_max_connections_enforced(self) -> None:
+        mgr = ConnectionManager(max_connections=2)
+        for _ in range(2):
+            ws = MagicMock()
+            ws.accept = AsyncMock()
+            await mgr.connect(ws)
+
+        overflow_ws = MagicMock()
+        overflow_ws.accept = AsyncMock()
+        overflow_ws.close = AsyncMock()
+        with pytest.raises(WebSocketException):
+            await mgr.connect(overflow_ws)
+        assert mgr.connected_count == 2
