@@ -83,3 +83,35 @@ class TestAppFactory:
         assert "/api/v1/entities/search" in paths
         assert "/api/v1/health" in paths
         assert "/api/v1/stats" in paths
+
+
+class TestWebSocketWiring:
+    def test_ws_manager_stored_in_app_state(self) -> None:
+        from seerflow.api.ws import ConnectionManager
+
+        manager = ConnectionManager()
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+            ws_manager=manager,
+        )
+        assert app.state.ws_manager is manager
+
+    def test_default_ws_manager_created_when_none_supplied(self) -> None:
+        from seerflow.api.ws import ConnectionManager
+
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+        )
+        assert isinstance(app.state.ws_manager, ConnectionManager)
+
+    def test_ws_route_registered(self) -> None:
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+        )
+        ws_routes = [
+            r for r in app.routes if getattr(r, "path", "") == "/api/v1/ws"
+        ]
+        assert len(ws_routes) == 1

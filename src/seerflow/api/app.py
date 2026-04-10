@@ -13,8 +13,10 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
+from seerflow.api import ws as ws_module
 from seerflow.api.deps import StorageDeps
 from seerflow.api.routes import alerts, entities, events, health, stats
+from seerflow.api.ws import ConnectionManager
 
 if TYPE_CHECKING:
     from seerflow.config import SeerflowConfig
@@ -28,6 +30,7 @@ def create_api_app(
     alert_store: AlertStore,
     entity_store: EntityStore | None = None,
     config: SeerflowConfig | None = None,
+    ws_manager: ConnectionManager | None = None,
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -36,6 +39,8 @@ def create_api_app(
         alert_store: Alert persistence backend.
         entity_store: Optional entity query backend.
         config: Optional application configuration.
+        ws_manager: Optional WebSocket ConnectionManager. A default is created
+            if not supplied.
     """
     app = FastAPI(
         title="Seerflow API",
@@ -53,6 +58,7 @@ def create_api_app(
     )
     app.state.config = config
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
+    app.state.ws_manager = ws_manager or ConnectionManager(alert_store=alert_store)
 
     # CORS — wide open for v1 (localhost-only, no auth).
     # Configurable origins deferred to v2 when auth is added.
@@ -69,5 +75,14 @@ def create_api_app(
     app.include_router(entities.router, prefix=_API_PREFIX)
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
+    app.include_router(ws_module.router, prefix=_API_PREFIX)
+
+    @app.on_event("startup")
+    async def _start_ws_status_task() -> None:
+        app.state.ws_manager.start_status_task()
+
+    @app.on_event("shutdown")
+    async def _stop_ws_manager() -> None:
+        await app.state.ws_manager.shutdown()
 
     return app
