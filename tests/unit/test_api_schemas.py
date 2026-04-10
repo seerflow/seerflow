@@ -182,6 +182,23 @@ class TestEntitySearchResult:
         assert result.entity_type == "ip"
 
 
+def test_entity_relation_response_from_relation() -> None:
+    from seerflow.api.schemas import EntityRelationResponse
+    from seerflow.models.query import EntityRelation
+
+    relation = EntityRelation(
+        entity_uuid="abc-123",
+        entity_type="host",
+        entity_value="web-01",
+        relation_type="communicates_with",
+    )
+    resp = EntityRelationResponse.from_relation(relation)
+    assert resp.entity_uuid == "abc-123"
+    assert resp.entity_type == "host"
+    assert resp.entity_value == "web-01"
+    assert resp.relation_type == "communicates_with"
+
+
 def test_entity_search_result_requires_entity_uuid() -> None:
     from seerflow.api.schemas import EntitySearchResult
 
