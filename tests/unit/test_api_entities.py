@@ -345,3 +345,25 @@ class TestEntityTimeline:
             f"/api/v1/entities/{entity_uuid}/timeline?severity_min=7"
         )
         assert resp.status_code == 422
+
+    def test_malformed_uuid_returns_422(self) -> None:
+        entity_store = AsyncMock()
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get("/api/v1/entities/not-a-uuid/timeline")
+        assert resp.status_code == 422
+
+    def test_missing_entity_store_returns_503(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        client = TestClient(_make_timeline_app(entity_store=None))
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline")
+        assert resp.status_code == 503
+        assert "entity_store" in resp.json()["detail"].lower()
+
+    def test_start_ns_after_end_ns_returns_422(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        client = TestClient(_make_timeline_app(entity_store))
+        resp = client.get(
+            f"/api/v1/entities/{entity_uuid}/timeline?start_ns=5000&end_ns=1000"
+        )
+        assert resp.status_code == 422
