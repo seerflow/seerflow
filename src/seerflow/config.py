@@ -755,11 +755,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
             f"alerting.otlp_protocol must be 'grpc' or 'http', got {otlp_protocol!r}"
         )
     otlp_interval = data.get("otlp_export_interval_seconds", 5)
-    if (
-        not isinstance(otlp_interval, int)
-        or isinstance(otlp_interval, bool)
-        or otlp_interval < 1
-    ):
+    if not isinstance(otlp_interval, int) or isinstance(otlp_interval, bool) or otlp_interval < 1:
         raise ConfigError(
             f"alerting.otlp_export_interval_seconds must be an integer >= 1, got {otlp_interval!r}"
         )

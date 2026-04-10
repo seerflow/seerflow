@@ -503,6 +503,35 @@ class TestNormalizeGrpcEndpoint:
         assert _normalize_grpc_endpoint("localhost:4317") == "localhost:4317"
 
 
+class TestMaskedUrl:
+    def test_http_url_masked(self) -> None:
+        from seerflow.alerting.sinks.otlp import masked_url
+
+        assert (
+            masked_url("http://collector.example.com:4318") == "http://collector.example.com/***"
+        )
+
+    def test_https_url_masked(self) -> None:
+        from seerflow.alerting.sinks.otlp import masked_url
+
+        assert masked_url("https://otel.internal:4318/v1/logs") == "https://otel.internal/***"
+
+    def test_bare_host_port_masked(self) -> None:
+        from seerflow.alerting.sinks.otlp import masked_url
+
+        assert masked_url("localhost:4317") == "grpc://localhost/***"
+
+    def test_bare_hostname_masked(self) -> None:
+        from seerflow.alerting.sinks.otlp import masked_url
+
+        assert masked_url("collector.example.com:4317") == "grpc://collector.example.com/***"
+
+    def test_empty_string(self) -> None:
+        from seerflow.alerting.sinks.otlp import masked_url
+
+        assert masked_url("") == "<invalid-url>"
+
+
 class TestGetVersion:
     def test_returns_dev_when_package_not_found(self) -> None:
         import importlib.metadata

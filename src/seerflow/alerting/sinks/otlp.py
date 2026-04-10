@@ -170,13 +170,21 @@ def _normalize_grpc_endpoint(endpoint: str) -> str:
     return endpoint
 
 
-def _masked_url(url: str) -> str:
-    """Mask an endpoint URL to avoid logging sensitive paths."""
+def masked_url(url: str) -> str:
+    """Mask an endpoint URL to avoid logging sensitive paths.
+
+    Handles both scheme-prefixed URLs (http://host:port) and bare
+    host:port endpoints used by gRPC.
+    """
     parsed = urlparse(url)
-    if not parsed.hostname:
-        return "<invalid-url>"
-    scheme = parsed.scheme or "grpc"
-    return f"{scheme}://{parsed.hostname}/***"
+    if parsed.hostname:
+        scheme = parsed.scheme or "grpc"
+        return f"{scheme}://{parsed.hostname}/***"
+    # Bare host:port (no scheme) — urlparse puts everything in 'scheme'
+    host = url.split("/")[0].split(":")[0]
+    if host:
+        return f"grpc://{host}/***"
+    return "<invalid-url>"
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +284,7 @@ class OtlpSink:
                 code = exc.code() if hasattr(exc, "code") else None
                 _log.warning(
                     "OTLP gRPC export to %s failed (attempt %d): %s (code=%s)",
-                    _masked_url(self._endpoint),
+                    masked_url(self._endpoint),
                     attempt + 1,
                     exc.details() if hasattr(exc, "details") else str(exc),
                     code,
@@ -285,7 +293,7 @@ class OtlpSink:
                 await asyncio.sleep(self._RETRY_DELAYS[attempt])
         _log.error(
             "OTLP gRPC export to %s: all %d retries exhausted, dropping %d alerts",
-            _masked_url(self._endpoint),
+            masked_url(self._endpoint),
             self._MAX_RETRIES,
             len(request.resource_logs[0].scope_logs[0].log_records),
         )
@@ -311,20 +319,20 @@ class OtlpSink:
                     if resp.status < 500:
                         _log.error(
                             "OTLP HTTP export to %s returned %d — not retrying",
-                            _masked_url(self._endpoint),
+                            masked_url(self._endpoint),
                             resp.status,
                         )
                         return
                     _log.warning(
                         "OTLP HTTP export to %s returned %d (attempt %d)",
-                        _masked_url(self._endpoint),
+                        masked_url(self._endpoint),
                         resp.status,
                         attempt + 1,
                     )
             except Exception as exc:
                 _log.warning(
                     "OTLP HTTP export to %s failed (attempt %d): %s",
-                    _masked_url(self._endpoint),
+                    masked_url(self._endpoint),
                     attempt + 1,
                     exc,
                 )
@@ -332,7 +340,7 @@ class OtlpSink:
                 await asyncio.sleep(self._RETRY_DELAYS[attempt])
         _log.error(
             "OTLP HTTP export to %s: all %d retries exhausted, dropping %d alerts",
-            _masked_url(self._endpoint),
+            masked_url(self._endpoint),
             self._MAX_RETRIES,
             len(request.resource_logs[0].scope_logs[0].log_records),
         )
