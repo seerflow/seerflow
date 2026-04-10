@@ -266,7 +266,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         _pd_task = asyncio.create_task(pd_sink.run())
         _log.info("PagerDuty sink: routing key configured")
 
-    from seerflow.alerting.sinks.otlp import OtlpSink
+    from seerflow.alerting.sinks.otlp import OtlpSink, _masked_url
 
     otlp_sink: OtlpSink | None = None
     _otlp_task: asyncio.Task[None] | None = None
@@ -279,7 +279,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         _otlp_task = asyncio.create_task(otlp_sink.run())
         _log.info(
             "OTLP sink: %s via %s (interval=%ds)",
-            config.alerting.otlp_endpoint,
+            _masked_url(config.alerting.otlp_endpoint),
             config.alerting.otlp_protocol,
             config.alerting.otlp_export_interval_seconds,
         )

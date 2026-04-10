@@ -248,11 +248,17 @@ class OtlpSink:
             return
         batch = self._pending
         self._pending = []
-        request = build_export_request(batch)
-        if self._protocol == "grpc":
-            await self._send_grpc(request)
-        else:
-            await self._send_http(request)
+        try:
+            request = build_export_request(batch)
+            if self._protocol == "grpc":
+                await self._send_grpc(request)
+            else:
+                await self._send_http(request)
+        except Exception:
+            _log.exception(
+                "OTLP flush failed, dropping %d alerts",
+                len(batch),
+            )
 
     async def _send_grpc(self, request: ExportLogsServiceRequest) -> None:
         """Send batch via gRPC with retry."""
