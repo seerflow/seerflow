@@ -7,6 +7,7 @@ filtering), and the /api/ws WebSocket route handler.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections import deque
 from dataclasses import dataclass, field
@@ -157,14 +158,10 @@ class ConnectionManager:
             return
         if client.sender_task is not None and not client.sender_task.done():
             client.sender_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await client.sender_task
-            except (asyncio.CancelledError, Exception):
-                pass
 
-    _VALID_ALERT_TYPES: frozenset[str] = frozenset(
-        {"ml", "sigma", "correlation", "ueba", "ioc"}
-    )
+    _VALID_ALERT_TYPES: frozenset[str] = frozenset({"ml", "sigma", "correlation", "ueba", "ioc"})
     _MAX_SOURCES = 50
     _MAX_TEMPLATE_IDS = 100
     _MAX_ALERT_TYPES = 10
@@ -201,14 +198,10 @@ class ConnectionManager:
             errors.append("alert_types must be a list")
             alert_types_raw = []
         alert_types_trimmed = alert_types_raw[: self._MAX_ALERT_TYPES]
-        unknown = [
-            at for at in alert_types_trimmed if at not in self._VALID_ALERT_TYPES
-        ]
+        unknown = [at for at in alert_types_trimmed if at not in self._VALID_ALERT_TYPES]
         if unknown:
             errors.append(f"unknown alert_types: {unknown}")
-        alert_types = frozenset(
-            at for at in alert_types_trimmed if at in self._VALID_ALERT_TYPES
-        )
+        alert_types = frozenset(at for at in alert_types_trimmed if at in self._VALID_ALERT_TYPES)
 
         min_sev_raw = filter_msg.get("min_severity", 1)
         if not isinstance(min_sev_raw, int):
@@ -280,13 +273,11 @@ class ConnectionManager:
         """Drain deques on wakeup or tick timeout; send batched JSON."""
         try:
             while True:
-                try:
+                with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(
                         client.wakeup.wait(),
                         timeout=self._tick_interval_s,
                     )
-                except TimeoutError:
-                    pass
                 client.wakeup.clear()
 
                 events_to_send: list[SeerflowEvent] = []
@@ -346,9 +337,7 @@ class ConnectionManager:
 
                 now_ns = _time.monotonic_ns()
                 elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
-                events_per_sec = (
-                    self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
-                )
+                events_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
                 self._events_broadcast_count = 0
                 self._broadcast_window_start_ns = now_ns
 
@@ -406,10 +395,8 @@ class ConnectionManager:
         """Cancel the status task and all client sender tasks."""
         if self._status_task is not None and not self._status_task.done():
             self._status_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._status_task
-            except (asyncio.CancelledError, Exception):
-                pass
         for client_id in list(self._clients.keys()):
             await self.disconnect(client_id)
 
@@ -436,9 +423,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             if msg.get("type") == "filter":
                 errors = manager.set_filter(client_id, msg)
                 if errors:
-                    await websocket.send_json(
-                        {"type": "error", "message": "; ".join(errors)}
-                    )
+                    await websocket.send_json({"type": "error", "message": "; ".join(errors)})
     except WebSocketDisconnect:
         pass
     finally:
