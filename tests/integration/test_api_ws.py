@@ -86,17 +86,19 @@ class TestWebSocketIntegration:
     def test_filter_suppresses_non_matching_event(
         self, client: TestClient, ws_manager: ConnectionManager
     ) -> None:
+        import time as _t
+
         with client.websocket_connect("/api/v1/ws") as ws:
             ws.send_json({"type": "filter", "min_severity": 4})
+            # Give the ASGI server loop time to apply the filter before broadcast
+            _t.sleep(0.05)
             ws_manager.broadcast_event(_make_event(severity_id=2))
             ws_manager.broadcast_event(_make_event(severity_id=5))
             msg = ws.receive_json()
             assert msg["type"] == "event"
             assert msg["data"]["severity_id"] == 5
 
-    def test_receive_alert(
-        self, client: TestClient, ws_manager: ConnectionManager
-    ) -> None:
+    def test_receive_alert(self, client: TestClient, ws_manager: ConnectionManager) -> None:
         with client.websocket_connect("/api/v1/ws") as ws:
             ws_manager.broadcast_alert(_make_alert())
             msg = ws.receive_json()
@@ -122,3 +124,37 @@ class TestWebSocketIntegration:
 
         _t.sleep(0.05)
         assert ws_manager.connected_count == 0
+
+    def test_non_dict_message_is_ignored(
+        self, client: TestClient, ws_manager: ConnectionManager
+    ) -> None:
+        """Route must tolerate non-dict JSON payloads without crashing."""
+        with client.websocket_connect("/api/v1/ws") as ws:
+            ws.send_json(["not", "a", "dict"])
+            # Broadcast an event and confirm we still receive it — connection is alive
+            ws_manager.broadcast_event(_make_event())
+            msg = ws.receive_json()
+            assert msg["type"] == "event"
+
+    def test_non_filter_message_is_ignored(
+        self, client: TestClient, ws_manager: ConnectionManager
+    ) -> None:
+        """Route must ignore client messages with unknown ``type`` values."""
+        with client.websocket_connect("/api/v1/ws") as ws:
+            ws.send_json({"type": "subscribe", "topic": "foo"})
+            ws_manager.broadcast_event(_make_event())
+            msg = ws.receive_json()
+            assert msg["type"] == "event"
+
+    def test_startup_and_shutdown_hooks_exercised(
+        self, backend: SqliteBackend
+    ) -> None:
+        """Using ``with TestClient(app)`` triggers the startup/shutdown lifespan."""
+        app = create_api_app(log_store=backend, alert_store=backend)
+        with TestClient(app):
+            # Lifespan startup has fired; ws_manager status task is running
+            mgr = app.state.ws_manager
+            assert mgr is not None
+            assert mgr._status_task is not None
+        # After exit, shutdown hook has fired — status task is done
+        assert app.state.ws_manager._status_task is None or app.state.ws_manager._status_task.done()

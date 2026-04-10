@@ -1280,4 +1280,3 @@ class TestWebSocketConfig:
         )
         assert config.ws_max_connections == 5
         assert config.ws_queue_maxlen == 500
-

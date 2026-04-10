@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import WebSocketException
 
-from seerflow.api.ws import ClientFilter
+from seerflow.api.ws import (
+    ClientFilter,
+    ConnectionManager,
+    serialize_alert,
+    serialize_event,
+)
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent
 
@@ -103,9 +111,6 @@ class TestClientFilterMatching:
         assert f.matches_event(bad_source) is False
 
 
-from seerflow.api.ws import ConnectionManager
-
-
 class TestConnectionManagerConstruction:
     def test_default_construction(self) -> None:
         mgr = ConnectionManager()
@@ -121,11 +126,6 @@ class TestConnectionManagerConstruction:
             status_interval_s=2.0,
         )
         assert mgr.max_connections == 5
-
-
-from unittest.mock import AsyncMock, MagicMock
-
-from fastapi import WebSocketException
 
 
 class TestConnectionManagerLifecycle:
@@ -391,11 +391,6 @@ class TestBroadcastAlert:
         assert client.dropped_alerts == 3
 
 
-import json as _json
-
-from seerflow.api.ws import serialize_alert, serialize_event
-
-
 class TestSerialization:
     def test_serialize_event_has_core_fields(self) -> None:
         event = _make_event(source_type="syslog", severity_id=3, template_id=42)
@@ -595,3 +590,131 @@ class TestWebSocketRoute:
         assert router is not None
         routes = [r.path for r in router.routes]
         assert "/ws" in routes
+
+
+class TestSetFilterEdgeCases:
+    """Cover the non-list / non-int validation error branches in set_filter."""
+
+    @pytest.mark.asyncio
+    async def _connect(self, mgr: ConnectionManager) -> str:
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        return await mgr.connect(ws)
+
+    @pytest.mark.asyncio
+    async def test_non_list_sources_returns_error(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        errors = mgr.set_filter(client_id, {"type": "filter", "sources": "syslog"})
+        assert any("sources must be a list" in e for e in errors)
+
+    @pytest.mark.asyncio
+    async def test_non_list_template_ids_returns_error(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        errors = mgr.set_filter(client_id, {"type": "filter", "template_ids": 42})
+        assert any("template_ids must be a list" in e for e in errors)
+
+    @pytest.mark.asyncio
+    async def test_non_list_alert_types_returns_error(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        errors = mgr.set_filter(client_id, {"type": "filter", "alert_types": "sigma"})
+        assert any("alert_types must be a list" in e for e in errors)
+
+    @pytest.mark.asyncio
+    async def test_non_int_min_severity_returns_error(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        errors = mgr.set_filter(client_id, {"type": "filter", "min_severity": "high"})
+        assert any("min_severity must be an integer" in e for e in errors)
+
+
+class TestConnectionManagerEdgeCases:
+    """Cover the short-return branches in start_client_sender and start_status_task."""
+
+    @pytest.mark.asyncio
+    async def test_start_client_sender_unknown_client_is_noop(self) -> None:
+        mgr = ConnectionManager()
+        mgr.start_client_sender("not-a-real-id")  # Must not raise
+
+    @pytest.mark.asyncio
+    async def test_start_client_sender_twice_is_idempotent(self) -> None:
+        mgr = ConnectionManager(tick_interval_s=0.01)
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_json = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+        first_task = mgr._clients[client_id].sender_task
+        mgr.start_client_sender(client_id)  # Second call is no-op
+        assert mgr._clients[client_id].sender_task is first_task
+        await mgr.disconnect(client_id)
+
+    @pytest.mark.asyncio
+    async def test_start_status_task_twice_is_idempotent(self) -> None:
+        mgr = ConnectionManager(status_interval_s=3600.0)
+        mgr.start_status_task()
+        first_task = mgr._status_task
+        mgr.start_status_task()  # Second call is no-op
+        assert mgr._status_task is first_task
+        await mgr.shutdown()
+
+
+class TestQueryAlerts24h:
+    """Cover the _query_alerts_24h exception-handling path."""
+
+    @pytest.mark.asyncio
+    async def test_query_failure_returns_zero(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts = AsyncMock(side_effect=RuntimeError("db down"))
+        mgr = ConnectionManager(alert_store=alert_store)
+        result = await mgr._query_alerts_24h()
+        assert result == 0
+
+
+class TestSenderBatchedAlerts:
+    """Cover the alert_batch (multi-alert) send path."""
+
+    @pytest.mark.asyncio
+    async def test_sends_multi_alert_as_alert_batch_message(self) -> None:
+        mgr = ConnectionManager(tick_interval_s=0.05, batch_max_events=10)
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_json = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+
+        for i in range(4):
+            mgr.broadcast_alert(_make_alert(alert_type="sigma", severity=i + 1))
+        await asyncio.sleep(0.12)
+
+        calls = ws.send_json.await_args_list
+        alert_batch_call = next(
+            (c for c in calls if c.args[0].get("type") == "alert_batch"), None
+        )
+        assert alert_batch_call is not None
+        assert len(alert_batch_call.args[0]["alerts"]) == 4
+        await mgr.disconnect(client_id)
+
+
+class TestStatusBroadcasterErrorPaths:
+    """Cover the status broadcaster send_json exception branch."""
+
+    @pytest.mark.asyncio
+    async def test_status_send_json_failure_does_not_crash_task(self) -> None:
+        mgr = ConnectionManager(
+            status_interval_s=0.02,
+            tick_interval_s=0.01,
+        )
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_json = AsyncMock(side_effect=RuntimeError("broken pipe"))
+        client_id = await mgr.connect(ws)
+        mgr.start_status_task()
+        await asyncio.sleep(0.08)
+        # Status task should still be running despite the send failure
+        assert mgr._status_task is not None
+        assert not mgr._status_task.done()
+        await mgr.shutdown()
+        await mgr.disconnect(client_id)

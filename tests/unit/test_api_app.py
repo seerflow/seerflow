@@ -111,7 +111,5 @@ class TestWebSocketWiring:
             log_store=AsyncMock(),
             alert_store=AsyncMock(),
         )
-        ws_routes = [
-            r for r in app.routes if getattr(r, "path", "") == "/api/v1/ws"
-        ]
+        ws_routes = [r for r in app.routes if getattr(r, "path", "") == "/api/v1/ws"]
         assert len(ws_routes) == 1
