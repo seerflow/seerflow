@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import time
+import typing
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -18,6 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 import msgspec
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
+
+from seerflow.models._types import AlertType
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -32,10 +35,15 @@ _JSON_ENCODER = msgspec.json.Encoder()
 
 @dataclass(frozen=True, slots=True)
 class ClientFilter:
-    """Per-connection filter criteria. Empty collections mean 'match all'."""
+    """Per-connection filter criteria. Empty collections mean 'match all'.
+
+    ``min_severity`` defaults to 0 (TRACE) so the empty filter truly
+    matches everything. Valid severity range is [0, 6] matching the
+    ``SeverityLevel`` enum in ``models.event``.
+    """
 
     sources: frozenset[str] = field(default_factory=frozenset)
-    min_severity: int = 1
+    min_severity: int = 0
     alert_types: frozenset[str] = field(default_factory=frozenset)
     template_ids: frozenset[int] = field(default_factory=frozenset)
 
@@ -108,12 +116,14 @@ class ClientState:
 class ConnectionManager:
     """Fan-out WebSocket broadcaster with per-client filtering and backpressure."""
 
-    _VALID_ALERT_TYPES: frozenset[str] = frozenset({"ml", "sigma", "correlation", "ueba", "ioc"})
+    # Single source of truth: track the AlertType Literal defined in models/_types.py.
+    _VALID_ALERT_TYPES: frozenset[str] = frozenset(typing.get_args(AlertType))
     _MAX_SOURCES = 50
     _MAX_TEMPLATE_IDS = 100
     _MAX_ALERT_TYPES = 10
-    _SEVERITY_MIN = 1
-    _SEVERITY_MAX = 24
+    # Severity bounds match the SeverityLevel enum in models/event.py (0..6).
+    _SEVERITY_MIN = 0
+    _SEVERITY_MAX = 6
 
     def __init__(
         self,

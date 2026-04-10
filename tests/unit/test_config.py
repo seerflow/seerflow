@@ -1323,3 +1323,21 @@ class TestWebSocketConfig:
         yaml_path.write_text("ws_queue_maxlen: not-a-number\n")
         with pytest.raises(ConfigError, match="ws_queue_maxlen"):
             load_config(path=str(yaml_path))
+
+    def test_ws_max_connections_rejects_bool(self, tmp_path: Path) -> None:
+        """``ws_max_connections: true`` must raise, not silently become 1."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_max_connections: true\n")
+        with pytest.raises(ConfigError, match="ws_max_connections"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_queue_maxlen_ceiling_enforced(self, tmp_path: Path) -> None:
+        """Values above the 100k ceiling must be rejected."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_queue_maxlen: 1000000\n")
+        with pytest.raises(ConfigError, match="ws_queue_maxlen"):
+            load_config(path=str(yaml_path))

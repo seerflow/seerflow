@@ -223,17 +223,25 @@ class TestSetFilter:
 
     @pytest.mark.asyncio
     async def test_min_severity_clamped_to_lower_bound(self) -> None:
+        """Negative severities are clamped to 0 (TRACE)."""
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
-        mgr.set_filter(client_id, {"type": "filter", "min_severity": 0})
-        assert mgr._clients[client_id].filter.min_severity == 1
+        mgr.set_filter(client_id, {"type": "filter", "min_severity": -5})
+        assert mgr._clients[client_id].filter.min_severity == 0
 
     @pytest.mark.asyncio
     async def test_min_severity_clamped_to_upper_bound(self) -> None:
+        """Severities above FATAL (6) are clamped down to 6."""
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
         mgr.set_filter(client_id, {"type": "filter", "min_severity": 99})
-        assert mgr._clients[client_id].filter.min_severity == 24
+        assert mgr._clients[client_id].filter.min_severity == 6
+
+    @pytest.mark.asyncio
+    async def test_default_filter_includes_trace_events(self) -> None:
+        """Empty ClientFilter must match TRACE (severity=0) events — regression guard."""
+        f = ClientFilter()
+        assert f.matches_event(_make_event(severity_id=0)) is True
 
     @pytest.mark.asyncio
     async def test_unknown_alert_type_rejected(self) -> None:
@@ -520,10 +528,11 @@ class TestClientSender:
         mgr.broadcast_event(_make_event())
         await asyncio.sleep(0.1)
 
-        # Sender task should have exited on its own
+        # Sender task should have exited on its own.
         client = mgr._clients.get(client_id)
-        if client is not None and client.sender_task is not None:
-            assert client.sender_task.done()
+        assert client is not None, "client was removed unexpectedly"
+        assert client.sender_task is not None, "sender task should exist"
+        assert client.sender_task.done(), "sender task should have exited"
         await mgr.disconnect(client_id)
 
 
@@ -573,17 +582,20 @@ class TestStatusBroadcaster:
         mgr.start_client_sender(client_id)
         mgr.start_status_task()
 
+        # Burst 10 events in the first window, then broadcast nothing.
         for _ in range(10):
             mgr.broadcast_event(_make_event())
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.15)
 
         sent = _decode_sent(ws)
         status_msgs = [m for m in sent if m.get("type") == "status"]
         assert len(status_msgs) >= 2
-        # Second status emission must have rate <= first (counter reset)
         first_rate = status_msgs[0]["data"]["events_per_sec"]
         last_rate = status_msgs[-1]["data"]["events_per_sec"]
-        assert first_rate > 0 or last_rate >= 0  # smoke check
+        # First window saw the burst; the counter resets after emission,
+        # so the last emitted window must show a strictly lower rate.
+        assert first_rate > 0.0
+        assert last_rate < first_rate
         await mgr.shutdown()
 
 

@@ -882,32 +882,48 @@ def load_config(
     )
 
 
+_WS_QUEUE_MAXLEN_CEILING = 100_000
+
+
+def _is_pos_int(value: object) -> bool:
+    """Return True iff ``value`` is a positive int that is not a bool."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _is_pos_number(value: object) -> bool:
+    """Return True iff ``value`` is a positive int or float (not a bool)."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
+
+
 def _parse_ws_fields(raw: dict[str, Any]) -> tuple[int, int, float, int, float]:
     """Parse and validate the top-level ``ws_*`` WebSocket tuning fields."""
     ws_max_connections = raw.get("ws_max_connections", 20)
-    if not isinstance(ws_max_connections, int) or ws_max_connections < 1:
+    if not _is_pos_int(ws_max_connections):
         raise ConfigError(
             f"ws_max_connections must be a positive integer, got {ws_max_connections!r}"
         )
 
     ws_queue_maxlen = raw.get("ws_queue_maxlen", 1000)
-    if not isinstance(ws_queue_maxlen, int) or ws_queue_maxlen < 1:
-        raise ConfigError(f"ws_queue_maxlen must be a positive integer, got {ws_queue_maxlen!r}")
+    if not _is_pos_int(ws_queue_maxlen) or ws_queue_maxlen > _WS_QUEUE_MAXLEN_CEILING:
+        raise ConfigError(
+            f"ws_queue_maxlen must be an integer in [1, {_WS_QUEUE_MAXLEN_CEILING}], "
+            f"got {ws_queue_maxlen!r}"
+        )
 
     ws_tick_interval_s = raw.get("ws_tick_interval_s", 0.01)
-    if not isinstance(ws_tick_interval_s, int | float) or ws_tick_interval_s <= 0:
+    if not _is_pos_number(ws_tick_interval_s):
         raise ConfigError(
             f"ws_tick_interval_s must be a positive number, got {ws_tick_interval_s!r}"
         )
 
     ws_batch_max_events = raw.get("ws_batch_max_events", 10)
-    if not isinstance(ws_batch_max_events, int) or ws_batch_max_events < 1:
+    if not _is_pos_int(ws_batch_max_events):
         raise ConfigError(
             f"ws_batch_max_events must be a positive integer, got {ws_batch_max_events!r}"
         )
 
     ws_status_interval_s = raw.get("ws_status_interval_s", 5.0)
-    if not isinstance(ws_status_interval_s, int | float) or ws_status_interval_s <= 0:
+    if not _is_pos_number(ws_status_interval_s):
         raise ConfigError(
             f"ws_status_interval_s must be a positive number, got {ws_status_interval_s!r}"
         )
