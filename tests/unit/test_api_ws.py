@@ -100,3 +100,23 @@ class TestClientFilterMatching:
         assert f.matches_event(event) is True
         bad_source = _make_event(source_type="otlp-grpc", severity_id=4, template_id=42)
         assert f.matches_event(bad_source) is False
+
+
+from seerflow.api.ws import ConnectionManager
+
+
+class TestConnectionManagerConstruction:
+    def test_default_construction(self) -> None:
+        mgr = ConnectionManager()
+        assert mgr.connected_count == 0
+        assert mgr.max_connections == 20
+
+    def test_custom_parameters(self) -> None:
+        mgr = ConnectionManager(
+            max_connections=5,
+            queue_maxlen=200,
+            tick_interval_s=0.05,
+            batch_max_events=3,
+            status_interval_s=2.0,
+        )
+        assert mgr.max_connections == 5
