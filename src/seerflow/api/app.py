@@ -45,6 +45,26 @@ def _build_ws_manager(
     )
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Start the WebSocket status task on startup and shut down cleanly."""
+    app.state.ws_manager.start_status_task()
+    try:
+        yield
+    finally:
+        await app.state.ws_manager.shutdown()
+
+
+def _register_routes(app: FastAPI) -> None:
+    """Include all API routers under the configured prefix."""
+    app.include_router(events.router, prefix=_API_PREFIX)
+    app.include_router(alerts.router, prefix=_API_PREFIX)
+    app.include_router(entities.router, prefix=_API_PREFIX)
+    app.include_router(health.router, prefix=_API_PREFIX)
+    app.include_router(stats.router, prefix=_API_PREFIX)
+    app.include_router(ws_module.router, prefix=_API_PREFIX)
+
+
 def create_api_app(
     log_store: LogStore,
     alert_store: AlertStore,
@@ -65,26 +85,15 @@ def create_api_app(
             created from ``config.ws_*`` fields (or hard defaults) if not
             supplied.
     """
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        """Start the WebSocket status task on startup and shut down cleanly."""
-        app.state.ws_manager.start_status_task()
-        try:
-            yield
-        finally:
-            await app.state.ws_manager.shutdown()
-
     app = FastAPI(
         title="Seerflow API",
         version="1.0.0",
         docs_url=f"{_API_PREFIX}/docs",
         openapi_url=f"{_API_PREFIX}/openapi.json",
         redoc_url=None,
-        lifespan=lifespan,
+        lifespan=_lifespan,
     )
 
-    # Storage dependency injection
     app.state.storage = StorageDeps(
         log_store=log_store,
         alert_store=alert_store,
@@ -103,12 +112,5 @@ def create_api_app(
         allow_headers=["*"],
     )
 
-    # Register route modules
-    app.include_router(events.router, prefix=_API_PREFIX)
-    app.include_router(alerts.router, prefix=_API_PREFIX)
-    app.include_router(entities.router, prefix=_API_PREFIX)
-    app.include_router(health.router, prefix=_API_PREFIX)
-    app.include_router(stats.router, prefix=_API_PREFIX)
-    app.include_router(ws_module.router, prefix=_API_PREFIX)
-
+    _register_routes(app)
     return app

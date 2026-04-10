@@ -186,48 +186,69 @@ class ConnectionManager:
             return []
 
         errors: list[str] = []
-
-        sources_raw = filter_msg.get("sources", [])
-        if not isinstance(sources_raw, list):
-            errors.append("sources must be a list")
-            sources_raw = []
-        sources = frozenset(str(s) for s in sources_raw[: self._MAX_SOURCES])
-
-        templates_raw = filter_msg.get("template_ids", [])
-        if not isinstance(templates_raw, list):
-            errors.append("template_ids must be a list")
-            templates_raw = []
-        template_ids = frozenset(
-            int(t) for t in templates_raw[: self._MAX_TEMPLATE_IDS] if isinstance(t, int)
+        sources = self._parse_list_field(filter_msg, "sources", str, self._MAX_SOURCES, errors)
+        template_ids = self._parse_list_field(
+            filter_msg, "template_ids", int, self._MAX_TEMPLATE_IDS, errors
         )
-
-        alert_types_raw = filter_msg.get("alert_types", [])
-        if not isinstance(alert_types_raw, list):
-            errors.append("alert_types must be a list")
-            alert_types_raw = []
-        alert_types_trimmed = alert_types_raw[: self._MAX_ALERT_TYPES]
-        unknown = [at for at in alert_types_trimmed if at not in self._VALID_ALERT_TYPES]
-        if unknown:
-            errors.append(f"unknown alert_types: {unknown}")
-        alert_types = frozenset(at for at in alert_types_trimmed if at in self._VALID_ALERT_TYPES)
-
-        min_sev_raw = filter_msg.get("min_severity", 1)
-        if not isinstance(min_sev_raw, int):
-            errors.append("min_severity must be an integer")
-            min_sev = 1
-        else:
-            min_sev = max(self._SEVERITY_MIN, min(self._SEVERITY_MAX, min_sev_raw))
+        alert_types = self._parse_alert_types(filter_msg, errors)
+        min_sev = self._parse_min_severity(filter_msg, errors)
 
         if errors:
             return errors
 
         client.filter = ClientFilter(
-            sources=sources,
+            sources=frozenset(sources),
             min_severity=min_sev,
-            alert_types=alert_types,
-            template_ids=template_ids,
+            alert_types=frozenset(alert_types),
+            template_ids=frozenset(template_ids),
         )
         return []
+
+    def _parse_list_field(
+        self,
+        filter_msg: dict[str, Any],
+        key: str,
+        item_type: type,
+        cap: int,
+        errors: list[str],
+    ) -> list[Any]:
+        """Parse and cap a list field from a filter message."""
+        raw = filter_msg.get(key, [])
+        if not isinstance(raw, list):
+            errors.append(f"{key} must be a list")
+            return []
+        trimmed = raw[:cap]
+        if item_type is str:
+            return [str(v) for v in trimmed]
+        return [int(v) for v in trimmed if isinstance(v, int) and not isinstance(v, bool)]
+
+    def _parse_alert_types(
+        self,
+        filter_msg: dict[str, Any],
+        errors: list[str],
+    ) -> list[str]:
+        """Parse and validate ``alert_types`` against the allowlist."""
+        raw = filter_msg.get("alert_types", [])
+        if not isinstance(raw, list):
+            errors.append("alert_types must be a list")
+            return []
+        trimmed = raw[: self._MAX_ALERT_TYPES]
+        unknown = [at for at in trimmed if at not in self._VALID_ALERT_TYPES]
+        if unknown:
+            errors.append(f"unknown alert_types: {unknown}")
+        return [at for at in trimmed if at in self._VALID_ALERT_TYPES]
+
+    def _parse_min_severity(
+        self,
+        filter_msg: dict[str, Any],
+        errors: list[str],
+    ) -> int:
+        """Parse and clamp ``min_severity`` to the valid range."""
+        raw = filter_msg.get("min_severity", 1)
+        if not isinstance(raw, int) or isinstance(raw, bool):
+            errors.append("min_severity must be an integer")
+            return 1
+        return max(self._SEVERITY_MIN, min(self._SEVERITY_MAX, raw))
 
     def broadcast_event(self, event: SeerflowEvent) -> None:
         """Fan-out an event to all matching clients (sync, non-blocking).
@@ -290,36 +311,8 @@ class ConnectionManager:
                 # we're awaiting send will re-set wakeup and be picked up on
                 # the next iteration. Spurious wakes are harmless.
                 client.wakeup.clear()
-
-                events_to_send: list[SeerflowEvent] = []
-                while client.event_deque and len(events_to_send) < self._batch_max_events:
-                    events_to_send.append(client.event_deque.popleft())
-
-                if len(events_to_send) == 1:
-                    await _send_bytes(client.websocket, serialize_event(events_to_send[0]))
-                elif events_to_send:
-                    await _send_bytes(
-                        client.websocket,
-                        {
-                            "type": "batch",
-                            "events": [serialize_event(e)["data"] for e in events_to_send],
-                        },
-                    )
-
-                alerts_to_send: list[Alert] = []
-                while client.alert_deque and len(alerts_to_send) < self._batch_max_events:
-                    alerts_to_send.append(client.alert_deque.popleft())
-
-                if len(alerts_to_send) == 1:
-                    await _send_bytes(client.websocket, serialize_alert(alerts_to_send[0]))
-                elif alerts_to_send:
-                    await _send_bytes(
-                        client.websocket,
-                        {
-                            "type": "alert_batch",
-                            "alerts": [serialize_alert(a)["data"] for a in alerts_to_send],
-                        },
-                    )
+                await self._drain_events(client)
+                await self._drain_alerts(client)
         except WebSocketDisconnect:
             pass
         except asyncio.CancelledError:
@@ -329,6 +322,38 @@ class ConnectionManager:
                 "client sender task failed for %s",
                 client.client_id,
                 exc_info=True,
+            )
+
+    async def _drain_events(self, client: ClientState) -> None:
+        """Pop up to ``batch_max_events`` events and send as event/batch."""
+        events: list[SeerflowEvent] = []
+        while client.event_deque and len(events) < self._batch_max_events:
+            events.append(client.event_deque.popleft())
+        if len(events) == 1:
+            await _send_bytes(client.websocket, serialize_event(events[0]))
+        elif events:
+            await _send_bytes(
+                client.websocket,
+                {
+                    "type": "batch",
+                    "events": [serialize_event(e)["data"] for e in events],
+                },
+            )
+
+    async def _drain_alerts(self, client: ClientState) -> None:
+        """Pop up to ``batch_max_events`` alerts and send as alert/alert_batch."""
+        alerts: list[Alert] = []
+        while client.alert_deque and len(alerts) < self._batch_max_events:
+            alerts.append(client.alert_deque.popleft())
+        if len(alerts) == 1:
+            await _send_bytes(client.websocket, serialize_alert(alerts[0]))
+        elif alerts:
+            await _send_bytes(
+                client.websocket,
+                {
+                    "type": "alert_batch",
+                    "alerts": [serialize_alert(a)["data"] for a in alerts],
+                },
             )
 
     def start_status_task(self) -> None:

@@ -1280,3 +1280,46 @@ class TestWebSocketConfig:
         )
         assert config.ws_max_connections == 5
         assert config.ws_queue_maxlen == 500
+
+    def test_ws_fields_loaded_from_yaml(self, tmp_path: Path) -> None:
+        """YAML ``ws_*`` fields must reach SeerflowConfig via load_config."""
+        from seerflow.config import load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text(
+            "ws_max_connections: 7\n"
+            "ws_queue_maxlen: 250\n"
+            "ws_tick_interval_s: 0.05\n"
+            "ws_batch_max_events: 3\n"
+            "ws_status_interval_s: 2.5\n"
+        )
+        config = load_config(path=str(yaml_path))
+        assert config.ws_max_connections == 7
+        assert config.ws_queue_maxlen == 250
+        assert config.ws_tick_interval_s == 0.05
+        assert config.ws_batch_max_events == 3
+        assert config.ws_status_interval_s == 2.5
+
+    def test_ws_max_connections_must_be_positive_int(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_max_connections: 0\n")
+        with pytest.raises(ConfigError, match="ws_max_connections"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_tick_interval_must_be_positive(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_tick_interval_s: -0.1\n")
+        with pytest.raises(ConfigError, match="ws_tick_interval_s"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_queue_maxlen_must_be_int(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_queue_maxlen: not-a-number\n")
+        with pytest.raises(ConfigError, match="ws_queue_maxlen"):
+            load_config(path=str(yaml_path))

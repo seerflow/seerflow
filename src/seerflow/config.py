@@ -862,6 +862,8 @@ def load_config(
             f"health_bind_address is not a valid IP address: {health_bind_address!r}"
         ) from exc
 
+    ws_fields = _parse_ws_fields(raw)
+
     return SeerflowConfig(
         storage=_build_storage(raw.get("storage", {})),
         receivers=_build_receivers(raw.get("receivers", {})),
@@ -872,4 +874,48 @@ def load_config(
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
+        ws_max_connections=ws_fields[0],
+        ws_queue_maxlen=ws_fields[1],
+        ws_tick_interval_s=ws_fields[2],
+        ws_batch_max_events=ws_fields[3],
+        ws_status_interval_s=ws_fields[4],
+    )
+
+
+def _parse_ws_fields(raw: dict[str, Any]) -> tuple[int, int, float, int, float]:
+    """Parse and validate the top-level ``ws_*`` WebSocket tuning fields."""
+    ws_max_connections = raw.get("ws_max_connections", 20)
+    if not isinstance(ws_max_connections, int) or ws_max_connections < 1:
+        raise ConfigError(
+            f"ws_max_connections must be a positive integer, got {ws_max_connections!r}"
+        )
+
+    ws_queue_maxlen = raw.get("ws_queue_maxlen", 1000)
+    if not isinstance(ws_queue_maxlen, int) or ws_queue_maxlen < 1:
+        raise ConfigError(f"ws_queue_maxlen must be a positive integer, got {ws_queue_maxlen!r}")
+
+    ws_tick_interval_s = raw.get("ws_tick_interval_s", 0.01)
+    if not isinstance(ws_tick_interval_s, int | float) or ws_tick_interval_s <= 0:
+        raise ConfigError(
+            f"ws_tick_interval_s must be a positive number, got {ws_tick_interval_s!r}"
+        )
+
+    ws_batch_max_events = raw.get("ws_batch_max_events", 10)
+    if not isinstance(ws_batch_max_events, int) or ws_batch_max_events < 1:
+        raise ConfigError(
+            f"ws_batch_max_events must be a positive integer, got {ws_batch_max_events!r}"
+        )
+
+    ws_status_interval_s = raw.get("ws_status_interval_s", 5.0)
+    if not isinstance(ws_status_interval_s, int | float) or ws_status_interval_s <= 0:
+        raise ConfigError(
+            f"ws_status_interval_s must be a positive number, got {ws_status_interval_s!r}"
+        )
+
+    return (
+        ws_max_connections,
+        ws_queue_maxlen,
+        float(ws_tick_interval_s),
+        ws_batch_max_events,
+        float(ws_status_interval_s),
     )
