@@ -175,16 +175,13 @@ class TestEntityTimelineIntegration:
 
         search_resp = entity_client.get(f"/api/v1/entities/search?q={ip}")
         assert search_resp.status_code == 200
-        matches = [
-            r for r in search_resp.json() if r["entity_value"] == ip
-        ]
+        matches = [r for r in search_resp.json() if r["entity_value"] == ip]
         assert len(matches) == 1
         entity_uuid = matches[0]["entity_uuid"]
         assert entity_uuid == expected_uuid
 
         timeline_resp = entity_client.get(
-            f"/api/v1/entities/{entity_uuid}/timeline"
-            f"?start_ns=0&end_ns=9000000000000000000"
+            f"/api/v1/entities/{entity_uuid}/timeline?start_ns=0&end_ns=9000000000000000000"
         )
         assert timeline_resp.status_code == 200
         body = timeline_resp.json()
