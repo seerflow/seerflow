@@ -28,13 +28,33 @@ if TYPE_CHECKING:
 _API_PREFIX = "/api/v1"
 
 
+def _default_allowed_origins(dashboard_port: int) -> frozenset[str]:
+    """Safe-by-default CSWSH origin allowlist for the dashboard port."""
+    return frozenset(
+        {
+            f"http://localhost:{dashboard_port}",
+            f"http://127.0.0.1:{dashboard_port}",
+        }
+    )
+
+
 def _build_ws_manager(
     alert_store: AlertStore,
     config: SeerflowConfig | None,
 ) -> ConnectionManager:
-    """Construct a ConnectionManager from SeerflowConfig ws_* fields."""
+    """Construct a ConnectionManager from SeerflowConfig ws_* fields.
+
+    If ``config.ws_allowed_origins`` is empty, a localhost-based default
+    allowlist is computed from ``dashboard_port``. When ``config`` is
+    ``None`` (tests, direct app construction), no Origin check is applied.
+    """
     if config is None:
         return ConnectionManager(alert_store=alert_store)
+    allowed_origins: frozenset[str]
+    if config.ws_allowed_origins:
+        allowed_origins = frozenset(config.ws_allowed_origins)
+    else:
+        allowed_origins = _default_allowed_origins(config.dashboard_port)
     return ConnectionManager(
         alert_store=alert_store,
         max_connections=config.ws_max_connections,
@@ -42,6 +62,7 @@ def _build_ws_manager(
         tick_interval_s=config.ws_tick_interval_s,
         batch_max_events=config.ws_batch_max_events,
         status_interval_s=config.ws_status_interval_s,
+        allowed_origins=allowed_origins,
     )
 
 

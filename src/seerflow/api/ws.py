@@ -137,6 +137,7 @@ class ConnectionManager:
         tick_interval_s: float = 0.01,
         batch_max_events: int = 10,
         status_interval_s: float = 5.0,
+        allowed_origins: frozenset[str] | None = None,
     ) -> None:
         self._alert_store = alert_store
         self.max_connections = max_connections
@@ -144,6 +145,9 @@ class ConnectionManager:
         self._tick_interval_s = tick_interval_s
         self._batch_max_events = batch_max_events
         self._status_interval_s = status_interval_s
+        # ``None`` means "skip Origin check" (non-browser clients / tests).
+        # A frozenset means "only browser clients with matching Origin may connect".
+        self._allowed_origins = allowed_origins
         self._clients: dict[str, ClientState] = {}
         self._events_broadcast_count = 0
         # Initialize window start at construction so broadcasts before
@@ -154,6 +158,23 @@ class ConnectionManager:
     @property
     def connected_count(self) -> int:
         return len(self._clients)
+
+    def is_origin_allowed(self, origin: str | None) -> bool:
+        """Return True iff the given Origin header should be allowed.
+
+        Cross-Site WebSocket Hijacking (CSWSH) defense: the browser fetch
+        spec does NOT enforce same-origin for WebSocket handshakes, so the
+        server must validate the ``Origin`` header itself. Missing headers
+        (non-browser clients) are allowed. If ``allowed_origins`` is
+        ``None`` (e.g. for direct ConnectionManager tests), all origins
+        are allowed.
+        """
+        if self._allowed_origins is None:
+            return True
+        if origin is None or origin == "":
+            # Non-browser client — no Origin header is sent by Python/curl.
+            return True
+        return origin in self._allowed_origins
 
     async def connect(self, websocket: WebSocket) -> str:
         """Accept a WebSocket connection, register client, return client_id.
@@ -478,6 +499,16 @@ router = APIRouter(tags=["websocket"])
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time event/alert streaming."""
     manager: ConnectionManager = websocket.app.state.ws_manager
+
+    # CSWSH defense: reject browser connections from unapproved origins
+    # BEFORE calling accept(). Non-browser clients (Python, curl) send no
+    # Origin header and are allowed through unless an allowlist is in force.
+    origin = websocket.headers.get("origin")
+    if not manager.is_origin_allowed(origin):
+        _log.warning("ws connect rejected: origin %r not allowed", origin)
+        await websocket.close(code=1008, reason="origin not allowed")
+        return
+
     try:
         client_id = await manager.connect(websocket)
     except WebSocketException as exc:
@@ -490,7 +521,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         while True:
             try:
                 msg = await websocket.receive_json()
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError, KeyError, UnicodeDecodeError):
+                # TypeError: binary frame received in text mode (message["text"] is None)
+                # KeyError: malformed ASGI frame
+                # UnicodeDecodeError: invalid UTF-8 in a text frame
                 await _send_bytes(
                     websocket,
                     {"type": "error", "message": "invalid JSON"},

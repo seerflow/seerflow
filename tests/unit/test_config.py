@@ -1341,3 +1341,57 @@ class TestWebSocketConfig:
         yaml_path.write_text("ws_queue_maxlen: 1000000\n")
         with pytest.raises(ConfigError, match="ws_queue_maxlen"):
             load_config(path=str(yaml_path))
+
+    def test_ws_max_connections_ceiling_enforced(self, tmp_path: Path) -> None:
+        """Values above the 1000 ceiling on ws_max_connections must be rejected."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_max_connections: 9999\n")
+        with pytest.raises(ConfigError, match="ws_max_connections"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_batch_max_events_ceiling_enforced(self, tmp_path: Path) -> None:
+        """Values above the 1000 ceiling on ws_batch_max_events must be rejected."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_batch_max_events: 5000\n")
+        with pytest.raises(ConfigError, match="ws_batch_max_events"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_allowed_origins_defaults_to_empty(self) -> None:
+        """Default SeerflowConfig has an empty origins tuple — app.py derives the default."""
+        from seerflow.config import SeerflowConfig
+
+        assert SeerflowConfig().ws_allowed_origins == ()
+
+    def test_ws_allowed_origins_loaded_from_yaml(self, tmp_path: Path) -> None:
+        """YAML list of origins flows into SeerflowConfig.ws_allowed_origins."""
+        from seerflow.config import load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text(
+            "ws_allowed_origins:\n  - http://dashboard.local\n  - http://10.0.0.1:8080\n"
+        )
+        config = load_config(path=str(yaml_path))
+        assert config.ws_allowed_origins == (
+            "http://dashboard.local",
+            "http://10.0.0.1:8080",
+        )
+
+    def test_ws_allowed_origins_rejects_non_list(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text('ws_allowed_origins: "http://localhost"\n')
+        with pytest.raises(ConfigError, match="ws_allowed_origins"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_allowed_origins_rejects_non_string_items(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_allowed_origins:\n  - 42\n")
+        with pytest.raises(ConfigError, match="ws_allowed_origins"):
+            load_config(path=str(yaml_path))

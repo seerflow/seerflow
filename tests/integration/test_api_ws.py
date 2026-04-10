@@ -183,3 +183,58 @@ class TestWebSocketIntegration:
         assert (
             app.state.ws_manager._status_task is None or app.state.ws_manager._status_task.done()
         )
+
+
+class TestOriginRejection:
+    """Integration test: WebSocket route rejects non-allowlisted Origins (CSWSH)."""
+
+    def test_rejects_unapproved_origin_header(self, backend: SqliteBackend) -> None:
+        """A browser connection from an unapproved origin must be closed with 1008."""
+        from starlette.websockets import WebSocketDisconnect
+
+        from seerflow.api.ws import ConnectionManager
+
+        strict_mgr = ConnectionManager(
+            tick_interval_s=0.005,
+            status_interval_s=3600.0,
+            allowed_origins=frozenset({"http://localhost:8080"}),
+        )
+        app = create_api_app(
+            log_store=backend,
+            alert_store=backend,
+            ws_manager=strict_mgr,
+        )
+        with (
+            TestClient(app) as test_client,
+            pytest.raises(WebSocketDisconnect),
+            test_client.websocket_connect(
+                "/api/v1/ws",
+                headers={"origin": "http://evil.example.com"},
+            ),
+        ):
+            pass
+
+    def test_accepts_approved_origin_header(self, backend: SqliteBackend) -> None:
+        """An allowlisted Origin connects successfully."""
+        from seerflow.api.ws import ConnectionManager
+
+        strict_mgr = ConnectionManager(
+            tick_interval_s=0.005,
+            status_interval_s=3600.0,
+            allowed_origins=frozenset({"http://localhost:8080"}),
+        )
+        app = create_api_app(
+            log_store=backend,
+            alert_store=backend,
+            ws_manager=strict_mgr,
+        )
+        with (
+            TestClient(app) as test_client,
+            test_client.websocket_connect(
+                "/api/v1/ws",
+                headers={"origin": "http://localhost:8080"},
+            ) as ws,
+        ):
+            strict_mgr.broadcast_event(_make_event())
+            msg = _recv(ws)
+            assert msg["type"] == "event"

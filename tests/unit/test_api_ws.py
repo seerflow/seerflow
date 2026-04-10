@@ -747,3 +747,39 @@ class TestBroadcastAlertSafety:
         mgr._clients[client_id].filter = "not-a-filter"  # type: ignore[assignment]
         mgr.broadcast_alert(_make_alert())  # Must not raise
         await mgr.disconnect(client_id)
+
+
+class TestOriginAllowlist:
+    """CSWSH defense: validate WebSocket Origin against an allowlist."""
+
+    def test_none_allowed_origins_allows_everything(self) -> None:
+        """When allowed_origins is None, the manager skips the Origin check."""
+        mgr = ConnectionManager()
+        assert mgr.is_origin_allowed("http://evil.example.com") is True
+        assert mgr.is_origin_allowed(None) is True
+        assert mgr.is_origin_allowed("") is True
+
+    def test_empty_allowlist_rejects_all_browser_origins(self) -> None:
+        """An explicit empty allowlist rejects every browser connection."""
+        mgr = ConnectionManager(allowed_origins=frozenset())
+        assert mgr.is_origin_allowed("http://localhost:8080") is False
+        # But non-browser clients (no Origin header) are still allowed.
+        assert mgr.is_origin_allowed(None) is True
+
+    def test_allowlist_permits_exact_match(self) -> None:
+        mgr = ConnectionManager(
+            allowed_origins=frozenset({"http://localhost:8080", "http://127.0.0.1:8080"})
+        )
+        assert mgr.is_origin_allowed("http://localhost:8080") is True
+        assert mgr.is_origin_allowed("http://127.0.0.1:8080") is True
+
+    def test_allowlist_rejects_non_matching_origin(self) -> None:
+        mgr = ConnectionManager(allowed_origins=frozenset({"http://localhost:8080"}))
+        assert mgr.is_origin_allowed("http://evil.example.com") is False
+        assert mgr.is_origin_allowed("http://localhost:9999") is False
+
+    def test_allowlist_permits_missing_origin(self) -> None:
+        """Non-browser clients (Python, curl) send no Origin header."""
+        mgr = ConnectionManager(allowed_origins=frozenset({"http://localhost:8080"}))
+        assert mgr.is_origin_allowed(None) is True
+        assert mgr.is_origin_allowed("") is True

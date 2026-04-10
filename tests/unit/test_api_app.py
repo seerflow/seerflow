@@ -152,3 +152,42 @@ class TestWebSocketWiring:
         )
         assert app.state.ws_manager is custom
         assert app.state.ws_manager.max_connections == 99
+
+    def test_default_origin_allowlist_derived_from_dashboard_port(self) -> None:
+        """The default ws_manager gets localhost/127.0.0.1 allowlist for dashboard_port."""
+        from seerflow.config import SeerflowConfig
+
+        config = SeerflowConfig(dashboard_port=9090)
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+            config=config,
+        )
+        mgr = app.state.ws_manager
+        assert mgr._allowed_origins == frozenset(
+            {"http://localhost:9090", "http://127.0.0.1:9090"}
+        )
+
+    def test_explicit_allowed_origins_config_overrides_default(self) -> None:
+        """Setting ws_allowed_origins in config replaces the localhost default."""
+        from seerflow.config import SeerflowConfig
+
+        config = SeerflowConfig(
+            dashboard_port=9090,
+            ws_allowed_origins=("http://dashboard.corp",),
+        )
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+            config=config,
+        )
+        mgr = app.state.ws_manager
+        assert mgr._allowed_origins == frozenset({"http://dashboard.corp"})
+
+    def test_ws_manager_without_config_has_no_origin_check(self) -> None:
+        """Passing no config preserves the permissive default for tests."""
+        app = create_api_app(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+        )
+        assert app.state.ws_manager._allowed_origins is None
