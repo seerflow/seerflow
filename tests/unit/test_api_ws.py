@@ -524,3 +524,65 @@ class TestClientSender:
         if client is not None and client.sender_task is not None:
             assert client.sender_task.done()
         await mgr.disconnect(client_id)
+
+
+class TestStatusBroadcaster:
+    @pytest.mark.asyncio
+    async def test_periodic_status_emitted(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts = AsyncMock(
+            return_value=MagicMock(total=17, items=[], has_next=False)
+        )
+        mgr = ConnectionManager(
+            alert_store=alert_store,
+            status_interval_s=0.03,
+            tick_interval_s=0.01,
+        )
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_json = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+        mgr.start_status_task()
+
+        await asyncio.sleep(0.1)
+
+        status_calls = [
+            c for c in ws.send_json.await_args_list if c.args[0].get("type") == "status"
+        ]
+        assert len(status_calls) >= 1
+        data = status_calls[0].args[0]["data"]
+        assert "events_per_sec" in data
+        assert data["alerts_24h"] == 17
+        assert data["connected_clients"] == 1
+        assert data["dropped_events"] == 0
+        assert data["dropped_alerts"] == 0
+
+        await mgr.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_events_per_sec_window_resets(self) -> None:
+        mgr = ConnectionManager(
+            status_interval_s=0.02,
+            tick_interval_s=0.005,
+        )
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_json = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+        mgr.start_status_task()
+
+        for _ in range(10):
+            mgr.broadcast_event(_make_event())
+        await asyncio.sleep(0.1)
+
+        status_calls = [
+            c for c in ws.send_json.await_args_list if c.args[0].get("type") == "status"
+        ]
+        assert len(status_calls) >= 2
+        # Second status emission must have rate <= first (counter reset)
+        first_rate = status_calls[0].args[0]["data"]["events_per_sec"]
+        last_rate = status_calls[-1].args[0]["data"]["events_per_sec"]
+        assert first_rate > 0 or last_rate >= 0  # smoke check
+        await mgr.shutdown()

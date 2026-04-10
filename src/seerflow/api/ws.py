@@ -330,3 +330,89 @@ class ConnectionManager:
                 client.client_id,
                 exc_info=True,
             )
+
+    def start_status_task(self) -> None:
+        """Start the periodic status broadcaster task."""
+        if self._status_task is not None and not self._status_task.done():
+            return
+        import time as _time
+
+        self._broadcast_window_start_ns = _time.monotonic_ns()
+        self._status_task = asyncio.create_task(self._status_broadcaster())
+
+    async def _status_broadcaster(self) -> None:
+        """Emit periodic status messages to all connected clients."""
+        import time as _time
+
+        try:
+            while True:
+                await asyncio.sleep(self._status_interval_s)
+
+                now_ns = _time.monotonic_ns()
+                elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
+                events_per_sec = (
+                    self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
+                )
+                self._events_broadcast_count = 0
+                self._broadcast_window_start_ns = now_ns
+
+                alerts_24h = await self._query_alerts_24h()
+
+                for client in list(self._clients.values()):
+                    status_msg = {
+                        "type": "status",
+                        "data": {
+                            "events_per_sec": events_per_sec,
+                            "alerts_24h": alerts_24h,
+                            "connected_clients": len(self._clients),
+                            "dropped_events": client.dropped_events,
+                            "dropped_alerts": client.dropped_alerts,
+                        },
+                    }
+                    try:
+                        await client.websocket.send_json(status_msg)
+                    except Exception:
+                        _log.debug(
+                            "failed to send status to client %s",
+                            client.client_id,
+                            exc_info=True,
+                        )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _log.warning("status broadcaster task crashed", exc_info=True)
+
+    async def _query_alerts_24h(self) -> int:
+        """Query AlertStore for the 24h alert count. Returns 0 on failure."""
+        if self._alert_store is None:
+            return 0
+        try:
+            import time as _time
+
+            from seerflow.models.query import AlertQuery, TimeRange
+
+            now_ns = _time.time_ns()
+            page = await self._alert_store.query_alerts(
+                AlertQuery(
+                    time_range=TimeRange(
+                        start_ns=now_ns - 24 * 3600 * 1_000_000_000,
+                        end_ns=now_ns,
+                    ),
+                    limit=1,
+                ),
+            )
+            return int(page.total)
+        except Exception:
+            _log.debug("alerts_24h query failed", exc_info=True)
+            return 0
+
+    async def shutdown(self) -> None:
+        """Cancel the status task and all client sender tasks."""
+        if self._status_task is not None and not self._status_task.done():
+            self._status_task.cancel()
+            try:
+                await self._status_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        for client_id in list(self._clients.keys()):
+            await self.disconnect(client_id)
