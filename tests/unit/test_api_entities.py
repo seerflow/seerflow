@@ -336,3 +336,13 @@ class TestEntityTimeline:
         client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?start_ns=5000&end_ns=1000")
         assert resp.status_code == 422
+
+    def test_empty_related_returns_empty_list(self) -> None:
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        entity_store.get_timeline.return_value = []
+        entity_store.get_related.return_value = []
+        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline")
+        assert resp.status_code == 200
+        assert resp.json()["related"] == []
