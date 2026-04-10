@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from seerflow.alerting.dispatcher import AlertDispatcher
     from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
+    from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.graph_structural import GraphStructuralEvaluator
@@ -76,6 +77,7 @@ def make_handler(
     attack_mapper: AttackMapper | None = None,
     graph_structural: GraphStructuralEvaluator | None = None,
     kill_chain_tracker: KillChainTracker | None = None,
+    ws_manager: ConnectionManager | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -307,6 +309,9 @@ def make_handler(
 
         # Persist to storage (WriteBuffer handles batching + 100ms timer flush)
         await storage.write_events([seerflow_event])
+
+        if ws_manager is not None:
+            ws_manager.broadcast_event(seerflow_event)
 
         result = ensemble.process_event(seerflow_event)
         event_count += 1
