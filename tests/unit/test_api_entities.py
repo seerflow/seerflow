@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 
 from seerflow.api.deps import StorageDeps
 from seerflow.api.routes.entities import router
+from seerflow.models.entity import generate_ip_id
 from seerflow.models.event import SeerflowEvent
+from seerflow.models.query import Page
 
 
 def _make_app(
@@ -170,3 +172,47 @@ class TestEntitySearchUuidStamping:
         assert "file" not in types
         assert "process" not in types
         assert "hash" not in types
+
+
+class TestEntitySearchUuidQuery:
+    """UUID-shaped queries short-circuit FTS and use EventQuery(entity_uuid=...)."""
+
+    def test_uuid_query_bypasses_fts(self) -> None:
+        target_uuid = str(generate_ip_id("10.0.0.1"))
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=0,
+            observed_ns=0,
+            related_ips=("10.0.0.1",),
+        )
+        log_store = AsyncMock()
+        log_store.query_events.return_value = Page(
+            items=(event,),
+            total=1,
+            page=1,
+            limit=100,
+        )
+        client = TestClient(_make_app(log_store))
+        resp = client.get(f"/api/v1/entities/search?q={target_uuid}")
+        assert resp.status_code == 200
+        log_store.search_text.assert_not_called()
+        log_store.query_events.assert_awaited_once()
+        call_args = log_store.query_events.call_args.args[0]
+        assert call_args.entity_uuid == target_uuid
+        matching = [r for r in resp.json() if r["entity_uuid"] == target_uuid]
+        assert len(matching) == 1
+        assert matching[0]["entity_type"] == "ip"
+
+    def test_uuid_query_no_events_returns_empty(self) -> None:
+        target_uuid = str(uuid.uuid4())
+        log_store = AsyncMock()
+        log_store.query_events.return_value = Page(
+            items=(),
+            total=0,
+            page=1,
+            limit=100,
+        )
+        client = TestClient(_make_app(log_store))
+        resp = client.get(f"/api/v1/entities/search?q={target_uuid}")
+        assert resp.status_code == 200
+        assert resp.json() == []

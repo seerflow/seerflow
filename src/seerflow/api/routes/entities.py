@@ -8,6 +8,7 @@ with a deterministic UUID5 derived via the existing generate_*_id helpers.
 from __future__ import annotations
 
 import logging
+import uuid as _uuid_mod
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -21,6 +22,7 @@ from seerflow.models.entity import (
     generate_user_id,
     normalize_username,
 )
+from seerflow.models.query import EventQuery
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -96,12 +98,24 @@ async def search_entities(
     storage: Storage,
     q: str = Query(..., min_length=1, max_length=256, description="Search query"),
 ) -> list[EntitySearchResult]:
-    """Search entities by value.
+    """Search entities by value or UUID.
 
-    Currently always uses event-based search (LogStore.search_text) because
-    EntityStore has no search-by-value method — only get_timeline and
-    get_related. When EntityStore gains a search API, add an early return
-    path here that delegates to it.
+    UUID-shaped queries short-circuit to EventQuery(entity_uuid=...) and
+    return only entities matching the queried UUID. Otherwise falls back
+    to LogStore.search_text and extracts entity references from results.
     """
+    try:
+        parsed_uuid: _uuid_mod.UUID | None = _uuid_mod.UUID(q)
+    except ValueError:
+        parsed_uuid = None
+
+    if parsed_uuid is not None:
+        target = str(parsed_uuid)
+        page = await storage.log_store.query_events(
+            EventQuery(entity_uuid=target, limit=100),
+        )
+        all_entities = _extract_entities(list(page.items))
+        return [r for r in all_entities if r.entity_uuid == target]
+
     events = await storage.log_store.search_text(q, limit=100)
     return _extract_entities(events)
