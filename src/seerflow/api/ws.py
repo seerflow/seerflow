@@ -191,3 +191,24 @@ class ConnectionManager:
             template_ids=template_ids,
         )
         return []
+
+    def broadcast_event(self, event: SeerflowEvent) -> None:
+        """Fan-out an event to all matching clients (sync, non-blocking).
+
+        Must never raise — the pipeline hot path depends on this.
+        """
+        self._events_broadcast_count += 1
+        for client in self._clients.values():
+            try:
+                if not client.filter.matches_event(event):
+                    continue
+                if len(client.event_deque) == client.event_deque.maxlen:
+                    client.dropped_events += 1
+                client.event_deque.append(event)
+                client.wakeup.set()
+            except Exception:
+                _log.warning(
+                    "broadcast_event failed for client %s",
+                    client.client_id,
+                    exc_info=True,
+                )

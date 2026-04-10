@@ -260,3 +260,74 @@ class TestSetFilter:
         mgr = ConnectionManager()
         errors = mgr.set_filter("not-a-real-id", {"type": "filter"})
         assert errors == []
+
+
+class TestBroadcastEvent:
+    @pytest.mark.asyncio
+    async def _connect(self, mgr: ConnectionManager) -> str:
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        return await mgr.connect(ws)
+
+    @pytest.mark.asyncio
+    async def test_broadcast_to_empty_manager_is_noop(self) -> None:
+        mgr = ConnectionManager()
+        mgr.broadcast_event(_make_event())  # Must not raise
+
+    @pytest.mark.asyncio
+    async def test_broadcast_appends_to_all_matching_clients(self) -> None:
+        mgr = ConnectionManager()
+        id_a = await self._connect(mgr)
+        id_b = await self._connect(mgr)
+
+        event = _make_event(source_type="syslog")
+        mgr.broadcast_event(event)
+
+        assert len(mgr._clients[id_a].event_deque) == 1
+        assert len(mgr._clients[id_b].event_deque) == 1
+
+    @pytest.mark.asyncio
+    async def test_broadcast_skips_non_matching_clients(self) -> None:
+        mgr = ConnectionManager()
+        id_syslog = await self._connect(mgr)
+        id_otlp = await self._connect(mgr)
+        mgr.set_filter(id_syslog, {"type": "filter", "sources": ["syslog"]})
+        mgr.set_filter(id_otlp, {"type": "filter", "sources": ["otlp-grpc"]})
+
+        mgr.broadcast_event(_make_event(source_type="syslog"))
+
+        assert len(mgr._clients[id_syslog].event_deque) == 1
+        assert len(mgr._clients[id_otlp].event_deque) == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_sets_wakeup(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        assert mgr._clients[client_id].wakeup.is_set() is False
+
+        mgr.broadcast_event(_make_event())
+
+        assert mgr._clients[client_id].wakeup.is_set() is True
+
+    @pytest.mark.asyncio
+    async def test_deque_overflow_drops_oldest_and_increments_counter(self) -> None:
+        mgr = ConnectionManager(queue_maxlen=3)
+        client_id = await self._connect(mgr)
+
+        for i in range(5):
+            mgr.broadcast_event(_make_event(template_id=i))
+
+        client = mgr._clients[client_id]
+        assert len(client.event_deque) == 3
+        assert client.dropped_events == 2
+        template_ids = [e.template_id for e in client.event_deque]
+        assert template_ids == [2, 3, 4]
+
+    @pytest.mark.asyncio
+    async def test_broadcast_does_not_raise_on_filter_error(self) -> None:
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+
+        # Corrupt the filter to force a TypeError in matches_event
+        mgr._clients[client_id].filter = "not-a-filter"  # type: ignore[assignment]
+        mgr.broadcast_event(_make_event())  # Must not raise
