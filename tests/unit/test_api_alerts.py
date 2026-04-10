@@ -75,11 +75,46 @@ class TestListAlerts:
         call_args = alert_store.query_alerts.call_args[0][0]
         assert call_args.alert_type == "sigma"
 
+    def test_since_until_filtering(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts.return_value = Page(
+            items=(),
+            total=0,
+            page=1,
+            limit=50,
+        )
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?since=2026-04-09T00:00:00&until=2026-04-09T23:59:59")
+        assert resp.status_code == 200
+        call_args = alert_store.query_alerts.call_args[0][0]
+        assert call_args.time_range is not None
+        assert call_args.time_range.start_ns < call_args.time_range.end_ns
+
     def test_since_after_until_returns_400(self) -> None:
         alert_store = AsyncMock()
         client = TestClient(_make_app(alert_store))
         resp = client.get("/api/v1/alerts?since=2026-04-10T00:00:00&until=2026-04-09T00:00:00")
         assert resp.status_code == 400
+
+    def test_invalid_timestamp_returns_422(self) -> None:
+        alert_store = AsyncMock()
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?since=garbage")
+        assert resp.status_code == 422
+
+    def test_limit_capped_at_1000(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts.return_value = Page(
+            items=(),
+            total=0,
+            page=1,
+            limit=1000,
+        )
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?limit=5000")
+        assert resp.status_code == 200
+        call_args = alert_store.query_alerts.call_args[0][0]
+        assert call_args.limit == 1000
 
 
 class TestGetAlert:

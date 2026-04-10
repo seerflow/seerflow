@@ -53,7 +53,8 @@ def create_api_app(
     app.state.config = config
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
 
-    # CORS — wide open for v1 (localhost-only, no auth)
+    # CORS — wide open for v1 (localhost-only, no auth).
+    # Configurable origins deferred to v2 when auth is added.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

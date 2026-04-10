@@ -49,6 +49,12 @@ async def search_entities(
     storage: Storage,
     q: str = Query(..., min_length=1, description="Search query"),
 ) -> list[EntitySearchResult]:
-    """Search entities by value. Falls back to event text search."""
+    """Search entities by value.
+
+    Currently always uses event-based search (LogStore.search_text) because
+    EntityStore has no search-by-value method — only get_timeline and
+    get_related. When EntityStore gains a search API, add an early return
+    path here that delegates to it.
+    """
     events = await storage.log_store.search_text(q, limit=100)
     return _extract_entities(events)

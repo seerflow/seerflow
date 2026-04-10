@@ -105,6 +105,7 @@ class HealthResponse(BaseModel):
 class StatsResponse(BaseModel):
     """Basic pipeline statistics."""
 
+    total_events: int
     total_alerts: int
     alerts_by_severity: dict[str, int]
     feedback_stats: dict[str, int]

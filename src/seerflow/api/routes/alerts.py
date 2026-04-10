@@ -34,13 +34,20 @@ async def list_alerts(
     tactic: str | None = Query(None, description="MITRE ATT&CK tactic"),
     technique: str | None = Query(None, description="MITRE ATT&CK technique"),
     page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(50, ge=1, le=1000, description="Results per page"),
+    limit: int = Query(50, ge=1, description="Results per page"),
 ) -> PaginatedResponse[AlertResponse]:
     """Query alerts with filtering and pagination."""
+    limit = min(limit, 1000)
+
     time_range: TimeRange | None = None
     if since is not None or until is not None:
-        start_ns = parse_timestamp_ns(since) if since else 0
-        end_ns = parse_timestamp_ns(until) if until else 2**63 - 1
+        try:
+            start_ns = parse_timestamp_ns(since) if since else 0
+            end_ns = parse_timestamp_ns(until) if until else 2**63 - 1
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Invalid ISO-8601 timestamp: {exc}"
+            ) from exc
         if start_ns > end_ns:
             raise HTTPException(status_code=400, detail="since must be before until")
         time_range = TimeRange(start_ns=start_ns, end_ns=end_ns)

@@ -92,6 +92,12 @@ class TestListEvents:
         resp = client.get("/api/v1/events?since=2026-04-10T00:00:00&until=2026-04-09T00:00:00")
         assert resp.status_code == 400
 
+    def test_invalid_timestamp_returns_422(self) -> None:
+        log_store = AsyncMock()
+        client = TestClient(_make_app(log_store))
+        resp = client.get("/api/v1/events?since=garbage")
+        assert resp.status_code == 422
+
     def test_source_filter(self) -> None:
         log_store = AsyncMock()
         log_store.query_events.return_value = Page(

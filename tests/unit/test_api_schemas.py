@@ -161,10 +161,12 @@ class TestStatsResponse:
 
     def test_basic_stats(self) -> None:
         resp = StatsResponse(
+            total_events=1000,
             total_alerts=42,
             alerts_by_severity={"critical": 2, "high": 10},
             feedback_stats={"tp": 5, "fp": 3},
         )
+        assert resp.total_events == 1000
         assert resp.total_alerts == 42
 
 

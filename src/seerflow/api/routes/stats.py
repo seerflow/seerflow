@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 
 from seerflow.api.deps import StorageDeps, get_storage
 from seerflow.api.schemas import StatsResponse
-from seerflow.models.query import AlertQuery
+from seerflow.models.query import AlertQuery, EventQuery
 
 router = APIRouter(tags=["system"])
 
@@ -24,9 +24,11 @@ async def get_stats(
     storage: Storage,
 ) -> StatsResponse:
     """Return basic pipeline statistics."""
+    event_page = await storage.log_store.query_events(EventQuery(limit=1))
     alert_page = await storage.alert_store.query_alerts(AlertQuery(limit=1))
     feedback_stats = await storage.alert_store.get_feedback_stats()
     return StatsResponse(
+        total_events=event_page.total,
         total_alerts=alert_page.total,
         alerts_by_severity={},
         feedback_stats=feedback_stats,
