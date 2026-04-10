@@ -13,7 +13,8 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from seerflow.alerting.dispatcher import WebhookTarget
@@ -192,7 +193,7 @@ class AlertingConfig:
     pagerduty_routing_key: str = field(default="", repr=False)
     dashboard_url: str = ""
     otlp_endpoint: str = ""
-    otlp_protocol: str = "grpc"
+    otlp_protocol: Literal["grpc", "http"] = "grpc"
     otlp_export_interval_seconds: int = 5
 
 
@@ -749,6 +750,14 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         raise ConfigError(
             f"alerting.otlp_endpoint must be a string, got {type(otlp_endpoint).__name__}"
         )
+    if otlp_endpoint and "://" in otlp_endpoint:
+        _allowed_otlp_schemes = {"http", "https"}
+        parsed_ep = urlparse(otlp_endpoint)
+        if parsed_ep.scheme not in _allowed_otlp_schemes:
+            raise ConfigError(
+                f"alerting.otlp_endpoint: unsupported scheme {parsed_ep.scheme!r},"
+                " expected http, https, or bare host:port"
+            )
     otlp_protocol = data.get("otlp_protocol", "grpc")
     if otlp_protocol not in ("grpc", "http"):
         raise ConfigError(

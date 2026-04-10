@@ -256,19 +256,20 @@ class OtlpSink:
             return
         batch = self._pending
         self._pending = []
+        batch_size = len(batch)
         try:
             request = build_export_request(batch)
             if self._protocol == "grpc":
-                await self._send_grpc(request)
+                await self._send_grpc(request, batch_size)
             else:
-                await self._send_http(request)
+                await self._send_http(request, batch_size)
         except Exception:
             _log.exception(
                 "OTLP flush failed, dropping %d alerts",
                 len(batch),
             )
 
-    async def _send_grpc(self, request: ExportLogsServiceRequest) -> None:
+    async def _send_grpc(self, request: ExportLogsServiceRequest, batch_size: int) -> None:
         """Send batch via gRPC with retry."""
         import grpc
 
@@ -295,10 +296,10 @@ class OtlpSink:
             "OTLP gRPC export to %s: all %d retries exhausted, dropping %d alerts",
             masked_url(self._endpoint),
             self._MAX_RETRIES,
-            len(request.resource_logs[0].scope_logs[0].log_records),
+            batch_size,
         )
 
-    async def _send_http(self, request: ExportLogsServiceRequest) -> None:
+    async def _send_http(self, request: ExportLogsServiceRequest, batch_size: int) -> None:
         """Send batch via HTTP POST with retry."""
         if self._http_session is None:
             self._http_session = aiohttp.ClientSession()
@@ -342,5 +343,5 @@ class OtlpSink:
             "OTLP HTTP export to %s: all %d retries exhausted, dropping %d alerts",
             masked_url(self._endpoint),
             self._MAX_RETRIES,
-            len(request.resource_logs[0].scope_logs[0].log_records),
+            batch_size,
         )

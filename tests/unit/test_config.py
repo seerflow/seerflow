@@ -1196,6 +1196,24 @@ class TestWebhookConfigParsing:
         result = _build_alerting({"otlp_endpoint": "http://collector:4317"})
         assert result.otlp_endpoint == "http://collector:4317"
 
+    def test_otlp_endpoint_bare_host_port_valid(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_endpoint": "localhost:4317"})
+        assert result.otlp_endpoint == "localhost:4317"
+
+    def test_otlp_endpoint_unsupported_scheme_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="unsupported scheme"):
+            _build_alerting({"otlp_endpoint": "ftp://evil.host/exfil"})
+
+    def test_otlp_endpoint_file_scheme_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="unsupported scheme"):
+            _build_alerting({"otlp_endpoint": "file:///etc/passwd"})
+
     def test_otlp_protocol_default_grpc(self) -> None:
         from seerflow.config import _build_alerting
 
