@@ -266,6 +266,24 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         _pd_task = asyncio.create_task(pd_sink.run())
         _log.info("PagerDuty sink: routing key configured")
 
+    from seerflow.alerting.sinks.otlp import OtlpSink, masked_url
+
+    otlp_sink: OtlpSink | None = None
+    _otlp_task: asyncio.Task[None] | None = None
+    if config.alerting.otlp_endpoint:
+        otlp_sink = OtlpSink(
+            endpoint=config.alerting.otlp_endpoint,
+            protocol=config.alerting.otlp_protocol,
+            export_interval=config.alerting.otlp_export_interval_seconds,
+        )
+        _otlp_task = asyncio.create_task(otlp_sink.run())
+        _log.info(
+            "OTLP sink: %s via %s (interval=%ds)",
+            masked_url(config.alerting.otlp_endpoint),
+            config.alerting.otlp_protocol,
+            config.alerting.otlp_export_interval_seconds,
+        )
+
     handler = make_handler(
         ensemble,
         storage,
@@ -280,6 +298,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         alerting_config=config.alerting,
         alert_dispatcher=dispatcher,
         pagerduty_sink=pd_sink,
+        otlp_sink=otlp_sink,
         attack_mapper=attack_mapper,
         graph_structural=graph_structural,
         kill_chain_tracker=kill_chain_tracker,
@@ -332,6 +351,13 @@ async def _run_with_config(config: SeerflowConfig) -> None:
                 await _pd_task
         if pd_session is not None:
             await pd_session.close()
+        if otlp_sink is not None:
+            await otlp_sink.stop()
+        if _otlp_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await _otlp_task
+        if otlp_sink is not None:
+            await otlp_sink.close()
         if webhook_session is not None:
             await webhook_session.close()
         await health_runner.cleanup()

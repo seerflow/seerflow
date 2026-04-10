@@ -13,7 +13,8 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from seerflow.alerting.dispatcher import WebhookTarget
@@ -191,6 +192,9 @@ class AlertingConfig:
     webhook_targets: tuple[WebhookTarget, ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
     dashboard_url: str = ""
+    otlp_endpoint: str = ""
+    otlp_protocol: Literal["grpc", "http"] = "grpc"
+    otlp_export_interval_seconds: int = 5
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -741,6 +745,29 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     routing_key = data.get("pagerduty_routing_key", "")
     if routing_key and not re.fullmatch(r"[0-9a-fA-F]{32}", routing_key):
         raise ConfigError("alerting.pagerduty_routing_key must be a 32-character hex string")
+    otlp_endpoint = data.get("otlp_endpoint", "")
+    if not isinstance(otlp_endpoint, str):
+        raise ConfigError(
+            f"alerting.otlp_endpoint must be a string, got {type(otlp_endpoint).__name__}"
+        )
+    if otlp_endpoint and "://" in otlp_endpoint:
+        _allowed_otlp_schemes = {"http", "https"}
+        parsed_ep = urlparse(otlp_endpoint)
+        if parsed_ep.scheme not in _allowed_otlp_schemes:
+            raise ConfigError(
+                f"alerting.otlp_endpoint: unsupported scheme {parsed_ep.scheme!r},"
+                " expected http, https, or bare host:port"
+            )
+    otlp_protocol = data.get("otlp_protocol", "grpc")
+    if otlp_protocol not in ("grpc", "http"):
+        raise ConfigError(
+            f"alerting.otlp_protocol must be 'grpc' or 'http', got {otlp_protocol!r}"
+        )
+    otlp_interval = data.get("otlp_export_interval_seconds", 5)
+    if not isinstance(otlp_interval, int) or isinstance(otlp_interval, bool) or otlp_interval < 1:
+        raise ConfigError(
+            f"alerting.otlp_export_interval_seconds must be an integer >= 1, got {otlp_interval!r}"
+        )
     return AlertingConfig(
         dedup_window_seconds=dedup_window_seconds,
         dedup_window_overrides=overrides,
@@ -748,6 +775,9 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         webhook_targets=webhook_targets,
         pagerduty_routing_key=routing_key,
         dashboard_url=dashboard_url,
+        otlp_endpoint=otlp_endpoint,
+        otlp_protocol=otlp_protocol,
+        otlp_export_interval_seconds=otlp_interval,
     )
 
 
