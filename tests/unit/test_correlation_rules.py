@@ -466,3 +466,106 @@ class TestPathSafety:
         rules = load_correlation_rules([str(tmp_path)])
         assert len(rules) == 1
         assert rules[0].name == "symlink-test"
+
+    def test_symlinked_directory_skipped(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from seerflow.correlation.rule_loader import load_correlation_rules
+
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        (real_dir / "rule.yml").write_text(_VALID_RULE_YAML)
+
+        link_dir = tmp_path / "link_dir"
+        link_dir.symlink_to(real_dir)
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            rules = load_correlation_rules([str(link_dir)])
+
+        assert len(rules) == 0
+        assert "symlink" in caplog.text.lower()
+
+
+class TestSourceConditionValidation:
+    """Tests for uncovered branches in _validate_sources."""
+
+    def test_conditions_not_dict_raises(self) -> None:
+        data = _rule_data(
+            sources=[
+                {
+                    "source_type": "syslog",
+                    "conditions": "not-a-dict",
+                    "min_count": 1,
+                }
+            ]
+        )
+        with pytest.raises(RuleValidationError, match="conditions must be a dict"):
+            parse_rule_yaml(data)
+
+    def test_invalid_condition_field_raises(self) -> None:
+        data = _rule_data(
+            sources=[
+                {
+                    "source_type": "syslog",
+                    "conditions": {"nonexistent_field": "pattern.*"},
+                    "min_count": 1,
+                }
+            ]
+        )
+        with pytest.raises(RuleValidationError, match="not in the allowed field list"):
+            parse_rule_yaml(data)
+
+    def test_condition_pattern_not_string_raises(self) -> None:
+        data = _rule_data(
+            sources=[
+                {
+                    "source_type": "syslog",
+                    "conditions": {"message": 12345},
+                    "min_count": 1,
+                }
+            ]
+        )
+        with pytest.raises(RuleValidationError, match="must be a string"):
+            parse_rule_yaml(data)
+
+    def test_min_count_not_int_raises(self) -> None:
+        data = _rule_data(
+            sources=[
+                {
+                    "source_type": "syslog",
+                    "conditions": {"message": "test.*"},
+                    "min_count": "five",
+                }
+            ]
+        )
+        with pytest.raises(RuleValidationError, match="min_count must be a positive integer"):
+            parse_rule_yaml(data)
+
+    def test_min_count_zero_raises(self) -> None:
+        data = _rule_data(
+            sources=[
+                {
+                    "source_type": "syslog",
+                    "conditions": {"message": "test.*"},
+                    "min_count": 0,
+                }
+            ]
+        )
+        with pytest.raises(RuleValidationError, match="min_count must be a positive integer"):
+            parse_rule_yaml(data)
+
+
+class TestMinSourcesValidation:
+    """Tests for uncovered min_sources validation branches."""
+
+    def test_min_sources_non_int_raises(self) -> None:
+        data = _rule_data(min_sources="two")
+        with pytest.raises(RuleValidationError, match="min_sources must be >= 1"):
+            parse_rule_yaml(data)
+
+    def test_min_sources_zero_raises(self) -> None:
+        data = _rule_data(min_sources=0)
+        with pytest.raises(RuleValidationError, match="min_sources must be >= 1"):
+            parse_rule_yaml(data)

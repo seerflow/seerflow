@@ -37,13 +37,13 @@ _log = logging.getLogger("seerflow")
 # ---------------------------------------------------------------------------
 
 _SEVERITY_MAP: dict[int, tuple[int, str]] = {
-    0: (1, "TRACE"),      # TRACE
-    1: (9, "INFO"),       # INFORMATIONAL
-    2: (10, "INFO2"),     # NOTICE
-    3: (13, "WARN"),      # WARNING
-    4: (17, "ERROR"),     # ERROR
-    5: (21, "FATAL"),     # CRITICAL
-    6: (24, "FATAL4"),    # FATAL
+    0: (1, "TRACE"),  # TRACE
+    1: (9, "INFO"),  # INFORMATIONAL
+    2: (10, "INFO2"),  # NOTICE
+    3: (13, "WARN"),  # WARNING
+    4: (17, "ERROR"),  # ERROR
+    5: (21, "FATAL"),  # CRITICAL
+    6: (24, "FATAL4"),  # FATAL
 }
 
 
@@ -91,7 +91,7 @@ def alert_to_log_record(alert: Alert) -> LogRecord:
     return LogRecord(
         time_unix_nano=alert.timestamp_ns,
         observed_time_unix_nano=alert.timestamp_ns,
-        severity_number=severity_number,
+        severity_number=severity_number,  # type: ignore[arg-type]
         severity_text=severity_text,
         body=AnyValue(string_value=alert.description),
         attributes=[
@@ -166,7 +166,7 @@ def _normalize_grpc_endpoint(endpoint: str) -> str:
     """Strip http:// or https:// scheme for gRPC channels (they take host:port)."""
     for prefix in ("https://", "http://"):
         if endpoint.startswith(prefix):
-            return endpoint[len(prefix):]
+            return endpoint[len(prefix) :]
     return endpoint
 
 
@@ -261,7 +261,7 @@ class OtlpSink:
         if self._grpc_channel is None:
             target = _normalize_grpc_endpoint(self._endpoint)
             self._grpc_channel = grpc.aio.insecure_channel(target)
-        stub = LogsServiceStub(self._grpc_channel)
+        stub = LogsServiceStub(self._grpc_channel)  # type: ignore[no-untyped-call]
         for attempt in range(self._MAX_RETRIES):
             try:
                 await stub.Export(request)

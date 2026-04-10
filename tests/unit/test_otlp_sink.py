@@ -11,7 +11,6 @@ import pytest
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -502,3 +501,153 @@ class TestNormalizeGrpcEndpoint:
         from seerflow.alerting.sinks.otlp import _normalize_grpc_endpoint
 
         assert _normalize_grpc_endpoint("localhost:4317") == "localhost:4317"
+
+
+class TestGetVersion:
+    def test_returns_dev_when_package_not_found(self) -> None:
+        import importlib.metadata
+
+        from seerflow.alerting.sinks.otlp import _get_version
+
+        with patch.object(
+            importlib.metadata,
+            "version",
+            side_effect=importlib.metadata.PackageNotFoundError("seerflow"),
+        ):
+            assert _get_version() == "dev"
+
+
+class TestOtlpSinkClose:
+    @pytest.mark.asyncio
+    async def test_close_grpc_channel_when_open(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="localhost:4317", protocol="grpc")
+        mock_channel = AsyncMock()
+        sink._grpc_channel = mock_channel
+        await sink.close()
+        mock_channel.close.assert_awaited_once()
+        assert sink._grpc_channel is None
+
+    @pytest.mark.asyncio
+    async def test_close_http_session_when_open(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="http://localhost:4318", protocol="http")
+        mock_session = AsyncMock()
+        sink._http_session = mock_session
+        await sink.close()
+        mock_session.close.assert_awaited_once()
+        assert sink._http_session is None
+
+
+class TestOtlpSinkGrpcChannelCreation:
+    @pytest.mark.asyncio
+    async def test_grpc_creates_channel_when_none(self) -> None:
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="localhost:4317", protocol="grpc")
+        assert sink._grpc_channel is None
+
+        with (
+            patch.object(grpc.aio, "insecure_channel", return_value=mock_channel),
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        assert sink._grpc_channel is mock_channel
+        mock_stub.Export.assert_awaited_once()
+
+
+class TestOtlpSinkGrpcGenericException:
+    @pytest.mark.asyncio
+    async def test_grpc_generic_exception_triggers_retry(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        call_count = 0
+
+        async def flaky_export(request: object) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise ConnectionError("network blip")
+
+        mock_channel = MagicMock()
+        mock_stub = MagicMock()
+        mock_stub.Export = flaky_export
+        sink = OtlpSink(endpoint="localhost:4317", protocol="grpc")
+        sink._grpc_channel = mock_channel
+
+        with (
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+            patch("seerflow.alerting.sinks.otlp.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.sleep = AsyncMock()
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        assert call_count == 2
+
+
+class TestOtlpSinkHttpExhaustsRetries:
+    @pytest.mark.asyncio
+    async def test_http_logs_error_after_all_retries_exhausted(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        resp_mock = MagicMock(status=500)
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        sink = OtlpSink(endpoint="http://localhost:4318", protocol="http")
+        sink._http_session = session
+
+        with (
+            patch("seerflow.alerting.sinks.otlp.asyncio") as mock_asyncio,
+            patch("seerflow.alerting.sinks.otlp._log") as mock_log,
+        ):
+            mock_asyncio.sleep = AsyncMock()
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        mock_log.error.assert_called_once()
+        assert session.post.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_http_generic_exception_triggers_retry(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        call_count = 0
+
+        def flaky_post(*_args: object, **_kwargs: object) -> object:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise ConnectionError("network blip")
+            resp_mock = MagicMock(status=200)
+            resp_cm = AsyncMock()
+            resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+            resp_cm.__aexit__ = AsyncMock(return_value=False)
+            return resp_cm
+
+        session = MagicMock()
+        session.post = MagicMock(side_effect=flaky_post)
+
+        sink = OtlpSink(endpoint="http://localhost:4318", protocol="http")
+        sink._http_session = session
+
+        with patch("seerflow.alerting.sinks.otlp.asyncio") as mock_asyncio:
+            mock_asyncio.sleep = AsyncMock()
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        assert call_count == 2

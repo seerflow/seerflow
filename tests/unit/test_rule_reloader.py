@@ -167,3 +167,39 @@ class TestRuleReloader:
 
         assert len(to_thread_calls) >= 1, "asyncio.to_thread was not called"
         assert to_thread_calls[0] == reloader._reload_correlation
+
+    def test_reload_correlation_warns_when_no_window_buffer(self, tmp_path: Path) -> None:
+        """_reload_correlation warns and returns when window_buffer is None."""
+
+        holder: EngineHolder = EngineHolder(engine=None)
+        reloader = RuleReloader(
+            correlation_holder=holder,
+            correlation_dirs=[str(tmp_path)],
+            window_buffer=None,
+        )
+        with patch("seerflow.correlation.reloader._log") as mock_log:
+            reloader._reload_correlation()
+            mock_log.warning.assert_called_once()
+        assert holder.engine is None
+
+    def test_reload_correlation_handles_exception(self, tmp_path: Path) -> None:
+        """_reload_correlation logs warning on load failure and keeps existing engine."""
+
+        window = EntityWindowBuffer(window_ns=600_000_000_000)
+        holder: EngineHolder = EngineHolder(engine=None)
+        reloader = RuleReloader(
+            correlation_holder=holder,
+            correlation_dirs=[str(tmp_path)],
+            window_buffer=window,
+        )
+
+        with (
+            patch(
+                "seerflow.correlation.reloader.load_correlation_rules",
+                side_effect=RuntimeError("disk error"),
+            ),
+            patch("seerflow.correlation.reloader._log") as mock_log,
+        ):
+            reloader._reload_correlation()
+            mock_log.warning.assert_called_once()
+        assert holder.engine is None

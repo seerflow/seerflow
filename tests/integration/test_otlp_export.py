@@ -81,9 +81,7 @@ class TestOtlpHttpIntegration:
             # Verify at least one batch received
             assert len(received) >= 1
             total_records = sum(
-                len(rl.scope_logs[0].log_records)
-                for req in received
-                for rl in req.resource_logs
+                len(rl.scope_logs[0].log_records) for req in received for rl in req.resource_logs
             )
             assert total_records == 3
 
