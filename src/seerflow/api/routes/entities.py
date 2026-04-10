@@ -29,6 +29,7 @@ from seerflow.models.entity import (
     normalize_username,
 )
 from seerflow.models.query import EventQuery, TimeRange
+from seerflow.storage.protocols import EntityStore  # noqa: TC001
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -144,7 +145,7 @@ async def search_entities(
 )
 async def get_entity_timeline(
     entity_uuid: _uuid_mod.UUID,
-    storage: Storage,
+    entity_store: Annotated[EntityStore, Depends(require_entity_store)],
     start_ns: Annotated[int | None, Query(ge=0)] = None,
     end_ns: Annotated[int | None, Query(ge=0)] = None,
     source_type: Annotated[str | None, Query(max_length=64)] = None,
@@ -152,7 +153,6 @@ async def get_entity_timeline(
     limit: Annotated[int, Query(ge=1, le=10_000)] = 1_000,
 ) -> EntityTimelineResponse:
     """Return cross-source timeline + related entities for an entity UUID."""
-    entity_store = require_entity_store(storage)
     try:
         time_range = _coerce_time_range(start_ns, end_ns)
     except ValueError as exc:

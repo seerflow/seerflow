@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 if TYPE_CHECKING:
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -54,7 +54,9 @@ def parse_timestamp_ns(iso_str: str) -> int:
     return ns
 
 
-def require_entity_store(storage: StorageDeps) -> EntityStore:
+def require_entity_store(
+    storage: StorageDeps = Depends(get_storage),  # noqa: B008
+) -> EntityStore:
     """FastAPI Depends -- return entity_store or 503 if missing."""
     if storage.entity_store is None:
         raise HTTPException(
