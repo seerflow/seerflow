@@ -136,6 +136,7 @@ class EntityRelationResponse(BaseModel):
 
     @classmethod
     def from_relation(cls, relation: EntityRelation) -> EntityRelationResponse:
+        """Convert a dataclass EntityRelation to a Pydantic response model."""
         return cls(
             entity_uuid=relation.entity_uuid,
             entity_type=relation.entity_type,
