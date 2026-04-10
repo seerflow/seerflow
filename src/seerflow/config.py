@@ -230,6 +230,14 @@ class SeerflowConfig:
     dashboard_port: int = 8080
     health_bind_address: str = "127.0.0.1"
     log_level: str = "INFO"
+    ws_max_connections: int = 20
+    ws_queue_maxlen: int = 1000
+    ws_tick_interval_s: float = 0.01
+    ws_batch_max_events: int = 10
+    ws_status_interval_s: float = 5.0
+    # Explicit WebSocket Origin allowlist. Empty tuple means "use the
+    # localhost defaults derived from dashboard_port" (see api.app).
+    ws_allowed_origins: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +865,8 @@ def load_config(
             f"health_bind_address is not a valid IP address: {health_bind_address!r}"
         ) from exc
 
+    ws_fields = _parse_ws_fields(raw)
+
     return SeerflowConfig(
         storage=_build_storage(raw.get("storage", {})),
         receivers=_build_receivers(raw.get("receivers", {})),
@@ -867,4 +877,82 @@ def load_config(
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
+        ws_max_connections=ws_fields[0],
+        ws_queue_maxlen=ws_fields[1],
+        ws_tick_interval_s=ws_fields[2],
+        ws_batch_max_events=ws_fields[3],
+        ws_status_interval_s=ws_fields[4],
+        ws_allowed_origins=ws_fields[5],
+    )
+
+
+_WS_QUEUE_MAXLEN_CEILING = 100_000
+_WS_MAX_CONNECTIONS_CEILING = 1_000
+_WS_BATCH_MAX_EVENTS_CEILING = 1_000
+
+
+def _is_pos_int(value: object) -> bool:
+    """Return True iff ``value`` is a positive int that is not a bool."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _is_pos_number(value: object) -> bool:
+    """Return True iff ``value`` is a positive int or float (not a bool)."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
+
+
+def _parse_ws_fields(
+    raw: dict[str, Any],
+) -> tuple[int, int, float, int, float, tuple[str, ...]]:
+    """Parse and validate the top-level ``ws_*`` WebSocket tuning fields."""
+    ws_max_connections = raw.get("ws_max_connections", 20)
+    if not _is_pos_int(ws_max_connections) or ws_max_connections > _WS_MAX_CONNECTIONS_CEILING:
+        raise ConfigError(
+            f"ws_max_connections must be an integer in [1, {_WS_MAX_CONNECTIONS_CEILING}], "
+            f"got {ws_max_connections!r}"
+        )
+
+    ws_queue_maxlen = raw.get("ws_queue_maxlen", 1000)
+    if not _is_pos_int(ws_queue_maxlen) or ws_queue_maxlen > _WS_QUEUE_MAXLEN_CEILING:
+        raise ConfigError(
+            f"ws_queue_maxlen must be an integer in [1, {_WS_QUEUE_MAXLEN_CEILING}], "
+            f"got {ws_queue_maxlen!r}"
+        )
+
+    ws_tick_interval_s = raw.get("ws_tick_interval_s", 0.01)
+    if not _is_pos_number(ws_tick_interval_s):
+        raise ConfigError(
+            f"ws_tick_interval_s must be a positive number, got {ws_tick_interval_s!r}"
+        )
+
+    ws_batch_max_events = raw.get("ws_batch_max_events", 10)
+    if not _is_pos_int(ws_batch_max_events) or ws_batch_max_events > _WS_BATCH_MAX_EVENTS_CEILING:
+        raise ConfigError(
+            f"ws_batch_max_events must be an integer in [1, {_WS_BATCH_MAX_EVENTS_CEILING}], "
+            f"got {ws_batch_max_events!r}"
+        )
+
+    ws_status_interval_s = raw.get("ws_status_interval_s", 5.0)
+    if not _is_pos_number(ws_status_interval_s):
+        raise ConfigError(
+            f"ws_status_interval_s must be a positive number, got {ws_status_interval_s!r}"
+        )
+
+    ws_allowed_origins_raw = raw.get("ws_allowed_origins", [])
+    if not isinstance(ws_allowed_origins_raw, list):
+        raise ConfigError(
+            f"ws_allowed_origins must be a list of strings, got "
+            f"{type(ws_allowed_origins_raw).__name__}"
+        )
+    if not all(isinstance(o, str) for o in ws_allowed_origins_raw):
+        raise ConfigError("ws_allowed_origins items must be strings")
+    ws_allowed_origins: tuple[str, ...] = tuple(ws_allowed_origins_raw)
+
+    return (
+        ws_max_connections,
+        ws_queue_maxlen,
+        float(ws_tick_interval_s),
+        ws_batch_max_events,
+        float(ws_status_interval_s),
+        ws_allowed_origins,
     )

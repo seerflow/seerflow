@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from seerflow.alerting.dispatcher import AlertDispatcher
     from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
+    from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
     from seerflow.correlation.graph_structural import GraphStructuralEvaluator
@@ -76,6 +77,7 @@ def make_handler(
     attack_mapper: AttackMapper | None = None,
     graph_structural: GraphStructuralEvaluator | None = None,
     kill_chain_tracker: KillChainTracker | None = None,
+    ws_manager: ConnectionManager | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -111,6 +113,8 @@ def make_handler(
                         pagerduty_sink.enqueue_trigger(kc)
                     if otlp_sink is not None:
                         otlp_sink.enqueue(kc)
+                    if ws_manager is not None:
+                        ws_manager.broadcast_alert(kc)
             except Exception:
                 _log.warning("Kill-chain alert write failed", exc_info=True)
 
@@ -206,6 +210,8 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(corr_alert)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(corr_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(corr_alert)
                         await _feed_kill_chain(corr_alert)
                     except Exception:
                         _log.warning("Correlation alert write failed", exc_info=True)
@@ -271,6 +277,8 @@ def make_handler(
                                     pagerduty_sink.enqueue_trigger(cc_alert)
                                 if otlp_sink is not None:
                                     otlp_sink.enqueue(cc_alert)
+                                if ws_manager is not None:
+                                    ws_manager.broadcast_alert(cc_alert)
                             await _feed_kill_chain(cc_alert)
                         except Exception:
                             _log.warning(
@@ -307,6 +315,9 @@ def make_handler(
 
         # Persist to storage (WriteBuffer handles batching + 100ms timer flush)
         await storage.write_events([seerflow_event])
+
+        if ws_manager is not None:
+            ws_manager.broadcast_event(seerflow_event)
 
         result = ensemble.process_event(seerflow_event)
         event_count += 1
@@ -398,6 +409,8 @@ def make_handler(
                             pagerduty_sink.enqueue_trigger(alert)
                         if otlp_sink is not None:
                             otlp_sink.enqueue(alert)
+                        if ws_manager is not None:
+                            ws_manager.broadcast_alert(alert)
                     await _feed_kill_chain(alert)
                 except Exception:
                     _log.warning("Alert write failed", exc_info=True)
@@ -435,6 +448,8 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(sigma_alert)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(sigma_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(sigma_alert)
                         await _feed_kill_chain(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
@@ -498,6 +513,8 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(risk_alert)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(risk_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(risk_alert)
                     except Exception:
                         _log.warning("Risk alert write failed", exc_info=True)
 
@@ -548,6 +565,8 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(pa)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(pa)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(pa)
                         await _feed_kill_chain(pa)
                     except Exception:
                         _log.warning(
