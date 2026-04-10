@@ -129,6 +129,8 @@ async def search_entities(
 
     if parsed_uuid is not None:
         target = str(parsed_uuid)
+        # Match the fallback search_text(limit=100) ceiling. Callers should
+        # pivot to /entities/{uuid}/timeline for full history.
         page = await storage.log_store.query_events(
             EventQuery(entity_uuid=target, limit=100),
         )
