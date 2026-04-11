@@ -352,13 +352,14 @@ class TestSetFilter:
 
     @pytest.mark.asyncio
     async def test_filter_rate_limit_allows_after_interval(self) -> None:
-        import time as _time
-
         mgr = ConnectionManager(filter_min_interval_ns=10_000_000)  # 10 ms
         client_id = await self._connect(mgr)
 
         mgr.set_filter(client_id, {"type": "filter", "sources": ["a"]})
-        _time.sleep(0.02)  # exceed 10 ms window
+        # Yield to the event loop and let wall-clock advance past the
+        # 10 ms monotonic window. asyncio.sleep cooperates with the loop
+        # where time.sleep would block the whole thread.
+        await asyncio.sleep(0.02)
         errors = mgr.set_filter(client_id, {"type": "filter", "sources": ["b"]})
         assert errors == []
         assert mgr._clients[client_id].filter.sources == frozenset({"b"})
@@ -645,14 +646,18 @@ class TestClientSender:
 
         mgr.broadcast_event(_make_event())
         mgr.broadcast_alert(_make_alert())
-        _event_types = ("event", "batch", "alert", "alert_batch")
+        _evt_types = ("event", "batch")
+        _alert_types = ("alert", "alert_batch")
         await _wait_until(
             lambda: (
                 any(
-                    msgspec.json.decode(call.args[0]).get("type") in _event_types
+                    msgspec.json.decode(call.args[0]).get("type") in _evt_types
                     for call in ws.send_bytes.await_args_list
                 )
-                and len(ws.send_bytes.await_args_list) >= 2
+                and any(
+                    msgspec.json.decode(call.args[0]).get("type") in _alert_types
+                    for call in ws.send_bytes.await_args_list
+                )
             ),
             timeout=1.0,
         )
@@ -1135,3 +1140,21 @@ class TestRouteSizeGuard:
             msg = ws.receive_json(mode="binary")
             assert msg["type"] == "error"
             assert "too large" in msg["message"]
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_via_testclient_returns_error(self) -> None:
+        """Small frame with invalid JSON body also returns an error reply."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.state.ws_manager = ConnectionManager(max_connections=4)
+        from seerflow.api.ws import router
+
+        app.include_router(router, prefix="/api")
+
+        with TestClient(app) as client, client.websocket_connect("/api/ws") as ws:
+            ws.send_text("not-valid-json{")
+            msg = ws.receive_json(mode="binary")
+            assert msg["type"] == "error"
+            assert "invalid JSON" in msg["message"]

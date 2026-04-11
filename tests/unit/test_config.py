@@ -1432,3 +1432,21 @@ def test_ws_filter_min_interval_ms_rejects_negative() -> None:
 
     with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
         _parse_ws_fields({"ws_filter_min_interval_ms": -1})
+
+
+def test_ws_filter_min_interval_ms_accepts_zero() -> None:
+    """Zero means no throttle — must be accepted."""
+    from seerflow.config import _parse_ws_fields
+
+    result = _parse_ws_fields({"ws_filter_min_interval_ms": 0})
+    assert result.ws_filter_min_interval_ms == 0
+
+
+def test_ws_filter_min_interval_ms_rejects_bool() -> None:
+    """Bool is an int subclass; must be rejected explicitly."""
+    import pytest
+
+    from seerflow.config import ConfigError, _parse_ws_fields
+
+    with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
+        _parse_ws_fields({"ws_filter_min_interval_ms": True})
