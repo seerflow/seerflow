@@ -10,7 +10,13 @@ from fastapi.testclient import TestClient
 
 from seerflow.api.deps import StorageDeps
 from seerflow.api.routes.entities import DEFAULT_TIMELINE_WINDOW_NS, router
-from seerflow.models.entity import generate_ip_id
+from seerflow.models.entity import (
+    generate_domain_id,
+    generate_host_id,
+    generate_ip_id,
+    generate_user_id,
+    normalize_username,
+)
 from seerflow.models.event import SeerflowEvent
 from seerflow.models.query import EntityRelation, Page
 
@@ -95,21 +101,13 @@ class TestEntitySearch:
 def _expected_uuid(entity_type: str, value: str) -> str:
     """Mirror the route's UUID derivation for assertions."""
     if entity_type == "ip":
-        from seerflow.models.entity import generate_ip_id
-
         return str(generate_ip_id(value))
     if entity_type == "user":
-        from seerflow.models.entity import generate_user_id, normalize_username
-
         username, domain = normalize_username(value)
         return str(generate_user_id(username, domain))
     if entity_type == "host":
-        from seerflow.models.entity import generate_host_id
-
         return str(generate_host_id(value))
     if entity_type == "domain":
-        from seerflow.models.entity import generate_domain_id
-
         return str(generate_domain_id(value))
     raise AssertionError(f"unexpected type {entity_type}")
 

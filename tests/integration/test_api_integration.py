@@ -5,6 +5,7 @@ Verifies full round-trip: HTTP request -> FastAPI -> Storage -> response.
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import TYPE_CHECKING
 
@@ -229,8 +230,6 @@ class TestEntityTimelineIntegration:
         backend: SqliteBackend,
     ) -> None:
         """FR-036 target is <500ms for 10K events. 750ms ceiling absorbs CI jitter."""
-        import time as _time
-
         ip = "192.168.99.1"
         expected_uuid = str(generate_ip_id(ip))
         batch = 1_000
@@ -256,12 +255,12 @@ class TestEntityTimelineIntegration:
         )
         assert warmup.status_code == 200
 
-        t0 = _time.perf_counter()
+        t0 = time.perf_counter()
         resp = entity_client.get(
             f"/api/v1/entities/{expected_uuid}/timeline"
             f"?start_ns=0&end_ns=9000000000000000000&limit=10000"
         )
-        elapsed_ms = (_time.perf_counter() - t0) * 1000.0
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         assert resp.status_code == 200
         assert resp.json()["total"] == 10_000
