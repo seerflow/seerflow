@@ -90,3 +90,31 @@ class TestRequireEntityStore:
         )
         result = require_entity_store(storage)
         assert result is store
+
+
+class TestDetectionEngines:
+    def test_defaults(self) -> None:
+        from seerflow.api.deps import DetectionEngines
+
+        engines = DetectionEngines()
+        assert engines.sigma_engine is None
+        assert engines.correlation_rules == ()
+
+    def test_is_frozen(self) -> None:
+        import dataclasses
+
+        from seerflow.api.deps import DetectionEngines
+
+        engines = DetectionEngines()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            engines.sigma_engine = object()  # type: ignore[misc]
+
+    def test_get_engines_reads_from_app_state(self) -> None:
+        from types import SimpleNamespace
+
+        from seerflow.api.deps import DetectionEngines, get_engines
+
+        sentinel = DetectionEngines()
+        app = SimpleNamespace(state=SimpleNamespace(engines=sentinel))
+        request = SimpleNamespace(app=app)
+        assert get_engines(request) is sentinel  # type: ignore[arg-type]

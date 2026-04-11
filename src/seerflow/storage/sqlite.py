@@ -24,6 +24,7 @@ from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent
 from seerflow.models.query import AlertQuery, EventQuery, Page, TimeRange
+from seerflow.sigma.attack import format_technique
 
 _log = logging.getLogger(__name__)
 
@@ -266,8 +267,23 @@ ON CONFLICT(template_id) DO UPDATE SET
 """
 
 
+# Cap on the number of rows scanned when applying a post-decode
+# tactic/technique filter. Keeps the route bounded even if the caller's
+# time window is wider than expected.
+# Follow-up: push the filter into SQL with a migration that stores
+# mitre_tactics/mitre_techniques in dedicated columns (or uses JSON1) —
+# then paginate accurately without a scan cap. Tracked in the review
+# summary for PR #141 as "SQL-level mitre filter migration".
+_MAX_POST_DECODE_SCAN = 10_000
+
+
 def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
-    """Build WHERE clause and params from AlertQuery."""
+    """Build WHERE clause and params from AlertQuery.
+
+    ``tactic`` and ``technique`` are NOT handled here — they are applied
+    post-decode in ``query_alerts`` because the msgpack BLOB holds those
+    lists rather than dedicated columns.
+    """
     clauses: list[str] = []
     params: list[Any] = []
     if filters.time_range is not None:
@@ -666,34 +682,84 @@ class SqliteBackend:
         return row is not None and row[0] == 1
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
-        """Query alerts with composable filters and pagination."""
+        """Query alerts with composable filters and pagination.
+
+        ``tactic`` and ``technique`` are applied post-decode in Python
+        (the alert BLOB stores them as msgpack fields). The fast SQL
+        path is used when neither is set.
+        """
         where, params = _build_alert_query(filters)
+        post_decode = filters.tactic is not None or filters.technique is not None
 
-        # where clause assembled from hardcoded SQL fragments in _build_alert_query().
-        # All user values are bound via params. No user data is interpolated.
-        count_sql = f"SELECT COUNT(*) FROM alerts a WHERE {where}"  # noqa: S608  # nosec B608
-        async with await self._conn.execute(count_sql, params) as cursor:
-            row = await cursor.fetchone()
-            total = row[0] if row else 0
+        if not post_decode:
+            # where clause assembled from hardcoded SQL fragments in _build_alert_query().
+            # All user values are bound via params. No user data is interpolated.
+            count_sql = f"SELECT COUNT(*) FROM alerts a WHERE {where}"  # noqa: S608  # nosec B608
+            async with await self._conn.execute(count_sql, params) as cursor:
+                row = await cursor.fetchone()
+                total = row[0] if row else 0
 
-        offset = (filters.page - 1) * filters.limit
-        # where clause assembled from hardcoded SQL fragments in _build_alert_query().
-        # All user values are bound via params. No user data is interpolated.
-        data_sql = (
+            offset = (filters.page - 1) * filters.limit
+            data_sql = (
+                f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
+                f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
+            )
+            async with await self._conn.execute(
+                data_sql, [*params, filters.limit, offset]
+            ) as cursor:
+                rows = await cursor.fetchall()
+            items = tuple(
+                msgspec.structs.replace(
+                    msgspec.msgpack.decode(row[0], type=Alert),
+                    dedup_count=row[1],
+                )
+                for row in rows
+            )
+            return Page(items=items, total=total, page=filters.page, limit=filters.limit)
+
+        # Slow path: decode up to _MAX_POST_DECODE_SCAN rows matching the
+        # SQL-level filters, then apply the mitre filter in Python.
+        scan_sql = (
             f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
-            f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
+            f"ORDER BY a.timestamp_ns DESC LIMIT ?"
         )
-        async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
+        async with await self._conn.execute(scan_sql, [*params, _MAX_POST_DECODE_SCAN]) as cursor:
             rows = await cursor.fetchall()
+        if len(rows) == _MAX_POST_DECODE_SCAN:
+            _log.warning(
+                "query_alerts post-decode scan hit cap (%d rows); "
+                "tactic/technique pagination may be incomplete",
+                _MAX_POST_DECODE_SCAN,
+            )
 
-        items = tuple(
+        decoded: list[Alert] = [
             msgspec.structs.replace(
                 msgspec.msgpack.decode(row[0], type=Alert),
                 dedup_count=row[1],
             )
             for row in rows
+        ]
+
+        if filters.tactic is not None:
+            tactic = filters.tactic
+            decoded = [a for a in decoded if tactic in a.mitre_tactics]
+        if filters.technique is not None:
+            technique = format_technique(filters.technique)
+            decoded = [
+                a
+                for a in decoded
+                if any(format_technique(t) == technique for t in a.mitre_techniques)
+            ]
+
+        total = len(decoded)
+        offset = (filters.page - 1) * filters.limit
+        page_items = tuple(decoded[offset : offset + filters.limit])
+        return Page(
+            items=page_items,
+            total=total,
+            page=filters.page,
+            limit=filters.limit,
         )
-        return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
     async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None:
         """Update alert feedback and re-encode the BLOB.

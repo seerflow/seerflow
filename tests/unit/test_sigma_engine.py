@@ -215,3 +215,24 @@ class TestMakeEventExpansion:
         assert event.event_type == "start"
         assert event.event_action == "logon-failed"
         assert event.event_outcome == "failure"
+
+
+class TestSigmaEngineIterCompiledRules:
+    def test_empty_engine_yields_nothing(self) -> None:
+        engine = SigmaEngine()
+        assert list(engine.iter_compiled_rules()) == []
+
+    def test_yields_every_loaded_rule(self) -> None:
+        from seerflow.sigma.matcher import CompiledRule
+
+        engine = SigmaEngine()
+        engine.load_rules([FIXTURES / "test_whoami.yml", FIXTURES / "test_ssh_brute.yml"])
+        rules = list(engine.iter_compiled_rules())
+        assert len(rules) == engine.rule_count == 2
+        assert all(isinstance(r, CompiledRule) for r in rules)
+
+    def test_returns_iterator(self) -> None:
+        from collections.abc import Iterator
+
+        engine = SigmaEngine()
+        assert isinstance(engine.iter_compiled_rules(), Iterator)

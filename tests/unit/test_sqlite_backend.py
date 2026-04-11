@@ -976,6 +976,189 @@ class TestQueryAlerts:
             await backend.close()
 
 
+def _make_mitre_alert(
+    *,
+    alert_id: str,
+    ts_ns: int,
+    tactics: tuple[str, ...] = (),
+    techniques: tuple[str, ...] = (),
+    dedup_key: str | None = None,
+) -> Alert:
+    return Alert(
+        alert_id=alert_id,
+        alert_type="sigma",
+        timestamp_ns=ts_ns,
+        severity_id=SeverityLevel.WARNING,
+        rule_name="test",
+        description="",
+        entity_uuid="e1",
+        entity_value="1.2.3.4",
+        entity_type="ip",
+        contributing_events=(),
+        mitre_tactics=tactics,
+        mitre_techniques=techniques,
+        dedup_key=dedup_key or f"test:{alert_id}",
+    )
+
+
+class TestQueryAlertsMitreFilter:
+    async def _make_backend_with_alerts(self, alerts: list[Alert] | None = None) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        if alerts is not None:
+            for alert in alerts:
+                await backend.write_alert(alert)
+        return backend
+
+    async def test_filter_by_tactic_present(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+            _make_mitre_alert(
+                alert_id="a2", ts_ns=2_000, tactics=("execution",), techniques=("t1059",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="discovery"))
+            assert page.total == 1
+            assert [a.alert_id for a in page.items] == ["a1"]
+        finally:
+            await backend.close()
+
+    async def test_filter_by_tactic_absent(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="nonexistent"))
+            assert page.total == 0
+            assert page.items == ()
+        finally:
+            await backend.close()
+
+    async def test_filter_by_technique_case_insensitive(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+            _make_mitre_alert(
+                alert_id="a2", ts_ns=2_000, tactics=("execution",), techniques=("t1059",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(technique="T1033"))
+            assert page.total == 1
+            assert page.items[0].alert_id == "a1"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_tactic_and_technique(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+            _make_mitre_alert(
+                alert_id="a2", ts_ns=2_000, tactics=("discovery",), techniques=("t1087",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="discovery", technique="T1033"))
+            assert page.total == 1
+            assert page.items[0].alert_id == "a1"
+        finally:
+            await backend.close()
+
+    async def test_pagination_under_filter_preserves_total(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id=f"a{i}",
+                ts_ns=1_000 + i,
+                tactics=("discovery",),
+                techniques=("t1033",),
+                dedup_key=f"test:a{i}",
+            )
+            for i in range(5)
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page1 = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=2))
+            page2 = await backend.query_alerts(AlertQuery(tactic="discovery", page=2, limit=2))
+            page3 = await backend.query_alerts(AlertQuery(tactic="discovery", page=3, limit=2))
+            assert page1.total == 5
+            assert page2.total == 5
+            assert page3.total == 5
+            assert len(page1.items) == 2
+            assert len(page2.items) == 2
+            assert len(page3.items) == 1
+            assert page1.has_next is True
+            assert page2.has_next is True
+            assert page3.has_next is False
+        finally:
+            await backend.close()
+
+    async def test_fast_and_slow_paths_agree_on_overlapping_alerts(self) -> None:
+        """Unfiltered (fast SQL path) and ``tactic="discovery"`` (slow
+        post-decode path) must agree on the discovery-tagged subset.
+        Locks in the invariant that the two paths return consistent data.
+        """
+        alerts = [
+            _make_mitre_alert(
+                alert_id=f"a{i}",
+                ts_ns=10_000 + i,
+                tactics=("discovery",) if i % 2 == 0 else ("execution",),
+                techniques=("t1033",) if i % 2 == 0 else ("t1059",),
+                dedup_key=f"test:fs:a{i}",
+            )
+            for i in range(6)
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            fast = await backend.query_alerts(AlertQuery(limit=100))
+            slow = await backend.query_alerts(AlertQuery(tactic="discovery", limit=100))
+            assert fast.total == 6
+            assert slow.total == 3
+            fast_discovery_ids = {a.alert_id for a in fast.items if "discovery" in a.mitre_tactics}
+            slow_ids = {a.alert_id for a in slow.items}
+            assert fast_discovery_ids == slow_ids
+        finally:
+            await backend.close()
+
+    async def test_tactic_filter_is_case_sensitive_by_contract(self) -> None:
+        """Plan decision 2: tactics are a canonical snake_case enum and
+        the filter is case-sensitive. This test locks in the semantics
+        — non-canonical values written to the store (e.g. via a
+        misbehaving rule writer) are NOT matched and drop silently.
+        """
+        alerts = [
+            _make_mitre_alert(
+                alert_id="canonical",
+                ts_ns=1_000,
+                tactics=("discovery",),
+                techniques=("t1033",),
+            ),
+            _make_mitre_alert(
+                alert_id="uppercase",
+                ts_ns=2_000,
+                tactics=("Discovery",),
+                techniques=("t1033",),
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="discovery"))
+            assert page.total == 1
+            assert [a.alert_id for a in page.items] == ["canonical"]
+        finally:
+            await backend.close()
+
+
 class TestUpdateFeedback:
     async def _make_backend_with_alert(self, alert: Alert) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
