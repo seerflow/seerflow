@@ -748,7 +748,7 @@ class SqliteBackend:
             decoded = [
                 a
                 for a in decoded
-                if technique in {format_technique(t) for t in a.mitre_techniques}
+                if any(format_technique(t) == technique for t in a.mitre_techniques)
             ]
 
         total = len(decoded)

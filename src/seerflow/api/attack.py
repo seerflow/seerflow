@@ -8,7 +8,7 @@ and rule snapshots plus an alert iterable and return a fully-formed
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from seerflow.api.schemas import (
     AttackCoverageCell,
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from seerflow.models.alert import Alert, CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
 
-CellKey = tuple[str, str]  # (tactic_raw, technique_uppercase)
+CellKey: TypeAlias = tuple[str, str]  # (tactic_raw, technique_uppercase)
 
 
 def _count_tag_pairs(
@@ -130,10 +130,9 @@ def build_matrix(
         by_tactic[key[0]].append(key)
 
     tactics: list[AttackCoverageTactic] = []
-    known = list(TACTICS.keys())
-    known_set = set(known)
+    known_set = set(TACTICS)
 
-    for tactic in known:
+    for tactic in TACTICS:
         tactics.append(
             AttackCoverageTactic(
                 tactic=tactic,
