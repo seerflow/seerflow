@@ -396,7 +396,7 @@ class TestBroadcastEvent:
         client = mgr._clients[client_id]
         assert len(client.event_deque) == 3
         assert client.dropped_events == 2
-        template_ids = [e.template_id for e in client.event_deque]
+        template_ids = [be.event.template_id for be in client.event_deque]
         assert template_ids == [2, 3, 4]
 
     @pytest.mark.asyncio
@@ -468,8 +468,10 @@ class TestBroadcastAlert:
 
 class TestSerialization:
     def test_serialize_event_has_core_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
         event = _make_event(source_type="syslog", severity_id=3, template_id=42)
-        payload = serialize_event(event)
+        payload = serialize_event(BroadcastEvent(event=event))
         assert payload["type"] == "event"
         data = payload["data"]
         assert data["source_type"] == "syslog"
@@ -490,7 +492,9 @@ class TestSerialization:
         assert "entity_value" in data
 
     def test_serialize_event_is_json_encodable(self) -> None:
-        payload = serialize_event(_make_event())
+        from seerflow.api.ws import BroadcastEvent
+
+        payload = serialize_event(BroadcastEvent(event=_make_event()))
         # Round-trips through json.dumps/loads
         s = _json.dumps(payload)
         parsed = _json.loads(s)
@@ -568,7 +572,8 @@ class TestClientSender:
         mgr.start_client_sender(client_id)
 
         # Append directly without setting the wakeup event
-        mgr._clients[client_id].event_deque.append(_make_event())
+        from seerflow.api.ws import BroadcastEvent
+        mgr._clients[client_id].event_deque.append(BroadcastEvent(event=_make_event()))
         await asyncio.sleep(0.1)
 
         assert ws.send_bytes.await_count >= 1
@@ -807,6 +812,31 @@ class TestBroadcastAlertSafety:
         mgr._clients[client_id].filter = "not-a-filter"  # type: ignore[assignment]
         mgr.broadcast_alert(_make_alert())  # Must not raise
         await mgr.disconnect(client_id)
+
+
+class TestBroadcastEventWrapper:
+    def test_broadcast_event_namedtuple_has_detection_fields(self) -> None:
+        """BroadcastEvent wraps a SeerflowEvent plus optional detection metadata."""
+        from seerflow.api.ws import BroadcastEvent
+
+        be = BroadcastEvent(event=_make_event())
+        assert be.event is not None
+        assert be.score is None
+        assert be.is_anomaly is None
+        assert be.upper_threshold is None
+
+    def test_broadcast_event_with_detection_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        be = BroadcastEvent(
+            event=_make_event(),
+            score=0.92,
+            is_anomaly=True,
+            upper_threshold=0.8,
+        )
+        assert be.score == 0.92
+        assert be.is_anomaly is True
+        assert be.upper_threshold == 0.8
 
 
 class TestOriginAllowlist:

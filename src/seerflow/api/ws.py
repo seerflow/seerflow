@@ -1,7 +1,18 @@
 """WebSocket streaming for real-time event/alert delivery to the dashboard.
 
 Provides ConnectionManager (fan-out broadcaster), ClientFilter (per-connection
-filtering), and the /api/ws WebSocket route handler.
+filtering), BroadcastEvent (event + detection metadata wrapper), and the
+/api/ws WebSocket route handler.
+
+Filter application timing
+-------------------------
+Filter updates via the inbound ``{"type": "filter", ...}`` message take
+effect on the next ``broadcast_event`` / ``broadcast_alert`` call after
+``set_filter`` returns. Events and alerts already queued in the per-client
+deque when the filter is updated are delivered under the *previous* filter
+— they were matched at broadcast time, not at drain time. Clients that
+need immediate filter-tight semantics should expect a small transition
+window after updating filters.
 """
 
 from __future__ import annotations
@@ -15,7 +26,7 @@ import typing
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import msgspec
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
@@ -24,6 +35,7 @@ from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 
 if TYPE_CHECKING:
+    from seerflow.detection.ensemble import DetectionResult
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
     from seerflow.storage.protocols import AlertStore
@@ -61,8 +73,9 @@ class ClientFilter:
         return alert.severity_id >= self.min_severity
 
 
-def _event_data(event: SeerflowEvent) -> dict[str, Any]:
+def _event_data(be: BroadcastEvent) -> dict[str, Any]:
     """Build the inner ``data`` payload for an event wire message."""
+    event = be.event
     return {
         "event_id": str(event.event_id),
         "timestamp_ns": event.timestamp_ns,
@@ -93,14 +106,28 @@ def _alert_data(alert: Alert) -> dict[str, Any]:
     }
 
 
-def serialize_event(event: SeerflowEvent) -> dict[str, Any]:
-    """Serialize a SeerflowEvent to a dict suitable for JSON wire format."""
-    return {"type": "event", "data": _event_data(event)}
+def serialize_event(be: BroadcastEvent) -> dict[str, Any]:
+    """Serialize a BroadcastEvent to a dict suitable for JSON wire format."""
+    return {"type": "event", "data": _event_data(be)}
 
 
 def serialize_alert(alert: Alert) -> dict[str, Any]:
     """Serialize an Alert to a dict suitable for JSON wire format."""
     return {"type": "alert", "data": _alert_data(alert)}
+
+
+class BroadcastEvent(NamedTuple):
+    """Event plus optional detection metadata for the WS event deque.
+
+    ``score``, ``is_anomaly``, and ``upper_threshold`` are set when the
+    pipeline calls ``broadcast_event`` after ``DetectionEnsemble.process_event``;
+    they remain ``None`` when detection hasn't run (tests, kill-chain replay).
+    """
+
+    event: SeerflowEvent
+    score: float | None = None
+    is_anomaly: bool | None = None
+    upper_threshold: float | None = None
 
 
 @dataclass(slots=True)
@@ -110,7 +137,7 @@ class ClientState:
     client_id: str
     websocket: WebSocket
     filter: ClientFilter
-    event_deque: deque[SeerflowEvent]
+    event_deque: deque[BroadcastEvent]
     alert_deque: deque[Alert]
     wakeup: asyncio.Event
     sender_task: asyncio.Task[None] | None = None
@@ -298,19 +325,33 @@ class ConnectionManager:
             return 1
         return max(SEVERITY_MIN, min(SEVERITY_MAX, raw))
 
-    def broadcast_event(self, event: SeerflowEvent) -> None:
+    def broadcast_event(
+        self,
+        event: SeerflowEvent,
+        *,
+        detection: DetectionResult | None = None,
+    ) -> None:
         """Fan-out an event to all matching clients (sync, non-blocking).
 
         Must never raise — the pipeline hot path depends on this.
         """
         self._events_broadcast_count += 1
+        if detection is None:
+            be = BroadcastEvent(event=event)
+        else:
+            be = BroadcastEvent(
+                event=event,
+                score=detection.score,
+                is_anomaly=detection.is_anomaly,
+                upper_threshold=detection.upper_threshold,
+            )
         for client in self._clients.values():
             try:
                 if not client.filter.matches_event(event):
                     continue
                 if len(client.event_deque) == client.event_deque.maxlen:
                     client.dropped_events += 1
-                client.event_deque.append(event)
+                client.event_deque.append(be)
                 client.wakeup.set()
             except Exception:
                 _log.warning(
@@ -374,7 +415,7 @@ class ConnectionManager:
 
     async def _drain_events(self, client: ClientState) -> None:
         """Pop up to ``batch_max_events`` events and send as event/batch."""
-        events: list[SeerflowEvent] = []
+        events: list[BroadcastEvent] = []
         while client.event_deque and len(events) < self._batch_max_events:
             events.append(client.event_deque.popleft())
         if len(events) == 1:
@@ -382,7 +423,7 @@ class ConnectionManager:
         elif events:
             await _send_bytes(
                 client.websocket,
-                {"type": "batch", "events": [_event_data(e) for e in events]},
+                {"type": "batch", "events": [_event_data(be) for be in events]},
             )
 
     async def _drain_alerts(self, client: ClientState) -> None:
