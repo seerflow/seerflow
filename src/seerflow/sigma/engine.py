@@ -25,7 +25,7 @@ from seerflow.sigma.matcher import CompiledRule, compile_rule, match_event
 from seerflow.sigma.pipeline import seerflow_pipeline
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from pathlib import Path
 
     from seerflow.models.event import SeerflowEvent
@@ -178,6 +178,16 @@ class SigmaEngine:
     def logsource_summary(self) -> dict[tuple[str, str, str], int]:
         """Map of logsource key -> number of rules."""
         return {k: len(v) for k, v in self._index.items()}
+
+    def iter_compiled_rules(self) -> Iterator[CompiledRule]:
+        """Yield every compiled rule in this engine.
+
+        Iteration order groups rules by logsource key, then by insertion
+        order inside each group. Callers must not rely on the exact
+        ordering — treat it as an unordered set.
+        """
+        for rules in self._index.values():
+            yield from rules
 
 
 def _create_sigma_alert(compiled: CompiledRule, event: SeerflowEvent) -> Alert:
