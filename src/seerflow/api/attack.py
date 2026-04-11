@@ -28,21 +28,34 @@ if TYPE_CHECKING:
 CellKey = tuple[str, str]  # (tactic_raw, technique_uppercase)
 
 
+def _count_tag_pairs(
+    tactics: tuple[str, ...],
+    techniques: tuple[str, ...],
+    counts: dict[CellKey, int],
+) -> None:
+    """Increment ``counts`` for every valid (tactic, technique) pair.
+
+    Drops empty-string entries and pairs where either tuple is empty.
+    Techniques are normalized with ``format_technique`` before keying.
+    """
+    if not tactics or not techniques:
+        return
+    for tactic in tactics:
+        if not tactic:
+            continue
+        for technique in techniques:
+            if not technique:
+                continue
+            counts[(tactic, format_technique(technique))] += 1
+
+
 def collect_sigma_cells(engine: SigmaEngine | None) -> dict[CellKey, int]:
     """Count one hit per (tactic, technique) pair per Sigma rule."""
     counts: dict[CellKey, int] = defaultdict(int)
     if engine is None:
         return counts
     for rule in engine.iter_compiled_rules():
-        if not rule.attack_tactics or not rule.attack_techniques:
-            continue
-        for tactic in rule.attack_tactics:
-            if not tactic:
-                continue
-            for technique in rule.attack_techniques:
-                if not technique:
-                    continue
-                counts[(tactic, format_technique(technique))] += 1
+        _count_tag_pairs(rule.attack_tactics, rule.attack_techniques, counts)
     return counts
 
 
@@ -52,15 +65,7 @@ def collect_correlation_cells(
     """Count one hit per (tactic, technique) pair per correlation rule."""
     counts: dict[CellKey, int] = defaultdict(int)
     for rule in rules:
-        if not rule.mitre_tactics or not rule.mitre_techniques:
-            continue
-        for tactic in rule.mitre_tactics:
-            if not tactic:
-                continue
-            for technique in rule.mitre_techniques:
-                if not technique:
-                    continue
-                counts[(tactic, format_technique(technique))] += 1
+        _count_tag_pairs(rule.mitre_tactics, rule.mitre_techniques, counts)
     return counts
 
 
@@ -68,16 +73,25 @@ def collect_alert_cells(alerts: Iterable[Alert]) -> dict[CellKey, int]:
     """Count one hit per (tactic, technique) pair per alert."""
     counts: dict[CellKey, int] = defaultdict(int)
     for alert in alerts:
-        if not alert.mitre_tactics or not alert.mitre_techniques:
-            continue
-        for tactic in alert.mitre_tactics:
-            if not tactic:
-                continue
-            for technique in alert.mitre_techniques:
-                if not technique:
-                    continue
-                counts[(tactic, format_technique(technique))] += 1
+        _count_tag_pairs(alert.mitre_tactics, alert.mitre_techniques, counts)
     return counts
+
+
+def merge_rule_counts(
+    *sources: dict[CellKey, int],
+) -> dict[CellKey, int]:
+    """Merge multiple rule-count dicts into one.
+
+    The route handler collects counts from the Sigma engine and the
+    correlation-rules list separately, then merges here. Keeping the
+    merge in this pure module prevents the route from growing merge
+    logic when new rule sources are added.
+    """
+    merged: dict[CellKey, int] = defaultdict(int)
+    for source in sources:
+        for key, count in source.items():
+            merged[key] += count
+    return merged
 
 
 def _cells_for_tactic(

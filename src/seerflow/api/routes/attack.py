@@ -16,6 +16,7 @@ from seerflow.api.attack import (
     collect_alert_cells,
     collect_correlation_cells,
     collect_sigma_cells,
+    merge_rule_counts,
 )
 from seerflow.api.deps import (
     DetectionEngines,
@@ -29,6 +30,7 @@ from seerflow.models.query import AlertQuery, TimeRange
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
+    from seerflow.storage.protocols import AlertStore
 
 _log = logging.getLogger(__name__)
 
@@ -67,14 +69,14 @@ def _resolve_window(since: str | None, until: str | None) -> tuple[datetime, dat
 
 
 async def _scan_alerts(
-    alert_store: object,
+    alert_store: AlertStore,
     time_range: TimeRange,
 ) -> list[Alert]:
     """Page through up to ``_MAX_ALERT_SCAN`` alerts and warn if the cap hits."""
     alerts: list[Alert] = []
     page = None
     for page_num in range(1, _MAX_SCAN_PAGES + 1):
-        page = await alert_store.query_alerts(  # type: ignore[attr-defined]
+        page = await alert_store.query_alerts(
             AlertQuery(time_range=time_range, page=page_num, limit=_SCAN_PAGE_SIZE)
         )
         alerts.extend(page.items)
@@ -109,11 +111,10 @@ async def get_coverage(
         end_ns=int(window_until.timestamp() * 1_000_000_000),
     )
     alerts = await _scan_alerts(storage.alert_store, time_range)
-
-    rule_counts: dict[tuple[str, str], int] = dict(collect_sigma_cells(engines.sigma_engine))
-    for key, count in collect_correlation_cells(engines.correlation_rules).items():
-        rule_counts[key] = rule_counts.get(key, 0) + count
-
+    rule_counts = merge_rule_counts(
+        collect_sigma_cells(engines.sigma_engine),
+        collect_correlation_cells(engines.correlation_rules),
+    )
     return build_matrix(
         rule_counts,
         collect_alert_cells(alerts),

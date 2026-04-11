@@ -198,7 +198,13 @@ class AttackCoverageSummary(BaseModel):
 
 
 class AttackCoverageResponse(BaseModel):
-    """Top-level ATT&CK coverage matrix response."""
+    """Top-level ATT&CK coverage matrix response.
+
+    ``window_since`` and ``window_until`` are ISO-8601 strings produced
+    by ``datetime.isoformat()`` on a UTC-aware ``datetime``. Offsets are
+    emitted as ``+00:00`` (RFC 3339 canonical), not the ``Z`` shorthand.
+    Callers parsing these should accept both via ``datetime.fromisoformat``.
+    """
 
     window_since: str
     window_until: str

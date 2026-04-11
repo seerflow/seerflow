@@ -9,6 +9,7 @@ from seerflow.api.attack import (
     collect_alert_cells,
     collect_correlation_cells,
     collect_sigma_cells,
+    merge_rule_counts,
 )
 from seerflow.models.alert import Alert, CorrelationRule, SourceCondition
 from seerflow.models.event import SeverityLevel
@@ -214,3 +215,34 @@ class TestBuildMatrix:
         resp = build_matrix({}, {}, window_since=self._since, window_until=self._until)
         assert resp.window_since.startswith("2026-03-12")
         assert resp.window_until.startswith("2026-04-11")
+
+
+class TestMergeRuleCounts:
+    def test_empty_inputs_return_empty(self) -> None:
+        assert merge_rule_counts() == {}
+        assert merge_rule_counts({}) == {}
+        assert merge_rule_counts({}, {}) == {}
+
+    def test_disjoint_sources_are_concatenated(self) -> None:
+        sigma = {("discovery", "T1033"): 2}
+        correlation = {("lateral_movement", "T1021"): 1}
+        merged = merge_rule_counts(sigma, correlation)
+        assert merged == {
+            ("discovery", "T1033"): 2,
+            ("lateral_movement", "T1021"): 1,
+        }
+
+    def test_overlapping_sources_are_summed(self) -> None:
+        sigma = {("discovery", "T1033"): 2, ("execution", "T1059"): 1}
+        correlation = {("discovery", "T1033"): 3}
+        merged = merge_rule_counts(sigma, correlation)
+        assert merged == {
+            ("discovery", "T1033"): 5,
+            ("execution", "T1059"): 1,
+        }
+
+    def test_variadic_three_sources(self) -> None:
+        a = {("discovery", "T1033"): 1}
+        b = {("discovery", "T1033"): 2}
+        c = {("discovery", "T1033"): 4}
+        assert merge_rule_counts(a, b, c) == {("discovery", "T1033"): 7}

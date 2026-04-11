@@ -124,6 +124,25 @@ class TestAttackCoverageRoute:
         assert response.status_code == 400
         assert response.json()["detail"] == "since must be before until"
 
+    def test_since_equals_until_accepted_with_empty_window(self) -> None:
+        """Zero-length window is accepted (``since <= until``). Alerts in
+        a zero-second window are inherently empty, which is useful for
+        clients fetching "coverage as of a specific instant" with rule
+        counts but no alert data.
+        """
+        client = _build_client()
+        response = client.get(
+            "/api/v1/attack/coverage",
+            params={
+                "since": "2026-04-11T00:00:00+00:00",
+                "until": "2026-04-11T00:00:00+00:00",
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["summary"]["total_alerts_matched"] == 0
+        assert body["window_since"] == body["window_until"]
+
     def test_malformed_timestamp_returns_422(self) -> None:
         client = _build_client()
         response = client.get("/api/v1/attack/coverage", params={"since": "not-a-date"})
