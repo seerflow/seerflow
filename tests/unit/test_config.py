@@ -1409,3 +1409,26 @@ def test_parse_ws_fields_returns_named_tuple() -> None:
     assert result.ws_batch_max_events == 10
     assert result.ws_status_interval_s == 5.0
     assert result.ws_allowed_origins == ()
+
+
+def test_ws_filter_min_interval_ms_default_is_100() -> None:
+    from seerflow.config import SeerflowConfig
+
+    cfg = SeerflowConfig()
+    assert cfg.ws_filter_min_interval_ms == 100
+
+
+def test_parse_ws_fields_includes_filter_min_interval_ms() -> None:
+    from seerflow.config import _parse_ws_fields
+
+    result = _parse_ws_fields({"ws_filter_min_interval_ms": 250})
+    assert result.ws_filter_min_interval_ms == 250
+
+
+def test_ws_filter_min_interval_ms_rejects_negative() -> None:
+    import pytest
+
+    from seerflow.config import ConfigError, _parse_ws_fields
+
+    with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
+        _parse_ws_fields({"ws_filter_min_interval_ms": -1})

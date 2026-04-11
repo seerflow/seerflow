@@ -238,6 +238,7 @@ class SeerflowConfig:
     # Explicit WebSocket Origin allowlist. Empty tuple means "use the
     # localhost defaults derived from dashboard_port" (see api.app).
     ws_allowed_origins: tuple[str, ...] = ()
+    ws_filter_min_interval_ms: int = 100
 
 
 # ---------------------------------------------------------------------------
@@ -883,6 +884,7 @@ def load_config(
         ws_batch_max_events=ws_fields.ws_batch_max_events,
         ws_status_interval_s=ws_fields.ws_status_interval_s,
         ws_allowed_origins=ws_fields.ws_allowed_origins,
+        ws_filter_min_interval_ms=ws_fields.ws_filter_min_interval_ms,
     )
 
 
@@ -910,6 +912,7 @@ class _WsFields(NamedTuple):
     ws_batch_max_events: int
     ws_status_interval_s: float
     ws_allowed_origins: tuple[str, ...]
+    ws_filter_min_interval_ms: int
 
 
 def _parse_ws_fields(
@@ -959,6 +962,17 @@ def _parse_ws_fields(
         raise ConfigError("ws_allowed_origins items must be strings")
     ws_allowed_origins: tuple[str, ...] = tuple(ws_allowed_origins_raw)
 
+    ws_filter_min_interval_ms = raw.get("ws_filter_min_interval_ms", 100)
+    if (
+        not isinstance(ws_filter_min_interval_ms, int)
+        or isinstance(ws_filter_min_interval_ms, bool)
+        or ws_filter_min_interval_ms < 0
+    ):
+        raise ConfigError(
+            f"ws_filter_min_interval_ms must be a non-negative integer, "
+            f"got {ws_filter_min_interval_ms!r}"
+        )
+
     return _WsFields(
         ws_max_connections=ws_max_connections,
         ws_queue_maxlen=ws_queue_maxlen,
@@ -966,4 +980,5 @@ def _parse_ws_fields(
         ws_batch_max_events=ws_batch_max_events,
         ws_status_interval_s=float(ws_status_interval_s),
         ws_allowed_origins=ws_allowed_origins,
+        ws_filter_min_interval_ms=ws_filter_min_interval_ms,
     )
