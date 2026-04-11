@@ -158,3 +158,40 @@ class EntityTimelineResponse(BaseModel):
     events: list[EventResponse]
     related: list[EntityRelationResponse]
     total: int
+
+
+class AttackCoverageCell(BaseModel):
+    """One (tactic, technique) cell in the ATT&CK coverage matrix."""
+
+    tactic: str
+    technique: str
+    rule_count: int = Field(ge=0)
+    alert_count: int = Field(ge=0)
+    covered: bool
+    detected: bool
+
+
+class AttackCoverageTactic(BaseModel):
+    """All technique cells grouped under a single tactic."""
+
+    tactic: str
+    tactic_display_name: str
+    techniques: list[AttackCoverageCell] = Field(default_factory=list)
+
+
+class AttackCoverageSummary(BaseModel):
+    """Aggregate totals across the whole coverage response."""
+
+    total_techniques_covered: int = Field(ge=0)
+    total_techniques_detected: int = Field(ge=0)
+    total_rules_with_attack_tags: int = Field(ge=0)
+    total_alerts_matched: int = Field(ge=0)
+
+
+class AttackCoverageResponse(BaseModel):
+    """Top-level ATT&CK coverage matrix response."""
+
+    window_since: str
+    window_until: str
+    tactics: list[AttackCoverageTactic]
+    summary: AttackCoverageSummary

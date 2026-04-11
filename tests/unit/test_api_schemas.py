@@ -249,3 +249,54 @@ def test_entity_timeline_response_envelope() -> None:
     assert envelope.total == 1
     assert envelope.events[0].message == "hi"
     assert envelope.related[0].relation_type == "seen_on"
+
+
+class TestAttackCoverageSchemas:
+    def test_attack_coverage_cell_roundtrip(self) -> None:
+        from seerflow.api.schemas import AttackCoverageCell
+
+        cell = AttackCoverageCell(
+            tactic="discovery",
+            technique="T1033",
+            rule_count=2,
+            alert_count=1,
+            covered=True,
+            detected=True,
+        )
+        assert cell.model_dump() == {
+            "tactic": "discovery",
+            "technique": "T1033",
+            "rule_count": 2,
+            "alert_count": 1,
+            "covered": True,
+            "detected": True,
+        }
+
+    def test_attack_coverage_tactic_default_techniques_empty(self) -> None:
+        from seerflow.api.schemas import AttackCoverageTactic
+
+        tactic = AttackCoverageTactic(
+            tactic="discovery", tactic_display_name="Discovery (TA0007)"
+        )
+        assert tactic.techniques == []
+
+    def test_attack_coverage_response_empty_ok(self) -> None:
+        from seerflow.api.schemas import (
+            AttackCoverageResponse,
+            AttackCoverageSummary,
+        )
+
+        resp = AttackCoverageResponse(
+            window_since="2026-03-12T00:00:00+00:00",
+            window_until="2026-04-11T00:00:00+00:00",
+            tactics=[],
+            summary=AttackCoverageSummary(
+                total_techniques_covered=0,
+                total_techniques_detected=0,
+                total_rules_with_attack_tags=0,
+                total_alerts_matched=0,
+            ),
+        )
+        body = resp.model_dump()
+        assert body["summary"]["total_techniques_covered"] == 0
+        assert body["tactics"] == []
