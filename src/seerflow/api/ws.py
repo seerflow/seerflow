@@ -109,7 +109,11 @@ def _event_data(be: BroadcastEvent) -> dict[str, Any]:
         "timestamp_ns": event.timestamp_ns,
         "observed_ns": event.observed_ns,
         "severity_id": event.severity_id,
-        "severity_text": event.severity_id.text if isinstance(event.severity_id, SeverityLevel) else SeverityLevel(int(event.severity_id)).text,
+        "severity_text": (
+            event.severity_id.text
+            if isinstance(event.severity_id, SeverityLevel)
+            else SeverityLevel(int(event.severity_id)).text
+        ),
         "source_type": event.source_type,
         "message": event.message,
         "template_id": event.template_id,
