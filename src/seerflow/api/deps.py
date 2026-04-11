@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, Request
 
 if TYPE_CHECKING:
+    from seerflow.models.alert import CorrelationRule
+    from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
 
 
@@ -64,3 +66,21 @@ def require_entity_store(
             detail="entity_store not configured",
         )
     return storage.entity_store
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionEngines:
+    """Snapshot of detection engines injected into the FastAPI app.
+
+    Hot-reloads managed by ``seerflow.correlation.reloader`` are NOT
+    reflected here — the snapshot is captured at ``create_api_app`` time.
+    Restart the process to refresh rule counts in the coverage API.
+    """
+
+    sigma_engine: SigmaEngine | None = None
+    correlation_rules: tuple[CorrelationRule, ...] = ()
+
+
+def get_engines(request: Request) -> DetectionEngines:
+    """FastAPI Depends provider -- retrieve DetectionEngines from app.state."""
+    return request.app.state.engines  # type: ignore[no-any-return]
