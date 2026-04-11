@@ -182,6 +182,7 @@ class ClientState:
     sender_task: asyncio.Task[None] | None = None
     dropped_events: int = 0
     dropped_alerts: int = 0
+    last_filter_ns: int = 0
 
 
 class ConnectionManager:
@@ -283,11 +284,22 @@ class ConnectionManager:
     def set_filter(self, client_id: str, filter_msg: dict[str, Any]) -> list[str]:
         """Validate and apply a filter message. Returns list of error strings.
 
-        On validation failure, the existing filter is preserved (atomic update).
+        On validation failure or rate-limit rejection, the existing filter
+        is preserved (atomic update).
         """
         client = self._clients.get(client_id)
         if client is None:
             return []
+
+        now_ns = time.monotonic_ns()
+        if (
+            client.last_filter_ns > 0
+            and now_ns - client.last_filter_ns < self._filter_min_interval_ns
+        ):
+            return [
+                f"filter updates throttled: min interval "
+                f"{self._filter_min_interval_ns // 1_000_000} ms"
+            ]
 
         errors: list[str] = []
         sources = self._parse_list_field(filter_msg, "sources", str, self._MAX_SOURCES, errors)
@@ -306,6 +318,7 @@ class ConnectionManager:
             alert_types=frozenset(alert_types),
             template_ids=frozenset(template_ids),
         )
+        client.last_filter_ns = now_ns
         return []
 
     def _parse_list_field(

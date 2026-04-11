@@ -337,6 +337,32 @@ class TestSetFilter:
         errors = mgr.set_filter("not-a-real-id", {"type": "filter"})
         assert errors == []
 
+    @pytest.mark.asyncio
+    async def test_filter_rate_limit_rejects_fast_updates(self) -> None:
+        """Second filter message within the throttle window is rejected."""
+        mgr = ConnectionManager(filter_min_interval_ns=50_000_000)  # 50 ms
+        client_id = await self._connect(mgr)
+
+        errors1 = mgr.set_filter(client_id, {"type": "filter", "sources": ["a"]})
+        assert errors1 == []
+        errors2 = mgr.set_filter(client_id, {"type": "filter", "sources": ["b"]})
+        assert any("throttled" in e for e in errors2)
+        # Original filter preserved
+        assert mgr._clients[client_id].filter.sources == frozenset({"a"})
+
+    @pytest.mark.asyncio
+    async def test_filter_rate_limit_allows_after_interval(self) -> None:
+        import time as _time
+
+        mgr = ConnectionManager(filter_min_interval_ns=10_000_000)  # 10 ms
+        client_id = await self._connect(mgr)
+
+        mgr.set_filter(client_id, {"type": "filter", "sources": ["a"]})
+        _time.sleep(0.02)  # exceed 10 ms window
+        errors = mgr.set_filter(client_id, {"type": "filter", "sources": ["b"]})
+        assert errors == []
+        assert mgr._clients[client_id].filter.sources == frozenset({"b"})
+
 
 class TestBroadcastEvent:
     @pytest.mark.asyncio
