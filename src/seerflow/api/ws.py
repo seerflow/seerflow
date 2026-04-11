@@ -73,6 +73,30 @@ class ClientFilter:
         return alert.severity_id >= self.min_severity
 
 
+_ENTITY_SUMMARY_MAX_PER_KEY = 5
+
+
+def _entity_summary(event: SeerflowEvent) -> dict[str, list[str]]:
+    """Build a compact entity summary dict for the WS wire payload.
+
+    Includes only non-empty entity lists, capped at
+    ``_ENTITY_SUMMARY_MAX_PER_KEY`` values per key, so the frontend can
+    display top entities without a REST round-trip.
+    """
+    summary: dict[str, list[str]] = {}
+    for key, vals in (
+        ("ips", event.related_ips),
+        ("users", event.related_users),
+        ("hosts", event.related_hosts),
+        ("domains", event.related_domains),
+        ("files", event.related_files),
+        ("processes", event.related_processes),
+    ):
+        if vals:
+            summary[key] = list(vals[:_ENTITY_SUMMARY_MAX_PER_KEY])
+    return summary
+
+
 def _event_data(be: BroadcastEvent) -> dict[str, Any]:
     """Build the inner ``data`` payload for an event wire message.
 
@@ -90,6 +114,7 @@ def _event_data(be: BroadcastEvent) -> dict[str, Any]:
         "message": event.message,
         "template_id": event.template_id,
         "entity_refs": list(event.entity_refs),
+        "entity_summary": _entity_summary(event),
     }
     return data
 

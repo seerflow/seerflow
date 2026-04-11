@@ -509,6 +509,36 @@ class TestSerialization:
         parsed = _json.loads(s)
         assert parsed["type"] == "event"
 
+    def test_serialize_event_includes_entity_summary(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        event = msgspec.structs.replace(
+            _make_event(),
+            related_ips=("10.0.0.1", "10.0.0.2"),
+            related_users=("alice",),
+        )
+        payload = serialize_event(BroadcastEvent(event=event))
+        data = payload["data"]
+        assert data["entity_summary"] == {
+            "ips": ["10.0.0.1", "10.0.0.2"],
+            "users": ["alice"],
+        }
+
+    def test_entity_summary_omits_empty_keys(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        event = _make_event()  # no related_* fields set
+        payload = serialize_event(BroadcastEvent(event=event))
+        assert payload["data"]["entity_summary"] == {}
+
+    def test_entity_summary_caps_at_five_values(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        many = tuple(f"10.0.0.{i}" for i in range(20))
+        event = msgspec.structs.replace(_make_event(), related_ips=many)
+        payload = serialize_event(BroadcastEvent(event=event))
+        assert payload["data"]["entity_summary"]["ips"] == list(many[:5])
+
 
 class TestClientSender:
     @pytest.mark.asyncio
