@@ -115,6 +115,88 @@ class TestAlertsIntegration:
         )
         assert resp.status_code == 204
 
+    async def test_filter_by_tactic(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        a1 = Alert(
+            alert_id="int-mitre-a1",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=3,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("discovery",),
+            mitre_techniques=("t1033",),
+            dedup_key="int-mitre:a1",
+        )
+        a2 = Alert(
+            alert_id="int-mitre-a2",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_001,
+            severity_id=3,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("execution",),
+            mitre_techniques=("t1059",),
+            dedup_key="int-mitre:a2",
+        )
+        await backend.write_alert(a1, dedup_window_ns=0)
+        await backend.write_alert(a2, dedup_window_ns=0)
+        resp = client.get("/api/v1/alerts", params={"tactic": "discovery"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert [item["alert_id"] for item in body["items"]] == ["int-mitre-a1"]
+
+    async def test_filter_by_technique_case_insensitive(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        a1 = Alert(
+            alert_id="int-tech-a1",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=3,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("discovery",),
+            mitre_techniques=("t1033",),
+            dedup_key="int-tech:a1",
+        )
+        a2 = Alert(
+            alert_id="int-tech-a2",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_001,
+            severity_id=3,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("discovery",),
+            mitre_techniques=("t1087",),
+            dedup_key="int-tech:a2",
+        )
+        await backend.write_alert(a1, dedup_window_ns=0)
+        await backend.write_alert(a2, dedup_window_ns=0)
+        resp = client.get("/api/v1/alerts", params={"technique": "T1033"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["alert_id"] == "int-tech-a1"
+
 
 class TestHealthIntegration:
     """Health endpoint with real app."""
