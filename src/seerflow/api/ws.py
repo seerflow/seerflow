@@ -506,7 +506,13 @@ class ConnectionManager:
                 _log.warning("status broadcaster tick failed", exc_info=True)
 
     async def _emit_status_tick(self) -> None:
-        """Compute and broadcast one status tick to all connected clients."""
+        """Compute and broadcast one status tick to all connected clients.
+
+        The reported ``events_ingested_per_sec`` counts *observed broadcasts*
+        at the fan-out point, not per-client deliveries. Events filtered out
+        by per-client filters or dropped due to deque overflow still count
+        toward this rate — it reflects pipeline ingest, not wire throughput.
+        """
         now_ns = time.monotonic_ns()
         elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
         events_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
