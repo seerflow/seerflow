@@ -134,6 +134,18 @@ class TestConnectionManagerConstruction:
         )
         assert mgr.max_connections == 5
 
+    def test_max_connections_is_read_only_property(self) -> None:
+        """max_connections and connected_count should both be properties."""
+        mgr = ConnectionManager(max_connections=5)
+        # Both should be property-based
+        assert isinstance(type(mgr).max_connections, property)
+        assert isinstance(type(mgr).connected_count, property)
+        # Read works
+        assert mgr.max_connections == 5
+        # Write should fail (property has no setter)
+        with pytest.raises(AttributeError):
+            mgr.max_connections = 99  # type: ignore[misc]
+
 
 class TestConnectionManagerLifecycle:
     @pytest.mark.asyncio

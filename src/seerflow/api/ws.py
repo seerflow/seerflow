@@ -137,7 +137,7 @@ class ConnectionManager:
         allowed_origins: frozenset[str] | None = None,
     ) -> None:
         self._alert_store = alert_store
-        self.max_connections = max_connections
+        self._max_connections = max_connections
         self._queue_maxlen = queue_maxlen
         self._tick_interval_s = tick_interval_s
         self._batch_max_events = batch_max_events
@@ -151,6 +151,10 @@ class ConnectionManager:
         # start_status_task are attributed to a non-zero window.
         self._broadcast_window_start_ns = time.monotonic_ns()
         self._status_task: asyncio.Task[None] | None = None
+
+    @property
+    def max_connections(self) -> int:
+        return self._max_connections
 
     @property
     def connected_count(self) -> int:
