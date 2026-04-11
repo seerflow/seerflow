@@ -201,6 +201,7 @@ class ConnectionManager:
         batch_max_events: int = 10,
         status_interval_s: float = 5.0,
         allowed_origins: frozenset[str] | None = None,
+        filter_min_interval_ns: int = 100_000_000,  # 100 ms default
     ) -> None:
         self._alert_store = alert_store
         self._max_connections = max_connections
@@ -211,6 +212,7 @@ class ConnectionManager:
         # ``None`` means "skip Origin check" (non-browser clients / tests).
         # A frozenset means "only browser clients with matching Origin may connect".
         self._allowed_origins = allowed_origins
+        self._filter_min_interval_ns = filter_min_interval_ns
         self._clients: dict[str, ClientState] = {}
         self._events_broadcast_count = 0
         # Initialize window start at construction so broadcasts before

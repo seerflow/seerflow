@@ -65,6 +65,7 @@ def _build_ws_manager(
         batch_max_events=config.ws_batch_max_events,
         status_interval_s=config.ws_status_interval_s,
         allowed_origins=allowed_origins,
+        filter_min_interval_ns=config.ws_filter_min_interval_ms * 1_000_000,
     )
 
 
