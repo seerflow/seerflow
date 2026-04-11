@@ -51,14 +51,14 @@ class ClientFilter:
     def matches_event(self, event: SeerflowEvent) -> bool:
         if self.sources and event.source_type not in self.sources:
             return False
-        if int(event.severity_id) < self.min_severity:
+        if event.severity_id < self.min_severity:
             return False
         return not (self.template_ids and event.template_id not in self.template_ids)
 
     def matches_alert(self, alert: Alert) -> bool:
         if self.alert_types and alert.alert_type not in self.alert_types:
             return False
-        return int(alert.severity_id) >= self.min_severity
+        return alert.severity_id >= self.min_severity
 
 
 def _event_data(event: SeerflowEvent) -> dict[str, Any]:
@@ -66,7 +66,7 @@ def _event_data(event: SeerflowEvent) -> dict[str, Any]:
     return {
         "event_id": str(event.event_id),
         "timestamp_ns": event.timestamp_ns,
-        "severity_id": int(event.severity_id),
+        "severity_id": event.severity_id,
         "source_type": event.source_type,
         "message": event.message,
         "template_id": event.template_id,
@@ -81,7 +81,7 @@ def _alert_data(alert: Alert) -> dict[str, Any]:
         "timestamp_ns": alert.timestamp_ns,
         "alert_type": alert.alert_type,
         "rule_name": alert.rule_name,
-        "severity": int(alert.severity_id),
+        "severity": alert.severity_id,
         "risk_score": alert.risk_score,
         "entity_uuid": alert.entity_uuid,
         "entity_type": alert.entity_type,
