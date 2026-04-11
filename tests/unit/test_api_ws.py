@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import uuid
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -61,6 +62,27 @@ def _make_alert(
         entity_type="ip",
         contributing_events=(),
     )
+
+
+async def _wait_until(
+    predicate: Callable[[], bool],
+    timeout: float = 1.0,
+    interval: float = 0.005,
+) -> None:
+    """Poll ``predicate`` at ``interval`` seconds until it returns True.
+
+    Replaces fixed ``asyncio.sleep(...)`` test waits that were flaky under
+    CI load. Raises ``TimeoutError`` if ``timeout`` seconds elapse without
+    ``predicate`` returning a truthy value.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(interval)
+    if not predicate():
+        msg = f"predicate did not become true within {timeout}s"
+        raise TimeoutError(msg)
 
 
 class TestClientFilterDefaults:
