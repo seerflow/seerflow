@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import json
 import logging
 import time
@@ -32,7 +33,7 @@ import msgspec
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
 from seerflow.models._types import AlertType
-from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN, SeverityLevel
+from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionResult
@@ -93,7 +94,7 @@ def _entity_summary(event: SeerflowEvent) -> dict[str, list[str]]:
         ("processes", event.related_processes),
     ):
         if vals:
-            summary[key] = list(vals[:_ENTITY_SUMMARY_MAX_PER_KEY])
+            summary[key] = list(itertools.islice(vals, _ENTITY_SUMMARY_MAX_PER_KEY))
     return summary
 
 
@@ -109,11 +110,7 @@ def _event_data(be: BroadcastEvent) -> dict[str, Any]:
         "timestamp_ns": event.timestamp_ns,
         "observed_ns": event.observed_ns,
         "severity_id": event.severity_id,
-        "severity_text": (
-            event.severity_id.text
-            if isinstance(event.severity_id, SeverityLevel)
-            else SeverityLevel(int(event.severity_id)).text
-        ),
+        "severity_text": event.severity_id.text,
         "source_type": event.source_type,
         "message": event.message,
         "template_id": event.template_id,

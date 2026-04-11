@@ -20,7 +20,7 @@ from seerflow.api.ws import (
     serialize_event,
 )
 from seerflow.models.alert import Alert
-from seerflow.models.event import SeerflowEvent
+from seerflow.models.event import SeerflowEvent, SeverityLevel
 
 
 def _decode_sent(ws_mock: Any) -> list[dict[str, Any]]:
@@ -40,7 +40,7 @@ def _make_event(
         observed_ns=1_800_000_000_000_000_001,
         message="test event",
         source_type=source_type,
-        severity_id=severity_id,  # type: ignore[arg-type]
+        severity_id=SeverityLevel(severity_id),
         template_id=template_id,
     )
 
@@ -54,7 +54,7 @@ def _make_alert(
         alert_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"alert-{alert_type}-{severity}")),
         alert_type=alert_type,  # type: ignore[arg-type]
         timestamp_ns=1_800_000_000_000_000_000,
-        severity_id=severity,  # type: ignore[arg-type]
+        severity_id=SeverityLevel(severity),
         rule_name="test-rule",
         description="test alert",
         entity_uuid=str(uuid.uuid4()),
@@ -744,7 +744,7 @@ class TestStatusBroadcaster:
         client_id = await mgr.connect(ws)
         mgr.start_client_sender(client_id)
 
-        # Force two drops
+        # Force >=3 drops: queue_maxlen=2, broadcasting 5 events drops events 3-5.
         for i in range(5):
             mgr.broadcast_event(_make_event(template_id=i))
 

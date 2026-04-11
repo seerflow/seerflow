@@ -118,9 +118,9 @@ async def test_broadcast_event_includes_detection_result_after_process() -> None
     """Event broadcast must happen AFTER process_event and include the DetectionResult."""
     from seerflow.pipeline.handler import make_handler
 
-    ws_manager = MagicMock()
-    ws_manager.broadcast_event = MagicMock()
-    ws_manager.broadcast_alert = MagicMock()
+    from seerflow.api.ws import ConnectionManager
+
+    ws_manager = MagicMock(spec=ConnectionManager)
 
     # Storage: async no-op for writes
     storage = MagicMock()
