@@ -183,6 +183,7 @@ class ClientState:
     dropped_events: int = 0
     dropped_alerts: int = 0
     last_filter_ns: int = 0
+    dead: bool = False
 
 
 class ConnectionManager:
@@ -400,6 +401,8 @@ class ConnectionManager:
                 upper_threshold=detection.upper_threshold,
             )
         for client in self._clients.values():
+            if client.dead:
+                continue
             try:
                 if not client.filter.matches_event(event):
                     continue
@@ -420,6 +423,8 @@ class ConnectionManager:
         Must never raise — the pipeline hot path depends on this.
         """
         for client in self._clients.values():
+            if client.dead:
+                continue
             try:
                 if not client.filter.matches_alert(alert):
                     continue
@@ -461,8 +466,9 @@ class ConnectionManager:
         except asyncio.CancelledError:
             raise
         except Exception:
+            client.dead = True
             _log.warning(
-                "client sender task failed for %s",
+                "client sender task failed for %s — marking client dead",
                 client.client_id,
                 exc_info=True,
             )

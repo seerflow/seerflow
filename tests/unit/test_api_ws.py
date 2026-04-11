@@ -997,3 +997,45 @@ class TestOriginAllowlist:
         mgr = ConnectionManager(allowed_origins=frozenset({"http://localhost:8080"}))
         assert mgr.is_origin_allowed(None) is True
         assert mgr.is_origin_allowed("") is True
+
+
+class TestDeadClientMarker:
+    @pytest.mark.asyncio
+    async def test_sender_exception_marks_client_dead(self) -> None:
+        """Non-disconnect exceptions in the sender task mark the client dead."""
+        mgr = ConnectionManager(tick_interval_s=0.005, batch_max_events=10)
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_bytes = AsyncMock(side_effect=RuntimeError("boom"))
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+
+        mgr.broadcast_event(_make_event())
+        await _wait_until(
+            lambda: mgr._clients[client_id].dead,
+            timeout=1.0,
+        )
+        assert mgr._clients[client_id].dead is True
+        await mgr.disconnect(client_id)
+
+    @pytest.mark.asyncio
+    async def test_dead_client_skipped_by_broadcast_event(self) -> None:
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr._clients[client_id].dead = True
+
+        mgr.broadcast_event(_make_event())
+        assert len(mgr._clients[client_id].event_deque) == 0
+
+    @pytest.mark.asyncio
+    async def test_dead_client_skipped_by_broadcast_alert(self) -> None:
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr._clients[client_id].dead = True
+
+        mgr.broadcast_alert(_make_alert())
+        assert len(mgr._clients[client_id].alert_deque) == 0
