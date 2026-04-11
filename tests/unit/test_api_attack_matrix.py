@@ -200,12 +200,15 @@ class TestBuildMatrix:
         rule_counts = {
             ("discovery", "T1087"): 1,
             ("discovery", "T1033"): 1,
+            ("discovery", "T1053"): 1,
+            ("discovery", "T1053.001"): 1,
             ("discovery", "T1059"): 1,
         }
         resp = build_matrix(rule_counts, {}, window_since=self._since, window_until=self._until)
         discovery = next(t for t in resp.tactics if t.tactic == "discovery")
         techs = [c.technique for c in discovery.techniques]
-        assert techs == sorted(techs)
+        # Lexicographic ordering — T1033 < T1053 < T1053.001 < T1059 < T1087.
+        assert techs == ["T1033", "T1053", "T1053.001", "T1059", "T1087"]
 
     def test_window_fields_from_datetimes(self) -> None:
         resp = build_matrix({}, {}, window_since=self._since, window_until=self._until)

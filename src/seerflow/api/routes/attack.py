@@ -5,6 +5,7 @@ GET /api/v1/attack/coverage -- coverage matrix (tactics x techniques x counts).
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
@@ -28,6 +29,8 @@ from seerflow.models.query import AlertQuery, TimeRange
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["attack"])
 
@@ -80,6 +83,7 @@ async def get_coverage(
         end_ns=int(window_until.timestamp() * 1_000_000_000),
     )
     alerts: list[Alert] = []
+    page = None
     for page_num in range(1, _MAX_SCAN_PAGES + 1):
         page = await storage.alert_store.query_alerts(
             AlertQuery(time_range=time_range, page=page_num, limit=_SCAN_PAGE_SIZE)
@@ -87,6 +91,12 @@ async def get_coverage(
         alerts.extend(page.items)
         if not page.has_next:
             break
+    if page is not None and page.has_next:
+        _log.warning(
+            "attack/coverage alert scan hit cap (%d alerts); "
+            "summary counts may understate the true window total",
+            _MAX_ALERT_SCAN,
+        )
 
     rule_counts: dict[tuple[str, str], int] = dict(collect_sigma_cells(engines.sigma_engine))
     for key, count in collect_correlation_cells(engines.correlation_rules).items():

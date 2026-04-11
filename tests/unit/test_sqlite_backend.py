@@ -1103,6 +1103,61 @@ class TestQueryAlertsMitreFilter:
         finally:
             await backend.close()
 
+    async def test_fast_and_slow_paths_agree_on_overlapping_alerts(self) -> None:
+        """Unfiltered (fast SQL path) and ``tactic="discovery"`` (slow
+        post-decode path) must agree on the discovery-tagged subset.
+        Locks in the invariant that the two paths return consistent data.
+        """
+        alerts = [
+            _make_mitre_alert(
+                alert_id=f"a{i}",
+                ts_ns=10_000 + i,
+                tactics=("discovery",) if i % 2 == 0 else ("execution",),
+                techniques=("t1033",) if i % 2 == 0 else ("t1059",),
+                dedup_key=f"test:fs:a{i}",
+            )
+            for i in range(6)
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            fast = await backend.query_alerts(AlertQuery(limit=100))
+            slow = await backend.query_alerts(AlertQuery(tactic="discovery", limit=100))
+            assert fast.total == 6
+            assert slow.total == 3
+            fast_discovery_ids = {a.alert_id for a in fast.items if "discovery" in a.mitre_tactics}
+            slow_ids = {a.alert_id for a in slow.items}
+            assert fast_discovery_ids == slow_ids
+        finally:
+            await backend.close()
+
+    async def test_tactic_filter_is_case_sensitive_by_contract(self) -> None:
+        """Plan decision 2: tactics are a canonical snake_case enum and
+        the filter is case-sensitive. This test locks in the semantics
+        — non-canonical values written to the store (e.g. via a
+        misbehaving rule writer) are NOT matched and drop silently.
+        """
+        alerts = [
+            _make_mitre_alert(
+                alert_id="canonical",
+                ts_ns=1_000,
+                tactics=("discovery",),
+                techniques=("t1033",),
+            ),
+            _make_mitre_alert(
+                alert_id="uppercase",
+                ts_ns=2_000,
+                tactics=("Discovery",),
+                techniques=("t1033",),
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="discovery"))
+            assert page.total == 1
+            assert [a.alert_id for a in page.items] == ["canonical"]
+        finally:
+            await backend.close()
+
 
 class TestUpdateFeedback:
     async def _make_backend_with_alert(self, alert: Alert) -> SqliteBackend:

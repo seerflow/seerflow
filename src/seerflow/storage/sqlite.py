@@ -270,9 +270,10 @@ ON CONFLICT(template_id) DO UPDATE SET
 # Cap on the number of rows scanned when applying a post-decode
 # tactic/technique filter. Keeps the route bounded even if the caller's
 # time window is wider than expected.
-# TODO(v2): push the filter into SQL with a migration that stores
-# mitre_tactics/mitre_techniques in dedicated columns — then paginate
-# accurately without a scan cap.
+# Follow-up: push the filter into SQL with a migration that stores
+# mitre_tactics/mitre_techniques in dedicated columns (or uses JSON1) —
+# then paginate accurately without a scan cap. Tracked in the review
+# summary for PR #141 as "SQL-level mitre filter migration".
 _MAX_POST_DECODE_SCAN = 10_000
 
 

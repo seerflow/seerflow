@@ -180,7 +180,16 @@ class AttackCoverageTactic(BaseModel):
 
 
 class AttackCoverageSummary(BaseModel):
-    """Aggregate totals across the whole coverage response."""
+    """Aggregate totals across the whole coverage response.
+
+    ``total_rules_with_attack_tags`` and ``total_alerts_matched`` count
+    **cell hits**, not unique rules/alerts: a rule tagged with two
+    tactics and two techniques contributes 4 to ``total_rules_with_attack_tags``,
+    and an alert with the same shape contributes 4 to
+    ``total_alerts_matched``. This matches how the matrix is rendered
+    (each cell displays a per-cell count) but differs from "number of
+    distinct alerts in the window."
+    """
 
     total_techniques_covered: int = Field(ge=0)
     total_techniques_detected: int = Field(ge=0)

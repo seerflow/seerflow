@@ -20,8 +20,10 @@ class _StubAlertStore:
         self._alerts: list[Alert] = alerts or []
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
+        offset = (filters.page - 1) * filters.limit
+        page_items = tuple(self._alerts[offset : offset + filters.limit])
         return Page(
-            items=tuple(self._alerts),
+            items=page_items,
             total=len(self._alerts),
             page=filters.page,
             limit=filters.limit,
@@ -162,6 +164,62 @@ class TestAttackCoverageRoute:
         response = client.get("/api/v1/attack/coverage")
         assert response.status_code == 200
         body = response.json()
-        assert body["window_until"].startswith("2026-04-11")
+        assert body["window_until"] == fixed_now.isoformat()
         expected_since = fixed_now - timedelta(days=30)
-        assert body["window_since"].startswith(expected_since.date().isoformat())
+        assert body["window_since"] == expected_since.isoformat()
+
+    def test_alert_scan_cap_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        # 10_001 alerts — one past the _MAX_ALERT_SCAN = 10_000 cap.
+        # The stub pages at limit=1000, so page 10 will have has_next=True.
+        alerts = [
+            Alert(
+                alert_id=f"cap-{i}",
+                alert_type="sigma",
+                timestamp_ns=1_775_736_000_000_000_000 + i,
+                severity_id=SeverityLevel.WARNING,
+                rule_name="test",
+                description="",
+                entity_uuid="e",
+                entity_value="v",
+                entity_type="ip",
+                contributing_events=(),
+                mitre_tactics=("discovery",),
+                mitre_techniques=("t1033",),
+            )
+            for i in range(10_001)
+        ]
+        client = _build_client(alerts=alerts)
+        with caplog.at_level("WARNING", logger="seerflow.api.routes.attack"):
+            response = client.get("/api/v1/attack/coverage")
+        assert response.status_code == 200
+        assert any("attack/coverage alert scan hit cap" in rec.message for rec in caplog.records)
+
+    def test_multi_tag_alert_contributes_cell_hits(self) -> None:
+        """An alert tagged with two tactics x two techniques should contribute
+        four separate (tactic, technique) cell hits — this is cell-hit
+        semantics for ``total_alerts_matched``, documented on the schema.
+        """
+        alert = Alert(
+            alert_id="multi",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e",
+            entity_value="v",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("discovery", "execution"),
+            mitre_techniques=("t1033", "t1059"),
+        )
+        client = _build_client(alerts=[alert])
+        response = client.get("/api/v1/attack/coverage")
+        assert response.status_code == 200
+        body = response.json()
+        # 2 tactics x 2 techniques = 4 cell hits for one alert.
+        assert body["summary"]["total_alerts_matched"] == 4
+        discovery = next(t for t in body["tactics"] if t["tactic"] == "discovery")
+        execution = next(t for t in body["tactics"] if t["tactic"] == "execution")
+        assert {c["technique"] for c in discovery["techniques"]} == {"T1033", "T1059"}
+        assert {c["technique"] for c in execution["techniques"]} == {"T1033", "T1059"}
