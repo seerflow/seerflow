@@ -511,15 +511,19 @@ class ConnectionManager:
 
         alerts_24h = await self._query_alerts_24h()
 
+        dropped_total = sum(
+            c.dropped_events + c.dropped_alerts for c in self._clients.values()
+        )
         for client in list(self._clients.values()):
             status_msg = {
                 "type": "status",
                 "data": {
-                    "events_per_sec": events_per_sec,
+                    "events_ingested_per_sec": events_per_sec,
                     "alerts_24h": alerts_24h,
                     "connected_clients": len(self._clients),
                     "dropped_events": client.dropped_events,
                     "dropped_alerts": client.dropped_alerts,
+                    "dropped_total": dropped_total,
                 },
             }
             try:

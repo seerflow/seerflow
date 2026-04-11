@@ -689,7 +689,7 @@ class TestStatusBroadcaster:
         status_msgs = [m for m in sent if m.get("type") == "status"]
         assert len(status_msgs) >= 1
         data = status_msgs[0]["data"]
-        assert "events_per_sec" in data
+        assert "events_ingested_per_sec" in data
         assert data["alerts_24h"] == 17
         assert data["connected_clients"] == 1
         assert data["dropped_events"] == 0
@@ -698,7 +698,7 @@ class TestStatusBroadcaster:
         await mgr.shutdown()
 
     @pytest.mark.asyncio
-    async def test_events_per_sec_window_resets(self) -> None:
+    async def test_events_ingested_per_sec_window_resets(self) -> None:
         mgr = ConnectionManager(
             status_interval_s=0.02,
             tick_interval_s=0.005,
@@ -718,12 +718,47 @@ class TestStatusBroadcaster:
         sent = _decode_sent(ws)
         status_msgs = [m for m in sent if m.get("type") == "status"]
         assert len(status_msgs) >= 2
-        first_rate = status_msgs[0]["data"]["events_per_sec"]
-        last_rate = status_msgs[-1]["data"]["events_per_sec"]
+        first_rate = status_msgs[0]["data"]["events_ingested_per_sec"]
+        last_rate = status_msgs[-1]["data"]["events_ingested_per_sec"]
         # First window saw the burst; the counter resets after emission,
         # so the last emitted window must show a strictly lower rate.
         assert first_rate > 0.0
         assert last_rate < first_rate
+        await mgr.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_status_payload_includes_dropped_total(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts = AsyncMock(
+            return_value=MagicMock(total=0, items=[], has_next=False)
+        )
+        mgr = ConnectionManager(
+            alert_store=alert_store,
+            status_interval_s=0.03,
+            tick_interval_s=0.01,
+            queue_maxlen=2,
+        )
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_bytes = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+
+        # Force two drops
+        for i in range(5):
+            mgr.broadcast_event(_make_event(template_id=i))
+
+        mgr.start_status_task()
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "status"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
+        sent = _decode_sent(ws)
+        status_msgs = [m for m in sent if m.get("type") == "status"]
+        assert status_msgs[-1]["data"]["dropped_total"] >= 3
         await mgr.shutdown()
 
 
