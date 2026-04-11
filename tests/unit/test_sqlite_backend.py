@@ -1069,9 +1069,7 @@ class TestQueryAlertsMitreFilter:
         ]
         backend = await self._make_backend_with_alerts(alerts)
         try:
-            page = await backend.query_alerts(
-                AlertQuery(tactic="discovery", technique="T1033")
-            )
+            page = await backend.query_alerts(AlertQuery(tactic="discovery", technique="T1033"))
             assert page.total == 1
             assert page.items[0].alert_id == "a1"
         finally:
@@ -1090,15 +1088,9 @@ class TestQueryAlertsMitreFilter:
         ]
         backend = await self._make_backend_with_alerts(alerts)
         try:
-            page1 = await backend.query_alerts(
-                AlertQuery(tactic="discovery", page=1, limit=2)
-            )
-            page2 = await backend.query_alerts(
-                AlertQuery(tactic="discovery", page=2, limit=2)
-            )
-            page3 = await backend.query_alerts(
-                AlertQuery(tactic="discovery", page=3, limit=2)
-            )
+            page1 = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=2))
+            page2 = await backend.query_alerts(AlertQuery(tactic="discovery", page=2, limit=2))
+            page3 = await backend.query_alerts(AlertQuery(tactic="discovery", page=3, limit=2))
             assert page1.total == 5
             assert page2.total == 5
             assert page3.total == 5

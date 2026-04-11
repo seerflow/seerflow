@@ -95,6 +95,17 @@ class TestCollectSigmaCells:
         )
         assert collect_sigma_cells(engine) == {}  # type: ignore[arg-type]
 
+    def test_skips_empty_string_tactic_and_technique_entries(self) -> None:
+        engine = _StubSigmaEngine(
+            [
+                _StubCompiled(("",), ("t1033",)),
+                _StubCompiled(("discovery",), ("",)),
+                _StubCompiled(("discovery",), ("t1033",)),
+            ]
+        )
+        counts = collect_sigma_cells(engine)  # type: ignore[arg-type]
+        assert counts == {("discovery", "T1033"): 1}
+
 
 class TestCollectCorrelationCells:
     def test_normalizes_technique_case(self) -> None:
@@ -109,6 +120,15 @@ class TestCollectCorrelationCells:
         rules = [_corr((), ("T1021",)), _corr(("lateral_movement",), ())]
         assert collect_correlation_cells(rules) == {}
 
+    def test_skips_empty_string_entries(self) -> None:
+        rules = [
+            _corr(("",), ("T1021",)),
+            _corr(("lateral_movement",), ("",)),
+            _corr(("lateral_movement",), ("T1021",)),
+        ]
+        counts = collect_correlation_cells(rules)
+        assert counts == {("lateral_movement", "T1021"): 1}
+
 
 class TestCollectAlertCells:
     def test_normalizes_technique_case(self) -> None:
@@ -122,6 +142,15 @@ class TestCollectAlertCells:
     def test_drops_orphans(self) -> None:
         alerts = [_alert((), ("t1033",), alert_id="a1")]
         assert collect_alert_cells(alerts) == {}
+
+    def test_skips_empty_string_entries(self) -> None:
+        alerts = [
+            _alert(("",), ("t1033",), alert_id="a1"),
+            _alert(("discovery",), ("",), alert_id="a2"),
+            _alert(("discovery",), ("t1033",), alert_id="a3"),
+        ]
+        counts = collect_alert_cells(alerts)
+        assert counts == {("discovery", "T1033"): 1}
 
 
 class TestBuildMatrix:
@@ -160,9 +189,7 @@ class TestBuildMatrix:
 
     def test_unknown_tactics_appended(self) -> None:
         rule_counts = {("custom_tactic", "T9999"): 1}
-        resp = build_matrix(
-            rule_counts, {}, window_since=self._since, window_until=self._until
-        )
+        resp = build_matrix(rule_counts, {}, window_since=self._since, window_until=self._until)
         known_count = len(TACTICS)
         assert len(resp.tactics) == known_count + 1
         assert resp.tactics[-1].tactic == "custom_tactic"
@@ -175,9 +202,7 @@ class TestBuildMatrix:
             ("discovery", "T1033"): 1,
             ("discovery", "T1059"): 1,
         }
-        resp = build_matrix(
-            rule_counts, {}, window_since=self._since, window_until=self._until
-        )
+        resp = build_matrix(rule_counts, {}, window_since=self._since, window_until=self._until)
         discovery = next(t for t in resp.tactics if t.tactic == "discovery")
         techs = [c.technique for c in discovery.techniques]
         assert techs == sorted(techs)

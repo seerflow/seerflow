@@ -275,9 +275,7 @@ class TestAttackCoverageSchemas:
     def test_attack_coverage_tactic_default_techniques_empty(self) -> None:
         from seerflow.api.schemas import AttackCoverageTactic
 
-        tactic = AttackCoverageTactic(
-            tactic="discovery", tactic_display_name="Discovery (TA0007)"
-        )
+        tactic = AttackCoverageTactic(tactic="discovery", tactic_display_name="Discovery (TA0007)")
         assert tactic.techniques == []
 
     def test_attack_coverage_response_empty_ok(self) -> None:

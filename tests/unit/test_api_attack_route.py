@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import pytest  # noqa: TC002
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
@@ -12,9 +13,6 @@ from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.models.query import AlertQuery, Page
 from seerflow.sigma.attack import TACTICS
-
-if TYPE_CHECKING:
-    import pytest
 
 
 class _StubAlertStore:
@@ -74,10 +72,14 @@ def _mitre_alert(tactics: tuple[str, ...], techniques: tuple[str, ...]) -> Alert
     )
 
 
-def _build_client(alerts: list[Alert] | None = None) -> TestClient:
+def _build_client(
+    alerts: list[Alert] | None = None,
+    correlation_rules: tuple[Any, ...] = (),
+) -> TestClient:
     app = create_api_app(
         log_store=_StubLogStore(),  # type: ignore[arg-type]
         alert_store=_StubAlertStore(alerts),  # type: ignore[arg-type]
+        correlation_rules=correlation_rules,
     )
     return TestClient(app)
 
@@ -125,7 +127,29 @@ class TestAttackCoverageRoute:
         response = client.get("/api/v1/attack/coverage", params={"since": "not-a-date"})
         assert response.status_code == 422
 
-    def test_default_window_is_thirty_days(self, monkeypatch: "pytest.MonkeyPatch") -> None:
+    def test_correlation_rules_contribute_to_coverage(self) -> None:
+        from seerflow.models.alert import CorrelationRule, SourceCondition
+
+        rule = CorrelationRule(
+            name="test",
+            entity_type="ip",
+            window_seconds=60,
+            sources=(SourceCondition(source_type="syslog", conditions={}),),
+            min_sources=1,
+            alert_severity=SeverityLevel.WARNING,
+            mitre_tactics=("lateral_movement",),
+            mitre_techniques=("T1021",),
+        )
+        client = _build_client(correlation_rules=(rule,))
+        response = client.get("/api/v1/attack/coverage")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["summary"]["total_rules_with_attack_tags"] == 1
+        lat = next(t for t in body["tactics"] if t["tactic"] == "lateral_movement")
+        assert lat["techniques"][0]["technique"] == "T1021"
+        assert lat["techniques"][0]["covered"] is True
+
+    def test_default_window_is_thirty_days(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fixed_now = datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
 
         class _FakeDT(datetime):

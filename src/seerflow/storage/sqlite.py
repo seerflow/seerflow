@@ -714,9 +714,7 @@ class SqliteBackend:
                 )
                 for row in rows
             )
-            return Page(
-                items=items, total=total, page=filters.page, limit=filters.limit
-            )
+            return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
         # Slow path: decode up to _MAX_POST_DECODE_SCAN rows matching the
         # SQL-level filters, then apply the mitre filter in Python.
@@ -724,9 +722,7 @@ class SqliteBackend:
             f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
             f"ORDER BY a.timestamp_ns DESC LIMIT ?"
         )
-        async with await self._conn.execute(
-            scan_sql, [*params, _MAX_POST_DECODE_SCAN]
-        ) as cursor:
+        async with await self._conn.execute(scan_sql, [*params, _MAX_POST_DECODE_SCAN]) as cursor:
             rows = await cursor.fetchall()
         if len(rows) == _MAX_POST_DECODE_SCAN:
             _log.warning(

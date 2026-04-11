@@ -115,9 +115,7 @@ class TestAlertsIntegration:
         )
         assert resp.status_code == 204
 
-    async def test_filter_by_tactic(
-        self, client: TestClient, backend: SqliteBackend
-    ) -> None:
+    async def test_filter_by_tactic(self, client: TestClient, backend: SqliteBackend) -> None:
         a1 = Alert(
             alert_id="int-mitre-a1",
             alert_type="sigma",

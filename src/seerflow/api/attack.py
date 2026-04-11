@@ -124,9 +124,7 @@ def build_matrix(
             AttackCoverageTactic(
                 tactic=tactic,
                 tactic_display_name=format_tactic(tactic),
-                techniques=_cells_for_tactic(
-                    by_tactic.get(tactic, []), rule_counts, alert_counts
-                ),
+                techniques=_cells_for_tactic(by_tactic.get(tactic, []), rule_counts, alert_counts),
             )
         )
 
@@ -135,9 +133,7 @@ def build_matrix(
             AttackCoverageTactic(
                 tactic=tactic,
                 tactic_display_name=format_tactic(tactic),
-                techniques=_cells_for_tactic(
-                    by_tactic[tactic], rule_counts, alert_counts
-                ),
+                techniques=_cells_for_tactic(by_tactic[tactic], rule_counts, alert_counts),
             )
         )
 

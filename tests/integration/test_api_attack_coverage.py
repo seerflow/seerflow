@@ -48,9 +48,7 @@ def _make_alert(i: int) -> Alert:
 
 
 class TestAttackCoverageIntegration:
-    async def test_returns_known_tactics_with_empty_engine(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_returns_known_tactics_with_empty_engine(self, backend: SqliteBackend) -> None:
         app = create_api_app(log_store=backend, alert_store=backend)
         client = TestClient(app)
         response = client.get("/api/v1/attack/coverage")
@@ -72,15 +70,11 @@ class TestAttackCoverageIntegration:
         body = response.json()
         assert body["summary"]["total_rules_with_attack_tags"] > 0
         covered_any = any(
-            cell["covered"]
-            for tactic in body["tactics"]
-            for cell in tactic["techniques"]
+            cell["covered"] for tactic in body["tactics"] for cell in tactic["techniques"]
         )
         assert covered_any
 
-    async def test_perf_under_500ms_with_10k_alerts(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_perf_under_500ms_with_10k_alerts(self, backend: SqliteBackend) -> None:
         for i in range(10_000):
             await backend.write_alert(_make_alert(i), dedup_window_ns=0)
         app = create_api_app(log_store=backend, alert_store=backend)
