@@ -491,6 +491,15 @@ class TestSerialization:
         assert "rule_name" in data
         assert "entity_value" in data
 
+    def test_serialize_event_includes_observed_ns_and_severity_text(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        event = _make_event(severity_id=3)
+        payload = serialize_event(BroadcastEvent(event=event))
+        data = payload["data"]
+        assert data["observed_ns"] == event.observed_ns
+        assert data["severity_text"] == "Warning"
+
     def test_serialize_event_is_json_encodable(self) -> None:
         from seerflow.api.ws import BroadcastEvent
 

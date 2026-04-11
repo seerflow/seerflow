@@ -32,7 +32,7 @@ import msgspec
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
 from seerflow.models._types import AlertType
-from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
+from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN, SeverityLevel
 
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionResult
@@ -74,17 +74,24 @@ class ClientFilter:
 
 
 def _event_data(be: BroadcastEvent) -> dict[str, Any]:
-    """Build the inner ``data`` payload for an event wire message."""
+    """Build the inner ``data`` payload for an event wire message.
+
+    Field parity with REST ``EventResponse`` (see ``api/schemas.py``) so
+    dashboard consumers don't need to duplicate serialization logic.
+    """
     event = be.event
-    return {
+    data: dict[str, Any] = {
         "event_id": str(event.event_id),
         "timestamp_ns": event.timestamp_ns,
+        "observed_ns": event.observed_ns,
         "severity_id": event.severity_id,
+        "severity_text": event.severity_id.text if isinstance(event.severity_id, SeverityLevel) else SeverityLevel(int(event.severity_id)).text,
         "source_type": event.source_type,
         "message": event.message,
         "template_id": event.template_id,
         "entity_refs": list(event.entity_refs),
     }
+    return data
 
 
 def _alert_data(alert: Alert) -> dict[str, Any]:
