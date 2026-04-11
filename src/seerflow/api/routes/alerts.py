@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from seerflow.api.deps import StorageDeps, get_storage, parse_timestamp_ns
 from seerflow.api.schemas import AlertResponse, FeedbackRequest, PaginatedResponse
 from seerflow.models._types import AlertType
+from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 from seerflow.models.query import AlertQuery, TimeRange
 
 router = APIRouter(tags=["alerts"])
@@ -30,7 +31,8 @@ async def list_alerts(
     until: Annotated[str | None, Query(description="End time (ISO-8601)")] = None,
     alert_type: Annotated[str | None, Query(alias="type", description="Alert type")] = None,
     severity: Annotated[
-        int | None, Query(ge=0, le=6, description="Minimum severity (0-6)")
+        int | None,
+        Query(ge=SEVERITY_MIN, le=SEVERITY_MAX, description="Minimum severity (0-6)"),
     ] = None,
     entity: Annotated[str | None, Query(description="Entity UUID")] = None,
     tactic: Annotated[str | None, Query(description="MITRE ATT&CK tactic", max_length=64)] = None,
