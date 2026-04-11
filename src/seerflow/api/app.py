@@ -15,14 +15,16 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api import ws as ws_module
-from seerflow.api.deps import StorageDeps
-from seerflow.api.routes import alerts, entities, events, health, stats
+from seerflow.api.deps import DetectionEngines, StorageDeps
+from seerflow.api.routes import alerts, attack, entities, events, health, stats
 from seerflow.api.ws import ConnectionManager
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from seerflow.config import SeerflowConfig
+    from seerflow.models.alert import CorrelationRule
+    from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
 
 _API_PREFIX = "/api/v1"
@@ -80,6 +82,7 @@ def _register_routes(app: FastAPI) -> None:
     """Include all API routers under the configured prefix."""
     app.include_router(events.router, prefix=_API_PREFIX)
     app.include_router(alerts.router, prefix=_API_PREFIX)
+    app.include_router(attack.router, prefix=_API_PREFIX)
     app.include_router(entities.router, prefix=_API_PREFIX)
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
@@ -92,6 +95,8 @@ def create_api_app(
     entity_store: EntityStore | None = None,
     config: SeerflowConfig | None = None,
     ws_manager: ConnectionManager | None = None,
+    sigma_engine: SigmaEngine | None = None,
+    correlation_rules: Sequence[CorrelationRule] = (),
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -105,6 +110,11 @@ def create_api_app(
         ws_manager: Optional WebSocket ConnectionManager. A default is
             created from ``config.ws_*`` fields (or hard defaults) if not
             supplied.
+        sigma_engine: Optional loaded ``SigmaEngine`` used by the ATT&CK
+            coverage endpoint. When ``None``, coverage responses report
+            zero rule counts for Sigma rules.
+        correlation_rules: Snapshot of correlation rules used by the
+            ATT&CK coverage endpoint. Hot reloads are not reflected.
     """
     app = FastAPI(
         title="Seerflow API",
@@ -119,6 +129,10 @@ def create_api_app(
         log_store=log_store,
         alert_store=alert_store,
         entity_store=entity_store,
+    )
+    app.state.engines = DetectionEngines(
+        sigma_engine=sigma_engine,
+        correlation_rules=tuple(correlation_rules),
     )
     app.state.config = config
     app.state.health_state = {"pipeline": "running", "storage": "connected"}

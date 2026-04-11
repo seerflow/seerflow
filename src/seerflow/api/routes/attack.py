@@ -24,6 +24,7 @@ from seerflow.api.deps import (
     parse_timestamp_ns,
 )
 from seerflow.api.schemas import AttackCoverageResponse
+from seerflow.models.alert import Alert
 from seerflow.models.query import AlertQuery, TimeRange
 
 router = APIRouter(tags=["attack"])
@@ -32,7 +33,12 @@ Storage = Annotated[StorageDeps, Depends(get_storage)]
 Engines = Annotated[DetectionEngines, Depends(get_engines)]
 
 _DEFAULT_WINDOW_DAYS = 30
-_MAX_ALERT_SCAN = 10_000
+# Maximum number of alerts scanned for coverage in one request. AlertQuery
+# caps ``limit`` at 1000, so we page through ``_MAX_SCAN_PAGES`` pages of
+# 1000 alerts each. 10 pages * 1000 = 10k alerts.
+_MAX_SCAN_PAGES = 10
+_SCAN_PAGE_SIZE = 1_000
+_MAX_ALERT_SCAN = _MAX_SCAN_PAGES * _SCAN_PAGE_SIZE
 
 
 def _parse_iso_or_422(value: str) -> datetime:
@@ -81,9 +87,16 @@ async def get_coverage(
         start_ns=int(window_since.timestamp() * 1_000_000_000),
         end_ns=int(window_until.timestamp() * 1_000_000_000),
     )
-    alert_page = await storage.alert_store.query_alerts(
-        AlertQuery(time_range=time_range, page=1, limit=_MAX_ALERT_SCAN)
-    )
+    alerts: list[Alert] = []
+    for page_num in range(1, _MAX_SCAN_PAGES + 1):
+        page = await storage.alert_store.query_alerts(
+            AlertQuery(
+                time_range=time_range, page=page_num, limit=_SCAN_PAGE_SIZE
+            )
+        )
+        alerts.extend(page.items)
+        if not page.has_next:
+            break
 
     rule_counts: dict[tuple[str, str], int] = dict(
         collect_sigma_cells(engines.sigma_engine)
@@ -91,7 +104,7 @@ async def get_coverage(
     for key, count in collect_correlation_cells(engines.correlation_rules).items():
         rule_counts[key] = rule_counts.get(key, 0) + count
 
-    alert_counts = collect_alert_cells(alert_page.items)
+    alert_counts = collect_alert_cells(alerts)
 
     return build_matrix(
         rule_counts,
