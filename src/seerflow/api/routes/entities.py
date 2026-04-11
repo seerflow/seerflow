@@ -7,6 +7,7 @@ with a deterministic UUID5 derived via the existing generate_*_id helpers.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid as _uuid_mod
@@ -64,10 +65,14 @@ DEFAULT_TIMELINE_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000  # 24h
 
 
 def _coerce_time_range(start_ns: int | None, end_ns: int | None) -> TimeRange:
-    """Default to last 24 hours if either bound is omitted."""
+    """Default to last 24 hours if either bound is omitted.
+
+    If only ``end_ns`` is supplied and smaller than the 24h window, the
+    computed ``start_ns`` is clamped to 0 rather than going negative.
+    """
     now = time.time_ns()
     end = end_ns if end_ns is not None else now
-    start = start_ns if start_ns is not None else end - DEFAULT_TIMELINE_WINDOW_NS
+    start = start_ns if start_ns is not None else max(0, end - DEFAULT_TIMELINE_WINDOW_NS)
     return TimeRange(start_ns=start, end_ns=end)
 
 
@@ -121,6 +126,10 @@ async def search_entities(
     UUID-shaped queries short-circuit to EventQuery(entity_uuid=...) and
     return only entities matching the queried UUID. Otherwise falls back
     to LogStore.search_text and extracts entity references from results.
+
+    Only FR-036 pivot types (ip, user, host, domain) carry ``entity_uuid``
+    in search results — a UUID query for a process/file/hash entity will
+    return an empty list even if events reference it.
     """
     try:
         parsed_uuid: _uuid_mod.UUID | None = _uuid_mod.UUID(q)
@@ -160,17 +169,20 @@ async def get_entity_timeline(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    events = await entity_store.get_timeline(
-        entity_uuid=str(entity_uuid),
-        time_range=time_range,
-        source_type=source_type,
-        severity_min=severity_min,
-        limit=limit,
+    entity_uuid_str = str(entity_uuid)
+    events, related = await asyncio.gather(
+        entity_store.get_timeline(
+            entity_uuid=entity_uuid_str,
+            time_range=time_range,
+            source_type=source_type,
+            severity_min=severity_min,
+            limit=limit,
+        ),
+        entity_store.get_related(entity_uuid=entity_uuid_str),
     )
-    related = await entity_store.get_related(entity_uuid=str(entity_uuid))
 
     return EntityTimelineResponse(
-        entity_uuid=str(entity_uuid),
+        entity_uuid=entity_uuid_str,
         events=[EventResponse.from_event(e) for e in events],
         related=[EntityRelationResponse.from_relation(r) for r in related],
         total=len(events),

@@ -173,6 +173,25 @@ class TestEntitySearchUuidStamping:
         assert "process" not in types
         assert "hash" not in types
 
+    def test_malformed_value_skipped_without_poisoning_siblings(self) -> None:
+        """A malformed IP in a mixed-entity event is skipped; valid siblings survive."""
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=0,
+            observed_ns=0,
+            related_ips=("not-an-ip",),
+            related_users=("alice@corp",),
+        )
+        log_store = AsyncMock()
+        log_store.search_text.return_value = [event]
+        client = TestClient(_make_app(log_store))
+        resp = client.get("/api/v1/entities/search?q=alice")
+        assert resp.status_code == 200
+        results = resp.json()
+        types = {r["entity_type"] for r in results}
+        assert "ip" not in types
+        assert "user" in types
+
 
 class TestEntitySearchUuidQuery:
     """UUID-shaped queries short-circuit FTS and use EventQuery(entity_uuid=...)."""
@@ -214,6 +233,28 @@ class TestEntitySearchUuidQuery:
         )
         client = TestClient(_make_app(log_store))
         resp = client.get(f"/api/v1/entities/search?q={target_uuid}")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_uuid_query_for_non_pivot_entity_returns_empty(self) -> None:
+        """Process/file/hash entities are not pivots; their UUID queries return []."""
+        process_uuid = str(uuid.uuid4())
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=0,
+            observed_ns=0,
+            related_processes=("bash",),
+            entity_refs=(process_uuid,),
+        )
+        log_store = AsyncMock()
+        log_store.query_events.return_value = Page(
+            items=(event,),
+            total=1,
+            page=1,
+            limit=100,
+        )
+        client = TestClient(_make_app(log_store))
+        resp = client.get(f"/api/v1/entities/search?q={process_uuid}")
         assert resp.status_code == 200
         assert resp.json() == []
 
