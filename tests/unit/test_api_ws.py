@@ -1039,3 +1039,31 @@ class TestDeadClientMarker:
 
         mgr.broadcast_alert(_make_alert())
         assert len(mgr._clients[client_id].alert_deque) == 0
+
+
+class TestRouteSizeGuard:
+    """The route handler rejects frames over 64 KiB before parsing."""
+
+    def test_ws_max_frame_bytes_constant_exists(self) -> None:
+        from seerflow.api.ws import _WS_MAX_FRAME_BYTES
+
+        assert _WS_MAX_FRAME_BYTES == 64 * 1024
+
+    @pytest.mark.asyncio
+    async def test_oversized_frame_via_testclient_returns_error(self) -> None:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.state.ws_manager = ConnectionManager(max_connections=4)
+        from seerflow.api.ws import router
+
+        app.include_router(router, prefix="/api")
+
+        with TestClient(app) as client:
+            with client.websocket_connect("/api/ws") as ws:
+                huge_payload = {"type": "filter", "sources": ["x" * 100_000]}
+                ws.send_text(_json.dumps(huge_payload))
+                msg = ws.receive_json(mode="binary")
+                assert msg["type"] == "error"
+                assert "too large" in msg["message"]

@@ -46,6 +46,8 @@ _log = logging.getLogger("seerflow.api.ws")
 # Reused across all broadcasts to avoid per-call allocation on the hot path.
 _JSON_ENCODER = msgspec.json.Encoder()
 
+_WS_MAX_FRAME_BYTES = 64 * 1024  # 64 KiB cap on inbound filter messages
+
 
 @dataclass(frozen=True, slots=True)
 class ClientFilter:
@@ -631,12 +633,25 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     try:
         while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+            # Extract bytes from binary or text frame
+            if "bytes" in message and message["bytes"] is not None:
+                raw: bytes = message["bytes"]
+            elif "text" in message and message["text"] is not None:
+                raw = message["text"].encode("utf-8")
+            else:
+                continue
+            if len(raw) > _WS_MAX_FRAME_BYTES:
+                await _send_bytes(
+                    websocket,
+                    {"type": "error", "message": "message too large"},
+                )
+                continue
             try:
-                msg = await websocket.receive_json()
-            except (json.JSONDecodeError, TypeError, KeyError, UnicodeDecodeError):
-                # TypeError: binary frame received in text mode (message["text"] is None)
-                # KeyError: malformed ASGI frame
-                # UnicodeDecodeError: invalid UTF-8 in a text frame
+                msg = json.loads(raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 await _send_bytes(
                     websocket,
                     {"type": "error", "message": "invalid JSON"},
