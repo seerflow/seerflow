@@ -62,6 +62,7 @@ def _uuid_for_domain(value: str) -> str:
 
 
 DEFAULT_TIMELINE_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000  # 24h
+_MAX_TIMESTAMP_NS = 2**63 - 1  # SQLite int64 ceiling (~year 2262)
 
 
 def _coerce_time_range(start_ns: int | None, end_ns: int | None) -> TimeRange:
@@ -157,8 +158,8 @@ async def search_entities(
 async def get_entity_timeline(
     entity_uuid: _uuid_mod.UUID,
     entity_store: Annotated[EntityStore, Depends(require_entity_store)],
-    start_ns: Annotated[int | None, Query(ge=0)] = None,
-    end_ns: Annotated[int | None, Query(ge=0)] = None,
+    start_ns: Annotated[int | None, Query(ge=0, le=_MAX_TIMESTAMP_NS)] = None,
+    end_ns: Annotated[int | None, Query(ge=0, le=_MAX_TIMESTAMP_NS)] = None,
     source_type: Annotated[str | None, Query(max_length=64)] = None,
     severity_min: Annotated[int | None, Query(ge=0, le=6)] = None,
     limit: Annotated[int, Query(ge=1, le=10_000)] = 1_000,
@@ -167,7 +168,10 @@ async def get_entity_timeline(
     try:
         time_range = _coerce_time_range(start_ns, end_ns)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=422,
+            detail="start_ns must be <= end_ns",
+        ) from exc
 
     entity_uuid_str = str(entity_uuid)
     events, related = await asyncio.gather(

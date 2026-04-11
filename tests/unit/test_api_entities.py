@@ -375,6 +375,15 @@ class TestEntityTimeline:
         client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?start_ns=5000&end_ns=1000")
         assert resp.status_code == 422
+        assert resp.json()["detail"] == "start_ns must be <= end_ns"
+
+    def test_ns_above_int64_ceiling_returns_422(self) -> None:
+        """FastAPI rejects start_ns/end_ns > 2**63 - 1 (SQLite int64 ceiling)."""
+        entity_uuid = str(uuid.uuid4())
+        entity_store = AsyncMock()
+        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
+        resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?end_ns=9223372036854775808")
+        assert resp.status_code == 422
 
     def test_empty_related_returns_empty_list(self) -> None:
         entity_uuid = str(uuid.uuid4())
