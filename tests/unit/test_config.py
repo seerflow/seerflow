@@ -1395,3 +1395,17 @@ class TestWebSocketConfig:
         yaml_path.write_text("ws_allowed_origins:\n  - 42\n")
         with pytest.raises(ConfigError, match="ws_allowed_origins"):
             load_config(path=str(yaml_path))
+
+
+def test_parse_ws_fields_returns_named_tuple() -> None:
+    """_parse_ws_fields must return a _WsFields NamedTuple with named access."""
+    from seerflow.config import _parse_ws_fields, _WsFields
+
+    result = _parse_ws_fields({})
+    assert isinstance(result, _WsFields)
+    assert result.ws_max_connections == 20
+    assert result.ws_queue_maxlen == 1000
+    assert result.ws_tick_interval_s == 0.01
+    assert result.ws_batch_max_events == 10
+    assert result.ws_status_interval_s == 5.0
+    assert result.ws_allowed_origins == ()
