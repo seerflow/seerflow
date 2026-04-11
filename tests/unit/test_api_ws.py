@@ -539,6 +539,30 @@ class TestSerialization:
         payload = serialize_event(BroadcastEvent(event=event))
         assert payload["data"]["entity_summary"]["ips"] == list(many[:5])
 
+    def test_serialize_event_without_detection_omits_score_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        payload = serialize_event(BroadcastEvent(event=_make_event()))
+        data = payload["data"]
+        assert "score" not in data
+        assert "is_anomaly" not in data
+        assert "upper_threshold" not in data
+
+    def test_serialize_event_with_detection_includes_score_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        be = BroadcastEvent(
+            event=_make_event(),
+            score=0.87,
+            is_anomaly=True,
+            upper_threshold=0.8,
+        )
+        payload = serialize_event(be)
+        data = payload["data"]
+        assert data["score"] == 0.87
+        assert data["is_anomaly"] is True
+        assert data["upper_threshold"] == 0.8
+
 
 class TestClientSender:
     @pytest.mark.asyncio

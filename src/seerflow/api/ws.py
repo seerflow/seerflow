@@ -116,6 +116,12 @@ def _event_data(be: BroadcastEvent) -> dict[str, Any]:
         "entity_refs": list(event.entity_refs),
         "entity_summary": _entity_summary(event),
     }
+    if be.score is not None:
+        data["score"] = be.score
+    if be.is_anomaly is not None:
+        data["is_anomaly"] = be.is_anomaly
+    if be.upper_threshold is not None:
+        data["upper_threshold"] = be.upper_threshold
     return data
 
 
