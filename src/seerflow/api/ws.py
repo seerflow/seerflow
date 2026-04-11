@@ -21,6 +21,7 @@ import msgspec
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
 from seerflow.models._types import AlertType
+from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -125,10 +126,6 @@ class ConnectionManager:
     _MAX_SOURCES = 50
     _MAX_TEMPLATE_IDS = 100
     _MAX_ALERT_TYPES = 10
-    # Severity bounds match the SeverityLevel enum in models/event.py (0..6).
-    _SEVERITY_MIN = 0
-    _SEVERITY_MAX = 6
-
     def __init__(
         self,
         alert_store: AlertStore | None = None,
@@ -295,7 +292,7 @@ class ConnectionManager:
         if not isinstance(raw, int) or isinstance(raw, bool):
             errors.append("min_severity must be an integer")
             return 1
-        return max(self._SEVERITY_MIN, min(self._SEVERITY_MAX, raw))
+        return max(SEVERITY_MIN, min(SEVERITY_MAX, raw))
 
     def broadcast_event(self, event: SeerflowEvent) -> None:
         """Fan-out an event to all matching clients (sync, non-blocking).
