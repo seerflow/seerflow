@@ -601,11 +601,7 @@ class TestClientSender:
         mgr.start_client_sender(client_id)
 
         mgr.broadcast_event(_make_event(source_type="syslog"))
-        # Yield control so the sender task can drain
-        for _ in range(20):
-            await asyncio.sleep(0.005)
-            if ws.send_bytes.await_count > 0:
-                break
+        await _wait_until(lambda: ws.send_bytes.await_count > 0, timeout=1.0)
 
         assert ws.send_bytes.await_count >= 1
         sent = _decode_sent(ws)
@@ -623,8 +619,13 @@ class TestClientSender:
 
         for i in range(5):
             mgr.broadcast_event(_make_event(template_id=i))
-        # Wait for at least one drain cycle (one tick_interval)
-        await asyncio.sleep(0.12)
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "batch"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         assert len(sent) >= 1
@@ -644,7 +645,14 @@ class TestClientSender:
 
         mgr.broadcast_event(_make_event())
         mgr.broadcast_alert(_make_alert())
-        await asyncio.sleep(0.12)
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") in ("event", "batch", "alert", "alert_batch")
+                for call in ws.send_bytes.await_args_list
+            )
+            and len(ws.send_bytes.await_args_list) >= 2,
+            timeout=1.0,
+        )
 
         types = [m["type"] for m in _decode_sent(ws)]
         assert "event" in types or "batch" in types
@@ -663,7 +671,7 @@ class TestClientSender:
         # Append directly without setting the wakeup event
         from seerflow.api.ws import BroadcastEvent
         mgr._clients[client_id].event_deque.append(BroadcastEvent(event=_make_event()))
-        await asyncio.sleep(0.1)
+        await _wait_until(lambda: ws.send_bytes.await_count >= 1, timeout=1.0)
 
         assert ws.send_bytes.await_count >= 1
         await mgr.disconnect(client_id)
@@ -680,7 +688,14 @@ class TestClientSender:
         mgr.start_client_sender(client_id)
 
         mgr.broadcast_event(_make_event())
-        await asyncio.sleep(0.1)
+        await _wait_until(
+            lambda: (
+                mgr._clients.get(client_id) is not None
+                and mgr._clients[client_id].sender_task is not None
+                and mgr._clients[client_id].sender_task.done()
+            ),
+            timeout=1.0,
+        )
 
         # Sender task should have exited on its own.
         client = mgr._clients.get(client_id)
@@ -709,7 +724,13 @@ class TestStatusBroadcaster:
         mgr.start_client_sender(client_id)
         mgr.start_status_task()
 
-        await asyncio.sleep(0.1)
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "status"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         status_msgs = [m for m in sent if m.get("type") == "status"]
@@ -739,7 +760,13 @@ class TestStatusBroadcaster:
         # Burst 10 events in the first window, then broadcast nothing.
         for _ in range(10):
             mgr.broadcast_event(_make_event())
-        await asyncio.sleep(0.15)
+        await _wait_until(
+            lambda: len([
+                call for call in ws.send_bytes.await_args_list
+                if msgspec.json.decode(call.args[0]).get("type") == "status"
+            ]) >= 2,
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         status_msgs = [m for m in sent if m.get("type") == "status"]
@@ -917,7 +944,13 @@ class TestSenderBatchedAlerts:
 
         for i in range(4):
             mgr.broadcast_alert(_make_alert(alert_type="sigma", severity=i + 1))
-        await asyncio.sleep(0.12)
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "alert_batch"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         alert_batch_msg = next((m for m in sent if m.get("type") == "alert_batch"), None)
@@ -940,7 +973,8 @@ class TestStatusBroadcasterErrorPaths:
         ws.send_bytes = AsyncMock(side_effect=RuntimeError("broken pipe"))
         client_id = await mgr.connect(ws)
         mgr.start_status_task()
-        await asyncio.sleep(0.08)
+        # Wait until send_bytes has been called at least once (the task ran)
+        await _wait_until(lambda: ws.send_bytes.await_count >= 1, timeout=1.0)
         # Status task should still be running despite the send failure
         assert mgr._status_task is not None
         assert not mgr._status_task.done()
