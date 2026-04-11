@@ -196,6 +196,7 @@ class ConnectionManager:
     _MAX_SOURCES = 50
     _MAX_TEMPLATE_IDS = 100
     _MAX_ALERT_TYPES = 10
+
     def __init__(
         self,
         alert_store: AlertStore | None = None,
@@ -541,9 +542,7 @@ class ConnectionManager:
 
         alerts_24h = await self._query_alerts_24h()
 
-        dropped_total = sum(
-            c.dropped_events + c.dropped_alerts for c in self._clients.values()
-        )
+        dropped_total = sum(c.dropped_events + c.dropped_alerts for c in self._clients.values())
         for client in list(self._clients.values()):
             status_msg = {
                 "type": "status",

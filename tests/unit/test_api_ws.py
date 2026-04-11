@@ -645,12 +645,15 @@ class TestClientSender:
 
         mgr.broadcast_event(_make_event())
         mgr.broadcast_alert(_make_alert())
+        _event_types = ("event", "batch", "alert", "alert_batch")
         await _wait_until(
-            lambda: any(
-                msgspec.json.decode(call.args[0]).get("type") in ("event", "batch", "alert", "alert_batch")
-                for call in ws.send_bytes.await_args_list
-            )
-            and len(ws.send_bytes.await_args_list) >= 2,
+            lambda: (
+                any(
+                    msgspec.json.decode(call.args[0]).get("type") in _event_types
+                    for call in ws.send_bytes.await_args_list
+                )
+                and len(ws.send_bytes.await_args_list) >= 2
+            ),
             timeout=1.0,
         )
 
@@ -670,6 +673,7 @@ class TestClientSender:
 
         # Append directly without setting the wakeup event
         from seerflow.api.ws import BroadcastEvent
+
         mgr._clients[client_id].event_deque.append(BroadcastEvent(event=_make_event()))
         await _wait_until(lambda: ws.send_bytes.await_count >= 1, timeout=1.0)
 
@@ -761,10 +765,16 @@ class TestStatusBroadcaster:
         for _ in range(10):
             mgr.broadcast_event(_make_event())
         await _wait_until(
-            lambda: len([
-                call for call in ws.send_bytes.await_args_list
-                if msgspec.json.decode(call.args[0]).get("type") == "status"
-            ]) >= 2,
+            lambda: (
+                len(
+                    [
+                        call
+                        for call in ws.send_bytes.await_args_list
+                        if msgspec.json.decode(call.args[0]).get("type") == "status"
+                    ]
+                )
+                >= 2
+            ),
             timeout=1.0,
         )
 
@@ -1119,10 +1129,9 @@ class TestRouteSizeGuard:
 
         app.include_router(router, prefix="/api")
 
-        with TestClient(app) as client:
-            with client.websocket_connect("/api/ws") as ws:
-                huge_payload = {"type": "filter", "sources": ["x" * 100_000]}
-                ws.send_text(_json.dumps(huge_payload))
-                msg = ws.receive_json(mode="binary")
-                assert msg["type"] == "error"
-                assert "too large" in msg["message"]
+        with TestClient(app) as client, client.websocket_connect("/api/ws") as ws:
+            huge_payload = {"type": "filter", "sources": ["x" * 100_000]}
+            ws.send_text(_json.dumps(huge_payload))
+            msg = ws.receive_json(mode="binary")
+            assert msg["type"] == "error"
+            assert "too large" in msg["message"]

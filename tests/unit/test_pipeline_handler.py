@@ -116,9 +116,8 @@ async def test_handler_broadcasts_ml_alert_on_anomaly() -> None:
 @pytest.mark.asyncio
 async def test_broadcast_event_includes_detection_result_after_process() -> None:
     """Event broadcast must happen AFTER process_event and include the DetectionResult."""
-    from seerflow.pipeline.handler import make_handler
-
     from seerflow.api.ws import ConnectionManager
+    from seerflow.pipeline.handler import make_handler
 
     ws_manager = MagicMock(spec=ConnectionManager)
 
