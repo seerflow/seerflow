@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import uuid
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import msgspec
 import pytest

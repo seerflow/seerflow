@@ -15,8 +15,8 @@ def test_severity_bounds_constants_match_enum_range() -> None:
     """Public SEVERITY_MIN/SEVERITY_MAX must match SeverityLevel enum range."""
     from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN, SeverityLevel
 
-    assert SEVERITY_MIN == int(min(SeverityLevel))
-    assert SEVERITY_MAX == int(max(SeverityLevel))
+    assert int(min(SeverityLevel)) == SEVERITY_MIN
+    assert int(max(SeverityLevel)) == SEVERITY_MAX
 
 
 def _make_event(**overrides: object) -> SeerflowEvent:
