@@ -834,6 +834,31 @@ class TestSetFilterEdgeCases:
         errors = mgr.set_filter(client_id, {"type": "filter", "min_severity": "high"})
         assert any("min_severity must be an integer" in e for e in errors)
 
+    @pytest.mark.asyncio
+    async def test_template_ids_non_int_entry_rejected(self) -> None:
+        """Mixed-type template_ids list must be rejected, filter unchanged."""
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        original_filter = mgr._clients[client_id].filter
+
+        errors = mgr.set_filter(
+            client_id,
+            {"type": "filter", "template_ids": [1, "not-int", 3]},
+        )
+        assert any("template_ids items must be integers" in e for e in errors)
+        assert mgr._clients[client_id].filter is original_filter
+
+    @pytest.mark.asyncio
+    async def test_template_ids_bool_entry_rejected(self) -> None:
+        """``True`` is int in Python; ensure bools are rejected too."""
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        errors = mgr.set_filter(
+            client_id,
+            {"type": "filter", "template_ids": [1, True, 3]},
+        )
+        assert any("template_ids items must be integers" in e for e in errors)
+
 
 class TestConnectionManagerEdgeCases:
     """Cover the short-return branches in start_client_sender and start_status_task."""
