@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
+    from seerflow.models.query import EntityRelation
 
 _T = TypeVar("_T")
 
@@ -122,3 +123,38 @@ class EntitySearchResult(BaseModel):
 
     entity_type: str
     entity_value: str
+    entity_uuid: str
+
+
+class EntityRelationResponse(BaseModel):
+    """A related entity in the entity graph."""
+
+    entity_uuid: str
+    entity_type: str
+    entity_value: str
+    relation_type: str
+
+    @classmethod
+    def from_relation(cls, relation: EntityRelation) -> EntityRelationResponse:
+        """Convert a dataclass EntityRelation to a Pydantic response model."""
+        return cls(
+            entity_uuid=relation.entity_uuid,
+            entity_type=relation.entity_type,
+            entity_value=relation.entity_value,
+            relation_type=relation.relation_type,
+        )
+
+
+class EntityTimelineResponse(BaseModel):
+    """Entity timeline detail: events + related entities.
+
+    ``total`` is the count of returned events in this page, equal to
+    ``len(events)``. When ``total`` equals the handler's ``limit`` query
+    parameter, the result may be truncated — callers should narrow the
+    time range or raise ``limit`` to retrieve more.
+    """
+
+    entity_uuid: str
+    events: list[EventResponse]
+    related: list[EntityRelationResponse]
+    total: int

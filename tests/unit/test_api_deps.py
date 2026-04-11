@@ -55,3 +55,38 @@ class TestStorageDeps:
         assert deps.log_store is not None
         assert deps.alert_store is not None
         assert deps.entity_store is not None
+
+
+class TestRequireEntityStore:
+    """Tests for the require_entity_store dependency."""
+
+    def test_require_entity_store_raises_503_when_missing(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from fastapi import HTTPException
+
+        from seerflow.api.deps import require_entity_store
+
+        storage = StorageDeps(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+            entity_store=None,
+        )
+        with pytest.raises(HTTPException) as excinfo:
+            require_entity_store(storage)
+        assert excinfo.value.status_code == 503
+        assert "entity_store" in excinfo.value.detail.lower()
+
+    def test_require_entity_store_returns_store_when_present(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from seerflow.api.deps import require_entity_store
+
+        store = AsyncMock()
+        storage = StorageDeps(
+            log_store=AsyncMock(),
+            alert_store=AsyncMock(),
+            entity_store=store,
+        )
+        result = require_entity_store(storage)
+        assert result is store
