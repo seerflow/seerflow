@@ -17,8 +17,6 @@ def test_severity_bounds_constants_match_enum_range() -> None:
 
     assert SEVERITY_MIN == int(min(SeverityLevel))
     assert SEVERITY_MAX == int(max(SeverityLevel))
-    assert SEVERITY_MIN == 0
-    assert SEVERITY_MAX == 6
 
 
 def _make_event(**overrides: object) -> SeerflowEvent:

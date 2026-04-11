@@ -75,14 +75,40 @@ async def _wait_until(
     CI load. Raises ``TimeoutError`` if ``timeout`` seconds elapse without
     ``predicate`` returning a truthy value.
     """
-    deadline = asyncio.get_running_loop().time() + timeout
-    while asyncio.get_running_loop().time() < deadline:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
         if predicate():
             return
         await asyncio.sleep(interval)
     if not predicate():
         msg = f"predicate did not become true within {timeout}s"
         raise TimeoutError(msg)
+
+
+class TestWaitUntil:
+    """Cover the _wait_until test helper itself so it is not dead code
+    before Task 24 replaces fixed sleeps with calls into it."""
+
+    @pytest.mark.asyncio
+    async def test_returns_immediately_when_predicate_already_true(self) -> None:
+        await _wait_until(lambda: True, timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_returns_when_predicate_becomes_true(self) -> None:
+        calls = {"n": 0}
+
+        def predicate() -> bool:
+            calls["n"] += 1
+            return calls["n"] >= 3
+
+        await _wait_until(predicate, timeout=0.5, interval=0.001)
+        assert calls["n"] >= 3
+
+    @pytest.mark.asyncio
+    async def test_raises_timeout_error_when_predicate_never_true(self) -> None:
+        with pytest.raises(TimeoutError, match="did not become true"):
+            await _wait_until(lambda: False, timeout=0.02, interval=0.001)
 
 
 class TestClientFilterDefaults:

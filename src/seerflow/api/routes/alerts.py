@@ -32,7 +32,11 @@ async def list_alerts(
     alert_type: Annotated[str | None, Query(alias="type", description="Alert type")] = None,
     severity: Annotated[
         int | None,
-        Query(ge=SEVERITY_MIN, le=SEVERITY_MAX, description="Minimum severity (0-6)"),
+        Query(
+            ge=SEVERITY_MIN,
+            le=SEVERITY_MAX,
+            description=f"Minimum severity ({SEVERITY_MIN}-{SEVERITY_MAX})",
+        ),
     ] = None,
     entity: Annotated[str | None, Query(description="Entity UUID")] = None,
     tactic: Annotated[str | None, Query(description="MITRE ATT&CK tactic", max_length=64)] = None,

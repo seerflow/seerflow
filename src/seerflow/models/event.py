@@ -37,8 +37,8 @@ class SeverityLevel(int, enum.Enum):
 
 # Public severity bounds — imported by api/ws.py and api/routes/alerts.py
 # to prevent drift between REST and WebSocket validation.
-SEVERITY_MIN: int = int(SeverityLevel.TRACE)
-SEVERITY_MAX: int = int(SeverityLevel.FATAL)
+SEVERITY_MIN: int = SeverityLevel.TRACE
+SEVERITY_MAX: int = SeverityLevel.FATAL
 
 
 class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
