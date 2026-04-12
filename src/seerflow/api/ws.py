@@ -536,7 +536,9 @@ class ConnectionManager:
         """
         now_ns = time.monotonic_ns()
         elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
-        events_ingested_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
+        events_ingested_per_sec = (
+            self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
+        )
         self._events_broadcast_count = 0
         self._broadcast_window_start_ns = now_ns
 
