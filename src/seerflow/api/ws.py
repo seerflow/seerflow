@@ -536,7 +536,7 @@ class ConnectionManager:
         """
         now_ns = time.monotonic_ns()
         elapsed_s = (now_ns - self._broadcast_window_start_ns) / 1e9
-        events_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
+        events_ingested_per_sec = self._events_broadcast_count / elapsed_s if elapsed_s > 0 else 0.0
         self._events_broadcast_count = 0
         self._broadcast_window_start_ns = now_ns
 
@@ -547,7 +547,7 @@ class ConnectionManager:
             status_msg = {
                 "type": "status",
                 "data": {
-                    "events_ingested_per_sec": events_per_sec,
+                    "events_ingested_per_sec": events_ingested_per_sec,
                     "alerts_24h": alerts_24h,
                     "connected_clients": len(self._clients),
                     "dropped_events": client.dropped_events,
@@ -649,7 +649,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 )
                 continue
             try:
-                msg = json.loads(raw.decode("utf-8"))
+                msg = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 await _send_bytes(
                     websocket,

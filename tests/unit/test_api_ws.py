@@ -366,6 +366,18 @@ class TestSetFilter:
         assert errors == []
         assert mgr._clients[client_id].filter.sources == frozenset({"b"})
 
+    @pytest.mark.asyncio
+    async def test_filter_rate_limit_disabled_when_interval_zero(self) -> None:
+        """filter_min_interval_ns=0 means no throttle; rapid updates allowed."""
+        mgr = ConnectionManager(filter_min_interval_ns=0)
+        client_id = await self._connect(mgr)
+
+        errors1 = mgr.set_filter(client_id, {"type": "filter", "sources": ["a"]})
+        errors2 = mgr.set_filter(client_id, {"type": "filter", "sources": ["b"]})
+        assert errors1 == []
+        assert errors2 == []
+        assert mgr._clients[client_id].filter.sources == frozenset({"b"})
+
 
 class TestBroadcastEvent:
     @pytest.mark.asyncio
