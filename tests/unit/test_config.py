@@ -1395,3 +1395,58 @@ class TestWebSocketConfig:
         yaml_path.write_text("ws_allowed_origins:\n  - 42\n")
         with pytest.raises(ConfigError, match="ws_allowed_origins"):
             load_config(path=str(yaml_path))
+
+
+def test_parse_ws_fields_returns_named_tuple() -> None:
+    """_parse_ws_fields must return a _WsFields NamedTuple with named access."""
+    from seerflow.config import _parse_ws_fields, _WsFields
+
+    result = _parse_ws_fields({})
+    assert isinstance(result, _WsFields)
+    assert result.ws_max_connections == 20
+    assert result.ws_queue_maxlen == 1000
+    assert result.ws_tick_interval_s == 0.01
+    assert result.ws_batch_max_events == 10
+    assert result.ws_status_interval_s == 5.0
+    assert result.ws_allowed_origins == ()
+
+
+def test_ws_filter_min_interval_ms_default_is_100() -> None:
+    from seerflow.config import SeerflowConfig
+
+    cfg = SeerflowConfig()
+    assert cfg.ws_filter_min_interval_ms == 100
+
+
+def test_parse_ws_fields_includes_filter_min_interval_ms() -> None:
+    from seerflow.config import _parse_ws_fields
+
+    result = _parse_ws_fields({"ws_filter_min_interval_ms": 250})
+    assert result.ws_filter_min_interval_ms == 250
+
+
+def test_ws_filter_min_interval_ms_rejects_negative() -> None:
+    import pytest
+
+    from seerflow.config import ConfigError, _parse_ws_fields
+
+    with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
+        _parse_ws_fields({"ws_filter_min_interval_ms": -1})
+
+
+def test_ws_filter_min_interval_ms_accepts_zero() -> None:
+    """Zero means no throttle — must be accepted."""
+    from seerflow.config import _parse_ws_fields
+
+    result = _parse_ws_fields({"ws_filter_min_interval_ms": 0})
+    assert result.ws_filter_min_interval_ms == 0
+
+
+def test_ws_filter_min_interval_ms_rejects_bool() -> None:
+    """Bool is an int subclass; must be rejected explicitly."""
+    import pytest
+
+    from seerflow.config import ConfigError, _parse_ws_fields
+
+    with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
+        _parse_ws_fields({"ws_filter_min_interval_ms": True})

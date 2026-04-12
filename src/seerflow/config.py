@@ -13,7 +13,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -238,6 +238,7 @@ class SeerflowConfig:
     # Explicit WebSocket Origin allowlist. Empty tuple means "use the
     # localhost defaults derived from dashboard_port" (see api.app).
     ws_allowed_origins: tuple[str, ...] = ()
+    ws_filter_min_interval_ms: int = 100
 
 
 # ---------------------------------------------------------------------------
@@ -877,12 +878,13 @@ def load_config(
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
-        ws_max_connections=ws_fields[0],
-        ws_queue_maxlen=ws_fields[1],
-        ws_tick_interval_s=ws_fields[2],
-        ws_batch_max_events=ws_fields[3],
-        ws_status_interval_s=ws_fields[4],
-        ws_allowed_origins=ws_fields[5],
+        ws_max_connections=ws_fields.ws_max_connections,
+        ws_queue_maxlen=ws_fields.ws_queue_maxlen,
+        ws_tick_interval_s=ws_fields.ws_tick_interval_s,
+        ws_batch_max_events=ws_fields.ws_batch_max_events,
+        ws_status_interval_s=ws_fields.ws_status_interval_s,
+        ws_allowed_origins=ws_fields.ws_allowed_origins,
+        ws_filter_min_interval_ms=ws_fields.ws_filter_min_interval_ms,
     )
 
 
@@ -901,9 +903,21 @@ def _is_pos_number(value: object) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
 
 
+class _WsFields(NamedTuple):
+    """Parsed ``ws_*`` WebSocket tuning fields from a raw config dict."""
+
+    ws_max_connections: int
+    ws_queue_maxlen: int
+    ws_tick_interval_s: float
+    ws_batch_max_events: int
+    ws_status_interval_s: float
+    ws_allowed_origins: tuple[str, ...]
+    ws_filter_min_interval_ms: int
+
+
 def _parse_ws_fields(
     raw: dict[str, Any],
-) -> tuple[int, int, float, int, float, tuple[str, ...]]:
+) -> _WsFields:
     """Parse and validate the top-level ``ws_*`` WebSocket tuning fields."""
     ws_max_connections = raw.get("ws_max_connections", 20)
     if not _is_pos_int(ws_max_connections) or ws_max_connections > _WS_MAX_CONNECTIONS_CEILING:
@@ -948,11 +962,23 @@ def _parse_ws_fields(
         raise ConfigError("ws_allowed_origins items must be strings")
     ws_allowed_origins: tuple[str, ...] = tuple(ws_allowed_origins_raw)
 
-    return (
-        ws_max_connections,
-        ws_queue_maxlen,
-        float(ws_tick_interval_s),
-        ws_batch_max_events,
-        float(ws_status_interval_s),
-        ws_allowed_origins,
+    ws_filter_min_interval_ms = raw.get("ws_filter_min_interval_ms", 100)
+    if (
+        not isinstance(ws_filter_min_interval_ms, int)
+        or isinstance(ws_filter_min_interval_ms, bool)
+        or ws_filter_min_interval_ms < 0
+    ):
+        raise ConfigError(
+            f"ws_filter_min_interval_ms must be a non-negative integer, "
+            f"got {ws_filter_min_interval_ms!r}"
+        )
+
+    return _WsFields(
+        ws_max_connections=ws_max_connections,
+        ws_queue_maxlen=ws_queue_maxlen,
+        ws_tick_interval_s=float(ws_tick_interval_s),
+        ws_batch_max_events=ws_batch_max_events,
+        ws_status_interval_s=float(ws_status_interval_s),
+        ws_allowed_origins=ws_allowed_origins,
+        ws_filter_min_interval_ms=ws_filter_min_interval_ms,
     )

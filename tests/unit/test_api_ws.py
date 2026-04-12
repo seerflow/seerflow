@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import msgspec
 import pytest
@@ -19,7 +22,7 @@ from seerflow.api.ws import (
     serialize_event,
 )
 from seerflow.models.alert import Alert
-from seerflow.models.event import SeerflowEvent
+from seerflow.models.event import SeerflowEvent, SeverityLevel
 
 
 def _decode_sent(ws_mock: Any) -> list[dict[str, Any]]:
@@ -39,7 +42,7 @@ def _make_event(
         observed_ns=1_800_000_000_000_000_001,
         message="test event",
         source_type=source_type,
-        severity_id=severity_id,  # type: ignore[arg-type]
+        severity_id=SeverityLevel(severity_id),
         template_id=template_id,
     )
 
@@ -53,7 +56,7 @@ def _make_alert(
         alert_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"alert-{alert_type}-{severity}")),
         alert_type=alert_type,  # type: ignore[arg-type]
         timestamp_ns=1_800_000_000_000_000_000,
-        severity_id=severity,  # type: ignore[arg-type]
+        severity_id=SeverityLevel(severity),
         rule_name="test-rule",
         description="test alert",
         entity_uuid=str(uuid.uuid4()),
@@ -61,6 +64,53 @@ def _make_alert(
         entity_type="ip",
         contributing_events=(),
     )
+
+
+async def _wait_until(
+    predicate: Callable[[], bool],
+    timeout: float = 1.0,
+    interval: float = 0.005,
+) -> None:
+    """Poll ``predicate`` at ``interval`` seconds until it returns True.
+
+    Replaces fixed ``asyncio.sleep(...)`` test waits that were flaky under
+    CI load. Raises ``TimeoutError`` if ``timeout`` seconds elapse without
+    ``predicate`` returning a truthy value.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(interval)
+    if not predicate():
+        msg = f"predicate did not become true within {timeout}s"
+        raise TimeoutError(msg)
+
+
+class TestWaitUntil:
+    """Cover the _wait_until test helper itself so it is not dead code
+    before Task 24 replaces fixed sleeps with calls into it."""
+
+    @pytest.mark.asyncio
+    async def test_returns_immediately_when_predicate_already_true(self) -> None:
+        await _wait_until(lambda: True, timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_returns_when_predicate_becomes_true(self) -> None:
+        calls = {"n": 0}
+
+        def predicate() -> bool:
+            calls["n"] += 1
+            return calls["n"] >= 3
+
+        await _wait_until(predicate, timeout=0.5, interval=0.001)
+        assert calls["n"] >= 3
+
+    @pytest.mark.asyncio
+    async def test_raises_timeout_error_when_predicate_never_true(self) -> None:
+        with pytest.raises(TimeoutError, match="did not become true"):
+            await _wait_until(lambda: False, timeout=0.02, interval=0.001)
 
 
 class TestClientFilterDefaults:
@@ -133,6 +183,18 @@ class TestConnectionManagerConstruction:
             status_interval_s=2.0,
         )
         assert mgr.max_connections == 5
+
+    def test_max_connections_is_read_only_property(self) -> None:
+        """max_connections and connected_count should both be properties."""
+        mgr = ConnectionManager(max_connections=5)
+        # Both should be property-based
+        assert isinstance(type(mgr).max_connections, property)
+        assert isinstance(type(mgr).connected_count, property)
+        # Read works
+        assert mgr.max_connections == 5
+        # Write should fail (property has no setter)
+        with pytest.raises(AttributeError):
+            mgr.max_connections = 99  # type: ignore[misc]
 
 
 class TestConnectionManagerLifecycle:
@@ -277,6 +339,45 @@ class TestSetFilter:
         errors = mgr.set_filter("not-a-real-id", {"type": "filter"})
         assert errors == []
 
+    @pytest.mark.asyncio
+    async def test_filter_rate_limit_rejects_fast_updates(self) -> None:
+        """Second filter message within the throttle window is rejected."""
+        mgr = ConnectionManager(filter_min_interval_ns=50_000_000)  # 50 ms
+        client_id = await self._connect(mgr)
+
+        errors1 = mgr.set_filter(client_id, {"type": "filter", "sources": ["a"]})
+        assert errors1 == []
+        errors2 = mgr.set_filter(client_id, {"type": "filter", "sources": ["b"]})
+        assert any("throttled" in e for e in errors2)
+        # Original filter preserved
+        assert mgr._clients[client_id].filter.sources == frozenset({"a"})
+
+    @pytest.mark.asyncio
+    async def test_filter_rate_limit_allows_after_interval(self) -> None:
+        mgr = ConnectionManager(filter_min_interval_ns=10_000_000)  # 10 ms
+        client_id = await self._connect(mgr)
+
+        mgr.set_filter(client_id, {"type": "filter", "sources": ["a"]})
+        # Yield to the event loop and let wall-clock advance past the
+        # 10 ms monotonic window. asyncio.sleep cooperates with the loop
+        # where time.sleep would block the whole thread.
+        await asyncio.sleep(0.02)
+        errors = mgr.set_filter(client_id, {"type": "filter", "sources": ["b"]})
+        assert errors == []
+        assert mgr._clients[client_id].filter.sources == frozenset({"b"})
+
+    @pytest.mark.asyncio
+    async def test_filter_rate_limit_disabled_when_interval_zero(self) -> None:
+        """filter_min_interval_ns=0 means no throttle; rapid updates allowed."""
+        mgr = ConnectionManager(filter_min_interval_ns=0)
+        client_id = await self._connect(mgr)
+
+        errors1 = mgr.set_filter(client_id, {"type": "filter", "sources": ["a"]})
+        errors2 = mgr.set_filter(client_id, {"type": "filter", "sources": ["b"]})
+        assert errors1 == []
+        assert errors2 == []
+        assert mgr._clients[client_id].filter.sources == frozenset({"b"})
+
 
 class TestBroadcastEvent:
     @pytest.mark.asyncio
@@ -336,7 +437,7 @@ class TestBroadcastEvent:
         client = mgr._clients[client_id]
         assert len(client.event_deque) == 3
         assert client.dropped_events == 2
-        template_ids = [e.template_id for e in client.event_deque]
+        template_ids = [be.event.template_id for be in client.event_deque]
         assert template_ids == [2, 3, 4]
 
     @pytest.mark.asyncio
@@ -408,8 +509,10 @@ class TestBroadcastAlert:
 
 class TestSerialization:
     def test_serialize_event_has_core_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
         event = _make_event(source_type="syslog", severity_id=3, template_id=42)
-        payload = serialize_event(event)
+        payload = serialize_event(BroadcastEvent(event=event))
         assert payload["type"] == "event"
         data = payload["data"]
         assert data["source_type"] == "syslog"
@@ -429,12 +532,77 @@ class TestSerialization:
         assert "rule_name" in data
         assert "entity_value" in data
 
+    def test_serialize_event_includes_observed_ns_and_severity_text(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        event = _make_event(severity_id=3)
+        payload = serialize_event(BroadcastEvent(event=event))
+        data = payload["data"]
+        assert data["observed_ns"] == event.observed_ns
+        assert data["severity_text"] == "Warning"
+
     def test_serialize_event_is_json_encodable(self) -> None:
-        payload = serialize_event(_make_event())
+        from seerflow.api.ws import BroadcastEvent
+
+        payload = serialize_event(BroadcastEvent(event=_make_event()))
         # Round-trips through json.dumps/loads
         s = _json.dumps(payload)
         parsed = _json.loads(s)
         assert parsed["type"] == "event"
+
+    def test_serialize_event_includes_entity_summary(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        event = msgspec.structs.replace(
+            _make_event(),
+            related_ips=("10.0.0.1", "10.0.0.2"),
+            related_users=("alice",),
+        )
+        payload = serialize_event(BroadcastEvent(event=event))
+        data = payload["data"]
+        assert data["entity_summary"] == {
+            "ips": ["10.0.0.1", "10.0.0.2"],
+            "users": ["alice"],
+        }
+
+    def test_entity_summary_omits_empty_keys(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        event = _make_event()  # no related_* fields set
+        payload = serialize_event(BroadcastEvent(event=event))
+        assert payload["data"]["entity_summary"] == {}
+
+    def test_entity_summary_caps_at_five_values(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        many = tuple(f"10.0.0.{i}" for i in range(20))
+        event = msgspec.structs.replace(_make_event(), related_ips=many)
+        payload = serialize_event(BroadcastEvent(event=event))
+        assert payload["data"]["entity_summary"]["ips"] == list(many[:5])
+
+    def test_serialize_event_without_detection_omits_score_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        payload = serialize_event(BroadcastEvent(event=_make_event()))
+        data = payload["data"]
+        assert "score" not in data
+        assert "is_anomaly" not in data
+        assert "upper_threshold" not in data
+
+    def test_serialize_event_with_detection_includes_score_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        be = BroadcastEvent(
+            event=_make_event(),
+            score=0.87,
+            is_anomaly=True,
+            upper_threshold=0.8,
+        )
+        payload = serialize_event(be)
+        data = payload["data"]
+        assert data["score"] == 0.87
+        assert data["is_anomaly"] is True
+        assert data["upper_threshold"] == 0.8
 
 
 class TestClientSender:
@@ -448,11 +616,7 @@ class TestClientSender:
         mgr.start_client_sender(client_id)
 
         mgr.broadcast_event(_make_event(source_type="syslog"))
-        # Yield control so the sender task can drain
-        for _ in range(20):
-            await asyncio.sleep(0.005)
-            if ws.send_bytes.await_count > 0:
-                break
+        await _wait_until(lambda: ws.send_bytes.await_count > 0, timeout=1.0)
 
         assert ws.send_bytes.await_count >= 1
         sent = _decode_sent(ws)
@@ -470,8 +634,13 @@ class TestClientSender:
 
         for i in range(5):
             mgr.broadcast_event(_make_event(template_id=i))
-        # Wait for at least one drain cycle (one tick_interval)
-        await asyncio.sleep(0.12)
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "batch"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         assert len(sent) >= 1
@@ -491,7 +660,21 @@ class TestClientSender:
 
         mgr.broadcast_event(_make_event())
         mgr.broadcast_alert(_make_alert())
-        await asyncio.sleep(0.12)
+        _evt_types = ("event", "batch")
+        _alert_types = ("alert", "alert_batch")
+        await _wait_until(
+            lambda: (
+                any(
+                    msgspec.json.decode(call.args[0]).get("type") in _evt_types
+                    for call in ws.send_bytes.await_args_list
+                )
+                and any(
+                    msgspec.json.decode(call.args[0]).get("type") in _alert_types
+                    for call in ws.send_bytes.await_args_list
+                )
+            ),
+            timeout=1.0,
+        )
 
         types = [m["type"] for m in _decode_sent(ws)]
         assert "event" in types or "batch" in types
@@ -508,8 +691,10 @@ class TestClientSender:
         mgr.start_client_sender(client_id)
 
         # Append directly without setting the wakeup event
-        mgr._clients[client_id].event_deque.append(_make_event())
-        await asyncio.sleep(0.1)
+        from seerflow.api.ws import BroadcastEvent
+
+        mgr._clients[client_id].event_deque.append(BroadcastEvent(event=_make_event()))
+        await _wait_until(lambda: ws.send_bytes.await_count >= 1, timeout=1.0)
 
         assert ws.send_bytes.await_count >= 1
         await mgr.disconnect(client_id)
@@ -526,7 +711,14 @@ class TestClientSender:
         mgr.start_client_sender(client_id)
 
         mgr.broadcast_event(_make_event())
-        await asyncio.sleep(0.1)
+        await _wait_until(
+            lambda: (
+                mgr._clients.get(client_id) is not None
+                and mgr._clients[client_id].sender_task is not None
+                and mgr._clients[client_id].sender_task.done()
+            ),
+            timeout=1.0,
+        )
 
         # Sender task should have exited on its own.
         client = mgr._clients.get(client_id)
@@ -555,13 +747,19 @@ class TestStatusBroadcaster:
         mgr.start_client_sender(client_id)
         mgr.start_status_task()
 
-        await asyncio.sleep(0.1)
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "status"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         status_msgs = [m for m in sent if m.get("type") == "status"]
         assert len(status_msgs) >= 1
         data = status_msgs[0]["data"]
-        assert "events_per_sec" in data
+        assert "events_ingested_per_sec" in data
         assert data["alerts_24h"] == 17
         assert data["connected_clients"] == 1
         assert data["dropped_events"] == 0
@@ -570,7 +768,7 @@ class TestStatusBroadcaster:
         await mgr.shutdown()
 
     @pytest.mark.asyncio
-    async def test_events_per_sec_window_resets(self) -> None:
+    async def test_events_ingested_per_sec_window_resets(self) -> None:
         mgr = ConnectionManager(
             status_interval_s=0.02,
             tick_interval_s=0.005,
@@ -585,17 +783,64 @@ class TestStatusBroadcaster:
         # Burst 10 events in the first window, then broadcast nothing.
         for _ in range(10):
             mgr.broadcast_event(_make_event())
-        await asyncio.sleep(0.15)
+        await _wait_until(
+            lambda: (
+                len(
+                    [
+                        call
+                        for call in ws.send_bytes.await_args_list
+                        if msgspec.json.decode(call.args[0]).get("type") == "status"
+                    ]
+                )
+                >= 2
+            ),
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         status_msgs = [m for m in sent if m.get("type") == "status"]
         assert len(status_msgs) >= 2
-        first_rate = status_msgs[0]["data"]["events_per_sec"]
-        last_rate = status_msgs[-1]["data"]["events_per_sec"]
+        first_rate = status_msgs[0]["data"]["events_ingested_per_sec"]
+        last_rate = status_msgs[-1]["data"]["events_ingested_per_sec"]
         # First window saw the burst; the counter resets after emission,
         # so the last emitted window must show a strictly lower rate.
         assert first_rate > 0.0
         assert last_rate < first_rate
+        await mgr.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_status_payload_includes_dropped_total(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts = AsyncMock(
+            return_value=MagicMock(total=0, items=[], has_next=False)
+        )
+        mgr = ConnectionManager(
+            alert_store=alert_store,
+            status_interval_s=0.03,
+            tick_interval_s=0.01,
+            queue_maxlen=2,
+        )
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_bytes = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+
+        # Force >=3 drops: queue_maxlen=2, broadcasting 5 events drops events 3-5.
+        for i in range(5):
+            mgr.broadcast_event(_make_event(template_id=i))
+
+        mgr.start_status_task()
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "status"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
+        sent = _decode_sent(ws)
+        status_msgs = [m for m in sent if m.get("type") == "status"]
+        assert status_msgs[-1]["data"]["dropped_total"] >= 3
         await mgr.shutdown()
 
 
@@ -644,6 +889,31 @@ class TestSetFilterEdgeCases:
         client_id = await self._connect(mgr)
         errors = mgr.set_filter(client_id, {"type": "filter", "min_severity": "high"})
         assert any("min_severity must be an integer" in e for e in errors)
+
+    @pytest.mark.asyncio
+    async def test_template_ids_non_int_entry_rejected(self) -> None:
+        """Mixed-type template_ids list must be rejected, filter unchanged."""
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        original_filter = mgr._clients[client_id].filter
+
+        errors = mgr.set_filter(
+            client_id,
+            {"type": "filter", "template_ids": [1, "not-int", 3]},
+        )
+        assert any("template_ids items must be integers" in e for e in errors)
+        assert mgr._clients[client_id].filter is original_filter
+
+    @pytest.mark.asyncio
+    async def test_template_ids_bool_entry_rejected(self) -> None:
+        """``True`` is int in Python; ensure bools are rejected too."""
+        mgr = ConnectionManager()
+        client_id = await self._connect(mgr)
+        errors = mgr.set_filter(
+            client_id,
+            {"type": "filter", "template_ids": [1, True, 3]},
+        )
+        assert any("template_ids items must be integers" in e for e in errors)
 
 
 class TestConnectionManagerEdgeCases:
@@ -703,7 +973,13 @@ class TestSenderBatchedAlerts:
 
         for i in range(4):
             mgr.broadcast_alert(_make_alert(alert_type="sigma", severity=i + 1))
-        await asyncio.sleep(0.12)
+        await _wait_until(
+            lambda: any(
+                msgspec.json.decode(call.args[0]).get("type") == "alert_batch"
+                for call in ws.send_bytes.await_args_list
+            ),
+            timeout=1.0,
+        )
 
         sent = _decode_sent(ws)
         alert_batch_msg = next((m for m in sent if m.get("type") == "alert_batch"), None)
@@ -726,7 +1002,8 @@ class TestStatusBroadcasterErrorPaths:
         ws.send_bytes = AsyncMock(side_effect=RuntimeError("broken pipe"))
         client_id = await mgr.connect(ws)
         mgr.start_status_task()
-        await asyncio.sleep(0.08)
+        # Wait until send_bytes has been called at least once (the task ran)
+        await _wait_until(lambda: ws.send_bytes.await_count >= 1, timeout=1.0)
         # Status task should still be running despite the send failure
         assert mgr._status_task is not None
         assert not mgr._status_task.done()
@@ -747,6 +1024,31 @@ class TestBroadcastAlertSafety:
         mgr._clients[client_id].filter = "not-a-filter"  # type: ignore[assignment]
         mgr.broadcast_alert(_make_alert())  # Must not raise
         await mgr.disconnect(client_id)
+
+
+class TestBroadcastEventWrapper:
+    def test_broadcast_event_namedtuple_has_detection_fields(self) -> None:
+        """BroadcastEvent wraps a SeerflowEvent plus optional detection metadata."""
+        from seerflow.api.ws import BroadcastEvent
+
+        be = BroadcastEvent(event=_make_event())
+        assert be.event is not None
+        assert be.score is None
+        assert be.is_anomaly is None
+        assert be.upper_threshold is None
+
+    def test_broadcast_event_with_detection_fields(self) -> None:
+        from seerflow.api.ws import BroadcastEvent
+
+        be = BroadcastEvent(
+            event=_make_event(),
+            score=0.92,
+            is_anomaly=True,
+            upper_threshold=0.8,
+        )
+        assert be.score == 0.92
+        assert be.is_anomaly is True
+        assert be.upper_threshold == 0.8
 
 
 class TestOriginAllowlist:
@@ -783,3 +1085,90 @@ class TestOriginAllowlist:
         mgr = ConnectionManager(allowed_origins=frozenset({"http://localhost:8080"}))
         assert mgr.is_origin_allowed(None) is True
         assert mgr.is_origin_allowed("") is True
+
+
+class TestDeadClientMarker:
+    @pytest.mark.asyncio
+    async def test_sender_exception_marks_client_dead(self) -> None:
+        """Non-disconnect exceptions in the sender task mark the client dead."""
+        mgr = ConnectionManager(tick_interval_s=0.005, batch_max_events=10)
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_bytes = AsyncMock(side_effect=RuntimeError("boom"))
+        client_id = await mgr.connect(ws)
+        mgr.start_client_sender(client_id)
+
+        mgr.broadcast_event(_make_event())
+        await _wait_until(
+            lambda: mgr._clients[client_id].dead,
+            timeout=1.0,
+        )
+        assert mgr._clients[client_id].dead is True
+        await mgr.disconnect(client_id)
+
+    @pytest.mark.asyncio
+    async def test_dead_client_skipped_by_broadcast_event(self) -> None:
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr._clients[client_id].dead = True
+
+        mgr.broadcast_event(_make_event())
+        assert len(mgr._clients[client_id].event_deque) == 0
+
+    @pytest.mark.asyncio
+    async def test_dead_client_skipped_by_broadcast_alert(self) -> None:
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        client_id = await mgr.connect(ws)
+        mgr._clients[client_id].dead = True
+
+        mgr.broadcast_alert(_make_alert())
+        assert len(mgr._clients[client_id].alert_deque) == 0
+
+
+class TestRouteSizeGuard:
+    """The route handler rejects frames over 64 KiB before parsing."""
+
+    def test_ws_max_frame_bytes_constant_exists(self) -> None:
+        from seerflow.api.ws import _WS_MAX_FRAME_BYTES
+
+        assert _WS_MAX_FRAME_BYTES == 64 * 1024
+
+    @pytest.mark.asyncio
+    async def test_oversized_frame_via_testclient_returns_error(self) -> None:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.state.ws_manager = ConnectionManager(max_connections=4)
+        from seerflow.api.ws import router
+
+        app.include_router(router, prefix="/api")
+
+        with TestClient(app) as client, client.websocket_connect("/api/ws") as ws:
+            huge_payload = {"type": "filter", "sources": ["x" * 100_000]}
+            ws.send_text(_json.dumps(huge_payload))
+            msg = ws.receive_json(mode="binary")
+            assert msg["type"] == "error"
+            assert "too large" in msg["message"]
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_via_testclient_returns_error(self) -> None:
+        """Small frame with invalid JSON body also returns an error reply."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.state.ws_manager = ConnectionManager(max_connections=4)
+        from seerflow.api.ws import router
+
+        app.include_router(router, prefix="/api")
+
+        with TestClient(app) as client, client.websocket_connect("/api/ws") as ws:
+            ws.send_text("not-valid-json{")
+            msg = ws.receive_json(mode="binary")
+            assert msg["type"] == "error"
+            assert "invalid JSON" in msg["message"]

@@ -316,11 +316,14 @@ def make_handler(
         # Persist to storage (WriteBuffer handles batching + 100ms timer flush)
         await storage.write_events([seerflow_event])
 
-        if ws_manager is not None:
-            ws_manager.broadcast_event(seerflow_event)
-
         result = ensemble.process_event(seerflow_event)
         event_count += 1
+
+        if ws_manager is not None:
+            try:
+                ws_manager.broadcast_event(seerflow_event, detection=result)
+            except Exception:
+                _log.warning("ws broadcast_event failed", exc_info=True)
 
         # Flush template metadata every 10 events
         if event_count % 10 == 0 and template_meta:
