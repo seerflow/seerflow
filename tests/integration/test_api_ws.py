@@ -18,7 +18,7 @@ from seerflow.api.app import create_api_app
 from seerflow.api.ws import ConnectionManager
 from seerflow.config import StorageConfig
 from seerflow.models.alert import Alert
-from seerflow.models.event import SeerflowEvent
+from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.storage.sqlite import SqliteBackend
 
 if TYPE_CHECKING:
@@ -65,7 +65,7 @@ def _make_event(source_type: str = "syslog", severity_id: int = 3) -> SeerflowEv
         observed_ns=1_800_000_000_000_000_001,
         message="integration test event",
         source_type=source_type,
-        severity_id=severity_id,  # type: ignore[arg-type]
+        severity_id=SeverityLevel(severity_id),
     )
 
 
@@ -74,7 +74,7 @@ def _make_alert(alert_type: str = "sigma") -> Alert:
         alert_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"int-{alert_type}")),
         alert_type=alert_type,  # type: ignore[arg-type]
         timestamp_ns=1_800_000_000_000_000_000,
-        severity_id=4,  # type: ignore[arg-type]
+        severity_id=SeverityLevel(4),
         rule_name="integration-rule",
         description="integration alert",
         entity_uuid=str(uuid.uuid4()),
