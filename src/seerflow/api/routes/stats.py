@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -21,12 +21,17 @@ from seerflow.api.deps import (
 from seerflow.api.schemas import StatsResponse
 from seerflow.models.query import AlertQuery, EventQuery
 
+if TYPE_CHECKING:
+    from seerflow.api.metrics import MetricsProvider as _MetricsProvider
+
 _log = logging.getLogger("seerflow.api.stats")
 
 router = APIRouter(tags=["system"])
 
 Storage = Annotated[StorageDeps, Depends(get_storage)]
-MetricsProvider = Annotated[Any, Depends(get_pipeline_metrics_provider)]
+MetricsProviderDep = Annotated[
+    "_MetricsProvider | None", Depends(get_pipeline_metrics_provider)
+]
 
 
 def _compute_rate(started_monotonic: float, events: int) -> tuple[float, float]:
@@ -44,7 +49,7 @@ def _compute_rate(started_monotonic: float, events: int) -> tuple[float, float]:
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats(
     storage: Storage,
-    metrics_provider: MetricsProvider,
+    metrics_provider: MetricsProviderDep,
 ) -> StatsResponse:
     """Return pipeline statistics (persistent counts + live metrics)."""
     event_page = await storage.log_store.query_events(EventQuery(limit=1))

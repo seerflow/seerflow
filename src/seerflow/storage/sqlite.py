@@ -828,7 +828,9 @@ class SqliteBackend:
         for severity_id, count in rows:
             try:
                 name = SeverityLevel(int(severity_id)).name.lower()
-            except ValueError:
+            except (ValueError, TypeError):
+                # ValueError: severity_id outside enum range OR non-numeric text
+                # TypeError: severity_id is None (SQLite type affinity edge case)
                 name = "unknown"
             counts[name] = counts.get(name, 0) + int(count)
         return counts
