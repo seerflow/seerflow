@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -20,10 +22,16 @@ from seerflow.models.entity import (
 from seerflow.models.event import SeerflowEvent
 from seerflow.models.query import EntityRelation, Page
 
+if TYPE_CHECKING:
+    # Protocol is only referenced in annotations; `from __future__ import annotations`
+    # above keeps the runtime from evaluating `EntityStore`, so the TYPE_CHECKING guard
+    # is safe and satisfies ruff TC001.
+    from seerflow.storage.protocols import EntityStore
+
 
 def _make_app(
     log_store: AsyncMock,
-    entity_store: AsyncMock | None = None,
+    entity_store: EntityStore | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.state.storage = StorageDeps(
@@ -260,7 +268,22 @@ class TestEntitySearchUuidQuery:
 class TestEntityTimeline:
     """GET /api/v1/entities/{entity_uuid}/timeline."""
 
-    def test_happy_path_returns_events_and_related(self) -> None:
+    @pytest.fixture
+    def entity_store(self) -> AsyncMock:
+        store = AsyncMock()
+        store.get_timeline.return_value = []
+        store.get_related.return_value = []
+        return store
+
+    @pytest.fixture
+    def client(self, entity_store: AsyncMock) -> TestClient:
+        return TestClient(_make_app(AsyncMock(), entity_store=entity_store))
+
+    def test_happy_path_returns_events_and_related(
+        self,
+        entity_store: AsyncMock,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
         event = SeerflowEvent(
             event_id=uuid.uuid4(),
@@ -275,11 +298,9 @@ class TestEntityTimeline:
             entity_value="web-01",
             relation_type="seen_on",
         )
-        entity_store = AsyncMock()
         entity_store.get_timeline.return_value = [event]
         entity_store.get_related.return_value = [relation]
 
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline")
         assert resp.status_code == 200
         body = resp.json()
@@ -291,57 +312,56 @@ class TestEntityTimeline:
         assert len(body["related"]) == 1
         assert body["related"][0]["relation_type"] == "seen_on"
 
-    def test_default_time_range_spans_last_24h(self) -> None:
+    def test_default_time_range_spans_last_24h(
+        self,
+        entity_store: AsyncMock,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        entity_store.get_timeline.return_value = []
-        entity_store.get_related.return_value = []
-
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline")
         assert resp.status_code == 200
         call = entity_store.get_timeline.await_args
         time_range = call.kwargs["time_range"]
         assert time_range.end_ns - time_range.start_ns == DEFAULT_TIMELINE_WINDOW_NS
 
-    def test_source_type_filter_propagates(self) -> None:
+    def test_source_type_filter_propagates(
+        self,
+        entity_store: AsyncMock,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        entity_store.get_timeline.return_value = []
-        entity_store.get_related.return_value = []
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?source_type=syslog")
         assert resp.status_code == 200
         assert entity_store.get_timeline.await_args.kwargs["source_type"] == "syslog"
 
-    def test_severity_min_filter_propagates(self) -> None:
+    def test_severity_min_filter_propagates(
+        self,
+        entity_store: AsyncMock,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        entity_store.get_timeline.return_value = []
-        entity_store.get_related.return_value = []
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?severity_min=4")
         assert resp.status_code == 200
         assert entity_store.get_timeline.await_args.kwargs["severity_min"] == 4
 
-    def test_explicit_time_range_propagates(self) -> None:
+    def test_explicit_time_range_propagates(
+        self,
+        entity_store: AsyncMock,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        entity_store.get_timeline.return_value = []
-        entity_store.get_related.return_value = []
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?start_ns=1000&end_ns=2000")
         assert resp.status_code == 200
         tr = entity_store.get_timeline.await_args.kwargs["time_range"]
         assert tr.start_ns == 1000
         assert tr.end_ns == 2000
 
-    def test_limit_propagates_and_clamped(self) -> None:
+    def test_limit_propagates_and_clamped(
+        self,
+        entity_store: AsyncMock,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        entity_store.get_timeline.return_value = []
-        entity_store.get_related.return_value = []
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?limit=500")
         assert resp.status_code == 200
         assert entity_store.get_timeline.await_args.kwargs["limit"] == 500
@@ -349,16 +369,18 @@ class TestEntityTimeline:
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?limit=999999")
         assert resp.status_code == 422
 
-    def test_severity_out_of_range_returns_422(self) -> None:
+    def test_severity_out_of_range_returns_422(
+        self,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?severity_min=7")
         assert resp.status_code == 422
 
-    def test_malformed_uuid_returns_422(self) -> None:
-        entity_store = AsyncMock()
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
+    def test_malformed_uuid_returns_422(
+        self,
+        client: TestClient,
+    ) -> None:
         resp = client.get("/api/v1/entities/not-a-uuid/timeline")
         assert resp.status_code == 422
 
@@ -369,28 +391,29 @@ class TestEntityTimeline:
         assert resp.status_code == 503
         assert "entity_store" in resp.json()["detail"].lower()
 
-    def test_start_ns_after_end_ns_returns_422(self) -> None:
+    def test_start_ns_after_end_ns_returns_422(
+        self,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?start_ns=5000&end_ns=1000")
         assert resp.status_code == 422
         assert resp.json()["detail"] == "start_ns must be <= end_ns"
 
-    def test_ns_above_int64_ceiling_returns_422(self) -> None:
+    def test_ns_above_int64_ceiling_returns_422(
+        self,
+        client: TestClient,
+    ) -> None:
         """FastAPI rejects start_ns/end_ns > 2**63 - 1 (SQLite int64 ceiling)."""
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline?end_ns=9223372036854775808")
         assert resp.status_code == 422
 
-    def test_empty_related_returns_empty_list(self) -> None:
+    def test_empty_related_returns_empty_list(
+        self,
+        client: TestClient,
+    ) -> None:
         entity_uuid = str(uuid.uuid4())
-        entity_store = AsyncMock()
-        entity_store.get_timeline.return_value = []
-        entity_store.get_related.return_value = []
-        client = TestClient(_make_app(AsyncMock(), entity_store=entity_store))
         resp = client.get(f"/api/v1/entities/{entity_uuid}/timeline")
         assert resp.status_code == 200
         assert resp.json()["related"] == []

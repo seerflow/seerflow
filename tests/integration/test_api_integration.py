@@ -305,6 +305,7 @@ class TestEntityTimelineIntegration:
         assert body["total"] == 2
         assert all(e["source_type"] == "auth" for e in body["events"])
 
+    @pytest.mark.slow
     async def test_10k_events_under_750ms_ceiling(
         self,
         entity_client: TestClient,
