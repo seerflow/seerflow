@@ -191,3 +191,24 @@ class TestWebSocketWiring:
             alert_store=AsyncMock(),
         )
         assert app.state.ws_manager._allowed_origins is None
+
+
+class TestAppWiring:
+    def test_config_router_registered(self) -> None:
+        from seerflow.api.app import create_api_app
+        from seerflow.config import SeerflowConfig
+
+        cfg = SeerflowConfig()
+        log_store = AsyncMock()
+        alert_store = AsyncMock()
+        app = create_api_app(log_store=log_store, alert_store=alert_store, config=cfg)
+        paths = {r.path for r in app.routes}
+        assert "/api/v1/config" in paths
+
+    def test_pipeline_metrics_provider_initialized_to_none(self) -> None:
+        from seerflow.api.app import create_api_app
+
+        log_store = AsyncMock()
+        alert_store = AsyncMock()
+        app = create_api_app(log_store=log_store, alert_store=alert_store)
+        assert getattr(app.state, "pipeline_metrics_provider", "unset") is None
