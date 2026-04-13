@@ -20,7 +20,7 @@ from seerflow.api.app import create_api_app
 from seerflow.config import StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.entity import generate_ip_id
-from seerflow.models.event import SeerflowEvent
+from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.storage.sqlite import SqliteBackend
 
 
@@ -60,7 +60,7 @@ def sample_alert() -> Alert:
         alert_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, "integration-test")),
         alert_type="ml",
         timestamp_ns=1_775_736_000_000_000_000,
-        severity_id=4,
+        severity_id=SeverityLevel.ERROR,
         rule_name="hst_anomaly",
         description="Integration test alert",
         entity_uuid=str(uuid.uuid5(uuid.NAMESPACE_DNS, "10.0.0.1")),
@@ -121,7 +121,7 @@ class TestAlertsIntegration:
             alert_id="int-mitre-a1",
             alert_type="sigma",
             timestamp_ns=1_775_736_000_000_000_000,
-            severity_id=3,
+            severity_id=SeverityLevel.WARNING,
             rule_name="test",
             description="",
             entity_uuid="e1",
@@ -136,7 +136,7 @@ class TestAlertsIntegration:
             alert_id="int-mitre-a2",
             alert_type="sigma",
             timestamp_ns=1_775_736_000_000_000_001,
-            severity_id=3,
+            severity_id=SeverityLevel.WARNING,
             rule_name="test",
             description="",
             entity_uuid="e1",
@@ -162,7 +162,7 @@ class TestAlertsIntegration:
             alert_id="int-tech-a1",
             alert_type="sigma",
             timestamp_ns=1_775_736_000_000_000_000,
-            severity_id=3,
+            severity_id=SeverityLevel.WARNING,
             rule_name="test",
             description="",
             entity_uuid="e1",
@@ -177,7 +177,7 @@ class TestAlertsIntegration:
             alert_id="int-tech-a2",
             alert_type="sigma",
             timestamp_ns=1_775_736_000_000_000_001,
-            severity_id=3,
+            severity_id=SeverityLevel.WARNING,
             rule_name="test",
             description="",
             entity_uuid="e1",
@@ -380,14 +380,13 @@ class TestConfigAndStatsIntegration:
     async def test_stats_endpoint_end_to_end(self, backend: SqliteBackend) -> None:
         from seerflow.api.metrics import PipelineMetrics
         from seerflow.config import SeerflowConfig
-        from seerflow.models.event import SeverityLevel
 
         def _alert(idx: int, sev: SeverityLevel, tag: str) -> Alert:
             return Alert(
                 alert_id=f"stats-{tag}-{idx}",
                 alert_type="ml",
                 timestamp_ns=1_775_736_000_000_000_000 + idx,
-                severity_id=sev.value,
+                severity_id=sev,
                 rule_name="hst_anomaly",
                 description=f"{tag} alert {idx}",
                 entity_uuid=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"stats-{tag}-{idx}")),
