@@ -21,6 +21,32 @@ if TYPE_CHECKING:
 
 _MASK = "***"
 
+# Keys that must be masked in raw-YAML dict entries (``alerting.webhooks[]``
+# passes through as ``tuple[dict[str, Any], ...]`` — the typed dataclass
+# walker cannot see inside). Extend this set when adding any new secret
+# key to raw-dict config sections.
+_RAW_DICT_SECRET_KEYS: frozenset[str] = frozenset(
+    {
+        "auth_token",
+        "api_key",
+        "bearer_token",
+        "password",
+        "secret",
+        "token",
+    }
+)
+# Keys in raw-YAML dicts whose value is a URL that may embed credentials.
+_RAW_DICT_URL_KEYS: frozenset[str] = frozenset({"url"})
+
+
+def _scrub_raw_dict(entry: dict[str, Any]) -> None:
+    """Mask known-secret keys inside a raw-YAML dict entry in place."""
+    for key in list(entry.keys()):
+        if key in _RAW_DICT_URL_KEYS and entry.get(key):
+            entry[key] = mask_webhook_url(entry[key])
+        elif key in _RAW_DICT_SECRET_KEYS and entry.get(key):
+            entry[key] = _MASK
+
 
 def redact_config(config: SeerflowConfig) -> dict[str, Any]:
     """Return a dict view of ``config`` with every known secret masked.
@@ -45,10 +71,7 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
     # alerting.webhooks — raw YAML dict passthrough
     for wh in data["alerting"].get("webhooks", ()):
         if isinstance(wh, dict):
-            if wh.get("url"):
-                wh["url"] = mask_webhook_url(wh["url"])
-            if wh.get("auth_token"):
-                wh["auth_token"] = _MASK
+            _scrub_raw_dict(wh)
 
     # receivers.webhooks — typed WebhookEndpointConfig list
     for wh in data["receivers"].get("webhooks", ()):

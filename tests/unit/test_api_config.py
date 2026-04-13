@@ -108,6 +108,36 @@ class TestRedactConfig:
         assert wh["auth_token"] == "***"
         assert wh["format"] == "json"
 
+    def test_alerting_webhooks_raw_dict_scrubs_all_known_secret_keys(self) -> None:
+        """Guard against future raw-YAML keys (api_key, token, password, etc.)."""
+        cfg = SeerflowConfig(
+            alerting=AlertingConfig(
+                webhooks=(
+                    {
+                        "url": "https://api.example.com/hook",
+                        "api_key": "sk-1234567890",
+                        "bearer_token": "bearer-abc",
+                        "password": "hunter2",
+                        "secret": "very-secret",
+                        "token": "tok-xyz",
+                        "format": "json",
+                        "not_a_secret": "visible",
+                    },
+                ),
+            )
+        )
+        data = redact_config(cfg)
+        wh = data["alerting"]["webhooks"][0]
+        assert wh["url"] == "https://api.example.com/***"
+        assert wh["api_key"] == "***"
+        assert wh["bearer_token"] == "***"
+        assert wh["password"] == "***"
+        assert wh["secret"] == "***"
+        assert wh["token"] == "***"
+        # non-secret keys preserved
+        assert wh["format"] == "json"
+        assert wh["not_a_secret"] == "visible"
+
 
 class TestConfigEndpoint:
     def _build_app(self, config: SeerflowConfig | None) -> FastAPI:

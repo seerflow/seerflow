@@ -427,7 +427,8 @@ class TestConfigAndStatsIntegration:
         assert 49.0 <= body["uptime_seconds"] <= 51.0
         assert 0.15 <= body["event_rate_per_sec"] <= 0.25
 
-    async def test_both_endpoints_under_200ms(self, backend: SqliteBackend) -> None:
+    async def test_both_endpoints_under_100ms(self, backend: SqliteBackend) -> None:
+        """FR-047 target is <50ms; CI ceiling of 100ms absorbs runner jitter."""
         from seerflow.config import SeerflowConfig
 
         app = create_api_app(
@@ -441,4 +442,4 @@ class TestConfigAndStatsIntegration:
             resp = local_client.get(path)
             elapsed_ms = (time.perf_counter() - t0) * 1000
             assert resp.status_code == 200
-            assert elapsed_ms < 200, f"{path} took {elapsed_ms:.1f}ms"
+            assert elapsed_ms < 100, f"{path} took {elapsed_ms:.1f}ms"
