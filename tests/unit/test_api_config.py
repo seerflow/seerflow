@@ -92,3 +92,51 @@ class TestRedactConfig:
         data = redact_config(cfg)
         assert cfg.alerting.pagerduty_routing_key == "actual-key"
         assert data["alerting"]["pagerduty_routing_key"] == "***"
+
+
+class TestConfigEndpoint:
+    def _build_app(self, config: SeerflowConfig | None) -> FastAPI:
+        from seerflow.api.routes.config import router
+
+        app = FastAPI()
+        app.state.config = config
+        app.include_router(router, prefix="/api/v1")
+        return app
+
+    def test_returns_redacted_config(self) -> None:
+        cfg = SeerflowConfig(
+            alerting=AlertingConfig(pagerduty_routing_key="secret"),
+        )
+        client = TestClient(self._build_app(cfg))
+        resp = client.get("/api/v1/config")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["alerting"]["pagerduty_routing_key"] == "***"
+        assert body["dashboard_port"] == 8080
+
+    def test_returns_503_when_config_none(self) -> None:
+        client = TestClient(self._build_app(None))
+        resp = client.get("/api/v1/config")
+        assert resp.status_code == 503
+        assert "config" in resp.json()["detail"].lower()
+
+    def test_field_order_matches_dataclass(self) -> None:
+        cfg = SeerflowConfig()
+        client = TestClient(self._build_app(cfg))
+        resp = client.get("/api/v1/config")
+        keys = list(resp.json().keys())
+        expected_prefix = ["storage", "receivers", "detection", "correlation", "alerting", "llm"]
+        assert keys[: len(expected_prefix)] == expected_prefix
+
+    def test_no_secret_leaks_in_raw_body(self) -> None:
+        cfg = SeerflowConfig(
+            storage=StorageConfig(
+                backend="postgresql",
+                postgresql_url="postgres://u:CANARY_XYZ@h/d",
+            ),
+            alerting=AlertingConfig(pagerduty_routing_key="CANARY_PD"),
+        )
+        client = TestClient(self._build_app(cfg))
+        resp = client.get("/api/v1/config")
+        assert b"CANARY_XYZ" not in resp.content
+        assert b"CANARY_PD" not in resp.content
