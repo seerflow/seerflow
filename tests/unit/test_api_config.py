@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -33,9 +35,7 @@ class TestRedactConfig:
         assert data["storage"]["postgresql_url"] == ""
 
     def test_pagerduty_routing_key_masked(self) -> None:
-        cfg = SeerflowConfig(
-            alerting=AlertingConfig(pagerduty_routing_key="secret-key-xyz")
-        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(pagerduty_routing_key="secret-key-xyz"))
         data = redact_config(cfg)
         assert data["alerting"]["pagerduty_routing_key"] == "***"
 
@@ -50,9 +50,7 @@ class TestRedactConfig:
             format="slack",
             min_severity=3,
         )
-        cfg = SeerflowConfig(
-            alerting=AlertingConfig(webhook_targets=(target,))
-        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(webhook_targets=(target,)))
         data = redact_config(cfg)
         assert data["alerting"]["webhook_targets"][0]["url"] == "https://hooks.slack.com/***"
         assert data["alerting"]["webhook_targets"][0]["format"] == "slack"
@@ -86,9 +84,7 @@ class TestRedactConfig:
         assert data["log_level"] == "DEBUG"
 
     def test_returns_new_dict_does_not_mutate_config(self) -> None:
-        cfg = SeerflowConfig(
-            alerting=AlertingConfig(pagerduty_routing_key="actual-key")
-        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(pagerduty_routing_key="actual-key"))
         data = redact_config(cfg)
         assert cfg.alerting.pagerduty_routing_key == "actual-key"
         assert data["alerting"]["pagerduty_routing_key"] == "***"
@@ -140,3 +136,64 @@ class TestConfigEndpoint:
         resp = client.get("/api/v1/config")
         assert b"CANARY_XYZ" not in resp.content
         assert b"CANARY_PD" not in resp.content
+
+
+class TestSecretRegressionGuard:
+    """Force contributors to update redact_config when adding repr=False fields."""
+
+    _EXPECTED_SECRETS: ClassVar[set[str]] = {
+        "storage.postgresql_url",
+        "receivers.webhooks[].auth_token",
+        "alerting.pagerduty_routing_key",
+        "alerting.webhook_targets[].url",
+    }
+    _KNOWN_PUBLIC_REPR_FALSE: ClassVar[set[str]] = set()
+
+    def _collect_repr_false(
+        self,
+        cls: type,
+        prefix: str = "",
+    ) -> set[str]:
+        import dataclasses
+        import typing
+
+        from seerflow.alerting.dispatcher import WebhookTarget
+
+        localns = {"WebhookTarget": WebhookTarget}
+
+        found: set[str] = set()
+        if not dataclasses.is_dataclass(cls):
+            return found
+        try:
+            hints = typing.get_type_hints(cls, localns=localns)
+        except NameError:
+            hints = {}
+        for f in dataclasses.fields(cls):
+            path = f"{prefix}{f.name}"
+            if not f.repr:
+                found.add(path)
+            ann = hints.get(f.name, f.type)
+            args = typing.get_args(ann)
+            candidates = [ann, *args]
+            for c in candidates:
+                if isinstance(c, type) and dataclasses.is_dataclass(c):
+                    marker = f"{path}[]." if args else f"{path}."
+                    found.update(self._collect_repr_false(c, prefix=marker))
+        return found
+
+    def test_every_secret_is_masked_or_allowlisted(self) -> None:
+        found = self._collect_repr_false(SeerflowConfig)
+        unknown = found - self._EXPECTED_SECRETS - self._KNOWN_PUBLIC_REPR_FALSE
+        assert not unknown, (
+            f"New repr=False field(s) detected: {sorted(unknown)}. "
+            "Update redact_config() to mask them AND add to _EXPECTED_SECRETS "
+            "(or _KNOWN_PUBLIC_REPR_FALSE with justification)."
+        )
+
+    def test_all_expected_secrets_still_exist(self) -> None:
+        found = self._collect_repr_false(SeerflowConfig)
+        missing = self._EXPECTED_SECRETS - found
+        assert not missing, (
+            f"Allowlisted secret(s) no longer exist: {sorted(missing)}. "
+            "Remove from _EXPECTED_SECRETS."
+        )

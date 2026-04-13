@@ -10,14 +10,16 @@ when adding new secrets.
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
 
 from seerflow.alerting.mask import mask_webhook_url
-from seerflow.config import SeerflowConfig
 
-_MASK = "***"  # noqa: S105
+if TYPE_CHECKING:
+    from seerflow.config import SeerflowConfig
+
+_MASK = "***"
 
 
 def redact_config(config: SeerflowConfig) -> dict[str, Any]:
