@@ -52,3 +52,40 @@ class TestStatsEndpoint:
         assert resp.status_code == 200
         assert resp.json()["total_events"] == 0
         assert resp.json()["total_alerts"] == 0
+
+
+class TestStatsResponseSchema:
+    def test_new_fields_present_and_typed(self) -> None:
+        from seerflow.api.schemas import StatsResponse
+
+        r = StatsResponse(
+            total_events=10,
+            total_alerts=5,
+            alerts_by_severity={"high": 3},
+            feedback_stats={"tp": 1},
+            uptime_seconds=42.0,
+            event_rate_per_sec=1.5,
+            total_events_processed=100,
+            active_sources=2,
+            model_count=8,
+        )
+        assert r.uptime_seconds == 42.0
+        assert r.event_rate_per_sec == 1.5
+        assert r.total_events_processed == 100
+        assert r.active_sources == 2
+        assert r.model_count == 8
+
+    def test_new_fields_default_to_zero(self) -> None:
+        from seerflow.api.schemas import StatsResponse
+
+        r = StatsResponse(
+            total_events=0,
+            total_alerts=0,
+            alerts_by_severity={},
+            feedback_stats={},
+        )
+        assert r.uptime_seconds == 0.0
+        assert r.event_rate_per_sec == 0.0
+        assert r.total_events_processed == 0
+        assert r.active_sources == 0
+        assert r.model_count == 0
