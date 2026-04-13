@@ -54,12 +54,13 @@ class TestAlertResponse:
 
     def test_from_alert_converts_fields(self) -> None:
         from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
 
         alert = Alert(
             alert_id="abc-123",
             alert_type="ml",
             timestamp_ns=2_000_000_000,
-            severity_id=4,
+            severity_id=SeverityLevel.ERROR,
             rule_name="hst_anomaly",
             description="Anomaly detected",
             entity_uuid="ent-456",
@@ -86,12 +87,13 @@ class TestAlertResponse:
 
     def test_from_alert_no_mitre(self) -> None:
         from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
 
         alert = Alert(
             alert_id="abc-123",
             alert_type="sigma",
             timestamp_ns=0,
-            severity_id=3,
+            severity_id=SeverityLevel.WARNING,
             rule_name="sigma_rule",
             description="Sigma match",
             entity_uuid="ent-789",
@@ -117,7 +119,7 @@ class TestFeedbackRequest:
 
     def test_invalid_value_rejected(self) -> None:
         with pytest.raises(ValueError):
-            FeedbackRequest(feedback="invalid")
+            FeedbackRequest(feedback="invalid")  # type: ignore[arg-type]
 
 
 class TestPaginatedResponse:
