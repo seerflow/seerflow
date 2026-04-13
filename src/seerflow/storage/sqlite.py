@@ -22,7 +22,7 @@ import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.alert import Alert
-from seerflow.models.event import SeerflowEvent
+from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.models.query import AlertQuery, EventQuery, Page, TimeRange
 from seerflow.sigma.attack import format_technique
 
@@ -812,6 +812,26 @@ class SqliteBackend:
                 stats[fb_type] = count
                 stats["total"] += count
         return stats
+
+    async def count_by_severity(self) -> dict[str, int]:
+        """Return alert counts grouped by severity name (lowercase).
+
+        Invalid ``severity_id`` values (outside the ``SeverityLevel`` enum)
+        are bucketed under ``"unknown"`` so dirty data cannot crash the
+        stats endpoint.
+        """
+        async with await self._conn.execute(
+            "SELECT severity_id, COUNT(*) FROM alerts GROUP BY severity_id"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        counts: dict[str, int] = {}
+        for severity_id, count in rows:
+            try:
+                name = SeverityLevel(int(severity_id)).name.lower()
+            except ValueError:
+                name = "unknown"
+            counts[name] = counts.get(name, 0) + int(count)
+        return counts
 
     async def save_state(self, key: str, data: bytes) -> None:
         """Persist serialized model state (upsert by key)."""
