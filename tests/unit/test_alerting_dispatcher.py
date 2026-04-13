@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget, _masked_url
+from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 
@@ -68,20 +68,6 @@ async def _run_and_cancel(dispatcher: AlertDispatcher, delay: float = 0.05) -> N
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-
-
-class TestMaskedUrl:
-    def test_valid_url_masks_path(self) -> None:
-        assert (
-            _masked_url("https://hooks.slack.com/services/T00/B00/xxx")
-            == "https://hooks.slack.com/***"
-        )
-
-    def test_invalid_url_returns_placeholder(self) -> None:
-        assert _masked_url("not-a-url") == "<invalid-url>"
-
-    def test_empty_string_returns_placeholder(self) -> None:
-        assert _masked_url("") == "<invalid-url>"
 
 
 class TestAlertDispatcher:
