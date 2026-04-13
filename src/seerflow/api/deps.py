@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, HTTPException, Request
 
@@ -84,3 +84,13 @@ class DetectionEngines:
 def get_engines(request: Request) -> DetectionEngines:
     """FastAPI Depends provider -- retrieve DetectionEngines from app.state."""
     return request.app.state.engines  # type: ignore[no-any-return]
+
+
+def get_pipeline_metrics_provider(request: Request) -> Any:
+    """FastAPI Depends provider — returns the pipeline metrics provider or None.
+
+    Returns the callable stashed at ``app.state.pipeline_metrics_provider``,
+    or ``None`` if the attribute is missing (test mode / API running without
+    a pipeline). Callers are responsible for the ``None`` fallback.
+    """
+    return getattr(request.app.state, "pipeline_metrics_provider", None)
