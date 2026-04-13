@@ -108,6 +108,34 @@ class TestRedactConfig:
         assert wh["auth_token"] == "***"
         assert wh["format"] == "json"
 
+    def test_alerting_webhooks_raw_dict_nested_secret_masked(self) -> None:
+        """Secrets under nested dicts / lists of dicts must also be scrubbed."""
+        cfg = SeerflowConfig(
+            alerting=AlertingConfig(
+                webhooks=(
+                    {
+                        "url": "https://hook.example.com/a",
+                        "custom_headers": {
+                            "Authorization": "Bearer LEAKED",
+                            "api_key": "sk-nested",
+                        },
+                        "targets": [
+                            {"token": "leaked-in-list"},
+                        ],
+                    },
+                ),
+            )
+        )
+        data = redact_config(cfg)
+        wh = data["alerting"]["webhooks"][0]
+        # Top-level URL masked
+        assert wh["url"] == "https://hook.example.com/***"
+        # Nested secret key masked; non-secret key preserved
+        assert wh["custom_headers"]["api_key"] == "***"
+        assert wh["custom_headers"]["Authorization"] == "Bearer LEAKED"
+        # Nested list of dicts — secret key masked
+        assert wh["targets"][0]["token"] == "***"
+
     def test_alerting_webhooks_raw_dict_scrubs_all_known_secret_keys(self) -> None:
         """Guard against future raw-YAML keys (api_key, token, password, etc.)."""
         cfg = SeerflowConfig(
@@ -206,17 +234,24 @@ class TestSecretRegressionGuard:
         import dataclasses
         import typing
 
+        from seerflow import config as config_mod
         from seerflow.alerting.dispatcher import WebhookTarget
 
-        localns = {"WebhookTarget": WebhookTarget}
+        # Seed localns with every dataclass defined in seerflow.config so
+        # forward refs resolve. WebhookTarget is imported explicitly because
+        # it lives in alerting.dispatcher but is referenced from AlertingConfig.
+        localns: dict[str, type] = {"WebhookTarget": WebhookTarget}
+        for name in dir(config_mod):
+            attr = getattr(config_mod, name)
+            if isinstance(attr, type) and dataclasses.is_dataclass(attr):
+                localns[name] = attr
 
         found: set[str] = set()
         if not dataclasses.is_dataclass(cls):
             return found
-        try:
-            hints = typing.get_type_hints(cls, localns=localns)
-        except NameError:
-            hints = {}
+        # Fail loudly if a forward-ref cannot be resolved — silently skipping
+        # would let an unredacted secret field bypass this guard.
+        hints = typing.get_type_hints(cls, localns=localns)
         for f in dataclasses.fields(cls):
             path = f"{prefix}{f.name}"
             if not f.repr:

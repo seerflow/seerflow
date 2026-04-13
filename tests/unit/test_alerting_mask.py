@@ -18,3 +18,16 @@ class TestMaskWebhookUrl:
 
     def test_empty_string_returns_placeholder(self) -> None:
         assert mask_webhook_url("") == "<invalid-url>"
+
+    def test_non_default_port_preserved(self) -> None:
+        """Masked output keeps the port so operators can identify the target."""
+        assert (
+            mask_webhook_url("https://internal:9443/webhook/TOKEN") == "https://internal:9443/***"
+        )
+
+    def test_userinfo_stripped(self) -> None:
+        """Any ``user:pass@`` prefix must never appear in the masked output."""
+        masked = mask_webhook_url("https://user:pass@host:9443/path/SECRET")
+        assert "user" not in masked
+        assert "pass" not in masked
+        assert masked == "https://host:9443/***"

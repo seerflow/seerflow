@@ -40,12 +40,24 @@ _RAW_DICT_URL_KEYS: frozenset[str] = frozenset({"url"})
 
 
 def _scrub_raw_dict(entry: dict[str, Any]) -> None:
-    """Mask known-secret keys inside a raw-YAML dict entry in place."""
+    """Mask known-secret keys inside a raw-YAML dict entry in place.
+
+    Recurses into nested dicts and into lists of dicts so secrets embedded
+    under nested configuration (e.g. ``custom_headers: {Authorization: "..."}``)
+    are masked even if they are declared inside a sub-mapping.
+    """
     for key in list(entry.keys()):
-        if key in _RAW_DICT_URL_KEYS and entry.get(key):
-            entry[key] = mask_webhook_url(entry[key])
-        elif key in _RAW_DICT_SECRET_KEYS and entry.get(key):
+        value = entry.get(key)
+        if key in _RAW_DICT_URL_KEYS and value:
+            entry[key] = mask_webhook_url(value)
+        elif key in _RAW_DICT_SECRET_KEYS and value:
             entry[key] = _MASK
+        elif isinstance(value, dict):
+            _scrub_raw_dict(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    _scrub_raw_dict(item)
 
 
 def redact_config(config: SeerflowConfig) -> dict[str, Any]:
