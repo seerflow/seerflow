@@ -1560,3 +1560,53 @@ class TestWriteAlertDedupReturn:
             assert result is True
         finally:
             await backend.close()
+
+
+class TestCountBySeverity:
+    """Tests for SqliteBackend.count_by_severity."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_empty_returns_empty_dict(self) -> None:
+        backend = await self._make_backend()
+        try:
+            counts = await backend.count_by_severity()
+            assert counts == {}
+        finally:
+            await backend.close()
+
+    async def test_mixed_severities(self) -> None:
+        backend = await self._make_backend()
+        try:
+            for i in range(3):
+                await backend.write_alert(
+                    _make_alert(alert_id=f"a{i}", severity=SeverityLevel.ERROR)
+                )
+            for i in range(2):
+                await backend.write_alert(
+                    _make_alert(alert_id=f"b{i}", severity=SeverityLevel.CRITICAL)
+                )
+            await backend.write_alert(_make_alert(alert_id="c0", severity=SeverityLevel.WARNING))
+
+            counts = await backend.count_by_severity()
+            assert counts == {"error": 3, "critical": 2, "warning": 1}
+        finally:
+            await backend.close()
+
+    async def test_unknown_severity_bucketed(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.write_alert(_make_alert(alert_id="a0", severity=SeverityLevel.ERROR))
+            # Poison a row with an out-of-range severity_id to simulate dirty data.
+            await backend._conn.execute("UPDATE alerts SET severity_id = 99 WHERE alert_id = 'a0'")
+            await backend._conn.commit()
+            # Insert a second known-severity alert so both buckets are present.
+            await backend.write_alert(_make_alert(alert_id="b0", severity=SeverityLevel.ERROR))
+
+            counts = await backend.count_by_severity()
+            assert counts.get("error") == 1
+            assert counts.get("unknown") == 1
+        finally:
+            await backend.close()

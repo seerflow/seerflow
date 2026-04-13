@@ -118,3 +118,53 @@ class TestDetectionEngines:
         app = SimpleNamespace(state=SimpleNamespace(engines=sentinel))
         request = SimpleNamespace(app=app)
         assert get_engines(request) is sentinel  # type: ignore[arg-type]
+
+
+class TestGetPipelineMetricsProvider:
+    def test_returns_none_when_not_set(self) -> None:
+        from fastapi import Depends, FastAPI
+        from fastapi.testclient import TestClient
+
+        from seerflow.api.deps import get_pipeline_metrics_provider
+
+        app = FastAPI()
+
+        @app.get("/probe")
+        def probe(
+            provider=Depends(get_pipeline_metrics_provider),  # noqa: B008
+        ) -> dict:
+            return {"has": provider is not None}
+
+        client = TestClient(app)
+        resp = client.get("/probe")
+        assert resp.status_code == 200
+        assert resp.json() == {"has": False}
+
+    def test_returns_provider_when_set(self) -> None:
+        from fastapi import Depends, FastAPI
+        from fastapi.testclient import TestClient
+
+        from seerflow.api.deps import get_pipeline_metrics_provider
+        from seerflow.api.metrics import PipelineMetrics
+
+        app = FastAPI()
+        app.state.pipeline_metrics_provider = lambda: PipelineMetrics(
+            started_monotonic=0.0,
+            total_events_processed=10,
+            active_sources=1,
+            model_count=4,
+        )
+
+        @app.get("/probe")
+        def probe(
+            provider=Depends(get_pipeline_metrics_provider),  # noqa: B008
+        ) -> dict:
+            if provider is None:
+                return {"has": False}
+            m = provider()
+            return {"has": True, "events": m.total_events_processed}
+
+        client = TestClient(app)
+        resp = client.get("/probe")
+        assert resp.status_code == 200
+        assert resp.json() == {"has": True, "events": 10}

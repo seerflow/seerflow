@@ -66,6 +66,16 @@ class AlertStore(Protocol):  # pragma: no cover
 
     async def get_feedback_stats(self) -> dict[str, int]: ...
 
+    async def count_by_severity(self) -> dict[str, int]:
+        """Return alert counts grouped by severity name.
+
+        Keys are lowercase SeverityLevel names (e.g. ``"informational"``,
+        ``"warning"``, ``"critical"``). Missing severities are omitted,
+        not returned as ``0``. Values that do not map to a known
+        SeverityLevel are bucketed under ``"unknown"``.
+        """
+        ...
+
 
 @runtime_checkable
 class ModelStore(Protocol):  # pragma: no cover

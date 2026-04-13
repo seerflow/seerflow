@@ -7,11 +7,11 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 import aiohttp
 
 from seerflow.alerting.formatters import format_json, format_slack, format_teams
+from seerflow.alerting.mask import mask_webhook_url
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -24,14 +24,6 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
 def _sanitize_body(raw: str, max_len: int = 200) -> str:
     """Strip control characters and truncate for safe logging."""
     return _CONTROL_CHARS.sub(" ", raw)[:max_len]
-
-
-def _masked_url(url: str) -> str:
-    """Mask a webhook URL to avoid logging embedded auth tokens."""
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.hostname:
-        return "<invalid-url>"
-    return f"{parsed.scheme}://{parsed.hostname}/***"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +101,7 @@ class AlertDispatcher:
             except Exception:
                 _log.exception(
                     "Formatter failed for target %s, alert %s",
-                    _masked_url(target.url),
+                    mask_webhook_url(target.url),
                     alert.alert_id,
                 )
                 continue
@@ -118,7 +110,7 @@ class AlertDispatcher:
             except Exception:
                 _log.exception(
                     "Delivery failed for target %s, alert %s",
-                    _masked_url(target.url),
+                    mask_webhook_url(target.url),
                     alert.alert_id,
                 )
 
@@ -144,7 +136,7 @@ class AlertDispatcher:
                         _log.error(
                             "Webhook %s returned client error %d for alert %s"
                             " — not retrying — response: %s",
-                            _masked_url(target.url),
+                            mask_webhook_url(target.url),
                             resp.status,
                             alert_id,
                             body,
@@ -153,7 +145,7 @@ class AlertDispatcher:
                     body = _sanitize_body(await resp.text(errors="replace"))
                     _log.warning(
                         "Webhook %s returned %d (attempt %d) — response: %s",
-                        _masked_url(target.url),
+                        mask_webhook_url(target.url),
                         resp.status,
                         attempt + 1,
                         body,
@@ -161,7 +153,7 @@ class AlertDispatcher:
             except Exception as exc:
                 _log.warning(
                     "Webhook %s failed (attempt %d): %s",
-                    _masked_url(target.url),
+                    mask_webhook_url(target.url),
                     attempt + 1,
                     exc,
                 )
@@ -170,7 +162,7 @@ class AlertDispatcher:
         # All retries exhausted — log at ERROR level for monitoring
         _log.error(
             "Webhook %s: all %d retries exhausted for alert %s",
-            _masked_url(target.url),
+            mask_webhook_url(target.url),
             self._MAX_RETRIES,
             alert_id,
         )

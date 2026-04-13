@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, Request
 
 if TYPE_CHECKING:
+    from seerflow.api.metrics import MetricsProvider
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -84,3 +85,16 @@ class DetectionEngines:
 def get_engines(request: Request) -> DetectionEngines:
     """FastAPI Depends provider -- retrieve DetectionEngines from app.state."""
     return request.app.state.engines  # type: ignore[no-any-return]
+
+
+def get_pipeline_metrics_provider(request: Request) -> MetricsProvider | None:
+    """FastAPI Depends provider — returns the pipeline metrics provider or None.
+
+    Returns the callable stashed at ``app.state.pipeline_metrics_provider``,
+    or ``None`` if the attribute is missing (test mode / API running without
+    a pipeline). Callers are responsible for the ``None`` fallback.
+    """
+    provider: MetricsProvider | None = getattr(
+        request.app.state, "pipeline_metrics_provider", None
+    )
+    return provider

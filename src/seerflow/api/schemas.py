@@ -104,12 +104,25 @@ class HealthResponse(BaseModel):
 
 
 class StatsResponse(BaseModel):
-    """Basic pipeline statistics."""
+    """Pipeline statistics — combines persistent counts and live metrics.
+
+    Persistent counts (``total_events``, ``total_alerts``, ``alerts_by_severity``,
+    ``feedback_stats``) come from the storage backend. Live metrics
+    (``uptime_seconds``, ``event_rate_per_sec``, ``total_events_processed``,
+    ``active_sources``, ``model_count``) come from the in-process pipeline
+    metrics provider. Live metric fields default to ``0`` when no provider
+    is wired (test mode, API running without a pipeline).
+    """
 
     total_events: int
     total_alerts: int
     alerts_by_severity: dict[str, int]
     feedback_stats: dict[str, int]
+    uptime_seconds: float = 0.0
+    event_rate_per_sec: float = 0.0
+    total_events_processed: int = 0
+    active_sources: int = 0
+    model_count: int = 0
 
 
 class FeedbackRequest(BaseModel):

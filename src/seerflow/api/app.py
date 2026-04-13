@@ -16,7 +16,15 @@ from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api import ws as ws_module
 from seerflow.api.deps import DetectionEngines, StorageDeps
-from seerflow.api.routes import alerts, attack, entities, events, health, stats
+from seerflow.api.routes import (
+    alerts,
+    attack,
+    config,
+    entities,
+    events,
+    health,
+    stats,
+)
 from seerflow.api.ws import ConnectionManager
 
 if TYPE_CHECKING:
@@ -84,6 +92,7 @@ def _register_routes(app: FastAPI) -> None:
     app.include_router(events.router, prefix=_API_PREFIX)
     app.include_router(alerts.router, prefix=_API_PREFIX)
     app.include_router(attack.router, prefix=_API_PREFIX)
+    app.include_router(config.router, prefix=_API_PREFIX)
     app.include_router(entities.router, prefix=_API_PREFIX)
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
@@ -136,6 +145,7 @@ def create_api_app(
         correlation_rules=tuple(correlation_rules),
     )
     app.state.config = config
+    app.state.pipeline_metrics_provider = None
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
     app.state.ws_manager = ws_manager or _build_ws_manager(alert_store, config)
 
