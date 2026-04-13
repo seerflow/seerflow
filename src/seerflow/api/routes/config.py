@@ -1,0 +1,73 @@
+"""GET /api/v1/config -- running configuration with secrets redacted.
+
+Uses an explicit allowlist of secret paths rather than ``repr=False``
+introspection. A meta-test in ``tests/unit/test_api_config.py`` asserts
+that every field with ``repr=False`` is either allowlisted as public or
+redacted by this helper — forcing contributors to update both places
+when adding new secrets.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+
+from seerflow.alerting.mask import mask_webhook_url
+from seerflow.config import SeerflowConfig
+
+_MASK = "***"  # noqa: S105
+
+
+def redact_config(config: SeerflowConfig) -> dict[str, Any]:
+    """Return a dict view of ``config`` with every known secret masked.
+
+    The input ``config`` is never mutated — ``asdict`` returns a fresh
+    nested dict structure that we then modify in place before returning.
+    Empty secrets (empty strings) are left as-is, not masked to ``***``.
+    """
+    data = asdict(config)
+
+    # storage
+    if data["storage"].get("postgresql_url"):
+        data["storage"]["postgresql_url"] = _MASK
+
+    # alerting — typed WebhookTarget list
+    if data["alerting"].get("pagerduty_routing_key"):
+        data["alerting"]["pagerduty_routing_key"] = _MASK
+    for target in data["alerting"].get("webhook_targets", ()):
+        if isinstance(target, dict) and target.get("url"):
+            target["url"] = mask_webhook_url(target["url"])
+
+    # alerting.webhooks — raw YAML dict passthrough
+    for wh in data["alerting"].get("webhooks", ()):
+        if isinstance(wh, dict):
+            if wh.get("url"):
+                wh["url"] = mask_webhook_url(wh["url"])
+            if wh.get("auth_token"):
+                wh["auth_token"] = _MASK
+
+    # receivers.webhooks — typed WebhookEndpointConfig list
+    for wh in data["receivers"].get("webhooks", ()):
+        if isinstance(wh, dict) and wh.get("auth_token"):
+            wh["auth_token"] = _MASK
+
+    return data
+
+
+router = APIRouter(tags=["system"])
+
+
+@router.get("/config")
+async def get_config(request: Request) -> dict[str, Any]:
+    """Return the running SeerflowConfig with secrets masked.
+
+    Returns 503 if ``app.state.config`` is not set (test mode, or the API
+    was constructed without a config — e.g. by a direct ``create_api_app``
+    call without a YAML load).
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is None:
+        raise HTTPException(status_code=503, detail="config not loaded")
+    return redact_config(config)
