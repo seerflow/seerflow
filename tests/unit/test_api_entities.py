@@ -19,11 +19,12 @@ from seerflow.models.entity import (
 )
 from seerflow.models.event import SeerflowEvent
 from seerflow.models.query import EntityRelation, Page
+from seerflow.storage.protocols import EntityStore
 
 
 def _make_app(
     log_store: AsyncMock,
-    entity_store: AsyncMock | None = None,
+    entity_store: EntityStore | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.state.storage = StorageDeps(
