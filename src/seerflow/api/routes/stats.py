@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -18,20 +18,16 @@ from seerflow.api.deps import (
     get_pipeline_metrics_provider,
     get_storage,
 )
+from seerflow.api.metrics import MetricsProvider
 from seerflow.api.schemas import StatsResponse
 from seerflow.models.query import AlertQuery, EventQuery
-
-if TYPE_CHECKING:
-    from seerflow.api.metrics import MetricsProvider as _MetricsProvider
 
 _log = logging.getLogger("seerflow.api.stats")
 
 router = APIRouter(tags=["system"])
 
 Storage = Annotated[StorageDeps, Depends(get_storage)]
-MetricsProviderDep = Annotated[
-    "_MetricsProvider | None", Depends(get_pipeline_metrics_provider)
-]
+MetricsProviderDep = Annotated[MetricsProvider | None, Depends(get_pipeline_metrics_provider)]
 
 
 def _compute_rate(started_monotonic: float, events: int) -> tuple[float, float]:
