@@ -89,6 +89,25 @@ class TestRedactConfig:
         assert cfg.alerting.pagerduty_routing_key == "actual-key"
         assert data["alerting"]["pagerduty_routing_key"] == "***"
 
+    def test_alerting_webhooks_raw_dict_url_and_token_masked(self) -> None:
+        """Cover the raw-YAML passthrough branch for alerting.webhooks."""
+        cfg = SeerflowConfig(
+            alerting=AlertingConfig(
+                webhooks=(
+                    {
+                        "url": "https://hooks.example.com/services/SECRET",
+                        "auth_token": "topsecret",
+                        "format": "json",
+                    },
+                ),
+            )
+        )
+        data = redact_config(cfg)
+        wh = data["alerting"]["webhooks"][0]
+        assert wh["url"] == "https://hooks.example.com/***"
+        assert wh["auth_token"] == "***"
+        assert wh["format"] == "json"
+
 
 class TestConfigEndpoint:
     def _build_app(self, config: SeerflowConfig | None) -> FastAPI:

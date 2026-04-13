@@ -190,3 +190,20 @@ class TestStatsEndpointEnrichment:
         client = TestClient(self._build_app(log_store, alert_store))
         resp = client.get("/api/v1/stats")
         assert resp.json()["feedback_stats"] == {"tp": 7, "fp": 2}
+
+    def test_metrics_provider_exception_swallowed(self) -> None:
+        """Provider raising must not 500 the endpoint; live fields stay at 0."""
+
+        def _broken_provider() -> object:
+            raise RuntimeError("provider exploded")
+
+        log_store, alert_store = self._default_stores()
+        client = TestClient(self._build_app(log_store, alert_store, provider=_broken_provider))
+        resp = client.get("/api/v1/stats")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["uptime_seconds"] == 0.0
+        assert body["event_rate_per_sec"] == 0.0
+        assert body["total_events_processed"] == 0
+        assert body["active_sources"] == 0
+        assert body["model_count"] == 0
