@@ -346,3 +346,99 @@ class TestEntityTimelineIntegration:
         assert resp.status_code == 200
         assert resp.json()["total"] == 10_000
         assert elapsed_ms < 750, f"timeline took {elapsed_ms:.0f}ms (>=750ms)"
+
+
+class TestConfigAndStatsIntegration:
+    """End-to-end: config + stats against a real SqliteBackend."""
+
+    async def test_config_endpoint_masks_secrets(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        from seerflow.config import AlertingConfig, SeerflowConfig
+
+        cfg = SeerflowConfig(
+            storage=StorageConfig(
+                backend="postgresql",
+                postgresql_url="postgres://u:CANARY_PG_SECRET@h/d",
+            ),
+            alerting=AlertingConfig(pagerduty_routing_key="CANARY_PD_KEY"),
+        )
+        app = create_api_app(
+            log_store=backend,
+            alert_store=backend,
+            config=cfg,
+        )
+        local_client = TestClient(app)
+        resp = local_client.get("/api/v1/config")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["storage"]["postgresql_url"] == "***"
+        assert body["alerting"]["pagerduty_routing_key"] == "***"
+        assert b"CANARY_PG_SECRET" not in resp.content
+        assert b"CANARY_PD_KEY" not in resp.content
+
+    async def test_stats_endpoint_end_to_end(self, backend: SqliteBackend) -> None:
+        from seerflow.api.metrics import PipelineMetrics
+        from seerflow.config import SeerflowConfig
+        from seerflow.models.event import SeverityLevel
+
+        def _alert(idx: int, sev: SeverityLevel, tag: str) -> Alert:
+            return Alert(
+                alert_id=f"stats-{tag}-{idx}",
+                alert_type="ml",
+                timestamp_ns=1_775_736_000_000_000_000 + idx,
+                severity_id=sev.value,
+                rule_name="hst_anomaly",
+                description=f"{tag} alert {idx}",
+                entity_uuid=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"stats-{tag}-{idx}")),
+                entity_value="10.0.0.1",
+                entity_type="ip",
+                contributing_events=(),
+                dedup_key=f"stats:{tag}:{idx}",
+            )
+
+        for i in range(3):
+            await backend.write_alert(_alert(i, SeverityLevel.ERROR, "e"), dedup_window_ns=0)
+        for i in range(2):
+            await backend.write_alert(_alert(i, SeverityLevel.CRITICAL, "c"), dedup_window_ns=0)
+        await backend.write_alert(_alert(0, SeverityLevel.WARNING, "w"), dedup_window_ns=0)
+
+        app = create_api_app(
+            log_store=backend,
+            alert_store=backend,
+            config=SeerflowConfig(),
+        )
+        start = time.monotonic() - 50.0
+        app.state.pipeline_metrics_provider = lambda: PipelineMetrics(
+            started_monotonic=start,
+            total_events_processed=10,
+            active_sources=2,
+            model_count=8,
+        )
+        local_client = TestClient(app)
+        resp = local_client.get("/api/v1/stats")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_alerts"] == 6
+        assert body["alerts_by_severity"] == {"error": 3, "critical": 2, "warning": 1}
+        assert body["total_events_processed"] == 10
+        assert body["active_sources"] == 2
+        assert body["model_count"] == 8
+        assert 49.0 <= body["uptime_seconds"] <= 51.0
+        assert 0.15 <= body["event_rate_per_sec"] <= 0.25
+
+    async def test_both_endpoints_under_200ms(self, backend: SqliteBackend) -> None:
+        from seerflow.config import SeerflowConfig
+
+        app = create_api_app(
+            log_store=backend,
+            alert_store=backend,
+            config=SeerflowConfig(),
+        )
+        local_client = TestClient(app)
+        for path in ("/api/v1/config", "/api/v1/stats"):
+            t0 = time.perf_counter()
+            resp = local_client.get(path)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            assert resp.status_code == 200
+            assert elapsed_ms < 200, f"{path} took {elapsed_ms:.1f}ms"
