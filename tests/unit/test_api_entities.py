@@ -23,6 +23,9 @@ from seerflow.models.event import SeerflowEvent
 from seerflow.models.query import EntityRelation, Page
 
 if TYPE_CHECKING:
+    # Protocol is only referenced in annotations; `from __future__ import annotations`
+    # above keeps the runtime from evaluating `EntityStore`, so the TYPE_CHECKING guard
+    # is safe and satisfies ruff TC001.
     from seerflow.storage.protocols import EntityStore
 
 
