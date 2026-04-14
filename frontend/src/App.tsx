@@ -7,16 +7,23 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useThemeStore } from "@/stores/theme";
+import wordmarkLight from "@/assets/wordmark-light.svg";
+import wordmarkDark from "@/assets/wordmark-dark.svg";
 
 export default function App() {
   const theme = useThemeStore((s) => s.theme);
   const toggle = useThemeStore((s) => s.toggle);
   const Icon = theme === "dark" ? Sun : Moon;
+  const wordmark = theme === "dark" ? wordmarkDark : wordmarkLight;
 
   return (
     <main className="min-h-screen p-6">
       <header className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Seerflow</h1>
+        <img
+          src={wordmark}
+          alt="Seerflow"
+          className="h-8 w-auto select-none"
+        />
         <Button
           variant="ghost"
           size="icon"
