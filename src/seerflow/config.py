@@ -1015,7 +1015,7 @@ def _validate_rate_limit_string(field_name: str, value: str) -> str:
 
     try:
         _parse_limit(value)
-    except Exception as exc:
+    except ValueError as exc:
         raise ConfigError(f"{field_name} is not a valid rate limit string: {value!r}") from exc
     return value
 
@@ -1036,7 +1036,9 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
     else:
         redis_url = None
 
-    origins_raw = raw.get("api_allowed_origins", []) or []
+    origins_raw = raw.get("api_allowed_origins", [])
+    if origins_raw is None:
+        origins_raw = []
     if not isinstance(origins_raw, list):
         raise ConfigError(
             f"api_allowed_origins must be a list of strings, got {type(origins_raw).__name__}"

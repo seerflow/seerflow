@@ -91,14 +91,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.ws_manager.shutdown()
 
 
-def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
+async def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
     """Return a 429 response with ``Retry-After`` header.
 
-    ``slowapi`` bundles a default handler, but it omits ``Retry-After``.
-    RFC 6585 recommends surfacing the cool-down so clients can back off
-    rationally.
+    ``slowapi`` bundles a default handler but omits ``Retry-After``.
+    RFC 7231 §7.1.3 accepts either delay-seconds or an HTTP-date;
+    ``limits.RateLimitItem.get_expiry()`` returns the window granularity
+    in seconds (e.g. 60 for ``60/minute``), which is a valid
+    delay-seconds value.
     """
-    assert isinstance(exc, RateLimitExceeded)
+    if not isinstance(exc, RateLimitExceeded):  # pragma: no cover
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Unexpected error"},
+        )
     limit_wrapper = exc.limit
     if limit_wrapper is None:  # pragma: no cover — slowapi always sets this
         return JSONResponse(
@@ -107,11 +113,10 @@ def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
             headers={"Retry-After": "60"},
         )
     item = limit_wrapper.limit
-    retry_after = str(int(item.get_expiry()))
     return JSONResponse(
         status_code=429,
         content={"detail": f"Rate limit exceeded: {item}"},
-        headers={"Retry-After": retry_after},
+        headers={"Retry-After": str(item.get_expiry())},
     )
 
 
@@ -144,7 +149,10 @@ def _install_security_middlewares(app: FastAPI, config: SeerflowConfig | None) -
             CORSMiddleware,
             allow_origins=list(allowed_origins),
             allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["*"],
+            # Explicit list — browsers do not expand `*` to
+            # `Authorization` for credentialled requests, so enumerate
+            # the headers the dashboard actually needs.
+            allow_headers=["Content-Type", "Accept", "Authorization"],
         )
 
 

@@ -31,11 +31,9 @@ def _reset_api_limiter() -> Iterator[None]:
 
     fresh = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
     _limits.limiter.enabled = False
-    _limits.limiter._storage = fresh._storage  # noqa: SLF001
-    _limits.limiter._limiter = fresh._limiter  # noqa: SLF001
-    defaults = __import__(
-        "seerflow.config", fromlist=["SeerflowConfig"]
-    ).SeerflowConfig()
+    _limits.limiter._storage = fresh._storage
+    _limits.limiter._limiter = fresh._limiter
+    defaults = __import__("seerflow.config", fromlist=["SeerflowConfig"]).SeerflowConfig()
     _limits._current_list_limit = defaults.api_list_rate_limit
     _limits._current_detail_limit = defaults.api_detail_rate_limit
     yield

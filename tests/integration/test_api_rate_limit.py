@@ -86,9 +86,7 @@ class TestRateLimit:
         for _ in range(5):
             assert client.get("/api/v1/alerts").status_code == 200
 
-    async def test_attack_coverage_429_matches_ac_spec(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_attack_coverage_429_matches_ac_spec(self, backend: SqliteBackend) -> None:
         """AC #7 traceability: 429 on /attack/coverage at 2/min."""
         client = _client(backend)
         for _ in range(2):
@@ -118,6 +116,4 @@ class TestRateLimit:
             # Any method operation on the path must document 429.
             for method_op in paths[path].values():
                 responses = method_op.get("responses", {})
-                assert "429" in responses, (
-                    f"{path} missing 429 response in OpenAPI schema"
-                )
+                assert "429" in responses, f"{path} missing 429 response in OpenAPI schema"

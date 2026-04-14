@@ -46,7 +46,8 @@ def _key_func(request: Request) -> str:
     return get_remote_address(request)
 
 
-def _default_localhost_origins(dashboard_port: int) -> tuple[str, ...]:
+def _default_localhost_origins(dashboard_port: int) -> tuple[str, str]:
+    """Return the two-element localhost fallback origin tuple."""
     return (
         f"http://localhost:{dashboard_port}",
         f"http://127.0.0.1:{dashboard_port}",
@@ -110,11 +111,6 @@ def configure_limiter(config: SeerflowConfig) -> Limiter:
     _current_detail_limit = config.api_detail_rate_limit
 
     return limiter
-
-
-# Back-compat alias for the original plan name. Deprecated in favour
-# of ``configure_limiter``.
-build_limiter = configure_limiter
 
 
 # Module-level limit strings. ``slowapi.Limiter.limit`` accepts a
