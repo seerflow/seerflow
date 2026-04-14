@@ -246,6 +246,46 @@ async def test_migration_v3_backfills_existing_rows(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_migration_v3_tolerates_none_mitre_fields(tmp_path: Path) -> None:
+    """Alerts whose decoded form has None tactic/technique fields don't abort."""
+    from seerflow.storage import migrations as migrations_module
+    from seerflow.storage.sqlite import _init_schema
+
+    class _FakeAlert:
+        mitre_tactics = None
+        mitre_techniques = None
+
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await _init_schema(conn)
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version ("
+            "version INTEGER NOT NULL UNIQUE, "
+            "applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        )
+        await conn.execute("INSERT INTO schema_version (version) VALUES (1)")
+        await conn.execute("INSERT INTO schema_version (version) VALUES (2)")
+        await _seed_v2_alert(
+            conn,
+            dedup_key="k_none",
+            tactics=("discovery",),
+            techniques=("T1059",),
+        )
+        await conn.commit()
+
+        with patch.object(migrations_module.msgspec.msgpack, "decode", return_value=_FakeAlert()):
+            await run_migrations(conn)
+
+        assert await get_schema_version(conn) >= 3
+        async with conn.execute(
+            "SELECT COUNT(*) FROM alert_tactics WHERE dedup_key='k_none'"
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row[0] == 0
+
+
+@pytest.mark.asyncio
 async def test_migration_v3_skips_corrupt_blob(tmp_path: Path) -> None:
     from seerflow.storage.sqlite import _init_schema
 

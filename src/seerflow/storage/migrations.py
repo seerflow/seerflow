@@ -127,15 +127,15 @@ async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
                 continue
             try:
                 alert = msgspec.msgpack.decode(blob, type=Alert)
-            except msgspec.DecodeError:
+            except (msgspec.DecodeError, TypeError, AttributeError):
                 logger.warning(
                     "v3 backfill: skipping alert %s with corrupt data blob",
                     dedup_key,
                 )
                 continue
-            for t in alert.mitre_tactics:
+            for t in alert.mitre_tactics or ():
                 tactic_rows.append((dedup_key, t, ts_ns))
-            for t in alert.mitre_techniques:
+            for t in alert.mitre_techniques or ():
                 technique_rows.append((dedup_key, format_technique(t), ts_ns))
 
         if tactic_rows:

@@ -17,6 +17,7 @@ from seerflow.api.schemas import AlertResponse, FeedbackRequest, PaginatedRespon
 from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 from seerflow.models.query import AlertQuery, TimeRange
+from seerflow.sigma.attack import is_valid_tactic, is_valid_technique
 
 router = APIRouter(tags=["alerts"])
 
@@ -58,6 +59,12 @@ async def list_alerts(
 
     if alert_type is not None and alert_type not in _VALID_ALERT_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid alert type: {alert_type!r}")
+
+    if tactic is not None and not is_valid_tactic(tactic):
+        raise HTTPException(status_code=422, detail=f"Unknown tactic: {tactic!r}")
+
+    if technique is not None and not is_valid_technique(technique):
+        raise HTTPException(status_code=422, detail=f"Invalid technique: {technique!r}")
 
     time_range: TimeRange | None = None
     if since is not None or until is not None:
