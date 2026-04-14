@@ -155,7 +155,11 @@ async def test_mitre_filter_sql_vs_decode_baseline(tmp_path: Path) -> None:
         # Discovery-tagged rows sit at the oldest 1 000 indices, so none fall
         # inside the baseline window — matching count is 0. The SQL path is not
         # bound by this window and still returns all 1 000 (asserted above via
-        # page.total).
+        # page.total). Guard the seed invariant so a future change to
+        # timestamp assignment surfaces as a failure instead of a silent 0.
+        assert baseline_page.items[0].timestamp_ns >= 10_000, (
+            "baseline window must exclude the oldest 1 000 discovery rows"
+        )
         assert len(matching) == 0
         ratio = baseline_elapsed / sql_elapsed
         bench_gate_strict = os.environ.get("SEERFLOW_BENCH_GATE") == "1"
