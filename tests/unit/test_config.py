@@ -1472,8 +1472,7 @@ class TestApiConfig:
     def test_api_rate_limit_invalid_list_string_rejected(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / "seerflow.yaml"
         cfg_path.write_text(
-            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
-            "api_list_rate_limit: '60/blarg'\n"
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_list_rate_limit: '60/blarg'\n"
         )
         with pytest.raises(ConfigError, match="api_list_rate_limit"):
             load_config(cfg_path)
@@ -1490,8 +1489,7 @@ class TestApiConfig:
     def test_api_rate_limit_redis_url_rejects_empty_string(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / "seerflow.yaml"
         cfg_path.write_text(
-            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
-            "api_rate_limit_redis_url: ''\n"
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_rate_limit_redis_url: ''\n"
         )
         with pytest.raises(ConfigError, match="api_rate_limit_redis_url"):
             load_config(cfg_path)
@@ -1499,8 +1497,7 @@ class TestApiConfig:
     def test_api_allowed_origins_rejects_non_string_entries(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / "seerflow.yaml"
         cfg_path.write_text(
-            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
-            "api_allowed_origins:\n  - 42\n"
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_allowed_origins:\n  - 42\n"
         )
         with pytest.raises(ConfigError, match="api_allowed_origins"):
             load_config(cfg_path)

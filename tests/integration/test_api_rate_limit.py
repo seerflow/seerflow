@@ -38,9 +38,7 @@ def _client(backend: SqliteBackend, **overrides: object) -> TestClient:
 
 
 class TestRateLimit:
-    async def test_list_endpoint_429_after_limit_exceeded(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_list_endpoint_429_after_limit_exceeded(self, backend: SqliteBackend) -> None:
         client = _client(backend)
         r1 = client.get("/api/v1/alerts")
         r2 = client.get("/api/v1/alerts")
@@ -50,45 +48,31 @@ class TestRateLimit:
         assert r3.status_code == 429
         assert "retry-after" in {k.lower() for k in r3.headers}
 
-    async def test_health_endpoint_not_rate_limited(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_health_endpoint_not_rate_limited(self, backend: SqliteBackend) -> None:
         client = _client(backend)
         for _ in range(10):
             r = client.get("/api/v1/health")
             assert r.status_code == 200
 
-    async def test_openapi_endpoint_not_rate_limited(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_openapi_endpoint_not_rate_limited(self, backend: SqliteBackend) -> None:
         client = _client(backend)
         for _ in range(10):
             r = client.get("/api/v1/openapi.json")
             assert r.status_code == 200
 
-    async def test_different_ips_throttled_independently(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_different_ips_throttled_independently(self, backend: SqliteBackend) -> None:
         client = _client(backend, api_trust_proxy_headers=True)
         # Client A — exhausts limit
         for _ in range(2):
-            r = client.get(
-                "/api/v1/alerts", headers={"X-Forwarded-For": "203.0.113.1"}
-            )
+            r = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "203.0.113.1"})
             assert r.status_code == 200
-        r3 = client.get(
-            "/api/v1/alerts", headers={"X-Forwarded-For": "203.0.113.1"}
-        )
+        r3 = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "203.0.113.1"})
         assert r3.status_code == 429
         # Client B — still allowed
-        r_b = client.get(
-            "/api/v1/alerts", headers={"X-Forwarded-For": "198.51.100.7"}
-        )
+        r_b = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "198.51.100.7"})
         assert r_b.status_code == 200
 
-    async def test_list_and_detail_have_independent_budgets(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_list_and_detail_have_independent_budgets(self, backend: SqliteBackend) -> None:
         client = _client(backend)
         for _ in range(2):
             assert client.get("/api/v1/alerts").status_code == 200
@@ -97,9 +81,7 @@ class TestRateLimit:
         r = client.get("/api/v1/alerts/nonexistent-id")
         assert r.status_code == 404
 
-    async def test_rate_limiter_disabled_does_not_throttle(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_rate_limiter_disabled_does_not_throttle(self, backend: SqliteBackend) -> None:
         client = _client(backend, api_rate_limit_enabled=False)
         for _ in range(5):
             assert client.get("/api/v1/alerts").status_code == 200

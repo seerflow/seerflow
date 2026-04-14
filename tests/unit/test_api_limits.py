@@ -13,8 +13,8 @@ from seerflow.api.limits import (
     detail_limit,
     resolve_allowed_origins,
 )
-from seerflow.config import ConfigError, SeerflowConfig
 from seerflow.api.limits import list_limit as list_limit_fn
+from seerflow.config import ConfigError, SeerflowConfig
 
 
 def _request(

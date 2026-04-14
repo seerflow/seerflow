@@ -95,21 +95,27 @@ def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
     """Return a 429 response with ``Retry-After`` header.
 
     ``slowapi`` bundles a default handler, but it omits ``Retry-After``.
-    The RFC 6585 contract for 429 recommends surfacing the cool-down so
-    clients can back off rationally.
+    RFC 6585 recommends surfacing the cool-down so clients can back off
+    rationally.
     """
     assert isinstance(exc, RateLimitExceeded)
-    retry_after = str(int(exc.limit.limit.get_expiry()))
+    limit_wrapper = exc.limit
+    if limit_wrapper is None:  # pragma: no cover — slowapi always sets this
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded"},
+            headers={"Retry-After": "60"},
+        )
+    item = limit_wrapper.limit
+    retry_after = str(int(item.get_expiry()))
     return JSONResponse(
         status_code=429,
-        content={"detail": f"Rate limit exceeded: {exc.limit.limit}"},
+        content={"detail": f"Rate limit exceeded: {item}"},
         headers={"Retry-After": retry_after},
     )
 
 
-def _install_security_middlewares(
-    app: FastAPI, config: SeerflowConfig | None
-) -> None:
+def _install_security_middlewares(app: FastAPI, config: SeerflowConfig | None) -> None:
     """Install rate limiter and CORS middleware (S-181).
 
     ``add_middleware`` reverses insertion order when building the chain,

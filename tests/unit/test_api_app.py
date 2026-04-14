@@ -238,9 +238,7 @@ class TestSecurityMiddleware:
 
     def test_cors_wildcard_removed(self) -> None:
         cfg = _test_config(api_allowed_origins=("https://dash.example.com",))
-        app = create_api_app(
-            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
-        )
+        app = create_api_app(log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg)
         mw = self._find_cors(app)
         assert mw is not None
         origins = mw.kwargs["allow_origins"]  # type: ignore[attr-defined]
@@ -249,18 +247,14 @@ class TestSecurityMiddleware:
 
     def test_limiter_installed_when_enabled(self) -> None:
         cfg = _test_config(api_rate_limit_enabled=True)
-        app = create_api_app(
-            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
-        )
+        app = create_api_app(log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg)
         limiter = getattr(app.state, "limiter", None)
         assert limiter is not None
         assert limiter.enabled is True
 
     def test_limiter_skipped_when_disabled(self) -> None:
         cfg = _test_config(api_rate_limit_enabled=False)
-        app = create_api_app(
-            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
-        )
+        app = create_api_app(log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg)
         limiter = getattr(app.state, "limiter", None)
         assert limiter is None or limiter.enabled is False
 
@@ -273,9 +267,7 @@ class TestSecurityMiddleware:
             api_allowed_origins=(),
             ws_allowed_origins=("https://ws.example.com",),
         )
-        app = create_api_app(
-            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
-        )
+        app = create_api_app(log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg)
         mw = self._find_cors(app)
         assert mw is not None
         assert "https://ws.example.com" in mw.kwargs["allow_origins"]  # type: ignore[attr-defined]

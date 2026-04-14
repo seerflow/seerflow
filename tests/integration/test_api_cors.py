@@ -64,16 +64,10 @@ class TestCors:
         )
         assert "access-control-allow-origin" not in {k.lower() for k in r.headers}
 
-    async def test_wildcard_not_in_middleware_config(
-        self, backend: SqliteBackend
-    ) -> None:
-        client = _client(
-            backend, api_allowed_origins=("http://localhost:3000",)
-        )
+    async def test_wildcard_not_in_middleware_config(self, backend: SqliteBackend) -> None:
+        client = _client(backend, api_allowed_origins=("http://localhost:3000",))
         app = client.app
-        cors_mw = next(
-            mw for mw in app.user_middleware if mw.cls is CORSMiddleware
-        )
+        cors_mw = next(mw for mw in app.user_middleware if mw.cls is CORSMiddleware)
         origins = cors_mw.kwargs["allow_origins"]
         assert "*" not in origins
         assert "http://localhost:3000" in origins

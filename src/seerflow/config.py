@@ -1016,9 +1016,7 @@ def _validate_rate_limit_string(field_name: str, value: str) -> str:
     try:
         _parse_limit(value)
     except Exception as exc:
-        raise ConfigError(
-            f"{field_name} is not a valid rate limit string: {value!r}"
-        ) from exc
+        raise ConfigError(f"{field_name} is not a valid rate limit string: {value!r}") from exc
     return value
 
 
@@ -1033,9 +1031,7 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
     redis_url_raw = raw.get("api_rate_limit_redis_url")
     if redis_url_raw is not None:
         if not isinstance(redis_url_raw, str) or not redis_url_raw.strip():
-            raise ConfigError(
-                "api_rate_limit_redis_url must be a non-empty string or omitted"
-            )
+            raise ConfigError("api_rate_limit_redis_url must be a non-empty string or omitted")
         redis_url: str | None = redis_url_raw.strip()
     else:
         redis_url = None
@@ -1043,8 +1039,7 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
     origins_raw = raw.get("api_allowed_origins", []) or []
     if not isinstance(origins_raw, list):
         raise ConfigError(
-            f"api_allowed_origins must be a list of strings, got "
-            f"{type(origins_raw).__name__}"
+            f"api_allowed_origins must be a list of strings, got {type(origins_raw).__name__}"
         )
     if not all(isinstance(o, str) for o in origins_raw):
         raise ConfigError("api_allowed_origins items must be strings")
@@ -1060,8 +1055,7 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
     trust_proxy_raw = raw.get("api_trust_proxy_headers", False)
     if not isinstance(trust_proxy_raw, bool):
         raise ConfigError(
-            f"api_trust_proxy_headers must be a boolean, got "
-            f"{type(trust_proxy_raw).__name__}"
+            f"api_trust_proxy_headers must be a boolean, got {type(trust_proxy_raw).__name__}"
         )
 
     return _ApiFields(

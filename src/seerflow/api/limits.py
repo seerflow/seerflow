@@ -102,8 +102,8 @@ def configure_limiter(config: SeerflowConfig) -> Limiter:
         enabled=config.api_rate_limit_enabled,
     )
     limiter.enabled = config.api_rate_limit_enabled
-    limiter._storage = fresh._storage  # noqa: SLF001
-    limiter._limiter = fresh._limiter  # noqa: SLF001
+    limiter._storage = fresh._storage
+    limiter._limiter = fresh._limiter
 
     global _current_list_limit, _current_detail_limit
     _current_list_limit = config.api_list_rate_limit
