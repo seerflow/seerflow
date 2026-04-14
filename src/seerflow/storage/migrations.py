@@ -59,26 +59,36 @@ async def _migrate_v2_graph_edges(conn: aiosqlite.Connection) -> None:
 
 
 async def _migrate_v3_mitre_junctions(conn: aiosqlite.Connection) -> None:
-    """Migration 3: junction tables for tactic/technique filtering + backfill."""
+    """Migration 3: junction tables for tactic/technique filtering + backfill.
+
+    Tables denormalize ``timestamp_ns`` from ``alerts`` so the composite
+    ``(tactic|technique, timestamp_ns DESC)`` index can drive both the filter
+    and the ORDER BY without touching the main alerts table — the query plan
+    becomes a seek on the junction index joined back to ``alerts`` by PK.
+    """
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS alert_tactics (
-            dedup_key TEXT NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
-            tactic    TEXT NOT NULL,
+            dedup_key    TEXT    NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
+            tactic       TEXT    NOT NULL,
+            timestamp_ns INTEGER NOT NULL,
             PRIMARY KEY (dedup_key, tactic)
         )
     """)
     await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_alert_tactics_tactic ON alert_tactics(tactic)"
+        "CREATE INDEX IF NOT EXISTS idx_alert_tactics_tactic_time "
+        "ON alert_tactics(tactic, timestamp_ns DESC)"
     )
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS alert_techniques (
-            dedup_key TEXT NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
-            technique TEXT NOT NULL,
+            dedup_key    TEXT    NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
+            technique    TEXT    NOT NULL,
+            timestamp_ns INTEGER NOT NULL,
             PRIMARY KEY (dedup_key, technique)
         )
     """)
     await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_alert_techniques_technique ON alert_techniques(technique)"
+        "CREATE INDEX IF NOT EXISTS idx_alert_techniques_technique_time "
+        "ON alert_techniques(technique, timestamp_ns DESC)"
     )
 
     await _backfill_mitre_junctions(conn)
@@ -104,16 +114,16 @@ async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
     processed = 0
     while True:
         async with conn.execute(
-            "SELECT dedup_key, data FROM alerts ORDER BY rowid LIMIT ? OFFSET ?",
+            "SELECT dedup_key, timestamp_ns, data FROM alerts ORDER BY rowid LIMIT ? OFFSET ?",
             (_BACKFILL_CHUNK, offset),
         ) as cur:
             rows = list(await cur.fetchall())
         if not rows:
             break
 
-        tactic_rows: list[tuple[str, str]] = []
-        technique_rows: list[tuple[str, str]] = []
-        for dedup_key, blob in rows:
+        tactic_rows: list[tuple[str, str, int]] = []
+        technique_rows: list[tuple[str, str, int]] = []
+        for dedup_key, ts_ns, blob in rows:
             if blob is None:
                 continue
             try:
@@ -125,18 +135,20 @@ async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
                 )
                 continue
             for t in alert.mitre_tactics:
-                tactic_rows.append((dedup_key, t))
+                tactic_rows.append((dedup_key, t, ts_ns))
             for t in alert.mitre_techniques:
-                technique_rows.append((dedup_key, format_technique(t)))
+                technique_rows.append((dedup_key, format_technique(t), ts_ns))
 
         if tactic_rows:
             await conn.executemany(
-                "INSERT OR IGNORE INTO alert_tactics (dedup_key, tactic) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO alert_tactics "
+                "(dedup_key, tactic, timestamp_ns) VALUES (?, ?, ?)",
                 tactic_rows,
             )
         if technique_rows:
             await conn.executemany(
-                "INSERT OR IGNORE INTO alert_techniques (dedup_key, technique) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO alert_techniques "
+                "(dedup_key, technique, timestamp_ns) VALUES (?, ?, ?)",
                 technique_rows,
             )
 

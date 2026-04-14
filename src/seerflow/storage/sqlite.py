@@ -268,7 +268,14 @@ ON CONFLICT(template_id) DO UPDATE SET
 
 
 def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
-    """Build WHERE clause and params from AlertQuery (including mitre filters)."""
+    """Build WHERE clause and params from AlertQuery (including mitre filters).
+
+    When ``tactic`` or ``technique`` is set, the caller drives the query from
+    the matching junction table (``alert_tactics at`` or ``alert_techniques
+    atq``) so the composite ``(tactic|technique, timestamp_ns DESC)`` index
+    satisfies both the predicate and the ORDER BY. When both are set, the
+    driver is the tactic junction and technique becomes a correlated EXISTS.
+    """
     clauses: list[str] = []
     params: list[Any] = []
     if filters.time_range is not None:
@@ -286,16 +293,19 @@ def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
         clauses.append("a.entity_uuid = ?")
         params.append(filters.entity_uuid)
     if filters.tactic is not None:
-        clauses.append(
-            "EXISTS (SELECT 1 FROM alert_tactics at "
-            "WHERE at.dedup_key = a.dedup_key AND at.tactic = ?)"
-        )
+        clauses.append("at.tactic = ?")
         params.append(filters.tactic)
     if filters.technique is not None:
-        clauses.append(
-            "EXISTS (SELECT 1 FROM alert_techniques atq "
-            "WHERE atq.dedup_key = a.dedup_key AND atq.technique = ?)"
-        )
+        # If tactic is also set, the driver is alert_tactics so technique
+        # becomes a correlated EXISTS on alert_techniques. Otherwise the
+        # driver is alert_techniques and we filter directly on atq.technique.
+        if filters.tactic is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM alert_techniques atq2 "
+                "WHERE atq2.dedup_key = a.dedup_key AND atq2.technique = ?)"
+            )
+        else:
+            clauses.append("atq.technique = ?")
         params.append(format_technique(filters.technique))
     where = " AND ".join(clauses) if clauses else "1=1"
     return where, params
@@ -679,13 +689,18 @@ class SqliteBackend:
             )
             if alert.mitre_tactics:
                 await self._conn.executemany(
-                    "INSERT OR IGNORE INTO alert_tactics (dedup_key, tactic) VALUES (?, ?)",
-                    [(alert.dedup_key, t) for t in alert.mitre_tactics],
+                    "INSERT OR IGNORE INTO alert_tactics "
+                    "(dedup_key, tactic, timestamp_ns) VALUES (?, ?, ?)",
+                    [(alert.dedup_key, t, alert.timestamp_ns) for t in alert.mitre_tactics],
                 )
             if alert.mitre_techniques:
                 await self._conn.executemany(
-                    "INSERT OR IGNORE INTO alert_techniques (dedup_key, technique) VALUES (?, ?)",
-                    [(alert.dedup_key, format_technique(t)) for t in alert.mitre_techniques],
+                    "INSERT OR IGNORE INTO alert_techniques "
+                    "(dedup_key, technique, timestamp_ns) VALUES (?, ?, ?)",
+                    [
+                        (alert.dedup_key, format_technique(t), alert.timestamp_ns)
+                        for t in alert.mitre_techniques
+                    ],
                 )
             await self._conn.commit()
         except Exception:
@@ -695,17 +710,36 @@ class SqliteBackend:
         return row is not None and row[0] == 1
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
-        """Query alerts with composable filters and pagination (all SQL-level)."""
+        """Query alerts with composable filters and pagination (all SQL-level).
+
+        When a mitre filter (``tactic`` / ``technique``) is set, the query is
+        driven from the matching junction table so the composite
+        ``(tactic|technique, timestamp_ns DESC)`` index satisfies both the
+        predicate and the ORDER BY without scanning the ``alerts`` table.
+        """
         where, params = _build_alert_query(filters)
-        count_sql = f"SELECT COUNT(*) FROM alerts a WHERE {where}"  # noqa: S608  # nosec B608
+
+        if filters.tactic is not None:
+            driver = "alert_tactics AS at JOIN alerts a ON a.dedup_key = at.dedup_key"
+            order_col = "at.timestamp_ns"
+        elif filters.technique is not None:
+            driver = "alert_techniques AS atq JOIN alerts a ON a.dedup_key = atq.dedup_key"
+            order_col = "atq.timestamp_ns"
+        else:
+            driver = "alerts a"
+            order_col = "a.timestamp_ns"
+
+        # driver, where, order_col are assembled from hardcoded SQL fragments;
+        # user values are bound exclusively via params.
+        count_sql = f"SELECT COUNT(*) FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
         async with await self._conn.execute(count_sql, params) as cursor:
             row = await cursor.fetchone()
             total = row[0] if row else 0
 
         offset = (filters.page - 1) * filters.limit
         data_sql = (
-            f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
-            f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
+            f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
+            f"ORDER BY {order_col} DESC LIMIT ? OFFSET ?"
         )
         async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
             rows = await cursor.fetchall()
