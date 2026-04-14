@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import aiosqlite
@@ -11,6 +11,9 @@ import pytest
 
 from seerflow.models.alert import Alert
 from seerflow.storage.migrations import MIGRATIONS, get_schema_version, run_migrations
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestSchemaVersion:
