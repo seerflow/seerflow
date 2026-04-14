@@ -674,6 +674,22 @@ class SqliteBackend:
         try:
             async with await self._conn.execute(_INSERT_ALERT_SQL, params) as cursor:
                 row = await cursor.fetchone()
+            await self._conn.execute(
+                "DELETE FROM alert_tactics WHERE dedup_key = ?", (alert.dedup_key,)
+            )
+            await self._conn.execute(
+                "DELETE FROM alert_techniques WHERE dedup_key = ?", (alert.dedup_key,)
+            )
+            if alert.mitre_tactics:
+                await self._conn.executemany(
+                    "INSERT OR IGNORE INTO alert_tactics (dedup_key, tactic) VALUES (?, ?)",
+                    [(alert.dedup_key, t) for t in alert.mitre_tactics],
+                )
+            if alert.mitre_techniques:
+                await self._conn.executemany(
+                    "INSERT OR IGNORE INTO alert_techniques (dedup_key, technique) VALUES (?, ?)",
+                    [(alert.dedup_key, format_technique(t)) for t in alert.mitre_techniques],
+                )
             await self._conn.commit()
         except Exception:
             await self._conn.rollback()

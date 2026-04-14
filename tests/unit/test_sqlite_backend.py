@@ -699,6 +699,8 @@ def _make_alert(
     dedup_key: str = "",
     severity: SeverityLevel = SeverityLevel.WARNING,
     timestamp_ns: int = 1_710_000_000_000_000_000,
+    mitre_tactics: tuple[str, ...] = (),
+    mitre_techniques: tuple[str, ...] = (),
 ) -> Alert:
     return Alert(
         alert_id=alert_id or str(uuid.uuid4()),
@@ -712,6 +714,8 @@ def _make_alert(
         entity_type="ip",
         contributing_events=(uuid.uuid4(),),
         dedup_key=dedup_key or str(uuid.uuid4()),
+        mitre_tactics=mitre_tactics,
+        mitre_techniques=mitre_techniques,
     )
 
 
@@ -799,6 +803,63 @@ class TestWriteAlert:
                 row = await cur.fetchone()
             decoded = msgspec.msgpack.decode(row[0], type=Alert)
             assert decoded.description == "second"
+        finally:
+            await backend.close()
+
+
+class TestWriteAlertJunctions:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_populates_junction_tables(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(
+                dedup_key="k1",
+                mitre_tactics=("discovery",),
+                mitre_techniques=("T1059.001",),
+            )
+            await backend.write_alert(alert)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1'"
+            ) as cur:
+                rows = [r[0] for r in await cur.fetchall()]
+            assert rows == ["discovery"]
+            async with await backend._conn.execute(
+                "SELECT technique FROM alert_techniques WHERE dedup_key='k1'"
+            ) as cur:
+                rows = [r[0] for r in await cur.fetchall()]
+            assert rows == ["T1059.001"]
+        finally:
+            await backend.close()
+
+    async def test_upsert_replaces_junction_rows(self) -> None:
+        backend = await self._make_backend()
+        try:
+            first = _make_alert(
+                dedup_key="k1",
+                mitre_tactics=("discovery", "execution"),
+                mitre_techniques=("T1059", "T1059.001"),
+            )
+            await backend.write_alert(first)
+            second = _make_alert(
+                dedup_key="k1",
+                alert_id="new-id",
+                mitre_tactics=("execution",),
+                mitre_techniques=("T1059.001",),
+            )
+            await backend.write_alert(second)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1' ORDER BY tactic"
+            ) as cur:
+                tactics = [r[0] for r in await cur.fetchall()]
+            async with await backend._conn.execute(
+                "SELECT technique FROM alert_techniques WHERE dedup_key='k1'"
+            ) as cur:
+                techs = [r[0] for r in await cur.fetchall()]
+            assert tactics == ["execution"]
+            assert techs == ["T1059.001"]
         finally:
             await backend.close()
 
