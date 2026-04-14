@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { WsStatus, WsFilter, WsMessage } from "@/lib/types";
 import { logger } from "@/lib/logger";
 
@@ -57,11 +57,11 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
     };
   }, [url]);
 
-  const send = (m: unknown): void => {
+  const send = useCallback((m: unknown): void => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
     else queueRef.current.push(m);
-  };
+  }, []);
 
   return { send };
 }
