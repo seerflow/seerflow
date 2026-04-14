@@ -16,4 +16,13 @@ module.exports = {
       { allowConstantExport: true },
     ],
   },
+  overrides: [
+    {
+      // shadcn/ui generated primitives co-locate variant helpers with
+      // components. The react-refresh HMR caveat does not apply here, since
+      // these are stable library files we do not edit often.
+      files: ["src/components/ui/**"],
+      rules: { "react-refresh/only-export-components": "off" },
+    },
+  ],
 };
