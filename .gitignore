@@ -155,3 +155,9 @@ seerflow.yaml
 *.db
 *.db-shm
 *.db-wal
+
+# Frontend (S-057)
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+src/seerflow/web/dist/
