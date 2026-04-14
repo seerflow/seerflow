@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { useAlertStore, selectVisible, selectCounts, type AlertsState } from "@/stores/alerts";
+import { useEffect, useMemo, useState } from "react";
+import { useAlertStore, selectVisible, selectCounts } from "@/stores/alerts";
 import { AlertRow } from "./AlertRow";
 import { AlertDetailPanel } from "./AlertDetailPanel";
 import { FilterBar } from "./FilterBar";
@@ -23,17 +23,10 @@ function toWsFilter(f: AlertFilter): WsFilter {
   };
 }
 
-function useStoreSlice<T>(selector: (s: AlertsState) => T): T {
-  return useSyncExternalStore(
-    (cb) => useAlertStore.subscribe(cb),
-    () => selector(useAlertStore.getState()),
-  );
-}
-
 export function AlertFeed(): JSX.Element {
-  const alerts = useStoreSlice(s => s.alerts);
-  const filter = useStoreSlice(s => s.filter);
-  const status = useStoreSlice(s => s.status);
+  const alerts = useAlertStore(s => s.alerts);
+  const filter = useAlertStore(s => s.filter);
+  const status = useAlertStore(s => s.status);
   const { prepend, backfill, setFilter, setStatus, setFeedback } = useAlertStore.getState();
   const [openId, setOpenId] = useState<string | null>(null);
   const [wsUrl] = useState(() => {

@@ -1,4 +1,4 @@
-import { create, type StoreApi } from "zustand";
+import { create } from "zustand";
 import { severityBucket } from "@/lib/severity";
 import type { Alert, AlertDetail, AlertFilter, SeverityBucket, WsStatus, Feedback } from "@/lib/types";
 
@@ -38,7 +38,7 @@ function mergePrepend(buf: Alert[], incoming: Alert, max: number): { alerts: Ale
   return { alerts: next.slice(0, max), dropped };
 }
 
-export function createAlertStore(max = MAX_ALERTS): StoreApi<AlertsState> {
+export function createAlertStore(max = MAX_ALERTS) {
   return create<AlertsState>((set) => ({
     alerts: [],
     detail: {},
