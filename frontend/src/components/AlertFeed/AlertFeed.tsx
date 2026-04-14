@@ -55,8 +55,8 @@ export function AlertFeed(): JSX.Element {
 
   useEffect(() => { send(toWsFilter(filter)); }, [filter, send]);
 
-  const counts = useMemo(() => selectCounts(useAlertStore.getState()), [alerts, filter]);
-  const visible = useMemo(() => selectVisible(useAlertStore.getState()), [alerts, filter]);
+  const counts = useAlertStore(selectCounts);
+  const visible = useAlertStore(selectVisible);
   const sources = useMemo(
     () => [...new Set(alerts.map(a => a.source_type).filter((s): s is string => Boolean(s)))],
     [alerts],
