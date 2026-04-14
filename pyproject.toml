@@ -60,6 +60,13 @@ seerflow = "seerflow.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/seerflow"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# Ship the built React dashboard (S-057). Produced by
+# ``./build_frontend.sh`` before ``uv build --wheel``. The destination
+# path matches the package-relative directory used by
+# ``seerflow.web.static._DEFAULT_DIST``.
+"src/seerflow/web/dist" = "seerflow/web/dist"
+
 [dependency-groups]
 dev = [
     "ruff>=0.11",
