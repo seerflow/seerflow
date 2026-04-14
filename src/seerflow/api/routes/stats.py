@@ -43,7 +43,11 @@ def _compute_rate(started_monotonic: float, events: int) -> tuple[float, float]:
     return uptime, events / uptime
 
 
-@router.get("/stats", response_model=StatsResponse)
+@router.get(
+    "/stats",
+    response_model=StatsResponse,
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(list_limit)
 async def get_stats(
     request: Request,

@@ -25,7 +25,11 @@ Storage = Annotated[StorageDeps, Depends(get_storage)]
 _VALID_ALERT_TYPES = frozenset(get_args(AlertType))
 
 
-@router.get("/alerts", response_model=PaginatedResponse[AlertResponse])
+@router.get(
+    "/alerts",
+    response_model=PaginatedResponse[AlertResponse],
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(list_limit)
 async def list_alerts(
     request: Request,
@@ -87,7 +91,11 @@ async def list_alerts(
     )
 
 
-@router.get("/alerts/{alert_id}", response_model=AlertResponse)
+@router.get(
+    "/alerts/{alert_id}",
+    response_model=AlertResponse,
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(detail_limit)
 async def get_alert(
     request: Request,
@@ -101,7 +109,11 @@ async def get_alert(
     return AlertResponse.from_alert(alert)
 
 
-@router.post("/alerts/{alert_id}/feedback", status_code=204)
+@router.post(
+    "/alerts/{alert_id}/feedback",
+    status_code=204,
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(detail_limit)
 async def submit_feedback(
     request: Request,

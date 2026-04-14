@@ -97,7 +97,10 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
 router = APIRouter(tags=["system"])
 
 
-@router.get("/config")
+@router.get(
+    "/config",
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(list_limit)
 async def get_config(request: Request) -> dict[str, Any]:
     """Return the running SeerflowConfig with secrets masked.

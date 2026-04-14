@@ -20,7 +20,11 @@ router = APIRouter(tags=["events"])
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 
 
-@router.get("/events", response_model=PaginatedResponse[EventResponse])
+@router.get(
+    "/events",
+    response_model=PaginatedResponse[EventResponse],
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(list_limit)
 async def list_events(
     request: Request,

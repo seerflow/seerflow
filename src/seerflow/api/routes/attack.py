@@ -92,7 +92,11 @@ async def _scan_alerts(
     return alerts
 
 
-@router.get("/attack/coverage", response_model=AttackCoverageResponse)
+@router.get(
+    "/attack/coverage",
+    response_model=AttackCoverageResponse,
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(list_limit)
 async def get_coverage(
     request: Request,

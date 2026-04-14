@@ -118,7 +118,11 @@ def _extract_entities(events: list[SeerflowEvent]) -> list[EntitySearchResult]:
     return results
 
 
-@router.get("/entities/search", response_model=list[EntitySearchResult])
+@router.get(
+    "/entities/search",
+    response_model=list[EntitySearchResult],
+    responses={429: {"description": "Rate limit exceeded"}},
+)
 @limiter.limit(list_limit)
 async def search_entities(
     request: Request,
@@ -157,6 +161,7 @@ async def search_entities(
 @router.get(
     "/entities/{entity_uuid}/timeline",
     response_model=EntityTimelineResponse,
+    responses={429: {"description": "Rate limit exceeded"}},
 )
 @limiter.limit(detail_limit)
 async def get_entity_timeline(

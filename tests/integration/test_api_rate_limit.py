@@ -85,3 +85,39 @@ class TestRateLimit:
         client = _client(backend, api_rate_limit_enabled=False)
         for _ in range(5):
             assert client.get("/api/v1/alerts").status_code == 200
+
+    async def test_attack_coverage_429_matches_ac_spec(
+        self, backend: SqliteBackend
+    ) -> None:
+        """AC #7 traceability: 429 on /attack/coverage at 2/min."""
+        client = _client(backend)
+        for _ in range(2):
+            assert client.get("/api/v1/attack/coverage").status_code == 200
+        r3 = client.get("/api/v1/attack/coverage")
+        assert r3.status_code == 429
+        assert "retry-after" in {k.lower() for k in r3.headers}
+
+    async def test_openapi_documents_429_for_rate_limited_routes(
+        self, backend: SqliteBackend
+    ) -> None:
+        """AC #8: OpenAPI schema lists 429 on every rate-limited route."""
+        client = _client(backend, api_rate_limit_enabled=False)
+        schema = client.get("/api/v1/openapi.json").json()
+        rate_limited_paths = (
+            "/api/v1/alerts",
+            "/api/v1/alerts/{alert_id}",
+            "/api/v1/events",
+            "/api/v1/entities/search",
+            "/api/v1/attack/coverage",
+            "/api/v1/stats",
+            "/api/v1/config",
+        )
+        paths = schema["paths"]
+        for path in rate_limited_paths:
+            assert path in paths, f"missing route {path} from OpenAPI schema"
+            # Any method operation on the path must document 429.
+            for method_op in paths[path].values():
+                responses = method_op.get("responses", {})
+                assert "429" in responses, (
+                    f"{path} missing 429 response in OpenAPI schema"
+                )
