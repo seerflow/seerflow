@@ -9,6 +9,7 @@ import pytest  # noqa: TC002
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
+from seerflow.api.routes.attack import _MAX_ALERT_SCAN
 from seerflow.config import SeerflowConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
@@ -189,9 +190,9 @@ class TestAttackCoverageRoute:
         assert body["window_since"] == expected_since.isoformat()
 
     def test_alert_scan_caps_at_max_scan(self) -> None:
-        # 10_001 alerts — one past the _MAX_ALERT_SCAN = 10_000 cap. The
-        # route issues a single query with limit=10_000, so only the first
-        # 10_000 alerts contribute to the coverage matrix.
+        # _MAX_ALERT_SCAN + 1 alerts — one past the cap. The route issues a single
+        # query with limit=_MAX_ALERT_SCAN, so only the first _MAX_ALERT_SCAN
+        # alerts contribute to the coverage matrix.
         alerts = [
             Alert(
                 alert_id=f"cap-{i}",
@@ -207,16 +208,16 @@ class TestAttackCoverageRoute:
                 mitre_tactics=("discovery",),
                 mitre_techniques=("t1033",),
             )
-            for i in range(10_001)
+            for i in range(_MAX_ALERT_SCAN + 1)
         ]
         client = _build_client(alerts=alerts)
         response = client.get("/api/v1/attack/coverage")
         assert response.status_code == 200
         body = response.json()
-        assert body["summary"]["total_alerts_matched"] == 10_000
+        assert body["summary"]["total_alerts_matched"] == _MAX_ALERT_SCAN
         discovery = next(t for t in body["tactics"] if t["tactic"] == "discovery")
         cell = next(c for c in discovery["techniques"] if c["technique"] == "T1033")
-        assert cell["alert_count"] == 10_000
+        assert cell["alert_count"] == _MAX_ALERT_SCAN
 
     def test_multi_tag_alert_contributes_cell_hits(self) -> None:
         """An alert tagged with two tactics x two techniques should contribute

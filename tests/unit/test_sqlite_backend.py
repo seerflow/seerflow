@@ -10,6 +10,7 @@ import aiosqlite
 import msgspec
 import pytest
 
+from seerflow.api.routes.attack import _MAX_ALERT_SCAN
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
@@ -1172,7 +1173,7 @@ class TestQueryAlertsMitreFilter:
     async def test_pagination_under_filter_preserves_total(self) -> None:
         backend = await self._make_backend_with_alerts()
         try:
-            for i in range(10_050):
+            for i in range(_MAX_ALERT_SCAN + 50):
                 await backend.write_alert(
                     _make_mitre_alert(
                         alert_id=f"a{i}",
@@ -1183,7 +1184,7 @@ class TestQueryAlertsMitreFilter:
                     )
                 )
             page = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=50))
-            assert page.total == 10_050
+            assert page.total == _MAX_ALERT_SCAN + 50
             assert len(page.items) == 50
         finally:
             await backend.close()
