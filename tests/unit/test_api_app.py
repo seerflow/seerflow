@@ -6,14 +6,27 @@ from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api.app import create_api_app
+from seerflow.config import SeerflowConfig
+
+
+def _test_config(**overrides: object) -> SeerflowConfig:
+    """Baseline test config with rate limiting off + localhost CORS."""
+    defaults: dict[str, object] = {
+        "api_rate_limit_enabled": False,
+        "api_allowed_origins": ("http://localhost:3000",),
+    }
+    defaults.update(overrides)
+    return SeerflowConfig(**defaults)  # type: ignore[arg-type]
 
 
 def _make_client() -> TestClient:
     app = create_api_app(
         log_store=AsyncMock(),
         alert_store=AsyncMock(),
+        config=_test_config(),
     )
     return TestClient(app)
 
@@ -212,3 +225,57 @@ class TestAppWiring:
         alert_store = AsyncMock()
         app = create_api_app(log_store=log_store, alert_store=alert_store)
         assert getattr(app.state, "pipeline_metrics_provider", "unset") is None
+
+
+class TestSecurityMiddleware:
+    """S-181: rate limiting + CORS wiring."""
+
+    def _find_cors(self, app: FastAPI) -> object | None:
+        for mw in app.user_middleware:
+            if mw.cls is CORSMiddleware:
+                return mw
+        return None
+
+    def test_cors_wildcard_removed(self) -> None:
+        cfg = _test_config(api_allowed_origins=("https://dash.example.com",))
+        app = create_api_app(
+            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
+        )
+        mw = self._find_cors(app)
+        assert mw is not None
+        origins = mw.kwargs["allow_origins"]  # type: ignore[attr-defined]
+        assert "*" not in origins
+        assert "https://dash.example.com" in origins
+
+    def test_limiter_installed_when_enabled(self) -> None:
+        cfg = _test_config(api_rate_limit_enabled=True)
+        app = create_api_app(
+            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
+        )
+        limiter = getattr(app.state, "limiter", None)
+        assert limiter is not None
+        assert limiter.enabled is True
+
+    def test_limiter_skipped_when_disabled(self) -> None:
+        cfg = _test_config(api_rate_limit_enabled=False)
+        app = create_api_app(
+            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
+        )
+        limiter = getattr(app.state, "limiter", None)
+        assert limiter is None or limiter.enabled is False
+
+    def test_no_cors_when_no_config(self) -> None:
+        app = create_api_app(log_store=AsyncMock(), alert_store=AsyncMock())
+        assert self._find_cors(app) is None
+
+    def test_cors_falls_back_to_ws_origins_when_api_unset(self) -> None:
+        cfg = _test_config(
+            api_allowed_origins=(),
+            ws_allowed_origins=("https://ws.example.com",),
+        )
+        app = create_api_app(
+            log_store=AsyncMock(), alert_store=AsyncMock(), config=cfg
+        )
+        mw = self._find_cors(app)
+        assert mw is not None
+        assert "https://ws.example.com" in mw.kwargs["allow_origins"]  # type: ignore[attr-defined]

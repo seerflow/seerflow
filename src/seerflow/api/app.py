@@ -12,10 +12,14 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api import ws as ws_module
 from seerflow.api.deps import DetectionEngines, StorageDeps
+from seerflow.api.limits import build_limiter, resolve_allowed_origins
 from seerflow.api.routes import (
     alerts,
     attack,
@@ -87,6 +91,38 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.ws_manager.shutdown()
 
 
+def _install_security_middlewares(
+    app: FastAPI, config: SeerflowConfig | None
+) -> None:
+    """Install rate limiter and CORS middleware (S-181).
+
+    ``add_middleware`` reverses insertion order when building the chain,
+    so CORS is added LAST here to run FIRST on requests — this lets
+    preflight OPTIONS short-circuit before the limiter counts them.
+
+    When ``config`` is ``None`` (direct app construction without config)
+    no security middleware is installed — callers must supply a config
+    to opt into rate limiting or CORS.
+    """
+    if config is None:
+        return
+
+    if config.api_rate_limit_enabled:
+        limiter = build_limiter(config)
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_middleware(SlowAPIMiddleware)
+
+    allowed_origins = resolve_allowed_origins(config)
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allowed_origins),
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
+
+
 def _register_routes(app: FastAPI) -> None:
     """Include all API routers under the configured prefix."""
     app.include_router(events.router, prefix=_API_PREFIX)
@@ -149,14 +185,6 @@ def create_api_app(
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
     app.state.ws_manager = ws_manager or _build_ws_manager(alert_store, config)
 
-    # CORS — wide open for v1 (localhost-only, no auth).
-    # Configurable origins deferred to v2 when auth is added.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     _register_routes(app)
+    _install_security_middlewares(app, config)
     return app
