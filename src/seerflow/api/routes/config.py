@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 
 from seerflow.alerting.mask import mask_webhook_url
+from seerflow.api.limits import limiter, list_limit
 
 if TYPE_CHECKING:
     from seerflow.config import SeerflowConfig
@@ -90,13 +91,21 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
         if isinstance(wh, dict) and wh.get("auth_token"):
             wh["auth_token"] = _MASK
 
+    # api — redis connection URLs may embed credentials
+    if data.get("api_rate_limit_redis_url"):
+        data["api_rate_limit_redis_url"] = _MASK
+
     return data
 
 
 router = APIRouter(tags=["system"])
 
 
-@router.get("/config")
+@router.get(
+    "/config",
+    responses={429: {"description": "Rate limit exceeded"}},
+)
+@limiter.limit(list_limit)
 async def get_config(request: Request) -> dict[str, Any]:
     """Return the running SeerflowConfig with secrets masked.
 

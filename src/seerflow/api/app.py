@@ -11,11 +11,15 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api import ws as ws_module
 from seerflow.api.deps import DetectionEngines, StorageDeps
+from seerflow.api.limits import configure_limiter, limiter, resolve_allowed_origins
 from seerflow.api.routes import (
     alerts,
     attack,
@@ -87,6 +91,71 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.ws_manager.shutdown()
 
 
+async def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return a 429 response with ``Retry-After`` header.
+
+    ``slowapi`` bundles a default handler but omits ``Retry-After``.
+    RFC 7231 §7.1.3 accepts either delay-seconds or an HTTP-date;
+    ``limits.RateLimitItem.get_expiry()`` returns the window granularity
+    in seconds (e.g. 60 for ``60/minute``), which is a valid
+    delay-seconds value.
+    """
+    if not isinstance(exc, RateLimitExceeded):  # pragma: no cover
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Unexpected error"},
+        )
+    limit_wrapper = exc.limit
+    if limit_wrapper is None:  # pragma: no cover — slowapi always sets this
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded"},
+            headers={"Retry-After": "60"},
+        )
+    item = limit_wrapper.limit
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {item}"},
+        headers={"Retry-After": str(item.get_expiry())},
+    )
+
+
+def _install_security_middlewares(app: FastAPI, config: SeerflowConfig | None) -> None:
+    """Install rate limiter and CORS middleware (S-181).
+
+    ``add_middleware`` reverses insertion order when building the chain,
+    so CORS is added LAST here to run FIRST on requests — this lets
+    preflight OPTIONS short-circuit before the limiter counts them.
+
+    When ``config`` is ``None`` (direct app construction without config)
+    no security middleware is installed — callers must supply a config
+    to opt into rate limiting or CORS.
+    """
+    if config is None:
+        # No config → leave module-level limiter in whatever state it
+        # was (disabled by default). This preserves direct-construction
+        # behaviour for tests that don't need security middleware.
+        return
+
+    configure_limiter(config)
+    if config.api_rate_limit_enabled:
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+        app.add_middleware(SlowAPIMiddleware)
+
+    allowed_origins = resolve_allowed_origins(config)
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allowed_origins),
+            allow_methods=["GET", "POST", "OPTIONS"],
+            # Explicit list — browsers do not expand `*` to
+            # `Authorization` for credentialled requests, so enumerate
+            # the headers the dashboard actually needs.
+            allow_headers=["Content-Type", "Accept", "Authorization"],
+        )
+
+
 def _register_routes(app: FastAPI) -> None:
     """Include all API routers under the configured prefix."""
     app.include_router(events.router, prefix=_API_PREFIX)
@@ -149,14 +218,6 @@ def create_api_app(
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
     app.state.ws_manager = ws_manager or _build_ws_manager(alert_store, config)
 
-    # CORS — wide open for v1 (localhost-only, no auth).
-    # Configurable origins deferred to v2 when auth is added.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     _register_routes(app)
+    _install_security_middlewares(app, config)
     return app

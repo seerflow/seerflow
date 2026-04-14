@@ -11,13 +11,14 @@ import logging
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from seerflow.api.deps import (
     StorageDeps,
     get_pipeline_metrics_provider,
     get_storage,
 )
+from seerflow.api.limits import limiter, list_limit
 from seerflow.api.metrics import MetricsProvider
 from seerflow.api.schemas import StatsResponse
 from seerflow.models.query import AlertQuery, EventQuery
@@ -42,8 +43,14 @@ def _compute_rate(started_monotonic: float, events: int) -> tuple[float, float]:
     return uptime, events / uptime
 
 
-@router.get("/stats", response_model=StatsResponse)
+@router.get(
+    "/stats",
+    response_model=StatsResponse,
+    responses={429: {"description": "Rate limit exceeded"}},
+)
+@limiter.limit(list_limit)
 async def get_stats(
+    request: Request,
     storage: Storage,
     metrics_provider: MetricsProviderDep,
 ) -> StatsResponse:

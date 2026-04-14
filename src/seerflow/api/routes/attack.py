@@ -9,7 +9,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from seerflow.api.attack import (
     build_matrix,
@@ -25,6 +25,7 @@ from seerflow.api.deps import (
     get_storage,
     parse_timestamp_ns,
 )
+from seerflow.api.limits import limiter, list_limit
 from seerflow.api.schemas import AttackCoverageResponse
 from seerflow.models.query import AlertQuery, TimeRange
 
@@ -91,8 +92,14 @@ async def _scan_alerts(
     return alerts
 
 
-@router.get("/attack/coverage", response_model=AttackCoverageResponse)
+@router.get(
+    "/attack/coverage",
+    response_model=AttackCoverageResponse,
+    responses={429: {"description": "Rate limit exceeded"}},
+)
+@limiter.limit(list_limit)
 async def get_coverage(
+    request: Request,
     storage: Storage,
     engines: Engines,
     since: Annotated[str | None, Query(description="Start time (ISO-8601)", max_length=64)] = None,

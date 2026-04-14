@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from seerflow.api.deps import StorageDeps, get_storage, parse_timestamp_ns
+from seerflow.api.limits import limiter, list_limit
 from seerflow.api.schemas import EventResponse, PaginatedResponse
 from seerflow.models.query import EventQuery, TimeRange
 
@@ -19,8 +20,14 @@ router = APIRouter(tags=["events"])
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 
 
-@router.get("/events", response_model=PaginatedResponse[EventResponse])
+@router.get(
+    "/events",
+    response_model=PaginatedResponse[EventResponse],
+    responses={429: {"description": "Rate limit exceeded"}},
+)
+@limiter.limit(list_limit)
 async def list_events(
+    request: Request,
     storage: Storage,
     since: Annotated[str | None, Query(description="Start time (ISO-8601)")] = None,
     until: Annotated[str | None, Query(description="End time (ISO-8601)")] = None,
