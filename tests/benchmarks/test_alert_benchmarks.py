@@ -147,12 +147,8 @@ async def test_mitre_filter_sql_vs_decode_baseline(tmp_path: Path) -> None:
         # Baseline: public query_alerts path at the S-182 10 000-row ceiling.
         # Uses only AlertStore.query_alerts — no storage-internal attr access.
         t0 = time.perf_counter()
-        baseline_page = await backend.query_alerts(
-            AlertQuery(page=1, limit=10_000)
-        )
-        matching = [
-            a for a in baseline_page.items if "discovery" in a.mitre_tactics
-        ]
+        baseline_page = await backend.query_alerts(AlertQuery(page=1, limit=10_000))
+        matching = [a for a in baseline_page.items if "discovery" in a.mitre_tactics]
         baseline_elapsed = time.perf_counter() - t0
 
         # Baseline sees only the most-recent 10 000 rows (timestamp_ns DESC).
