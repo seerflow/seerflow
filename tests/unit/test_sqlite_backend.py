@@ -1137,37 +1137,46 @@ class TestQueryAlertsMitreFilter:
             await backend.close()
 
     async def test_pagination_under_filter_preserves_total(self) -> None:
-        alerts = [
-            _make_mitre_alert(
-                alert_id=f"a{i}",
-                ts_ns=1_000 + i,
-                tactics=("discovery",),
-                techniques=("t1033",),
-                dedup_key=f"test:a{i}",
-            )
-            for i in range(5)
-        ]
-        backend = await self._make_backend_with_alerts(alerts)
+        backend = await self._make_backend_with_alerts()
         try:
-            page1 = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=2))
-            page2 = await backend.query_alerts(AlertQuery(tactic="discovery", page=2, limit=2))
-            page3 = await backend.query_alerts(AlertQuery(tactic="discovery", page=3, limit=2))
-            assert page1.total == 5
-            assert page2.total == 5
-            assert page3.total == 5
-            assert len(page1.items) == 2
-            assert len(page2.items) == 2
-            assert len(page3.items) == 1
-            assert page1.has_next is True
-            assert page2.has_next is True
-            assert page3.has_next is False
+            for i in range(10_050):
+                await backend.write_alert(
+                    _make_mitre_alert(
+                        alert_id=f"a{i}",
+                        ts_ns=1_000 + i,
+                        tactics=("discovery",),
+                        techniques=("t1033",),
+                        dedup_key=f"test:a{i}",
+                    )
+                )
+            page = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=50))
+            assert page.total == 10_050
+            assert len(page.items) == 50
         finally:
             await backend.close()
 
-    async def test_fast_and_slow_paths_agree_on_overlapping_alerts(self) -> None:
-        """Unfiltered (fast SQL path) and ``tactic="discovery"`` (slow
-        post-decode path) must agree on the discovery-tagged subset.
-        Locks in the invariant that the two paths return consistent data.
+    async def test_technique_filter_case_insensitive_sql(self) -> None:
+        backend = await self._make_backend_with_alerts(
+            [
+                _make_mitre_alert(
+                    alert_id="k1",
+                    ts_ns=1_000,
+                    tactics=("discovery",),
+                    techniques=("T1059.001",),
+                    dedup_key="k1",
+                ),
+            ]
+        )
+        try:
+            page = await backend.query_alerts(AlertQuery(technique="t1059.001", page=1, limit=10))
+            assert page.total == 1
+        finally:
+            await backend.close()
+
+    async def test_unfiltered_and_tactic_filter_agree_on_overlap(self) -> None:
+        """Unfiltered query and ``tactic="discovery"`` must agree on the
+        discovery-tagged subset. Locks in the invariant that both paths
+        return consistent data now that both are SQL-level.
         """
         alerts = [
             _make_mitre_alert(
@@ -1181,13 +1190,15 @@ class TestQueryAlertsMitreFilter:
         ]
         backend = await self._make_backend_with_alerts(alerts)
         try:
-            fast = await backend.query_alerts(AlertQuery(limit=100))
-            slow = await backend.query_alerts(AlertQuery(tactic="discovery", limit=100))
-            assert fast.total == 6
-            assert slow.total == 3
-            fast_discovery_ids = {a.alert_id for a in fast.items if "discovery" in a.mitre_tactics}
-            slow_ids = {a.alert_id for a in slow.items}
-            assert fast_discovery_ids == slow_ids
+            unfiltered = await backend.query_alerts(AlertQuery(limit=100))
+            filtered = await backend.query_alerts(AlertQuery(tactic="discovery", limit=100))
+            assert unfiltered.total == 6
+            assert filtered.total == 3
+            unfiltered_discovery_ids = {
+                a.alert_id for a in unfiltered.items if "discovery" in a.mitre_tactics
+            }
+            filtered_ids = {a.alert_id for a in filtered.items}
+            assert unfiltered_discovery_ids == filtered_ids
         finally:
             await backend.close()
 

@@ -41,3 +41,24 @@ class TestBuildAlertQuery:
         )
         assert " AND " in where
         assert len(params) == 5  # start, end, type, severity, entity
+
+
+def test_build_alert_query_emits_tactic_exists():
+    q = AlertQuery(
+        time_range=TimeRange(start_ns=0, end_ns=1),
+        tactic="discovery",
+    )
+    where, params = _build_alert_query(q)
+    assert "EXISTS" in where
+    assert "alert_tactics" in where
+    assert "discovery" in params
+
+
+def test_build_alert_query_emits_technique_exists_normalized():
+    q = AlertQuery(
+        time_range=TimeRange(start_ns=0, end_ns=1),
+        technique="t1059.001",
+    )
+    where, params = _build_alert_query(q)
+    assert "alert_techniques" in where
+    assert "T1059.001" in params
