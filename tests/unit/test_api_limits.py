@@ -40,10 +40,27 @@ class TestKeyFunc:
         cfg = SeerflowConfig(api_trust_proxy_headers=True)
         req = _request(
             client_host="10.0.0.1",
-            xff="203.0.113.5, 198.51.100.1",
+            xff="8.8.8.8, 1.1.1.1",
             config=cfg,
         )
-        assert _key_func(req) == "203.0.113.5"
+        assert _key_func(req) == "8.8.8.8"
+
+    def test_rejects_loopback_xff_to_prevent_bucket_sharing(self) -> None:
+        """Security: spoofed XFF=127.0.0.1 falls back to client.host."""
+        cfg = SeerflowConfig(api_trust_proxy_headers=True)
+        req = _request(client_host="203.0.113.1", xff="127.0.0.1", config=cfg)
+        assert _key_func(req) == "203.0.113.1"
+
+    def test_rejects_private_xff_to_prevent_bucket_sharing(self) -> None:
+        """Security: spoofed RFC1918 XFF falls back to client.host."""
+        cfg = SeerflowConfig(api_trust_proxy_headers=True)
+        req = _request(client_host="203.0.113.1", xff="10.0.0.5", config=cfg)
+        assert _key_func(req) == "203.0.113.1"
+
+    def test_rejects_garbage_xff(self) -> None:
+        cfg = SeerflowConfig(api_trust_proxy_headers=True)
+        req = _request(client_host="203.0.113.1", xff="not-an-ip", config=cfg)
+        assert _key_func(req) == "203.0.113.1"
 
     def test_falls_back_to_client_when_xff_missing(self) -> None:
         cfg = SeerflowConfig(api_trust_proxy_headers=True)

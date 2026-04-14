@@ -242,7 +242,9 @@ class SeerflowConfig:
     ws_filter_min_interval_ms: int = 100
     # API hardening (S-181).
     api_rate_limit_enabled: bool = True
-    api_rate_limit_redis_url: str | None = None
+    # repr=False: Redis URLs may embed credentials; redact_config masks
+    # this in GET /api/v1/config.
+    api_rate_limit_redis_url: str | None = field(default=None, repr=False)
     api_allowed_origins: tuple[str, ...] = ()
     api_list_rate_limit: str = "60/minute"
     api_detail_rate_limit: str = "300/minute"

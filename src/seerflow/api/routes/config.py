@@ -91,6 +91,10 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
         if isinstance(wh, dict) and wh.get("auth_token"):
             wh["auth_token"] = _MASK
 
+    # api — redis connection URLs may embed credentials
+    if data.get("api_rate_limit_redis_url"):
+        data["api_rate_limit_redis_url"] = _MASK
+
     return data
 
 

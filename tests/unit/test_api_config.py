@@ -223,6 +223,7 @@ class TestSecretRegressionGuard:
         "receivers.webhooks[].auth_token",
         "alerting.pagerduty_routing_key",
         "alerting.webhook_targets[].url",
+        "api_rate_limit_redis_url",
     }
     _KNOWN_PUBLIC_REPR_FALSE: ClassVar[set[str]] = set()
 

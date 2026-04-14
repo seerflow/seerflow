@@ -18,6 +18,7 @@ during decoration.
 
 from __future__ import annotations
 
+import ipaddress
 from typing import TYPE_CHECKING
 
 from slowapi import Limiter
@@ -29,12 +30,29 @@ if TYPE_CHECKING:
     from starlette.requests import Request
 
 
+def _is_public_ip(value: str) -> bool:
+    """Return True iff *value* is a valid, globally routable IP.
+
+    Rejects loopback, link-local, multicast, and RFC-1918 private
+    ranges. A client that submits a spoofed ``X-Forwarded-For`` entry
+    pointing at 127.0.0.1 or 10.x.y.z would otherwise end up sharing
+    a bucket with local/private traffic, bypassing per-IP throttling.
+    """
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return not (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast)
+
+
 def _key_func(request: Request) -> str:
     """Return the rate limit bucket identifier for *request*.
 
     When ``api_trust_proxy_headers`` is True on the app's config, the
-    left-most ``X-Forwarded-For`` hop is used. Otherwise falls back to
-    the direct client address. Operators opt in explicitly because
+    left-most ``X-Forwarded-For`` hop is used **provided** it is a
+    globally routable IP. A client-supplied private or loopback
+    address falls back to the direct client host to prevent
+    bucket-sharing attacks. Operators opt in explicitly because
     ``X-Forwarded-For`` is trivially spoofable when the proxy does not
     sanitise the header.
     """
@@ -42,7 +60,9 @@ def _key_func(request: Request) -> str:
     if config is not None and config.api_trust_proxy_headers:
         xff = request.headers.get("x-forwarded-for")
         if xff:
-            return xff.split(",", 1)[0].strip()
+            candidate = xff.split(",", 1)[0].strip()
+            if _is_public_ip(candidate):
+                return candidate
     return get_remote_address(request)
 
 

@@ -64,13 +64,26 @@ class TestRateLimit:
         client = _client(backend, api_trust_proxy_headers=True)
         # Client A — exhausts limit
         for _ in range(2):
-            r = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "203.0.113.1"})
+            r = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "8.8.8.8"})
             assert r.status_code == 200
-        r3 = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "203.0.113.1"})
+        r3 = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "8.8.8.8"})
         assert r3.status_code == 429
         # Client B — still allowed
-        r_b = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "198.51.100.7"})
+        r_b = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "1.1.1.1"})
         assert r_b.status_code == 200
+
+    async def test_spoofed_loopback_xff_does_not_bypass_limit(
+        self, backend: SqliteBackend
+    ) -> None:
+        """Security: attacker setting XFF=127.0.0.1 cannot hide from throttle."""
+        client = _client(backend, api_trust_proxy_headers=True)
+        # Both requests share the TestClient 'testclient' client.host bucket
+        # because XFF=127.0.0.1 is rejected as non-public.
+        for _ in range(2):
+            r = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "127.0.0.1"})
+            assert r.status_code == 200
+        r3 = client.get("/api/v1/alerts", headers={"X-Forwarded-For": "127.0.0.1"})
+        assert r3.status_code == 429
 
     async def test_list_and_detail_have_independent_budgets(self, backend: SqliteBackend) -> None:
         client = _client(backend)
