@@ -174,7 +174,34 @@ async def test_mitre_filter_sql_vs_decode_baseline(tmp_path: Path) -> None:
                 f"SQL vs decode ratio {ratio:.2f}x (<10x expected). "
                 f"sql={sql_elapsed:.3f}s baseline={baseline_elapsed:.3f}s. "
                 "Set SEERFLOW_BENCH_GATE=1 to enforce.",
+                category=UserWarning,
                 stacklevel=2,
             )
     finally:
         await backend.close()
+
+
+def test_benchmark_warn_uses_explicit_user_warning_category() -> None:
+    """S-187: the SQL/decode ratio warning must pass category explicitly.
+
+    Static-analysis tools and CI warning filters can reliably target the
+    benchmark warning only when ``category=`` is passed. Walks the AST
+    of :func:`test_mitre_filter_sql_vs_decode_baseline` so the assertion
+    is not fooled by the keyword appearing in a comment or string, and
+    fires deterministically without running the slow benchmark body.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(test_mitre_filter_sql_vs_decode_baseline))
+    warn_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "warn"
+    ]
+    assert warn_calls, "expected at least one warnings.warn() call"
+    assert all(any(kw.arg == "category" for kw in call.keywords) for call in warn_calls), (
+        "every warnings.warn() call must pass category= explicitly"
+    )

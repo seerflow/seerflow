@@ -17,6 +17,7 @@ from seerflow.api.attack import (
     collect_sigma_cells,
     merge_rule_counts,
 )
+from seerflow.api.constants import MAX_ALERT_SCAN
 from seerflow.api.deps import (
     DetectionEngines,
     StorageDeps,
@@ -38,9 +39,6 @@ Storage = Annotated[StorageDeps, Depends(get_storage)]
 Engines = Annotated[DetectionEngines, Depends(get_engines)]
 
 _DEFAULT_WINDOW_DAYS = 30
-# Upper bound for a single coverage scan. Matches AlertQuery.limit ceiling;
-# one SQL query replaces the former 10-page x 1_000-row loop.
-_MAX_ALERT_SCAN = 10_000
 
 
 def _parse_iso_or_422(value: str) -> datetime:
@@ -67,9 +65,9 @@ async def _scan_alerts(
     alert_store: AlertStore,
     time_range: TimeRange,
 ) -> list[Alert]:
-    """Fetch up to ``_MAX_ALERT_SCAN`` alerts in a single SQL query."""
+    """Fetch up to ``MAX_ALERT_SCAN`` alerts in a single SQL query."""
     page = await alert_store.query_alerts(
-        AlertQuery(time_range=time_range, page=1, limit=_MAX_ALERT_SCAN)
+        AlertQuery(time_range=time_range, page=1, limit=MAX_ALERT_SCAN)
     )
     return list(page.items)
 
