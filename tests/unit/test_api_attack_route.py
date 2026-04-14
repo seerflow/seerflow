@@ -9,6 +9,7 @@ import pytest  # noqa: TC002
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
+from seerflow.config import SeerflowConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.models.query import AlertQuery, Page
@@ -246,3 +247,21 @@ class TestAttackCoverageRoute:
         execution = next(t for t in body["tactics"] if t["tactic"] == "execution")
         assert {c["technique"] for c in discovery["techniques"]} == {"T1033", "T1059"}
         assert {c["technique"] for c in execution["techniques"]} == {"T1033", "T1059"}
+
+
+def test_get_coverage_respects_coverage_rate_limit() -> None:
+    """Coverage endpoint uses the tighter coverage_limit bucket (S-186)."""
+    config = SeerflowConfig(
+        api_rate_limit_enabled=True,
+        api_coverage_rate_limit="2/minute",
+        api_list_rate_limit="60/minute",
+    )
+    app = create_api_app(
+        log_store=_StubLogStore(),  # type: ignore[arg-type]
+        alert_store=_StubAlertStore(),  # type: ignore[arg-type]
+        config=config,
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/v1/attack/coverage").status_code == 200
+        assert client.get("/api/v1/attack/coverage").status_code == 200
+        assert client.get("/api/v1/attack/coverage").status_code == 429
