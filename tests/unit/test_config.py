@@ -1518,3 +1518,22 @@ class TestApiConfig:
         )
         with pytest.raises(ConfigError, match="http://"):
             load_config(cfg_path)
+
+
+def test_api_coverage_rate_limit_default() -> None:
+    cfg = SeerflowConfig()
+    assert cfg.api_coverage_rate_limit == "10/minute"
+
+
+def test_api_coverage_rate_limit_loader_roundtrip(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "seerflow.yaml"
+    yaml_path.write_text("api_coverage_rate_limit: 5/minute\n")
+    cfg = load_config(str(yaml_path))
+    assert cfg.api_coverage_rate_limit == "5/minute"
+
+
+def test_api_coverage_rate_limit_invalid_raises(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "seerflow.yaml"
+    yaml_path.write_text("api_coverage_rate_limit: not-a-limit\n")
+    with pytest.raises(ConfigError, match="api_coverage_rate_limit"):
+        load_config(str(yaml_path))

@@ -24,7 +24,7 @@ from seerflow.api.deps import (
     get_storage,
     parse_timestamp_ns,
 )
-from seerflow.api.limits import limiter, list_limit
+from seerflow.api.limits import coverage_limit, limiter
 from seerflow.api.schemas import AttackCoverageResponse
 from seerflow.models.query import AlertQuery, TimeRange
 
@@ -79,7 +79,7 @@ async def _scan_alerts(
     response_model=AttackCoverageResponse,
     responses={429: {"description": "Rate limit exceeded"}},
 )
-@limiter.limit(list_limit)
+@limiter.limit(coverage_limit)
 async def get_coverage(
     request: Request,
     storage: Storage,
