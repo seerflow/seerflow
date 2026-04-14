@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 
 from seerflow.alerting.mask import mask_webhook_url
+from seerflow.api.limits import limiter, list_limit
 
 if TYPE_CHECKING:
     from seerflow.config import SeerflowConfig
@@ -97,6 +98,7 @@ router = APIRouter(tags=["system"])
 
 
 @router.get("/config")
+@limiter.limit(list_limit)
 async def get_config(request: Request) -> dict[str, Any]:
     """Return the running SeerflowConfig with secrets masked.
 

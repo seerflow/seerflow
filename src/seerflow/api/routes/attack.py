@@ -9,7 +9,9 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from seerflow.api.limits import limiter, list_limit
 
 from seerflow.api.attack import (
     build_matrix,
@@ -92,7 +94,9 @@ async def _scan_alerts(
 
 
 @router.get("/attack/coverage", response_model=AttackCoverageResponse)
+@limiter.limit(list_limit)
 async def get_coverage(
+    request: Request,
     storage: Storage,
     engines: Engines,
     since: Annotated[str | None, Query(description="Start time (ISO-8601)", max_length=64)] = None,

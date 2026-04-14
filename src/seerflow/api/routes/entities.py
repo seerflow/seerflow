@@ -13,9 +13,10 @@ import time
 import uuid as _uuid_mod
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from seerflow.api.deps import StorageDeps, get_storage, require_entity_store
+from seerflow.api.limits import detail_limit, limiter, list_limit
 from seerflow.api.schemas import (
     EntityRelationResponse,
     EntitySearchResult,
@@ -118,7 +119,9 @@ def _extract_entities(events: list[SeerflowEvent]) -> list[EntitySearchResult]:
 
 
 @router.get("/entities/search", response_model=list[EntitySearchResult])
+@limiter.limit(list_limit)
 async def search_entities(
+    request: Request,
     storage: Storage,
     q: str = Query(..., min_length=1, max_length=256, description="Search query"),
 ) -> list[EntitySearchResult]:
@@ -155,7 +158,9 @@ async def search_entities(
     "/entities/{entity_uuid}/timeline",
     response_model=EntityTimelineResponse,
 )
+@limiter.limit(detail_limit)
 async def get_entity_timeline(
+    request: Request,
     entity_uuid: _uuid_mod.UUID,
     entity_store: Annotated[EntityStore, Depends(require_entity_store)],
     start_ns: Annotated[int | None, Query(ge=0, le=_MAX_TIMESTAMP_NS)] = None,

@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Annotated, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from seerflow.api.deps import StorageDeps, get_storage, parse_timestamp_ns
+from seerflow.api.limits import detail_limit, limiter, list_limit
 from seerflow.api.schemas import AlertResponse, FeedbackRequest, PaginatedResponse
 from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
@@ -25,7 +26,9 @@ _VALID_ALERT_TYPES = frozenset(get_args(AlertType))
 
 
 @router.get("/alerts", response_model=PaginatedResponse[AlertResponse])
+@limiter.limit(list_limit)
 async def list_alerts(
+    request: Request,
     storage: Storage,
     since: Annotated[str | None, Query(description="Start time (ISO-8601)")] = None,
     until: Annotated[str | None, Query(description="End time (ISO-8601)")] = None,
@@ -85,7 +88,9 @@ async def list_alerts(
 
 
 @router.get("/alerts/{alert_id}", response_model=AlertResponse)
+@limiter.limit(detail_limit)
 async def get_alert(
+    request: Request,
     alert_id: str,
     storage: Storage,
 ) -> AlertResponse:
@@ -97,7 +102,9 @@ async def get_alert(
 
 
 @router.post("/alerts/{alert_id}/feedback", status_code=204)
+@limiter.limit(detail_limit)
 async def submit_feedback(
+    request: Request,
     alert_id: str,
     body: FeedbackRequest,
     storage: Storage,
