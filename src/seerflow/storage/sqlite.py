@@ -267,22 +267,27 @@ ON CONFLICT(template_id) DO UPDATE SET
 """
 
 
-# Cap on the number of rows scanned when applying a post-decode
-# tactic/technique filter. Keeps the route bounded even if the caller's
-# time window is wider than expected.
-# Follow-up: push the filter into SQL with a migration that stores
-# mitre_tactics/mitre_techniques in dedicated columns (or uses JSON1) —
-# then paginate accurately without a scan cap. Tracked in the review
-# summary for PR #141 as "SQL-level mitre filter migration".
-_MAX_POST_DECODE_SCAN = 10_000
-
-
+# NOTE(S-073): when the PostgreSQL backend lands, mirror this schema and query
+# shape. Junction tables carry a denormalized ``timestamp_ns`` so the filter
+# path drives from the junction index without a sort step:
+#     CREATE TABLE alert_tactics (
+#         dedup_key    TEXT    NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
+#         tactic       TEXT    NOT NULL,
+#         timestamp_ns BIGINT  NOT NULL,
+#         PRIMARY KEY (dedup_key, tactic)
+#     );
+#     CREATE INDEX idx_alert_tactics_tactic_time
+#         ON alert_tactics(tactic, timestamp_ns DESC);
+# (same for alert_techniques). The PG ``write_alert`` must dual-write junction
+# rows in the same transaction as the alert upsert, keyed on ``dedup_key``.
 def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
-    """Build WHERE clause and params from AlertQuery.
+    """Build WHERE clause and params from AlertQuery (including mitre filters).
 
-    ``tactic`` and ``technique`` are NOT handled here — they are applied
-    post-decode in ``query_alerts`` because the msgpack BLOB holds those
-    lists rather than dedicated columns.
+    When ``tactic`` or ``technique`` is set, the caller drives the query from
+    the matching junction table (``alert_tactics at`` or ``alert_techniques
+    atq``) so the composite ``(tactic|technique, timestamp_ns DESC)`` index
+    satisfies both the predicate and the ORDER BY. When both are set, the
+    driver is the tactic junction and technique becomes a correlated EXISTS.
     """
     clauses: list[str] = []
     params: list[Any] = []
@@ -300,6 +305,21 @@ def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
     if filters.entity_uuid is not None:
         clauses.append("a.entity_uuid = ?")
         params.append(filters.entity_uuid)
+    if filters.tactic is not None:
+        clauses.append("at.tactic = ?")
+        params.append(filters.tactic)
+    if filters.technique is not None:
+        # If tactic is also set, the driver is alert_tactics so technique
+        # becomes a correlated EXISTS on alert_techniques. Otherwise the
+        # driver is alert_techniques and we filter directly on atq.technique.
+        if filters.tactic is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM alert_techniques atq2 "
+                "WHERE atq2.dedup_key = a.dedup_key AND atq2.technique = ?)"
+            )
+        else:
+            clauses.append("atq.technique = ?")
+        params.append(format_technique(filters.technique))
     where = " AND ".join(clauses) if clauses else "1=1"
     return where, params
 
@@ -674,6 +694,32 @@ class SqliteBackend:
         try:
             async with await self._conn.execute(_INSERT_ALERT_SQL, params) as cursor:
                 row = await cursor.fetchone()
+            # Only refresh junction rows when this is a fresh insert or a
+            # window-reset (dedup_count == 1). Within-window dedup bumps
+            # preserve the stored alert and its timestamp, so its junction
+            # rows are already correct.
+            if row is not None and row[0] == 1:
+                await self._conn.execute(
+                    "DELETE FROM alert_tactics WHERE dedup_key = ?", (alert.dedup_key,)
+                )
+                await self._conn.execute(
+                    "DELETE FROM alert_techniques WHERE dedup_key = ?", (alert.dedup_key,)
+                )
+                if alert.mitre_tactics:
+                    await self._conn.executemany(
+                        "INSERT OR IGNORE INTO alert_tactics "
+                        "(dedup_key, tactic, timestamp_ns) VALUES (?, ?, ?)",
+                        [(alert.dedup_key, t, alert.timestamp_ns) for t in alert.mitre_tactics],
+                    )
+                if alert.mitre_techniques:
+                    await self._conn.executemany(
+                        "INSERT OR IGNORE INTO alert_techniques "
+                        "(dedup_key, technique, timestamp_ns) VALUES (?, ?, ?)",
+                        [
+                            (alert.dedup_key, format_technique(t), alert.timestamp_ns)
+                            for t in alert.mitre_techniques
+                        ],
+                    )
             await self._conn.commit()
         except Exception:
             await self._conn.rollback()
@@ -682,84 +728,47 @@ class SqliteBackend:
         return row is not None and row[0] == 1
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
-        """Query alerts with composable filters and pagination.
+        """Query alerts with composable filters and pagination (all SQL-level).
 
-        ``tactic`` and ``technique`` are applied post-decode in Python
-        (the alert BLOB stores them as msgpack fields). The fast SQL
-        path is used when neither is set.
+        When a mitre filter (``tactic`` / ``technique``) is set, the query is
+        driven from the matching junction table so the composite
+        ``(tactic|technique, timestamp_ns DESC)`` index satisfies both the
+        predicate and the ORDER BY without scanning the ``alerts`` table.
         """
         where, params = _build_alert_query(filters)
-        post_decode = filters.tactic is not None or filters.technique is not None
 
-        if not post_decode:
-            # where clause assembled from hardcoded SQL fragments in _build_alert_query().
-            # All user values are bound via params. No user data is interpolated.
-            count_sql = f"SELECT COUNT(*) FROM alerts a WHERE {where}"  # noqa: S608  # nosec B608
-            async with await self._conn.execute(count_sql, params) as cursor:
-                row = await cursor.fetchone()
-                total = row[0] if row else 0
+        if filters.tactic is not None:
+            driver = "alert_tactics AS at JOIN alerts a ON a.dedup_key = at.dedup_key"
+            order_col = "at.timestamp_ns"
+        elif filters.technique is not None:
+            driver = "alert_techniques AS atq JOIN alerts a ON a.dedup_key = atq.dedup_key"
+            order_col = "atq.timestamp_ns"
+        else:
+            driver = "alerts a"
+            order_col = "a.timestamp_ns"
 
-            offset = (filters.page - 1) * filters.limit
-            data_sql = (
-                f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
-                f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
-            )
-            async with await self._conn.execute(
-                data_sql, [*params, filters.limit, offset]
-            ) as cursor:
-                rows = await cursor.fetchall()
-            items = tuple(
-                msgspec.structs.replace(
-                    msgspec.msgpack.decode(row[0], type=Alert),
-                    dedup_count=row[1],
-                )
-                for row in rows
-            )
-            return Page(items=items, total=total, page=filters.page, limit=filters.limit)
+        # driver, where, order_col are assembled from hardcoded SQL fragments;
+        # user values are bound exclusively via params.
+        count_sql = f"SELECT COUNT(*) FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
+        async with await self._conn.execute(count_sql, params) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
 
-        # Slow path: decode up to _MAX_POST_DECODE_SCAN rows matching the
-        # SQL-level filters, then apply the mitre filter in Python.
-        scan_sql = (
-            f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
-            f"ORDER BY a.timestamp_ns DESC LIMIT ?"
+        offset = (filters.page - 1) * filters.limit
+        data_sql = (
+            f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
+            f"ORDER BY {order_col} DESC LIMIT ? OFFSET ?"
         )
-        async with await self._conn.execute(scan_sql, [*params, _MAX_POST_DECODE_SCAN]) as cursor:
+        async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
             rows = await cursor.fetchall()
-        if len(rows) == _MAX_POST_DECODE_SCAN:
-            _log.warning(
-                "query_alerts post-decode scan hit cap (%d rows); "
-                "tactic/technique pagination may be incomplete",
-                _MAX_POST_DECODE_SCAN,
-            )
-
-        decoded: list[Alert] = [
+        items = tuple(
             msgspec.structs.replace(
                 msgspec.msgpack.decode(row[0], type=Alert),
                 dedup_count=row[1],
             )
             for row in rows
-        ]
-
-        if filters.tactic is not None:
-            tactic = filters.tactic
-            decoded = [a for a in decoded if tactic in a.mitre_tactics]
-        if filters.technique is not None:
-            technique = format_technique(filters.technique)
-            decoded = [
-                a
-                for a in decoded
-                if any(format_technique(t) == technique for t in a.mitre_techniques)
-            ]
-
-        total = len(decoded)
-        offset = (filters.page - 1) * filters.limit
-        page_items = tuple(decoded[offset : offset + filters.limit])
-        return Page(
-            items=page_items,
-            total=total,
-            page=filters.page,
-            limit=filters.limit,
         )
+        return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
     async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None:
         """Update alert feedback and re-encode the BLOB.

@@ -108,6 +108,35 @@ class TestListAlerts:
         resp = client.get("/api/v1/alerts?since=garbage")
         assert resp.status_code == 422
 
+    def test_unknown_tactic_returns_422(self) -> None:
+        alert_store = AsyncMock()
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?tactic=not_a_tactic")
+        assert resp.status_code == 422
+        assert "tactic" in resp.json()["detail"].lower()
+
+    def test_invalid_technique_format_returns_422(self) -> None:
+        alert_store = AsyncMock()
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?technique=not-a-technique")
+        assert resp.status_code == 422
+        assert "technique" in resp.json()["detail"].lower()
+
+    def test_valid_tactic_and_technique(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts.return_value = Page(
+            items=(),
+            total=0,
+            page=1,
+            limit=50,
+        )
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?tactic=discovery&technique=T1059.001")
+        assert resp.status_code == 200
+        call_args = alert_store.query_alerts.call_args[0][0]
+        assert call_args.tactic == "discovery"
+        assert call_args.technique == "T1059.001"
+
     def test_limit_capped_at_1000(self) -> None:
         alert_store = AsyncMock()
         alert_store.query_alerts.return_value = Page(

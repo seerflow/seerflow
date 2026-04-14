@@ -187,9 +187,10 @@ class TestAttackCoverageRoute:
         expected_since = fixed_now - timedelta(days=30)
         assert body["window_since"] == expected_since.isoformat()
 
-    def test_alert_scan_cap_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        # 10_001 alerts — one past the _MAX_ALERT_SCAN = 10_000 cap.
-        # The stub pages at limit=1000, so page 10 will have has_next=True.
+    def test_alert_scan_caps_at_max_scan(self) -> None:
+        # 10_001 alerts — one past the _MAX_ALERT_SCAN = 10_000 cap. The
+        # route issues a single query with limit=10_000, so only the first
+        # 10_000 alerts contribute to the coverage matrix.
         alerts = [
             Alert(
                 alert_id=f"cap-{i}",
@@ -208,10 +209,13 @@ class TestAttackCoverageRoute:
             for i in range(10_001)
         ]
         client = _build_client(alerts=alerts)
-        with caplog.at_level("WARNING", logger="seerflow.api.routes.attack"):
-            response = client.get("/api/v1/attack/coverage")
+        response = client.get("/api/v1/attack/coverage")
         assert response.status_code == 200
-        assert any("attack/coverage alert scan hit cap" in rec.message for rec in caplog.records)
+        body = response.json()
+        assert body["summary"]["total_alerts_matched"] == 10_000
+        discovery = next(t for t in body["tactics"] if t["tactic"] == "discovery")
+        cell = next(c for c in discovery["techniques"] if c["technique"] == "T1033")
+        assert cell["alert_count"] == 10_000
 
     def test_multi_tag_alert_contributes_cell_hits(self) -> None:
         """An alert tagged with two tactics x two techniques should contribute

@@ -5,7 +5,6 @@ GET /api/v1/attack/coverage -- coverage matrix (tactics x techniques x counts).
 
 from __future__ import annotations
 
-import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
@@ -33,20 +32,15 @@ if TYPE_CHECKING:
     from seerflow.models.alert import Alert
     from seerflow.storage.protocols import AlertStore
 
-_log = logging.getLogger(__name__)
-
 router = APIRouter(tags=["attack"])
 
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 Engines = Annotated[DetectionEngines, Depends(get_engines)]
 
 _DEFAULT_WINDOW_DAYS = 30
-# Maximum number of alerts scanned for coverage in one request. AlertQuery
-# caps ``limit`` at 1000, so we page through ``_MAX_SCAN_PAGES`` pages of
-# 1000 alerts each. 10 pages * 1000 = 10k alerts.
-_MAX_SCAN_PAGES = 10
-_SCAN_PAGE_SIZE = 1_000
-_MAX_ALERT_SCAN = _MAX_SCAN_PAGES * _SCAN_PAGE_SIZE
+# Upper bound for a single coverage scan. Matches AlertQuery.limit ceiling;
+# one SQL query replaces the former 10-page x 1_000-row loop.
+_MAX_ALERT_SCAN = 10_000
 
 
 def _parse_iso_or_422(value: str) -> datetime:
@@ -73,23 +67,11 @@ async def _scan_alerts(
     alert_store: AlertStore,
     time_range: TimeRange,
 ) -> list[Alert]:
-    """Page through up to ``_MAX_ALERT_SCAN`` alerts and warn if the cap hits."""
-    alerts: list[Alert] = []
-    page = None
-    for page_num in range(1, _MAX_SCAN_PAGES + 1):
-        page = await alert_store.query_alerts(
-            AlertQuery(time_range=time_range, page=page_num, limit=_SCAN_PAGE_SIZE)
-        )
-        alerts.extend(page.items)
-        if not page.has_next:
-            break
-    if page is not None and page.has_next:
-        _log.warning(
-            "attack/coverage alert scan hit cap (%d alerts); "
-            "summary counts may understate the true window total",
-            _MAX_ALERT_SCAN,
-        )
-    return alerts
+    """Fetch up to ``_MAX_ALERT_SCAN`` alerts in a single SQL query."""
+    page = await alert_store.query_alerts(
+        AlertQuery(time_range=time_range, page=1, limit=_MAX_ALERT_SCAN)
+    )
+    return list(page.items)
 
 
 @router.get(

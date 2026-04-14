@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import re
+
+_TECHNIQUE_PATTERN = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
+
 TACTICS: dict[str, str] = {
     "reconnaissance": "Reconnaissance (TA0043)",
     "resource_development": "Resource Development (TA0042)",
@@ -32,6 +36,11 @@ def format_tactic(name: str) -> str:
     Falls back to the raw name if not in the mapping.
     """
     return TACTICS.get(name, name)
+
+
+def is_valid_technique(value: str) -> bool:
+    """Return True if ``value`` matches the MITRE technique ID pattern."""
+    return bool(_TECHNIQUE_PATTERN.match(value))
 
 
 def format_technique(tid: str) -> str:

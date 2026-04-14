@@ -699,6 +699,8 @@ def _make_alert(
     dedup_key: str = "",
     severity: SeverityLevel = SeverityLevel.WARNING,
     timestamp_ns: int = 1_710_000_000_000_000_000,
+    mitre_tactics: tuple[str, ...] = (),
+    mitre_techniques: tuple[str, ...] = (),
 ) -> Alert:
     return Alert(
         alert_id=alert_id or str(uuid.uuid4()),
@@ -712,6 +714,8 @@ def _make_alert(
         entity_type="ip",
         contributing_events=(uuid.uuid4(),),
         dedup_key=dedup_key or str(uuid.uuid4()),
+        mitre_tactics=mitre_tactics,
+        mitre_techniques=mitre_techniques,
     )
 
 
@@ -799,6 +803,96 @@ class TestWriteAlert:
                 row = await cur.fetchone()
             decoded = msgspec.msgpack.decode(row[0], type=Alert)
             assert decoded.description == "second"
+        finally:
+            await backend.close()
+
+
+class TestWriteAlertJunctions:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_populates_junction_tables(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(
+                dedup_key="k1",
+                mitre_tactics=("discovery",),
+                mitre_techniques=("T1059.001",),
+            )
+            await backend.write_alert(alert)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1'"
+            ) as cur:
+                rows = [r[0] for r in await cur.fetchall()]
+            assert rows == ["discovery"]
+            async with await backend._conn.execute(
+                "SELECT technique FROM alert_techniques WHERE dedup_key='k1'"
+            ) as cur:
+                rows = [r[0] for r in await cur.fetchall()]
+            assert rows == ["T1059.001"]
+        finally:
+            await backend.close()
+
+    async def test_upsert_replaces_junction_rows(self) -> None:
+        """Window-reset (outside dedup window) replaces junction rows."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            first = _make_alert(
+                dedup_key="k1",
+                timestamp_ns=base_ns,
+                mitre_tactics=("discovery", "execution"),
+                mitre_techniques=("T1059", "T1059.001"),
+            )
+            await backend.write_alert(first)
+            # Outside the default 900s dedup window → window-reset path
+            second = _make_alert(
+                dedup_key="k1",
+                alert_id="new-id",
+                timestamp_ns=base_ns + 1_000_000_000_000,  # +1000s
+                mitre_tactics=("execution",),
+                mitre_techniques=("T1059.001",),
+            )
+            await backend.write_alert(second)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1' ORDER BY tactic"
+            ) as cur:
+                tactics = [r[0] for r in await cur.fetchall()]
+            async with await backend._conn.execute(
+                "SELECT technique FROM alert_techniques WHERE dedup_key='k1'"
+            ) as cur:
+                techs = [r[0] for r in await cur.fetchall()]
+            assert tactics == ["execution"]
+            assert techs == ["T1059.001"]
+        finally:
+            await backend.close()
+
+    async def test_dedup_bump_within_window_preserves_junction_rows(self) -> None:
+        """Within-window dedup bump keeps the stored alert and its junction rows."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            first = _make_alert(
+                dedup_key="k1",
+                timestamp_ns=base_ns,
+                mitre_tactics=("discovery",),
+            )
+            await backend.write_alert(first)
+            # Dedup bump within window (default 900s) with EMPTY tactics
+            second = _make_alert(
+                dedup_key="k1",
+                alert_id="new-id",
+                timestamp_ns=base_ns + 60_000_000_000,  # +60s
+                mitre_tactics=(),
+            )
+            await backend.write_alert(second)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1'"
+            ) as cur:
+                tactics = [r[0] for r in await cur.fetchall()]
+            # Original junction rows preserved because stored alert is unchanged
+            assert tactics == ["discovery"]
         finally:
             await backend.close()
 
@@ -1076,37 +1170,46 @@ class TestQueryAlertsMitreFilter:
             await backend.close()
 
     async def test_pagination_under_filter_preserves_total(self) -> None:
-        alerts = [
-            _make_mitre_alert(
-                alert_id=f"a{i}",
-                ts_ns=1_000 + i,
-                tactics=("discovery",),
-                techniques=("t1033",),
-                dedup_key=f"test:a{i}",
-            )
-            for i in range(5)
-        ]
-        backend = await self._make_backend_with_alerts(alerts)
+        backend = await self._make_backend_with_alerts()
         try:
-            page1 = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=2))
-            page2 = await backend.query_alerts(AlertQuery(tactic="discovery", page=2, limit=2))
-            page3 = await backend.query_alerts(AlertQuery(tactic="discovery", page=3, limit=2))
-            assert page1.total == 5
-            assert page2.total == 5
-            assert page3.total == 5
-            assert len(page1.items) == 2
-            assert len(page2.items) == 2
-            assert len(page3.items) == 1
-            assert page1.has_next is True
-            assert page2.has_next is True
-            assert page3.has_next is False
+            for i in range(10_050):
+                await backend.write_alert(
+                    _make_mitre_alert(
+                        alert_id=f"a{i}",
+                        ts_ns=1_000 + i,
+                        tactics=("discovery",),
+                        techniques=("t1033",),
+                        dedup_key=f"test:a{i}",
+                    )
+                )
+            page = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=50))
+            assert page.total == 10_050
+            assert len(page.items) == 50
         finally:
             await backend.close()
 
-    async def test_fast_and_slow_paths_agree_on_overlapping_alerts(self) -> None:
-        """Unfiltered (fast SQL path) and ``tactic="discovery"`` (slow
-        post-decode path) must agree on the discovery-tagged subset.
-        Locks in the invariant that the two paths return consistent data.
+    async def test_technique_filter_case_insensitive_sql(self) -> None:
+        backend = await self._make_backend_with_alerts(
+            [
+                _make_mitre_alert(
+                    alert_id="k1",
+                    ts_ns=1_000,
+                    tactics=("discovery",),
+                    techniques=("T1059.001",),
+                    dedup_key="k1",
+                ),
+            ]
+        )
+        try:
+            page = await backend.query_alerts(AlertQuery(technique="t1059.001", page=1, limit=10))
+            assert page.total == 1
+        finally:
+            await backend.close()
+
+    async def test_unfiltered_and_tactic_filter_agree_on_overlap(self) -> None:
+        """Unfiltered query and ``tactic="discovery"`` must agree on the
+        discovery-tagged subset. Locks in the invariant that both paths
+        return consistent data now that both are SQL-level.
         """
         alerts = [
             _make_mitre_alert(
@@ -1120,13 +1223,15 @@ class TestQueryAlertsMitreFilter:
         ]
         backend = await self._make_backend_with_alerts(alerts)
         try:
-            fast = await backend.query_alerts(AlertQuery(limit=100))
-            slow = await backend.query_alerts(AlertQuery(tactic="discovery", limit=100))
-            assert fast.total == 6
-            assert slow.total == 3
-            fast_discovery_ids = {a.alert_id for a in fast.items if "discovery" in a.mitre_tactics}
-            slow_ids = {a.alert_id for a in slow.items}
-            assert fast_discovery_ids == slow_ids
+            unfiltered = await backend.query_alerts(AlertQuery(limit=100))
+            filtered = await backend.query_alerts(AlertQuery(tactic="discovery", limit=100))
+            assert unfiltered.total == 6
+            assert filtered.total == 3
+            unfiltered_discovery_ids = {
+                a.alert_id for a in unfiltered.items if "discovery" in a.mitre_tactics
+            }
+            filtered_ids = {a.alert_id for a in filtered.items}
+            assert unfiltered_discovery_ids == filtered_ids
         finally:
             await backend.close()
 

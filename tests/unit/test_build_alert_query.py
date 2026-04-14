@@ -41,3 +41,36 @@ class TestBuildAlertQuery:
         )
         assert " AND " in where
         assert len(params) == 5  # start, end, type, severity, entity
+
+
+def test_build_alert_query_emits_tactic_predicate():
+    """Tactic filter emits a direct predicate; junction is the query driver."""
+    q = AlertQuery(
+        time_range=TimeRange(start_ns=0, end_ns=1),
+        tactic="discovery",
+    )
+    where, params = _build_alert_query(q)
+    assert "at.tactic = ?" in where
+    assert "discovery" in params
+
+
+def test_build_alert_query_emits_technique_predicate_normalized():
+    """Technique filter emits a direct predicate and normalizes the value."""
+    q = AlertQuery(
+        time_range=TimeRange(start_ns=0, end_ns=1),
+        technique="t1059.001",
+    )
+    where, params = _build_alert_query(q)
+    assert "atq.technique = ?" in where
+    assert "T1059.001" in params
+
+
+def test_build_alert_query_tactic_and_technique_uses_exists_for_technique():
+    """When both are set, tactic drives and technique becomes a correlated EXISTS."""
+    q = AlertQuery(tactic="discovery", technique="t1059.001")
+    where, params = _build_alert_query(q)
+    assert "at.tactic = ?" in where
+    assert "EXISTS" in where
+    assert "alert_techniques" in where
+    assert "discovery" in params
+    assert "T1059.001" in params
