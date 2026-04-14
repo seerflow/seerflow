@@ -35,7 +35,7 @@ def fake_dist(tmp_path: Path) -> Path:
 
 
 def test_root_serves_dashboard_html(backend: SqliteBackend, fake_dist: Path) -> None:
-    with patch("seerflow.api.app._DEFAULT_DIST", fake_dist):
+    with patch("seerflow.api.app.DEFAULT_DIST", fake_dist):
         app = create_api_app(log_store=backend, alert_store=backend)
     client = TestClient(app)
     response = client.get("/")
@@ -47,7 +47,7 @@ def test_root_serves_dashboard_html(backend: SqliteBackend, fake_dist: Path) -> 
 def test_health_route_still_works_with_dashboard_mounted(
     backend: SqliteBackend, fake_dist: Path
 ) -> None:
-    with patch("seerflow.api.app._DEFAULT_DIST", fake_dist):
+    with patch("seerflow.api.app.DEFAULT_DIST", fake_dist):
         app = create_api_app(log_store=backend, alert_store=backend)
     client = TestClient(app)
     response = client.get("/api/v1/health")
@@ -55,7 +55,7 @@ def test_health_route_still_works_with_dashboard_mounted(
 
 
 def test_spa_fallback_does_not_shadow_api_404s(backend: SqliteBackend, fake_dist: Path) -> None:
-    with patch("seerflow.api.app._DEFAULT_DIST", fake_dist):
+    with patch("seerflow.api.app.DEFAULT_DIST", fake_dist):
         app = create_api_app(log_store=backend, alert_store=backend)
     client = TestClient(app)
     # /api/v1/... is handled by FastAPI (404 JSON), NOT the SPA.
@@ -66,7 +66,7 @@ def test_spa_fallback_does_not_shadow_api_404s(backend: SqliteBackend, fake_dist
 
 def test_app_starts_without_dist(backend: SqliteBackend, tmp_path: Path) -> None:
     missing = tmp_path / "absent"
-    with patch("seerflow.api.app._DEFAULT_DIST", missing):
+    with patch("seerflow.api.app.DEFAULT_DIST", missing):
         app = create_api_app(log_store=backend, alert_store=backend)
     client = TestClient(app)
     assert client.get("/").status_code == 404

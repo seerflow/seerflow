@@ -55,4 +55,4 @@ def test_preflight_fails_loudly_when_required_and_missing(
         check=False,
     )
     assert result.returncode != 0
-    assert "frontend build missing" in result.stderr.lower()
+    assert "frontend build missing" in result.stderr
