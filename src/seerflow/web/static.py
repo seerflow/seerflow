@@ -41,7 +41,7 @@ class _SpaStaticFiles(StaticFiles):
         try:
             return await super().get_response(path, scope)
         except HTTPException as exc:
-            if exc.status_code == 404:
+            if exc.status_code == 404 and not path.startswith("api/"):
                 return FileResponse(self._index)
             raise
 

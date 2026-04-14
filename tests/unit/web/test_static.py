@@ -50,3 +50,16 @@ def test_spa_fallback_returns_index_for_unknown_path(tmp_path: Path) -> None:
     response = client.get("/unknown/deep/route")
     assert response.status_code == 200
     assert "<!doctype html>" in response.text
+
+
+def test_api_prefix_does_not_get_spa_fallback(tmp_path: Path) -> None:
+    """Paths under ``/api/`` must return 404, never the SPA index.
+
+    Guards against a regression where the SPA fallback swallows API
+    misses and breaks JSON clients.
+    """
+    app = FastAPI()
+    mount_dashboard(app, dist_dir=_write_dist(tmp_path))
+    client = TestClient(app)
+    response = client.get("/api/v1/does-not-exist")
+    assert response.status_code == 404
