@@ -6,7 +6,7 @@ This module owns:
 * the per-request key function (``_key_func``)
 * the configurable limit-string closures (``list_limit`` / ``detail_limit``)
 * the CORS allowlist resolver (``resolve_allowed_origins``)
-* the per-app ``Limiter`` factory (``build_limiter``)
+* the per-app ``Limiter`` reconfiguration (``configure_limiter``)
 
 Routes decorate with ``@limiter.limit(list_limit)`` or
 ``@limiter.limit(detail_limit)``; at request time, ``SlowAPIMiddleware``
@@ -71,7 +71,7 @@ def resolve_allowed_origins(config: SeerflowConfig | None) -> tuple[str, ...]:
     return _default_localhost_origins(config.dashboard_port)
 
 
-def configure_limiter(config: SeerflowConfig) -> Limiter:
+def configure_limiter(config: SeerflowConfig) -> None:
     """Configure the module-level ``limiter`` for the current app.
 
     Route decorators capture the module-level ``limiter`` singleton at
@@ -109,8 +109,6 @@ def configure_limiter(config: SeerflowConfig) -> Limiter:
     global _current_list_limit, _current_detail_limit
     _current_list_limit = config.api_list_rate_limit
     _current_detail_limit = config.api_detail_rate_limit
-
-    return limiter
 
 
 # Module-level limit strings. ``slowapi.Limiter.limit`` accepts a

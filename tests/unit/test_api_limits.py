@@ -90,15 +90,16 @@ class TestResolveAllowedOrigins:
 
 class TestBuildLimiter:
     def test_in_memory_when_no_redis_url(self) -> None:
-        cfg = SeerflowConfig(api_rate_limit_redis_url=None)
-        limiter = configure_limiter(cfg)
-        assert limiter is not None
-        assert limiter.enabled is True
+        from seerflow.api.limits import limiter as _limiter
+
+        configure_limiter(SeerflowConfig(api_rate_limit_redis_url=None))
+        assert _limiter.enabled is True
 
     def test_respects_enabled_false(self) -> None:
-        cfg = SeerflowConfig(api_rate_limit_enabled=False)
-        limiter = configure_limiter(cfg)
-        assert limiter.enabled is False
+        from seerflow.api.limits import limiter as _limiter
+
+        configure_limiter(SeerflowConfig(api_rate_limit_enabled=False))
+        assert _limiter.enabled is False
 
     def test_raises_when_redis_url_set_and_pkg_missing(
         self, monkeypatch: pytest.MonkeyPatch

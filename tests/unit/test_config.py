@@ -1501,3 +1501,20 @@ class TestApiConfig:
         )
         with pytest.raises(ConfigError, match="api_allowed_origins"):
             load_config(cfg_path)
+
+    def test_api_allowed_origins_rejects_wildcard(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_allowed_origins:\n  - '*'\n"
+        )
+        with pytest.raises(ConfigError, match="must not contain"):
+            load_config(cfg_path)
+
+    def test_api_allowed_origins_rejects_schemeless_entries(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
+            "api_allowed_origins:\n  - 'dash.example.com'\n"
+        )
+        with pytest.raises(ConfigError, match="http://"):
+            load_config(cfg_path)

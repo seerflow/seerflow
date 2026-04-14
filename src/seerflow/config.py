@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from seerflow.alerting.dispatcher import WebhookTarget
 
 import yaml
+from limits import parse as _parse_limit_string
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
@@ -1011,10 +1012,8 @@ class _ApiFields(NamedTuple):
 
 def _validate_rate_limit_string(field_name: str, value: str) -> str:
     """Validate a ``limits``-compatible rate limit string (e.g. ``60/minute``)."""
-    from limits import parse as _parse_limit
-
     try:
-        _parse_limit(value)
+        _parse_limit_string(value)
     except ValueError as exc:
         raise ConfigError(f"{field_name} is not a valid rate limit string: {value!r}") from exc
     return value
@@ -1045,12 +1044,22 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
         )
     if not all(isinstance(o, str) for o in origins_raw):
         raise ConfigError("api_allowed_origins items must be strings")
+    for origin in origins_raw:
+        if origin == "*":
+            raise ConfigError(
+                "api_allowed_origins must not contain '*' — wildcard defeats "
+                "the purpose of the allowlist. Enumerate explicit origins."
+            )
+        if not (origin.startswith("http://") or origin.startswith("https://")):
+            raise ConfigError(
+                f"api_allowed_origins entries must start with http:// or https://, got {origin!r}"
+            )
     origins: tuple[str, ...] = tuple(origins_raw)
 
-    list_limit = _validate_rate_limit_string(
+    list_limit_str = _validate_rate_limit_string(
         "api_list_rate_limit", str(raw.get("api_list_rate_limit", "60/minute"))
     )
-    detail_limit = _validate_rate_limit_string(
+    detail_limit_str = _validate_rate_limit_string(
         "api_detail_rate_limit", str(raw.get("api_detail_rate_limit", "300/minute"))
     )
 
@@ -1064,7 +1073,7 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
         api_rate_limit_enabled=enabled_raw,
         api_rate_limit_redis_url=redis_url,
         api_allowed_origins=origins,
-        api_list_rate_limit=list_limit,
-        api_detail_rate_limit=detail_limit,
+        api_list_rate_limit=list_limit_str,
+        api_detail_rate_limit=detail_limit_str,
         api_trust_proxy_headers=trust_proxy_raw,
     )

@@ -271,3 +271,33 @@ class TestSecurityMiddleware:
         mw = self._find_cors(app)
         assert mw is not None
         assert "https://ws.example.com" in mw.kwargs["allow_origins"]  # type: ignore[attr-defined]
+
+
+class TestRateLimitHandler:
+    """Contract checks for the 429 handler."""
+
+    async def test_retry_after_is_positive_integer(self) -> None:
+        from limits import parse as _parse_limit
+        from slowapi.errors import RateLimitExceeded
+        from slowapi.wrappers import Limit
+
+        from seerflow.api.app import _rate_limit_handler
+
+        item = _parse_limit("60/minute")
+        wrapper = Limit(
+            limit=item,
+            key_func=lambda: "k",
+            scope=None,
+            per_method=False,
+            methods=None,
+            error_message=None,
+            exempt_when=None,
+            cost=1,
+            override_defaults=False,
+        )
+        exc = RateLimitExceeded(wrapper)
+        response = await _rate_limit_handler(request=None, exc=exc)  # type: ignore[arg-type]
+        assert response.status_code == 429
+        retry_after = response.headers["retry-after"]
+        assert retry_after.isdigit()
+        assert int(retry_after) > 0
