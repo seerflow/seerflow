@@ -29,6 +29,7 @@ def _client(backend: SqliteBackend, **overrides: object) -> TestClient:
         "api_rate_limit_enabled": True,
         "api_list_rate_limit": "2/minute",
         "api_detail_rate_limit": "100/minute",
+        "api_coverage_rate_limit": "2/minute",
         "api_allowed_origins": ("http://localhost:3000",),
     }
     defaults.update(overrides)

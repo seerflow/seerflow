@@ -7,6 +7,9 @@ from seerflow.config import SeerflowConfig
 
 
 def test_coverage_limit_default_matches_config() -> None:
+    # Reset module-level state — other tests in the suite may have rebound
+    # _current_coverage_limit via configure_limiter(non-default).
+    limits.configure_limiter(SeerflowConfig())
     assert limits.coverage_limit() == SeerflowConfig().api_coverage_rate_limit
 
 
