@@ -174,7 +174,23 @@ async def test_mitre_filter_sql_vs_decode_baseline(tmp_path: Path) -> None:
                 f"SQL vs decode ratio {ratio:.2f}x (<10x expected). "
                 f"sql={sql_elapsed:.3f}s baseline={baseline_elapsed:.3f}s. "
                 "Set SEERFLOW_BENCH_GATE=1 to enforce.",
+                category=UserWarning,
                 stacklevel=2,
             )
     finally:
         await backend.close()
+
+
+def test_benchmark_warn_uses_explicit_user_warning_category() -> None:
+    """S-187: the SQL/decode ratio warning must pass category explicitly.
+
+    Static-analysis tools and CI warning filters can reliably target the
+    benchmark warning only when ``category=`` is passed.
+    """
+    import inspect
+
+    source = inspect.getsource(test_mitre_filter_sql_vs_decode_baseline)
+    assert "category=UserWarning" in source, (
+        "test_mitre_filter_sql_vs_decode_baseline must pass "
+        "category=UserWarning explicitly to warnings.warn"
+    )
