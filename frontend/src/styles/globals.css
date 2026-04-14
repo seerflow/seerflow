@@ -34,16 +34,17 @@
   }
 
   [data-theme="dark"] {
-    --bg: 222.2 84% 4.9%;
+    /* Matches the dark wordmark background (#0e1c29). */
+    --bg: 209 49% 11%;
     --fg: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --accent: 217.2 32.6% 17.5%;
+    --muted: 209 35% 18%;
+    --accent: 209 35% 18%;
 
     --background: var(--bg);
     --foreground: var(--fg);
-    --card: 222.2 84% 4.9%;
+    --card: 209 49% 11%;
     --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
+    --popover: 209 49% 11%;
     --popover-foreground: 210 40% 98%;
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
