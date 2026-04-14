@@ -17,7 +17,11 @@ export function AlertDetailPanel({ alert, onFeedback }: Props): JSX.Element {
     let cancelled = false;
     api.get<AlertDetail>(`/api/v1/alerts/${alert.alert_id}`)
       .then(d => { if (!cancelled) setDetail(d); })
-      .catch((e: ApiError) => { if (!cancelled) setErr(e.message); });
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const msg = e instanceof ApiError ? e.message : "Failed to load alert detail";
+        setErr(msg);
+      });
     return () => { cancelled = true; };
   }, [alert.alert_id]);
 
@@ -36,7 +40,7 @@ export function AlertDetailPanel({ alert, onFeedback }: Props): JSX.Element {
   if (!detail) return <div className="p-4 text-muted-foreground">Loading…</div>;
 
   return (
-    <div className="flex flex-col gap-3 p-4 border-l bg-background/50">
+    <div id={`alert-detail-${alert.alert_id}`} className="flex flex-col gap-3 p-4 border-l bg-background/50">
       <h3 className="font-semibold">{detail.rule_name}</h3>
       <p className="text-sm">{detail.message}</p>
       {(detail.entity_value || detail.entity_type) && (

@@ -13,6 +13,7 @@ function Row({ alert, onClick, isOpen }: Props): JSX.Element {
       type="button"
       aria-label={`alert ${alert.rule_name}`}
       aria-expanded={isOpen ?? false}
+      aria-controls={`alert-detail-${alert.alert_id}`}
       onClick={() => onClick(alert.alert_id)}
       className={cn(
         "w-full flex items-center gap-3 border-l-4 px-3 py-2 text-left hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring",

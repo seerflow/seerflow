@@ -22,6 +22,11 @@ const emptyFilter = (): AlertFilter => ({
   severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set(),
 });
 
+function insertSorted(buf: Alert[], a: Alert): Alert[] {
+  const pos = buf.findIndex(x => x.timestamp_ns <= a.timestamp_ns);
+  return pos === -1 ? [...buf, a] : [...buf.slice(0, pos), a, ...buf.slice(pos)];
+}
+
 function mergePrepend(buf: Alert[], incoming: Alert, max: number): { alerts: Alert[]; dropped: number } {
   const i = buf.findIndex(x => x.alert_id === incoming.alert_id);
   let next: Alert[];
@@ -30,9 +35,10 @@ function mergePrepend(buf: Alert[], incoming: Alert, max: number): { alerts: Ale
     const merged: Alert = incoming.timestamp_ns >= existing.timestamp_ns
       ? { ...existing, ...incoming, dedup_count: Math.max(existing.dedup_count, incoming.dedup_count) }
       : { ...incoming, ...existing, dedup_count: Math.max(existing.dedup_count, incoming.dedup_count) };
-    next = [merged, ...buf.slice(0, i), ...buf.slice(i + 1)];
+    const without = [...buf.slice(0, i), ...buf.slice(i + 1)];
+    next = insertSorted(without, merged);
   } else {
-    next = [incoming, ...buf];
+    next = insertSorted(buf, incoming);
   }
   const dropped = Math.max(0, next.length - max);
   return { alerts: next.slice(0, max), dropped };
@@ -50,13 +56,21 @@ export function createAlertStore(max = MAX_ALERTS) {
       return { alerts: r.alerts, dropped: s.dropped + r.dropped };
     }),
     backfill: (list) => set(s => {
-      const sorted = [...list].sort((x, y) => y.timestamp_ns - x.timestamp_ns);
-      let { alerts, dropped } = s;
-      for (const a of sorted.slice().reverse()) {
-        const r = mergePrepend(alerts, a, max);
-        alerts = r.alerts; dropped += r.dropped;
+      const byId = new Map<string, Alert>();
+      for (const a of s.alerts) byId.set(a.alert_id, a);
+      for (const a of list) {
+        const existing = byId.get(a.alert_id);
+        if (!existing) {
+          byId.set(a.alert_id, a);
+        } else if (a.timestamp_ns >= existing.timestamp_ns) {
+          byId.set(a.alert_id, { ...existing, ...a, dedup_count: Math.max(existing.dedup_count, a.dedup_count) });
+        } else {
+          byId.set(a.alert_id, { ...a, ...existing, dedup_count: Math.max(existing.dedup_count, a.dedup_count) });
+        }
       }
-      return { alerts, dropped };
+      const sorted = [...byId.values()].sort((x, y) => y.timestamp_ns - x.timestamp_ns);
+      const dropped = Math.max(0, sorted.length - max);
+      return { alerts: sorted.slice(0, max), dropped: s.dropped + dropped };
     }),
     setFilter: (p) => set(s => ({ filter: { ...s.filter, ...p } })),
     setStatus: (status) => set({ status }),
