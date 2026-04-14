@@ -58,9 +58,39 @@ async def _migrate_v2_graph_edges(conn: aiosqlite.Connection) -> None:
     )
 
 
+async def _migrate_v3_mitre_junctions(conn: aiosqlite.Connection) -> None:
+    """Migration 3: junction tables for tactic/technique filtering.
+
+    Schema only — backfill lands in migration task 2.
+    """
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS alert_tactics (
+            dedup_key TEXT NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
+            tactic    TEXT NOT NULL,
+            PRIMARY KEY (dedup_key, tactic)
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alert_tactics_tactic "
+        "ON alert_tactics(tactic)"
+    )
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS alert_techniques (
+            dedup_key TEXT NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
+            technique TEXT NOT NULL,
+            PRIMARY KEY (dedup_key, technique)
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alert_techniques_technique "
+        "ON alert_techniques(technique)"
+    )
+
+
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     1: _migrate_v1_bootstrap,
     2: _migrate_v2_graph_edges,
+    3: _migrate_v3_mitre_junctions,
 }
 
 

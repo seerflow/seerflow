@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import patch
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 import aiosqlite
 import pytest
@@ -147,3 +144,12 @@ class TestSqliteBackendMigration:
             assert version == max(MIGRATIONS)
         finally:
             await storage2.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_v3_registered_and_applied(tmp_path: Path) -> None:
+    assert 3 in MIGRATIONS
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await run_migrations(conn)
+        assert await get_schema_version(conn) >= 3
