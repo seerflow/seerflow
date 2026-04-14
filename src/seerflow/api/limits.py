@@ -126,9 +126,10 @@ def configure_limiter(config: SeerflowConfig) -> None:
     limiter._storage = fresh._storage
     limiter._limiter = fresh._limiter
 
-    global _current_list_limit, _current_detail_limit
+    global _current_list_limit, _current_detail_limit, _current_coverage_limit
     _current_list_limit = config.api_list_rate_limit
     _current_detail_limit = config.api_detail_rate_limit
+    _current_coverage_limit = config.api_coverage_rate_limit
 
 
 # Module-level limit strings. ``slowapi.Limiter.limit`` accepts a
@@ -140,6 +141,7 @@ def configure_limiter(config: SeerflowConfig) -> None:
 _DEFAULTS = SeerflowConfig()
 _current_list_limit = _DEFAULTS.api_list_rate_limit
 _current_detail_limit = _DEFAULTS.api_detail_rate_limit
+_current_coverage_limit = _DEFAULTS.api_coverage_rate_limit
 
 
 def list_limit() -> str:
@@ -150,6 +152,11 @@ def list_limit() -> str:
 def detail_limit() -> str:
     """Return the current detail-endpoint rate limit string."""
     return _current_detail_limit
+
+
+def coverage_limit() -> str:
+    """Return the current coverage-endpoint rate limit string."""
+    return _current_coverage_limit
 
 
 # Module-level singleton — slowapi decorator target. ``configure_limiter``
