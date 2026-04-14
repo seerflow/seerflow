@@ -267,6 +267,19 @@ ON CONFLICT(template_id) DO UPDATE SET
 """
 
 
+# NOTE(S-073): when the PostgreSQL backend lands, mirror this schema and query
+# shape. Junction tables carry a denormalized ``timestamp_ns`` so the filter
+# path drives from the junction index without a sort step:
+#     CREATE TABLE alert_tactics (
+#         dedup_key    TEXT    NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
+#         tactic       TEXT    NOT NULL,
+#         timestamp_ns BIGINT  NOT NULL,
+#         PRIMARY KEY (dedup_key, tactic)
+#     );
+#     CREATE INDEX idx_alert_tactics_tactic_time
+#         ON alert_tactics(tactic, timestamp_ns DESC);
+# (same for alert_techniques). The PG ``write_alert`` must dual-write junction
+# rows in the same transaction as the alert upsert, keyed on ``dedup_key``.
 def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
     """Build WHERE clause and params from AlertQuery (including mitre filters).
 
