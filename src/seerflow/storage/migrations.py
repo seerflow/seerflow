@@ -15,6 +15,10 @@ import logging
 from typing import TYPE_CHECKING
 
 import aiosqlite
+import msgspec
+
+from seerflow.models.alert import Alert
+from seerflow.sigma.attack import format_technique
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -99,11 +103,6 @@ _BACKFILL_CHUNK = 1000
 
 async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
     """Stream existing alerts, decode msgpack, populate junction rows."""
-    import msgspec
-
-    from seerflow.models.alert import Alert
-    from seerflow.sigma.attack import format_technique
-
     async with conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='alerts'"
     ) as cur:
@@ -156,6 +155,8 @@ async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
         processed += len(rows)
         if processed % (_BACKFILL_CHUNK * 10) == 0:
             logger.info("v3 backfill: processed %d alerts", processed)
+        # Commit per-chunk to release WAL pressure on large backfills.
+        await conn.commit()
 
 
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {

@@ -38,6 +38,8 @@ Storage = Annotated[StorageDeps, Depends(get_storage)]
 Engines = Annotated[DetectionEngines, Depends(get_engines)]
 
 _DEFAULT_WINDOW_DAYS = 30
+# Upper bound for a single coverage scan. Matches AlertQuery.limit ceiling;
+# one SQL query replaces the former 10-page x 1_000-row loop.
 _MAX_ALERT_SCAN = 10_000
 
 

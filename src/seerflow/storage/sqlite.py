@@ -694,27 +694,32 @@ class SqliteBackend:
         try:
             async with await self._conn.execute(_INSERT_ALERT_SQL, params) as cursor:
                 row = await cursor.fetchone()
-            await self._conn.execute(
-                "DELETE FROM alert_tactics WHERE dedup_key = ?", (alert.dedup_key,)
-            )
-            await self._conn.execute(
-                "DELETE FROM alert_techniques WHERE dedup_key = ?", (alert.dedup_key,)
-            )
-            if alert.mitre_tactics:
-                await self._conn.executemany(
-                    "INSERT OR IGNORE INTO alert_tactics "
-                    "(dedup_key, tactic, timestamp_ns) VALUES (?, ?, ?)",
-                    [(alert.dedup_key, t, alert.timestamp_ns) for t in alert.mitre_tactics],
+            # Only refresh junction rows when this is a fresh insert or a
+            # window-reset (dedup_count == 1). Within-window dedup bumps
+            # preserve the stored alert and its timestamp, so its junction
+            # rows are already correct.
+            if row is not None and row[0] == 1:
+                await self._conn.execute(
+                    "DELETE FROM alert_tactics WHERE dedup_key = ?", (alert.dedup_key,)
                 )
-            if alert.mitre_techniques:
-                await self._conn.executemany(
-                    "INSERT OR IGNORE INTO alert_techniques "
-                    "(dedup_key, technique, timestamp_ns) VALUES (?, ?, ?)",
-                    [
-                        (alert.dedup_key, format_technique(t), alert.timestamp_ns)
-                        for t in alert.mitre_techniques
-                    ],
+                await self._conn.execute(
+                    "DELETE FROM alert_techniques WHERE dedup_key = ?", (alert.dedup_key,)
                 )
+                if alert.mitre_tactics:
+                    await self._conn.executemany(
+                        "INSERT OR IGNORE INTO alert_tactics "
+                        "(dedup_key, tactic, timestamp_ns) VALUES (?, ?, ?)",
+                        [(alert.dedup_key, t, alert.timestamp_ns) for t in alert.mitre_tactics],
+                    )
+                if alert.mitre_techniques:
+                    await self._conn.executemany(
+                        "INSERT OR IGNORE INTO alert_techniques "
+                        "(dedup_key, technique, timestamp_ns) VALUES (?, ?, ?)",
+                        [
+                            (alert.dedup_key, format_technique(t), alert.timestamp_ns)
+                            for t in alert.mitre_techniques
+                        ],
+                    )
             await self._conn.commit()
         except Exception:
             await self._conn.rollback()

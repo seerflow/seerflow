@@ -835,17 +835,22 @@ class TestWriteAlertJunctions:
             await backend.close()
 
     async def test_upsert_replaces_junction_rows(self) -> None:
+        """Window-reset (outside dedup window) replaces junction rows."""
         backend = await self._make_backend()
         try:
+            base_ns = 1_710_000_000_000_000_000
             first = _make_alert(
                 dedup_key="k1",
+                timestamp_ns=base_ns,
                 mitre_tactics=("discovery", "execution"),
                 mitre_techniques=("T1059", "T1059.001"),
             )
             await backend.write_alert(first)
+            # Outside the default 900s dedup window → window-reset path
             second = _make_alert(
                 dedup_key="k1",
                 alert_id="new-id",
+                timestamp_ns=base_ns + 1_000_000_000_000,  # +1000s
                 mitre_tactics=("execution",),
                 mitre_techniques=("T1059.001",),
             )
@@ -860,6 +865,34 @@ class TestWriteAlertJunctions:
                 techs = [r[0] for r in await cur.fetchall()]
             assert tactics == ["execution"]
             assert techs == ["T1059.001"]
+        finally:
+            await backend.close()
+
+    async def test_dedup_bump_within_window_preserves_junction_rows(self) -> None:
+        """Within-window dedup bump keeps the stored alert and its junction rows."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            first = _make_alert(
+                dedup_key="k1",
+                timestamp_ns=base_ns,
+                mitre_tactics=("discovery",),
+            )
+            await backend.write_alert(first)
+            # Dedup bump within window (default 900s) with EMPTY tactics
+            second = _make_alert(
+                dedup_key="k1",
+                alert_id="new-id",
+                timestamp_ns=base_ns + 60_000_000_000,  # +60s
+                mitre_tactics=(),
+            )
+            await backend.write_alert(second)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1'"
+            ) as cur:
+                tactics = [r[0] for r in await cur.fetchall()]
+            # Original junction rows preserved because stored alert is unchanged
+            assert tactics == ["discovery"]
         finally:
             await backend.close()
 
