@@ -45,9 +45,7 @@ class TestRedactConfig:
         assert data["alerting"]["pagerduty_routing_key"] == ""
 
     def test_api_rate_limit_redis_url_masked_when_set(self) -> None:
-        cfg = SeerflowConfig(
-            api_rate_limit_redis_url="redis://:SECRET@redis.internal:6379/0"
-        )
+        cfg = SeerflowConfig(api_rate_limit_redis_url="redis://:SECRET@redis.internal:6379/0")
         data = redact_config(cfg)
         assert data["api_rate_limit_redis_url"] == "***"
         assert "SECRET" not in str(data)
