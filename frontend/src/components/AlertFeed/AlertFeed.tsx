@@ -53,7 +53,20 @@ export function AlertFeed(): JSX.Element {
     getFilterMessage: () => toWsFilter(useAlertStore.getState().filter),
   });
 
-  useEffect(() => { send(toWsFilter(filter)); }, [filter, send]);
+  useEffect(() => {
+    const t = setTimeout(() => send(toWsFilter(filter)), 150);
+    return () => clearTimeout(t);
+  }, [filter, send]);
+
+  const [showDisconnected, setShowDisconnected] = useState(false);
+  useEffect(() => {
+    if (status === "closed") {
+      const t = setTimeout(() => setShowDisconnected(true), 3000);
+      return () => clearTimeout(t);
+    }
+    setShowDisconnected(false);
+    return undefined;
+  }, [status]);
 
   const counts = useAlertStore(selectCounts);
   const visible = useAlertStore(selectVisible);
@@ -69,7 +82,7 @@ export function AlertFeed(): JSX.Element {
       <div className="flex flex-col flex-1 min-w-0">
         <SummaryBadges counts={counts} status={status} />
         <FilterBar filter={filter} sources={sources} tactics={tactics} onChange={setFilter} />
-        {status === "closed" && <div role="status" aria-live="polite" className="bg-amber-500/10 px-3 py-1 text-xs text-amber-700">Live stream disconnected — retrying…</div>}
+        {showDisconnected && <div role="status" aria-live="polite" className="bg-amber-500/10 px-3 py-1 text-xs text-amber-700">Live stream disconnected — retrying…</div>}
         <div className="flex-1 overflow-y-auto">
           {visible.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">No alerts in the last hour.</div>

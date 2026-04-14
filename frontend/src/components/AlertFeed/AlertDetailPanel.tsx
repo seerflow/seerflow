@@ -39,6 +39,16 @@ export function AlertDetailPanel({ alert, onFeedback }: Props): JSX.Element {
     <div className="flex flex-col gap-3 p-4 border-l bg-background/50">
       <h3 className="font-semibold">{detail.rule_name}</h3>
       <p className="text-sm">{detail.message}</p>
+      {(detail.entity_value || detail.entity_type) && (
+        <div className="flex flex-wrap gap-1" aria-label="entity references">
+          {detail.entity_type && (
+            <span className="rounded border bg-muted/30 px-2 py-0.5 text-xs font-mono">
+              {detail.entity_type}
+              {detail.entity_value ? `: ${detail.entity_value}` : ""}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap gap-1">
         {detail.mitre_tactics.map(t => <span key={t} className="rounded border px-2 py-0.5 text-xs">{t}</span>)}
         {detail.mitre_techniques.map(t => <span key={t} className="rounded border px-2 py-0.5 text-xs opacity-70">{t}</span>)}
