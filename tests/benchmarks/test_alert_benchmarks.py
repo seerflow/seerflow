@@ -185,12 +185,23 @@ def test_benchmark_warn_uses_explicit_user_warning_category() -> None:
     """S-187: the SQL/decode ratio warning must pass category explicitly.
 
     Static-analysis tools and CI warning filters can reliably target the
-    benchmark warning only when ``category=`` is passed.
+    benchmark warning only when ``category=`` is passed. Walks the AST
+    of :func:`test_mitre_filter_sql_vs_decode_baseline` so the assertion
+    is not fooled by the keyword appearing in a comment or string, and
+    fires deterministically without running the slow benchmark body.
     """
+    import ast
     import inspect
 
-    source = inspect.getsource(test_mitre_filter_sql_vs_decode_baseline)
-    assert "category=UserWarning" in source, (
-        "test_mitre_filter_sql_vs_decode_baseline must pass "
-        "category=UserWarning explicitly to warnings.warn"
+    tree = ast.parse(inspect.getsource(test_mitre_filter_sql_vs_decode_baseline))
+    warn_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "warn"
+    ]
+    assert warn_calls, "expected at least one warnings.warn() call"
+    assert all(any(kw.arg == "category" for kw in call.keywords) for call in warn_calls), (
+        "every warnings.warn() call must pass category= explicitly"
     )
