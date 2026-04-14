@@ -30,6 +30,7 @@ from seerflow.api.routes import (
     stats,
 )
 from seerflow.api.ws import ConnectionManager
+from seerflow.web import DEFAULT_DIST, mount_dashboard
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -220,4 +221,7 @@ def create_api_app(
 
     _register_routes(app)
     _install_security_middlewares(app, config)
+    # Mount the built React dashboard LAST so API routes (registered above)
+    # take precedence over the catch-all ``/`` StaticFiles mount.
+    mount_dashboard(app, dist_dir=DEFAULT_DIST)
     return app
