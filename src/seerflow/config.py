@@ -239,6 +239,13 @@ class SeerflowConfig:
     # localhost defaults derived from dashboard_port" (see api.app).
     ws_allowed_origins: tuple[str, ...] = ()
     ws_filter_min_interval_ms: int = 100
+    # API hardening (S-181).
+    api_rate_limit_enabled: bool = True
+    api_rate_limit_redis_url: str | None = None
+    api_allowed_origins: tuple[str, ...] = ()
+    api_list_rate_limit: str = "60/minute"
+    api_detail_rate_limit: str = "300/minute"
+    api_trust_proxy_headers: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -867,6 +874,7 @@ def load_config(
         ) from exc
 
     ws_fields = _parse_ws_fields(raw)
+    api_fields = _parse_api_fields(raw)
 
     return SeerflowConfig(
         storage=_build_storage(raw.get("storage", {})),
@@ -885,6 +893,12 @@ def load_config(
         ws_status_interval_s=ws_fields.ws_status_interval_s,
         ws_allowed_origins=ws_fields.ws_allowed_origins,
         ws_filter_min_interval_ms=ws_fields.ws_filter_min_interval_ms,
+        api_rate_limit_enabled=api_fields.api_rate_limit_enabled,
+        api_rate_limit_redis_url=api_fields.api_rate_limit_redis_url,
+        api_allowed_origins=api_fields.api_allowed_origins,
+        api_list_rate_limit=api_fields.api_list_rate_limit,
+        api_detail_rate_limit=api_fields.api_detail_rate_limit,
+        api_trust_proxy_headers=api_fields.api_trust_proxy_headers,
     )
 
 
@@ -981,4 +995,80 @@ def _parse_ws_fields(
         ws_status_interval_s=float(ws_status_interval_s),
         ws_allowed_origins=ws_allowed_origins,
         ws_filter_min_interval_ms=ws_filter_min_interval_ms,
+    )
+
+
+class _ApiFields(NamedTuple):
+    """Parsed ``api_*`` fields from a raw config dict (S-181)."""
+
+    api_rate_limit_enabled: bool
+    api_rate_limit_redis_url: str | None
+    api_allowed_origins: tuple[str, ...]
+    api_list_rate_limit: str
+    api_detail_rate_limit: str
+    api_trust_proxy_headers: bool
+
+
+def _validate_rate_limit_string(field_name: str, value: str) -> str:
+    """Validate a ``limits``-compatible rate limit string (e.g. ``60/minute``)."""
+    from limits import parse as _parse_limit
+
+    try:
+        _parse_limit(value)
+    except Exception as exc:
+        raise ConfigError(
+            f"{field_name} is not a valid rate limit string: {value!r}"
+        ) from exc
+    return value
+
+
+def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
+    """Parse and validate the top-level ``api_*`` API-hardening fields."""
+    enabled_raw = raw.get("api_rate_limit_enabled", True)
+    if not isinstance(enabled_raw, bool):
+        raise ConfigError(
+            f"api_rate_limit_enabled must be a boolean, got {type(enabled_raw).__name__}"
+        )
+
+    redis_url_raw = raw.get("api_rate_limit_redis_url")
+    if redis_url_raw is not None:
+        if not isinstance(redis_url_raw, str) or not redis_url_raw.strip():
+            raise ConfigError(
+                "api_rate_limit_redis_url must be a non-empty string or omitted"
+            )
+        redis_url: str | None = redis_url_raw.strip()
+    else:
+        redis_url = None
+
+    origins_raw = raw.get("api_allowed_origins", []) or []
+    if not isinstance(origins_raw, list):
+        raise ConfigError(
+            f"api_allowed_origins must be a list of strings, got "
+            f"{type(origins_raw).__name__}"
+        )
+    if not all(isinstance(o, str) for o in origins_raw):
+        raise ConfigError("api_allowed_origins items must be strings")
+    origins: tuple[str, ...] = tuple(origins_raw)
+
+    list_limit = _validate_rate_limit_string(
+        "api_list_rate_limit", str(raw.get("api_list_rate_limit", "60/minute"))
+    )
+    detail_limit = _validate_rate_limit_string(
+        "api_detail_rate_limit", str(raw.get("api_detail_rate_limit", "300/minute"))
+    )
+
+    trust_proxy_raw = raw.get("api_trust_proxy_headers", False)
+    if not isinstance(trust_proxy_raw, bool):
+        raise ConfigError(
+            f"api_trust_proxy_headers must be a boolean, got "
+            f"{type(trust_proxy_raw).__name__}"
+        )
+
+    return _ApiFields(
+        api_rate_limit_enabled=enabled_raw,
+        api_rate_limit_redis_url=redis_url,
+        api_allowed_origins=origins,
+        api_list_rate_limit=list_limit,
+        api_detail_rate_limit=detail_limit,
+        api_trust_proxy_headers=trust_proxy_raw,
     )

@@ -1450,3 +1450,57 @@ def test_ws_filter_min_interval_ms_rejects_bool() -> None:
 
     with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
         _parse_ws_fields({"ws_filter_min_interval_ms": True})
+
+
+# ---------------------------------------------------------------------------
+# API hardening (S-181)
+# ---------------------------------------------------------------------------
+
+
+class TestApiConfig:
+    def test_api_rate_limit_defaults_from_empty_yaml(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text("storage:\n  backend: sqlite\n  path: ':memory:'\n")
+        cfg = load_config(cfg_path)
+        assert cfg.api_rate_limit_enabled is True
+        assert cfg.api_rate_limit_redis_url is None
+        assert cfg.api_allowed_origins == ()
+        assert cfg.api_list_rate_limit == "60/minute"
+        assert cfg.api_detail_rate_limit == "300/minute"
+        assert cfg.api_trust_proxy_headers is False
+
+    def test_api_rate_limit_invalid_list_string_rejected(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
+            "api_list_rate_limit: '60/blarg'\n"
+        )
+        with pytest.raises(ConfigError, match="api_list_rate_limit"):
+            load_config(cfg_path)
+
+    def test_api_allowed_origins_parsed_as_tuple(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
+            "api_allowed_origins:\n  - https://dash.example.com\n"
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.api_allowed_origins == ("https://dash.example.com",)
+
+    def test_api_rate_limit_redis_url_rejects_empty_string(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
+            "api_rate_limit_redis_url: ''\n"
+        )
+        with pytest.raises(ConfigError, match="api_rate_limit_redis_url"):
+            load_config(cfg_path)
+
+    def test_api_allowed_origins_rejects_non_string_entries(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
+            "api_allowed_origins:\n  - 42\n"
+        )
+        with pytest.raises(ConfigError, match="api_allowed_origins"):
+            load_config(cfg_path)
