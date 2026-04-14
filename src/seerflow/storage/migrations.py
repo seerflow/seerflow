@@ -59,10 +59,7 @@ async def _migrate_v2_graph_edges(conn: aiosqlite.Connection) -> None:
 
 
 async def _migrate_v3_mitre_junctions(conn: aiosqlite.Connection) -> None:
-    """Migration 3: junction tables for tactic/technique filtering.
-
-    Schema only — backfill lands in migration task 2.
-    """
+    """Migration 3: junction tables for tactic/technique filtering + backfill."""
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS alert_tactics (
             dedup_key TEXT NOT NULL REFERENCES alerts(dedup_key) ON DELETE CASCADE,
@@ -71,8 +68,7 @@ async def _migrate_v3_mitre_junctions(conn: aiosqlite.Connection) -> None:
         )
     """)
     await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_alert_tactics_tactic "
-        "ON alert_tactics(tactic)"
+        "CREATE INDEX IF NOT EXISTS idx_alert_tactics_tactic ON alert_tactics(tactic)"
     )
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS alert_techniques (
@@ -82,9 +78,72 @@ async def _migrate_v3_mitre_junctions(conn: aiosqlite.Connection) -> None:
         )
     """)
     await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_alert_techniques_technique "
-        "ON alert_techniques(technique)"
+        "CREATE INDEX IF NOT EXISTS idx_alert_techniques_technique ON alert_techniques(technique)"
     )
+
+    await _backfill_mitre_junctions(conn)
+
+
+_BACKFILL_CHUNK = 1000
+
+
+async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
+    """Stream existing alerts, decode msgpack, populate junction rows."""
+    import msgspec
+
+    from seerflow.models.alert import Alert
+    from seerflow.sigma.attack import format_technique
+
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='alerts'"
+    ) as cur:
+        if await cur.fetchone() is None:
+            return
+
+    offset = 0
+    processed = 0
+    while True:
+        async with conn.execute(
+            "SELECT dedup_key, data FROM alerts ORDER BY rowid LIMIT ? OFFSET ?",
+            (_BACKFILL_CHUNK, offset),
+        ) as cur:
+            rows = list(await cur.fetchall())
+        if not rows:
+            break
+
+        tactic_rows: list[tuple[str, str]] = []
+        technique_rows: list[tuple[str, str]] = []
+        for dedup_key, blob in rows:
+            if blob is None:
+                continue
+            try:
+                alert = msgspec.msgpack.decode(blob, type=Alert)
+            except msgspec.DecodeError:
+                logger.warning(
+                    "v3 backfill: skipping alert %s with corrupt data blob",
+                    dedup_key,
+                )
+                continue
+            for t in alert.mitre_tactics:
+                tactic_rows.append((dedup_key, t))
+            for t in alert.mitre_techniques:
+                technique_rows.append((dedup_key, format_technique(t)))
+
+        if tactic_rows:
+            await conn.executemany(
+                "INSERT OR IGNORE INTO alert_tactics (dedup_key, tactic) VALUES (?, ?)",
+                tactic_rows,
+            )
+        if technique_rows:
+            await conn.executemany(
+                "INSERT OR IGNORE INTO alert_techniques (dedup_key, technique) VALUES (?, ?)",
+                technique_rows,
+            )
+
+        offset += _BACKFILL_CHUNK
+        processed += len(rows)
+        if processed % (_BACKFILL_CHUNK * 10) == 0:
+            logger.info("v3 backfill: processed %d alerts", processed)
 
 
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {

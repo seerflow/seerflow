@@ -6,8 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import aiosqlite
+import msgspec
 import pytest
 
+from seerflow.models.alert import Alert
 from seerflow.storage.migrations import MIGRATIONS, get_schema_version, run_migrations
 
 
@@ -151,5 +153,116 @@ async def test_migration_v3_registered_and_applied(tmp_path: Path) -> None:
     assert 3 in MIGRATIONS
     db = tmp_path / "t.db"
     async with aiosqlite.connect(db) as conn:
+        await run_migrations(conn)
+        assert await get_schema_version(conn) >= 3
+
+
+async def _seed_v2_alert(
+    conn: aiosqlite.Connection,
+    *,
+    dedup_key: str,
+    tactics: tuple[str, ...],
+    techniques: tuple[str, ...],
+) -> None:
+    alert = Alert(
+        alert_id="a1",
+        alert_type="sigma",
+        timestamp_ns=1,
+        severity_id=3,
+        rule_name="r",
+        description="d",
+        entity_uuid="e",
+        entity_type="host",
+        entity_value="v",
+        contributing_events=(),
+        dedup_key=dedup_key,
+        dedup_count=1,
+        risk_score=0.0,
+        feedback="",
+        mitre_tactics=tactics,
+        mitre_techniques=techniques,
+    )
+    await conn.execute(
+        "INSERT INTO alerts (alert_id, alert_type, timestamp_ns, severity_id, "
+        "rule_name, entity_uuid, entity_type, entity_value, dedup_key, "
+        "dedup_count, risk_score, feedback, data) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            alert.alert_id,
+            alert.alert_type,
+            alert.timestamp_ns,
+            int(alert.severity_id),
+            alert.rule_name,
+            alert.entity_uuid,
+            alert.entity_type,
+            alert.entity_value,
+            alert.dedup_key,
+            alert.dedup_count,
+            alert.risk_score,
+            alert.feedback,
+            msgspec.msgpack.encode(alert),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_migration_v3_backfills_existing_rows(tmp_path: Path) -> None:
+    from seerflow.storage.sqlite import _init_schema
+
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await _init_schema(conn)
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version ("
+            "version INTEGER NOT NULL UNIQUE, "
+            "applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        )
+        await conn.execute("INSERT INTO schema_version (version) VALUES (1)")
+        await conn.execute("INSERT INTO schema_version (version) VALUES (2)")
+        await _seed_v2_alert(
+            conn,
+            dedup_key="k1",
+            tactics=("discovery", "execution"),
+            techniques=("T1059.001", "t1059"),
+        )
+        await conn.commit()
+
+        await run_migrations(conn)
+
+        async with conn.execute(
+            "SELECT tactic FROM alert_tactics WHERE dedup_key='k1' ORDER BY tactic"
+        ) as cur:
+            tactics = [r[0] for r in await cur.fetchall()]
+        async with conn.execute(
+            "SELECT technique FROM alert_techniques WHERE dedup_key='k1' ORDER BY technique"
+        ) as cur:
+            techs = [r[0] for r in await cur.fetchall()]
+
+    assert tactics == ["discovery", "execution"]
+    assert techs == ["T1059", "T1059.001"]
+
+
+@pytest.mark.asyncio
+async def test_migration_v3_skips_corrupt_blob(tmp_path: Path) -> None:
+    from seerflow.storage.sqlite import _init_schema
+
+    db = tmp_path / "t.db"
+    async with aiosqlite.connect(db) as conn:
+        await _init_schema(conn)
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version ("
+            "version INTEGER NOT NULL UNIQUE, "
+            "applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        )
+        await conn.execute("INSERT INTO schema_version (version) VALUES (1)")
+        await conn.execute("INSERT INTO schema_version (version) VALUES (2)")
+        await conn.execute(
+            "INSERT INTO alerts (alert_id, alert_type, timestamp_ns, severity_id, "
+            "rule_name, entity_uuid, entity_type, entity_value, dedup_key, "
+            "dedup_count, risk_score, feedback, data) "
+            "VALUES ('a','t',1,3,'r','e','host','v','k_bad',1,0.0,NULL,?)",
+            (b"\x00\x01not-msgpack",),
+        )
+        await conn.commit()
         await run_migrations(conn)
         assert await get_schema_version(conn) >= 3
