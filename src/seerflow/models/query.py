@@ -68,8 +68,8 @@ class AlertQuery:
     def __post_init__(self) -> None:
         if self.page < 1:
             raise ValueError(f"page must be >= 1, got {self.page}")
-        if not (1 <= self.limit <= 1000):
-            raise ValueError(f"limit must be between 1 and 1000, got {self.limit}")
+        if not (1 <= self.limit <= 10_000):
+            raise ValueError(f"limit must be between 1 and 10000, got {self.limit}")
 
 
 @dataclass(frozen=True, slots=True)
