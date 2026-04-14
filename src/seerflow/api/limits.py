@@ -70,15 +70,18 @@ def resolve_allowed_origins(config: SeerflowConfig | None) -> tuple[str, ...]:
     return _default_localhost_origins(config.dashboard_port)
 
 
-def build_limiter(config: SeerflowConfig) -> Limiter:
-    """Construct the ``slowapi.Limiter`` for the application.
+def configure_limiter(config: SeerflowConfig) -> Limiter:
+    """Configure the module-level ``limiter`` for the current app.
 
-    Uses in-memory storage by default. When
-    ``config.api_rate_limit_redis_url`` is set, switches to Redis
-    storage; raises :class:`ConfigError` if the ``redis`` package is
-    not installed.
+    Route decorators capture the module-level ``limiter`` singleton at
+    import time. To allow per-app config changes (enable/disable,
+    Redis URI, key function), we mutate the singleton rather than
+    creating a disconnected instance that would never be consulted by
+    the middleware.
+
+    Raises :class:`ConfigError` if ``api_rate_limit_redis_url`` is set
+    but the ``redis`` package is not installed.
     """
-    storage_uri = "memory://"
     if config.api_rate_limit_redis_url:
         try:
             import redis  # noqa: F401
@@ -88,36 +91,56 @@ def build_limiter(config: SeerflowConfig) -> Limiter:
                 "is not installed. Install with: pip install 'seerflow[redis]'"
             ) from exc
         storage_uri = config.api_rate_limit_redis_url
+    else:
+        storage_uri = "memory://"
 
-    return Limiter(
+    # Rebuild internal storage + rate-limit engine so repeated calls in
+    # the same process (tests) do not leak counters between apps.
+    fresh = Limiter(
         key_func=_key_func,
         storage_uri=storage_uri,
         enabled=config.api_rate_limit_enabled,
     )
+    limiter.enabled = config.api_rate_limit_enabled
+    limiter._storage = fresh._storage  # noqa: SLF001
+    limiter._limiter = fresh._limiter  # noqa: SLF001
+
+    global _current_list_limit, _current_detail_limit
+    _current_list_limit = config.api_list_rate_limit
+    _current_detail_limit = config.api_detail_rate_limit
+
+    return limiter
 
 
-def list_limit(request: Request) -> str:
-    """Rate limit string for list endpoints, read from app state."""
-    config: SeerflowConfig | None = getattr(request.app.state, "config", None)
-    return (
-        config.api_list_rate_limit
-        if config is not None
-        else SeerflowConfig().api_list_rate_limit
-    )
+# Back-compat alias for the original plan name. Deprecated in favour
+# of ``configure_limiter``.
+build_limiter = configure_limiter
 
 
-def detail_limit(request: Request) -> str:
-    """Rate limit string for detail endpoints, read from app state."""
-    config: SeerflowConfig | None = getattr(request.app.state, "config", None)
-    return (
-        config.api_detail_rate_limit
-        if config is not None
-        else SeerflowConfig().api_detail_rate_limit
-    )
+# Module-level limit strings. ``slowapi.Limiter.limit`` accepts a
+# zero-arg callable that returns the limit string per request, so
+# routes decorate with ``@limiter.limit(list_limit)`` and the callable
+# reads the current config-driven value at request time. A single
+# module slot is fine because only one ``SeerflowConfig`` is active
+# per process (single-tenant service).
+_DEFAULTS = SeerflowConfig()
+_current_list_limit = _DEFAULTS.api_list_rate_limit
+_current_detail_limit = _DEFAULTS.api_detail_rate_limit
 
 
-# Module-level placeholder — slowapi decorator target. Per-app ``Limiter``
-# is stored on ``app.state.limiter`` and resolved by ``SlowAPIMiddleware``
-# at request time. Keeping this disabled prevents accidental enforcement
-# outside of an app context (e.g., direct route-function unit tests).
+def list_limit() -> str:
+    """Return the current list-endpoint rate limit string."""
+    return _current_list_limit
+
+
+def detail_limit() -> str:
+    """Return the current detail-endpoint rate limit string."""
+    return _current_detail_limit
+
+
+# Module-level singleton — slowapi decorator target. ``configure_limiter``
+# rebinds its storage and enabled flag based on the active app's
+# ``SeerflowConfig``. Starts disabled so that a route imported in
+# isolation (e.g., during direct unit-test of a handler) does not
+# throttle.
 limiter = Limiter(key_func=_key_func, enabled=False)

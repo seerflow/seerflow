@@ -11,15 +11,15 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
-from slowapi import _rate_limit_exceeded_handler
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api import ws as ws_module
 from seerflow.api.deps import DetectionEngines, StorageDeps
-from seerflow.api.limits import build_limiter, resolve_allowed_origins
+from seerflow.api.limits import configure_limiter, limiter, resolve_allowed_origins
 from seerflow.api.routes import (
     alerts,
     attack,
@@ -91,6 +91,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.ws_manager.shutdown()
 
 
+def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return a 429 response with ``Retry-After`` header.
+
+    ``slowapi`` bundles a default handler, but it omits ``Retry-After``.
+    The RFC 6585 contract for 429 recommends surfacing the cool-down so
+    clients can back off rationally.
+    """
+    assert isinstance(exc, RateLimitExceeded)
+    retry_after = str(int(exc.limit.limit.get_expiry()))
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.limit.limit}"},
+        headers={"Retry-After": retry_after},
+    )
+
+
 def _install_security_middlewares(
     app: FastAPI, config: SeerflowConfig | None
 ) -> None:
@@ -105,12 +121,15 @@ def _install_security_middlewares(
     to opt into rate limiting or CORS.
     """
     if config is None:
+        # No config → leave module-level limiter in whatever state it
+        # was (disabled by default). This preserves direct-construction
+        # behaviour for tests that don't need security middleware.
         return
 
+    configure_limiter(config)
     if config.api_rate_limit_enabled:
-        limiter = build_limiter(config)
         app.state.limiter = limiter
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
         app.add_middleware(SlowAPIMiddleware)
 
     allowed_origins = resolve_allowed_origins(config)

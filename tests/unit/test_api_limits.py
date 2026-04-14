@@ -9,7 +9,7 @@ import pytest
 
 from seerflow.api.limits import (
     _key_func,
-    build_limiter,
+    configure_limiter,
     detail_limit,
     resolve_allowed_origins,
 )
@@ -91,13 +91,13 @@ class TestResolveAllowedOrigins:
 class TestBuildLimiter:
     def test_in_memory_when_no_redis_url(self) -> None:
         cfg = SeerflowConfig(api_rate_limit_redis_url=None)
-        limiter = build_limiter(cfg)
+        limiter = configure_limiter(cfg)
         assert limiter is not None
         assert limiter.enabled is True
 
     def test_respects_enabled_false(self) -> None:
         cfg = SeerflowConfig(api_rate_limit_enabled=False)
-        limiter = build_limiter(cfg)
+        limiter = configure_limiter(cfg)
         assert limiter.enabled is False
 
     def test_raises_when_redis_url_set_and_pkg_missing(
@@ -106,24 +106,20 @@ class TestBuildLimiter:
         monkeypatch.setitem(sys.modules, "redis", None)
         cfg = SeerflowConfig(api_rate_limit_redis_url="redis://localhost:6379/0")
         with pytest.raises(ConfigError, match=r"seerflow\[redis\]"):
-            build_limiter(cfg)
+            configure_limiter(cfg)
 
 
 class TestLimitClosures:
-    def test_list_limit_reads_from_app_state(self) -> None:
-        cfg = SeerflowConfig(api_list_rate_limit="7/minute")
-        req = _request(config=cfg)
-        assert list_limit_fn(req) == "7/minute"
+    def test_configure_limiter_applies_list_limit(self) -> None:
+        configure_limiter(SeerflowConfig(api_list_rate_limit="7/minute"))
+        assert list_limit_fn() == "7/minute"
 
-    def test_detail_limit_reads_from_app_state(self) -> None:
-        cfg = SeerflowConfig(api_detail_rate_limit="11/minute")
-        req = _request(config=cfg)
-        assert detail_limit(req) == "11/minute"
+    def test_configure_limiter_applies_detail_limit(self) -> None:
+        configure_limiter(SeerflowConfig(api_detail_rate_limit="11/minute"))
+        assert detail_limit() == "11/minute"
 
-    def test_list_limit_falls_back_to_default_when_no_config(self) -> None:
-        req = _request(config=None)
-        assert list_limit_fn(req) == SeerflowConfig().api_list_rate_limit
-
-    def test_detail_limit_falls_back_to_default_when_no_config(self) -> None:
-        req = _request(config=None)
-        assert detail_limit(req) == SeerflowConfig().api_detail_rate_limit
+    def test_default_closures_return_config_defaults(self) -> None:
+        configure_limiter(SeerflowConfig())
+        defaults = SeerflowConfig()
+        assert list_limit_fn() == defaults.api_list_rate_limit
+        assert detail_limit() == defaults.api_detail_rate_limit
