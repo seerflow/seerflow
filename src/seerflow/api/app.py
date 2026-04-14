@@ -18,10 +18,12 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api import ws as ws_module
+from seerflow.api.anomaly_timeline import AnomalyTimelineRing
 from seerflow.api.deps import DetectionEngines, StorageDeps
 from seerflow.api.limits import configure_limiter, limiter, resolve_allowed_origins
 from seerflow.api.routes import (
     alerts,
+    anomaly,
     attack,
     config,
     entities,
@@ -166,6 +168,7 @@ def _register_routes(app: FastAPI) -> None:
     app.include_router(entities.router, prefix=_API_PREFIX)
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
+    app.include_router(anomaly.router, prefix=_API_PREFIX)
     app.include_router(ws_module.router, prefix=_API_PREFIX)
 
 
@@ -217,6 +220,7 @@ def create_api_app(
     app.state.config = config
     app.state.pipeline_metrics_provider = None
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
+    app.state.anomaly_timeline_ring = AnomalyTimelineRing()
     app.state.ws_manager = ws_manager or _build_ws_manager(alert_store, config)
 
     _register_routes(app)
