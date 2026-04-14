@@ -58,6 +58,7 @@ def _default_allowed_origins(dashboard_port: int) -> frozenset[str]:
 def _build_ws_manager(
     alert_store: AlertStore,
     config: SeerflowConfig | None,
+    timeline_ring: AnomalyTimelineRing | None = None,
 ) -> ConnectionManager:
     """Construct a ConnectionManager from SeerflowConfig ws_* fields.
 
@@ -66,7 +67,7 @@ def _build_ws_manager(
     ``None`` (tests, direct app construction), no Origin check is applied.
     """
     if config is None:
-        return ConnectionManager(alert_store=alert_store)
+        return ConnectionManager(alert_store=alert_store, timeline_ring=timeline_ring)
     allowed_origins: frozenset[str]
     if config.ws_allowed_origins:
         allowed_origins = frozenset(config.ws_allowed_origins)
@@ -81,6 +82,7 @@ def _build_ws_manager(
         status_interval_s=config.ws_status_interval_s,
         allowed_origins=allowed_origins,
         filter_min_interval_ns=config.ws_filter_min_interval_ms * 1_000_000,
+        timeline_ring=timeline_ring,
     )
 
 
@@ -221,7 +223,9 @@ def create_api_app(
     app.state.pipeline_metrics_provider = None
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
     app.state.anomaly_timeline_ring = AnomalyTimelineRing()
-    app.state.ws_manager = ws_manager or _build_ws_manager(alert_store, config)
+    app.state.ws_manager = ws_manager or _build_ws_manager(
+        alert_store, config, app.state.anomaly_timeline_ring
+    )
 
     _register_routes(app)
     _install_security_middlewares(app, config)

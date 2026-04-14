@@ -36,6 +36,7 @@ from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 
 if TYPE_CHECKING:
+    from seerflow.api.anomaly_timeline import AnomalyTimelineRing
     from seerflow.detection.ensemble import DetectionResult
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
@@ -207,6 +208,7 @@ class ConnectionManager:
         status_interval_s: float = 5.0,
         allowed_origins: frozenset[str] | None = None,
         filter_min_interval_ns: int = 100_000_000,  # 100 ms default
+        timeline_ring: AnomalyTimelineRing | None = None,
     ) -> None:
         self._alert_store = alert_store
         self._max_connections = max_connections
@@ -218,6 +220,7 @@ class ConnectionManager:
         # A frozenset means "only browser clients with matching Origin may connect".
         self._allowed_origins = allowed_origins
         self._filter_min_interval_ns = filter_min_interval_ns
+        self._timeline_ring = timeline_ring
         self._clients: dict[str, ClientState] = {}
         self._events_broadcast_count = 0
         # Initialize window start at construction so broadcasts before
@@ -402,6 +405,13 @@ class ConnectionManager:
                 score=detection.score,
                 is_anomaly=detection.is_anomaly,
                 upper_threshold=detection.upper_threshold,
+            )
+        if self._timeline_ring is not None and be.score is not None:
+            self._timeline_ring.record_score(
+                be.event.timestamp_ns,
+                be.score,
+                be.upper_threshold,
+                be.event.source_type,
             )
         for client in self._clients.values():
             if client.dead:

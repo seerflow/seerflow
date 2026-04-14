@@ -95,9 +95,7 @@ def get_anomaly_timeline_ring(request: Request) -> AnomalyTimelineRing:
     """
     from seerflow.api.anomaly_timeline import AnomalyTimelineRing as _Ring
 
-    ring: AnomalyTimelineRing | None = getattr(
-        request.app.state, "anomaly_timeline_ring", None
-    )
+    ring: AnomalyTimelineRing | None = getattr(request.app.state, "anomaly_timeline_ring", None)
     if ring is None:
         ring = _Ring()
         request.app.state.anomaly_timeline_ring = ring

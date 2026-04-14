@@ -1172,3 +1172,81 @@ class TestRouteSizeGuard:
             msg = ws.receive_json(mode="binary")
             assert msg["type"] == "error"
             assert "invalid JSON" in msg["message"]
+
+
+class TestTimelineRingIntegration:
+    """ConnectionManager.broadcast_event records scored events into the ring."""
+
+    def _event_at(self, bucket_ns: int, source_type: str = "syslog") -> SeerflowEvent:
+        return SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=bucket_ns,
+            observed_ns=bucket_ns + 1,
+            message="timeline test",
+            source_type=source_type,
+            severity_id=SeverityLevel(3),
+            template_id=7,
+        )
+
+    def test_broadcast_event_records_scored_events_into_timeline_ring(self) -> None:
+        from seerflow.api.anomaly_timeline import (
+            BUCKET_NS,
+            RANGE_NS,
+            RESOLUTION_NS,
+            AnomalyTimelineRing,
+        )
+        from seerflow.detection.ensemble import DetectionResult
+
+        ring = AnomalyTimelineRing()
+        mgr = ConnectionManager(timeline_ring=ring)
+        ts = BUCKET_NS * 7
+        event = self._event_at(ts, source_type="syslog")
+        detection = DetectionResult(
+            score=0.5,
+            upper_threshold=0.9,
+            lower_threshold=0.0,
+            is_anomaly=False,
+            anomaly_direction=None,
+            source_type="syslog",
+        )
+
+        mgr.broadcast_event(event, detection=detection)
+
+        out = ring.query(
+            range_ns=RANGE_NS["1h"],
+            resolution_ns=RESOLUTION_NS["1m"],
+            source=None,
+            now_ns=ts + 500,
+        )
+        hit = [b for b in out if b.event_count > 0]
+        assert len(hit) == 1
+        assert hit[0].max_score == 0.5
+        assert hit[0].upper_threshold == 0.9
+
+    def test_broadcast_event_skips_ring_when_detection_is_none(self) -> None:
+        from seerflow.api.anomaly_timeline import (
+            BUCKET_NS,
+            RANGE_NS,
+            RESOLUTION_NS,
+            AnomalyTimelineRing,
+        )
+
+        ring = AnomalyTimelineRing()
+        mgr = ConnectionManager(timeline_ring=ring)
+        ts = BUCKET_NS * 7
+        event = self._event_at(ts, source_type="syslog")
+
+        mgr.broadcast_event(event)  # detection=None by default
+
+        out = ring.query(
+            range_ns=RANGE_NS["1h"],
+            resolution_ns=RESOLUTION_NS["1m"],
+            source=None,
+            now_ns=ts + 500,
+        )
+        assert all(b.event_count == 0 for b in out)
+
+    def test_connection_manager_accepts_no_timeline_ring_backcompat(self) -> None:
+        """Existing callers that don't pass timeline_ring must still work."""
+        mgr = ConnectionManager()  # no timeline_ring kwarg
+        mgr.broadcast_event(self._event_at(1_800_000_000_000_000_000))
