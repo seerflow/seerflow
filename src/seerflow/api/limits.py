@@ -105,7 +105,7 @@ def configure_limiter(config: SeerflowConfig) -> None:
     """
     if config.api_rate_limit_redis_url:
         try:
-            import redis  # noqa: F401
+            import redis  # noqa: F401  # type: ignore[import-not-found]
         except ImportError as exc:
             raise ConfigError(
                 "api_rate_limit_redis_url is set but the 'redis' package "
