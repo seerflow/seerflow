@@ -44,6 +44,19 @@ class TestRedactConfig:
         data = redact_config(cfg)
         assert data["alerting"]["pagerduty_routing_key"] == ""
 
+    def test_api_rate_limit_redis_url_masked_when_set(self) -> None:
+        cfg = SeerflowConfig(
+            api_rate_limit_redis_url="redis://:SECRET@redis.internal:6379/0"
+        )
+        data = redact_config(cfg)
+        assert data["api_rate_limit_redis_url"] == "***"
+        assert "SECRET" not in str(data)
+
+    def test_api_rate_limit_redis_url_none_stays_none(self) -> None:
+        cfg = SeerflowConfig()
+        data = redact_config(cfg)
+        assert data["api_rate_limit_redis_url"] is None
+
     def test_webhook_target_url_masked(self) -> None:
         target = WebhookTarget(
             url="https://hooks.slack.com/services/T123/B456/SECRET",
