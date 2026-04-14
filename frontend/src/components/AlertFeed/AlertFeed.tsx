@@ -31,7 +31,11 @@ export function AlertFeed(): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
   const [wsUrl] = useState(() => {
     const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
-    return base.replace(/^http/, "ws") + "/api/v1/ws";
+    const url = base.replace(/^http/, "ws") + "/api/v1/ws";
+    if (url.startsWith("ws:") && window.location.protocol === "https:") {
+      logger.warn("WebSocket URL is insecure (ws:) but page served over https:", url);
+    }
+    return url;
   });
 
   useEffect(() => {
