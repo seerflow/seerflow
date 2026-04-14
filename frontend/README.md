@@ -22,6 +22,30 @@ wheel bundles the built assets.
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — ESLint, zero warnings allowed
 
+### Alert Feed
+
+Live alert feed widget (S-058) runs against the backend over HTTP +
+WebSocket. For hot-reload development:
+
+1. Start the backend on port 8080 in one terminal:
+
+   ```sh
+   uv run seerflow start
+   # or (if the package is installed on PATH)
+   seerflow start
+   ```
+
+2. Start the Vite dev server in another terminal:
+
+   ```sh
+   cd frontend && npm run dev
+   ```
+
+3. Open http://localhost:5173 — Vite proxies `/api` (REST) and
+   `/api/v1/ws` (WebSocket, `ws: true` in `vite.config.ts`) through
+   to `http://127.0.0.1:8080`, so the dashboard talks to the real
+   backend without CORS gymnastics.
+
 ## Architecture notes
 
 - **Path alias:** `@/` resolves to `src/` in both `vite.config.ts`
