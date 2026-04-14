@@ -248,6 +248,7 @@ class SeerflowConfig:
     api_allowed_origins: tuple[str, ...] = ()
     api_list_rate_limit: str = "60/minute"
     api_detail_rate_limit: str = "300/minute"
+    api_coverage_rate_limit: str = "10/minute"
     api_trust_proxy_headers: bool = False
 
 
@@ -901,6 +902,7 @@ def load_config(
         api_allowed_origins=api_fields.api_allowed_origins,
         api_list_rate_limit=api_fields.api_list_rate_limit,
         api_detail_rate_limit=api_fields.api_detail_rate_limit,
+        api_coverage_rate_limit=api_fields.api_coverage_rate_limit,
         api_trust_proxy_headers=api_fields.api_trust_proxy_headers,
     )
 
@@ -1009,6 +1011,7 @@ class _ApiFields(NamedTuple):
     api_allowed_origins: tuple[str, ...]
     api_list_rate_limit: str
     api_detail_rate_limit: str
+    api_coverage_rate_limit: str
     api_trust_proxy_headers: bool
 
 
@@ -1064,6 +1067,9 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
     detail_limit_str = _validate_rate_limit_string(
         "api_detail_rate_limit", str(raw.get("api_detail_rate_limit", "300/minute"))
     )
+    coverage_limit_str = _validate_rate_limit_string(
+        "api_coverage_rate_limit", str(raw.get("api_coverage_rate_limit", "10/minute"))
+    )
 
     trust_proxy_raw = raw.get("api_trust_proxy_headers", False)
     if not isinstance(trust_proxy_raw, bool):
@@ -1077,5 +1083,6 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
         api_allowed_origins=origins,
         api_list_rate_limit=list_limit_str,
         api_detail_rate_limit=detail_limit_str,
+        api_coverage_rate_limit=coverage_limit_str,
         api_trust_proxy_headers=trust_proxy_raw,
     )
