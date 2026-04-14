@@ -12,14 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-_INDEX = (
-    Path(__file__).resolve().parent
-    / "src"
-    / "seerflow"
-    / "web"
-    / "dist"
-    / "index.html"
-)
+_INDEX = Path(__file__).resolve().parent / "src" / "seerflow" / "web" / "dist" / "index.html"
 
 
 def main() -> int:

@@ -34,9 +34,7 @@ def fake_dist(tmp_path: Path) -> Path:
     return dist
 
 
-def test_root_serves_dashboard_html(
-    backend: SqliteBackend, fake_dist: Path
-) -> None:
+def test_root_serves_dashboard_html(backend: SqliteBackend, fake_dist: Path) -> None:
     with patch("seerflow.api.app._DEFAULT_DIST", fake_dist):
         app = create_api_app(log_store=backend, alert_store=backend)
     client = TestClient(app)
@@ -56,9 +54,7 @@ def test_health_route_still_works_with_dashboard_mounted(
     assert response.status_code == 200
 
 
-def test_spa_fallback_does_not_shadow_api_404s(
-    backend: SqliteBackend, fake_dist: Path
-) -> None:
+def test_spa_fallback_does_not_shadow_api_404s(backend: SqliteBackend, fake_dist: Path) -> None:
     with patch("seerflow.api.app._DEFAULT_DIST", fake_dist):
         app = create_api_app(log_store=backend, alert_store=backend)
     client = TestClient(app)
@@ -68,9 +64,7 @@ def test_spa_fallback_does_not_shadow_api_404s(
     assert response.headers["content-type"].startswith("application/json")
 
 
-def test_app_starts_without_dist(
-    backend: SqliteBackend, tmp_path: Path
-) -> None:
+def test_app_starts_without_dist(backend: SqliteBackend, tmp_path: Path) -> None:
     missing = tmp_path / "absent"
     with patch("seerflow.api.app._DEFAULT_DIST", missing):
         app = create_api_app(log_store=backend, alert_store=backend)

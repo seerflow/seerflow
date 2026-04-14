@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from seerflow.web.static import mount_dashboard
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write_dist(tmp_path: Path) -> Path:
