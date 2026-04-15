@@ -123,3 +123,38 @@ class TestFeedbackIntegration:
                 )
         finally:
             await storage.close()
+
+
+class TestFeedbackCLIInvalidBackend:
+    def test_unsupported_backend_rejected_by_load_config(
+        self, tmp_path: Path
+    ) -> None:
+        """`seerflow feedback` with an invalid storage.backend surfaces a
+        ConfigError through load_config — the user-facing failure mode.
+        """
+        import pytest
+
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "storage:\n  backend: redis\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ConfigError, match=r"Invalid storage\.backend"):
+            load_config(str(yaml_path))
+
+    async def test_factory_error_message_does_not_leak_paths(self) -> None:
+        """Defense-in-depth: factory rejects unknown backend without leaking paths."""
+        import pytest
+
+        from seerflow.config import StorageConfig
+        from seerflow.storage import connect_storage
+
+        cfg = StorageConfig(backend="nosuch", data_dir="/etc/secrets")
+        with pytest.raises(ValueError) as exc:
+            await connect_storage(cfg)
+        msg = str(exc.value)
+        assert "/etc/secrets" not in msg
+        assert "nosuch" in msg
