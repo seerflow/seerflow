@@ -22,6 +22,26 @@ wheel bundles the built assets.
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — ESLint, zero warnings allowed
 
+### Entity Explorer
+
+Investigator surface wired over the `GET /api/v1/entities/search` and
+`GET /api/v1/entities/{uuid}/timeline` endpoints (S-060, FR-036).
+
+- Persistent search combobox in the header (debounced, recent-searches
+  in `localStorage` under `seerflow:recentEntities`, keyboard navigation).
+- Entity detail view activated by URL hash:
+  `#entity=<uuid>&range=24h&source=<src>&severity=<n>`. Browser
+  Back / Forward and URL sharing both work.
+- Cross-source timeline (virtualized via `@tanstack/react-virtual` when
+  the page exceeds 200 rows), related-entities sidebar grouped by
+  `relation_type`, and a one-hop force-directed graph rendered with
+  `d3-force` over SVG.
+
+Click a related entity or a graph node to pivot to that entity's
+detail view. Click-to-navigate is the core interaction; richer graph
+gestures (drag-to-pin, wheel-zoom, keyboard pan) land in a follow-up
+story.
+
 ### Anomaly Timeline
 
 Live time-series chart of anomaly scores (S-059). Powered by:
@@ -93,7 +113,6 @@ intentionally NOT installed by this scaffold story:
 
 | Library | Lands in | Purpose |
 |---------|----------|---------|
-| `d3` | S-060 | entity force-directed graph |
 | `react-grid-layout` | S-062 | widget grid |
 | `@tanstack/react-table` | S-058 / S-061 | alert / event tables |
 
