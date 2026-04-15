@@ -679,3 +679,42 @@ class TestCreateMlAlerts:
         assert alerts[1].entity_uuid == shared_uuid
         assert alerts[0].entity_value == "10.0.0.1"
         assert alerts[1].entity_value == "10.0.0.2"
+
+
+def _minimal_alert(**overrides) -> Alert:
+    defaults = dict(
+        alert_id="alert-001",
+        alert_type="ml",
+        timestamp_ns=1_700_000_000_000_000_000,
+        severity_id=SeverityLevel.WARNING,
+        rule_name="hst-anomaly",
+        description="test",
+        entity_uuid="entity-001",
+        entity_value="10.0.0.1",
+        entity_type="ip",
+        contributing_events=(),
+        dedup_key="hst:1:syslog:entity-001",
+    )
+    defaults.update(overrides)
+    return Alert(**defaults)  # type: ignore[arg-type]
+
+
+class TestFeedbackNote:
+    def test_default_is_empty_string(self) -> None:
+        alert = _minimal_alert()
+        assert alert.feedback_note == ""
+
+    def test_roundtrip_with_note(self) -> None:
+        alert = _minimal_alert()
+        with_note = msgspec.structs.replace(alert, feedback_note="looked like a benign scanner")
+        blob = msgspec.msgpack.encode(with_note)
+        decoded = msgspec.msgpack.decode(blob, type=Alert)
+        assert decoded.feedback_note == "looked like a benign scanner"
+
+    def test_pre_s168_blob_decodes_with_default(self) -> None:
+        """A blob encoded before feedback_note existed must still decode."""
+        alert = _minimal_alert()
+        fields = {f: getattr(alert, f) for f in alert.__struct_fields__ if f != "feedback_note"}
+        legacy_blob = msgspec.msgpack.encode(fields)
+        decoded = msgspec.msgpack.decode(legacy_blob, type=Alert)
+        assert decoded.feedback_note == ""
