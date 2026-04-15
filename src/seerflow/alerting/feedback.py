@@ -61,25 +61,10 @@ async def process_feedback(
 
 
 async def _resolve_pagerduty(dedup_key: str, routing_key: str) -> None:
-    """Send a PagerDuty resolve event via direct HTTP POST."""
+    """Open a one-shot aiohttp session and resolve the PD incident via shared helper."""
     import aiohttp
 
-    payload = {
-        "routing_key": routing_key,
-        "event_action": "resolve",
-        "dedup_key": dedup_key,
-    }
-    try:
-        async with (
-            aiohttp.ClientSession() as session,
-            session.post(
-                "https://events.pagerduty.com/v2/enqueue",
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=10),
-                allow_redirects=False,
-            ) as resp,
-        ):
-            if resp.status >= 400:
-                _log.warning("PagerDuty resolve returned %d", resp.status)
-    except Exception as exc:
-        _log.warning("PagerDuty resolve failed: %s", exc)
+    from seerflow.alerting.sinks.pagerduty import post_resolve
+
+    async with aiohttp.ClientSession() as session:
+        await post_resolve(session, dedup_key, routing_key)

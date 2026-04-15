@@ -368,3 +368,23 @@ class TestUpdateFeedbackNote:
         await process_feedback(alert_id=alert.alert_id, feedback="tp", storage=storage)
 
         storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "")
+
+
+class TestResolvePagerDutyDelegates:
+    async def test_delegates_to_post_resolve(self) -> None:
+        """_resolve_pagerduty must open a session and call post_resolve."""
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.alerting.feedback import _resolve_pagerduty
+
+        with patch(
+            "seerflow.alerting.sinks.pagerduty.post_resolve",
+            new=AsyncMock(),
+        ) as mock_post:
+            await _resolve_pagerduty("dedup-key-99", "routing-key-xyz")
+
+        assert mock_post.await_count == 1
+        call_args = mock_post.await_args
+        # First positional is the session, then dedup_key, then routing_key.
+        assert call_args.args[1] == "dedup-key-99"
+        assert call_args.args[2] == "routing-key-xyz"
