@@ -49,7 +49,15 @@ export function hashHasEntity(hash: string): boolean {
  * all call sites (search, related panel, graph) stay consistent.
  */
 export function navigateToEntity(uuid: string, range: TimelineRange = "24h"): void {
+  // Defence in depth: server responses + localStorage are untrusted. Only
+  // well-formed UUIDs may reach window.location.hash so the invariant
+  // `hashHasEntity(h) === (parseEntityHash(h) !== null)` holds everywhere.
+  if (!UUID_RE.test(uuid)) return;
   const nextHash = serializeEntityHash({ entity_uuid: uuid, range });
   if (window.location.hash === nextHash) return;
   window.location.hash = nextHash;
+}
+
+export function isValidEntityUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_RE.test(value);
 }

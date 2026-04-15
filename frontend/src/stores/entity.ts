@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api, ApiError } from "@/lib/api";
-import { parseEntityHash } from "@/lib/hash";
+import { parseEntityHash, isValidEntityUuid } from "@/lib/hash";
 import { logger } from "@/lib/logger";
 import type {
   EntitySearchResult,
@@ -55,13 +55,25 @@ interface State {
   clearRecent: () => void;
 }
 
+function isRecentEntry(x: unknown): x is EntitySearchResult {
+  if (x === null || typeof x !== "object") return false;
+  const r = x as Record<string, unknown>;
+  return (
+    isValidEntityUuid(r.entity_uuid) &&
+    typeof r.entity_value === "string" &&
+    typeof r.entity_type === "string"
+  );
+}
+
 function loadRecent(): EntitySearchResult[] {
   try {
     const raw = localStorage.getItem(RECENT_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.slice(0, RECENT_MAX);
+    // Validate every entry so tampered / stale storage never feeds untrusted
+    // UUIDs into navigateToEntity.
+    return parsed.filter(isRecentEntry).slice(0, RECENT_MAX);
   } catch (e) {
     logger.warn("Failed to load recent entities", e);
     localStorage.removeItem(RECENT_KEY);

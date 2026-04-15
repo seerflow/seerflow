@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { parseEntityHash, serializeEntityHash } from "./hash";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  parseEntityHash,
+  serializeEntityHash,
+  navigateToEntity,
+  isValidEntityUuid,
+} from "./hash";
 
 const UUID = "11111111-2222-3333-4444-555555555555";
 
@@ -52,5 +57,40 @@ describe("serializeEntityHash", () => {
   it("round-trips", () => {
     const s = { entity_uuid: UUID, range: "7d" as const, source: "k8s", severity_min: 0 };
     expect(parseEntityHash(serializeEntityHash(s))).toEqual(s);
+  });
+});
+
+describe("navigateToEntity", () => {
+  beforeEach(() => { window.location.hash = ""; });
+
+  it("writes valid uuid to location.hash", () => {
+    navigateToEntity(UUID);
+    expect(window.location.hash).toContain(UUID);
+    expect(window.location.hash).toContain("range=24h");
+  });
+
+  it("is a no-op for malformed uuid (defence in depth)", () => {
+    navigateToEntity("../../evil");
+    expect(window.location.hash).toBe("");
+    navigateToEntity("javascript:alert(1)");
+    expect(window.location.hash).toBe("");
+  });
+
+  it("skips write when hash already matches target", () => {
+    window.location.hash = serializeEntityHash({ entity_uuid: UUID, range: "24h" });
+    const before = window.location.hash;
+    navigateToEntity(UUID);
+    expect(window.location.hash).toBe(before);
+  });
+});
+
+describe("isValidEntityUuid", () => {
+  it("accepts canonical uuids", () => {
+    expect(isValidEntityUuid(UUID)).toBe(true);
+  });
+  it("rejects non-strings and malformed strings", () => {
+    expect(isValidEntityUuid(null)).toBe(false);
+    expect(isValidEntityUuid(42)).toBe(false);
+    expect(isValidEntityUuid("not-a-uuid")).toBe(false);
   });
 });

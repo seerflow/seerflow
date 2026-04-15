@@ -87,6 +87,26 @@ describe("entityStore.pushRecent + clearRecent", () => {
   });
 });
 
+describe("loadRecent validates localStorage entries", () => {
+  it("drops tampered / malformed entries at module load", async () => {
+    localStorage.setItem(
+      "seerflow:recentEntities",
+      JSON.stringify([
+        { entity_type: "user", entity_value: "ok", entity_uuid: UUID },
+        { entity_type: "user", entity_value: "bad", entity_uuid: "../../evil" },
+        { entity_uuid: UUID }, // missing fields
+        "not-an-object",
+        null,
+      ]),
+    );
+    vi.resetModules();
+    const { useEntityStore: fresh } = await import("./entity");
+    const recent = fresh.getState().recent;
+    expect(recent).toHaveLength(1);
+    expect(recent[0]?.entity_uuid).toBe(UUID);
+  });
+});
+
 describe("entityStore.restoreFromHash", () => {
   it("applies hash state and triggers fetch", async () => {
     mockedGet.mockResolvedValue({ entity_uuid: UUID, events: [], related: [], total: 0 });
