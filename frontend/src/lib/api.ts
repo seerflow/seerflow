@@ -20,8 +20,10 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   }
 }
 
+interface GetOpts { signal?: AbortSignal }
+
 export const api = {
-  get:  <T,>(path: string) => request<T>(path, {method: "GET", headers: {"Accept": "application/json"}}),
+  get:  <T,>(path: string, opts?: GetOpts) => request<T>(path, {method: "GET", headers: {"Accept": "application/json"}, signal: opts?.signal}),
   post: <T,>(path: string, body: unknown) =>
     request<T>(path, {method: "POST", headers: {"Content-Type": "application/json", "Accept": "application/json"}, body: JSON.stringify(body)}),
 };
