@@ -74,3 +74,53 @@ export interface AnomalyEvent {
   upper_threshold: number | null;
   source_type: string;
 }
+
+// --- Entity explorer (S-060) ---
+
+export type EntityType = "ip" | "user" | "host" | "domain";
+export type RelationType =
+  | "authenticated_from"
+  | "logged_into"
+  | "has_ip"
+  | "accessed"
+  | "resolved_to"
+  | "spawned_by";
+
+export interface EntitySearchResult {
+  entity_type: EntityType | string; // server returns string; narrow on display
+  entity_value: string;
+  entity_uuid: string;
+}
+
+export interface EntityRelation {
+  entity_uuid: string;
+  entity_type: string;
+  entity_value: string;
+  relation_type: RelationType | string;
+}
+
+export interface EntityEvent {
+  event_id: string;
+  timestamp_ns: number;
+  source_type: string;
+  severity_id: number;
+  message: string;
+  related_ips: string[];
+  related_users: string[];
+  related_hosts: string[];
+  related_domains: string[];
+}
+
+export interface EntityTimelineResponse {
+  entity_uuid: string;
+  events: EntityEvent[];
+  related: EntityRelation[];
+  total: number;
+}
+
+export interface EntityViewState {
+  entity_uuid: string;
+  range: TimelineRange;
+  source?: string;
+  severity_min?: number;
+}
