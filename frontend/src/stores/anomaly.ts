@@ -20,11 +20,14 @@ export interface AnomalyState {
   loading: boolean;
   error: string | null;
 
+  knownSources: Set<string>;
+
   setRange: (r: TimelineRange) => void;
   setResolution: (r: TimelineResolution) => void;
   setSource: (s: string | null) => void;
   replaceSeries: (items: TimelineBucket[]) => void;
-  appendScore: (e: AnomalyEvent, resolution: TimelineResolution) => void;
+  appendScore: (e: AnomalyEvent) => void;
+  rolloverIfStale: (nowNs: number) => void;
   setLoading: (b: boolean) => void;
   setError: (s: string | null) => void;
 }
@@ -35,14 +38,19 @@ function bucketIndexFor(ts_ns: number, resolution: TimelineResolution): number {
   return Number(bucketStartNs(BigInt(ts_ns), resolution));
 }
 
+const INITIAL_STATE = {
+  range: "1h" as TimelineRange,
+  resolution: "1m" as TimelineResolution,
+  source: null as string | null,
+  items: [] as TimelineBucket[],
+  loading: false,
+  error: null as string | null,
+  knownSources: new Set<string>() as Set<string>,
+};
+
 export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
   return create<AnomalyState>((set, get) => ({
-    range: "1h",
-    resolution: "1m",
-    source: null,
-    items: [],
-    loading: false,
-    error: null,
+    ...INITIAL_STATE,
 
     setRange: (r) => set({ range: r, resolution: defaultResolution(r) }),
     setResolution: (r) => set({ resolution: r }),
@@ -51,10 +59,18 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
     setLoading: (b) => set({ loading: b }),
     setError: (s) => set({ error: s }),
 
-    appendScore: (e, resolution) => {
+    appendScore: (e) => {
       const state = get();
+      // Always track the source so the widget can offer it as a filter option,
+      // even when the event is filtered out by the current source selection.
+      if (!state.knownSources.has(e.source_type)) {
+        const nextSources = new Set(state.knownSources);
+        nextSources.add(e.source_type);
+        set({ knownSources: nextSources });
+      }
       if (state.source !== null && state.source !== e.source_type) return;
       if (state.items.length === 0) return;
+      const resolution = get().resolution;
       const targetStart = bucketIndexFor(e.timestamp_ns, resolution);
       const lastIdx = state.items.length - 1;
       const last = state.items[lastIdx];
@@ -102,7 +118,43 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
       const next = state.items.concat(intermediates, fresh).slice(-MAX_ITEMS);
       set({ items: next });
     },
+
+    rolloverIfStale: (nowNs) => {
+      const state = get();
+      if (state.items.length === 0) return;
+      const last = state.items[state.items.length - 1];
+      const resNs = Number(RESOLUTION_NS[state.resolution]);
+      if (nowNs - last.bucket_start_ns < resNs) return;
+      const targetStart = Math.floor(nowNs / resNs) * resNs;
+      const intermediates: TimelineBucket[] = [];
+      for (let b = last.bucket_start_ns + resNs; b <= targetStart; b += resNs) {
+        intermediates.push({
+          bucket_start_ns: b,
+          max_score: null,
+          avg_score: null,
+          event_count: 0,
+          upper_threshold: last.upper_threshold,
+          alert_count: 0,
+        });
+      }
+      if (intermediates.length === 0) return;
+      const nextItems = state.items.concat(intermediates).slice(-MAX_ITEMS);
+      set({ items: nextItems });
+    },
   }));
 }
 
 export const useAnomalyStore = createAnomalyStore();
+
+/** Selector for distinct source types observed via live WS events. */
+export function selectKnownSources(state: AnomalyState): string[] {
+  return Array.from(state.knownSources);
+}
+
+/** Reset the store to its initial state. For use in ``beforeEach``. */
+export function resetAnomalyStore(): void {
+  useAnomalyStore.setState({
+    ...INITIAL_STATE,
+    knownSources: new Set<string>(),
+  });
+}

@@ -58,16 +58,12 @@ export function AlertFeed(): JSX.Element {
         source_type?: string;
       };
       if (typeof d.timestamp_ns === "number" && typeof d.score === "number" && typeof d.source_type === "string") {
-        const anomaly = useAnomalyStore.getState();
-        anomaly.appendScore(
-          {
-            timestamp_ns: d.timestamp_ns,
-            score: d.score,
-            upper_threshold: d.upper_threshold ?? null,
-            source_type: d.source_type,
-          },
-          anomaly.resolution,
-        );
+        useAnomalyStore.getState().appendScore({
+          timestamp_ns: d.timestamp_ns,
+          score: d.score,
+          upper_threshold: d.upper_threshold ?? null,
+          source_type: d.source_type,
+        });
       }
     }
   };

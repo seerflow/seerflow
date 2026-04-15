@@ -65,7 +65,7 @@ describe("anomalyStore", () => {
     const store = createAnomalyStore();
     store.getState().replaceSeries([bucket({ bucket_start_ns: 0, event_count: 1, max_score: 0.2, avg_score: 0.2, upper_threshold: 0.9 })]);
     const e: AnomalyEvent = { timestamp_ns: 30_000_000_000, score: 0.6, upper_threshold: 0.9, source_type: "syslog" };
-    store.getState().appendScore(e, "1m");
+    store.getState().appendScore(e);
     const last = store.getState().items.at(-1)!;
     expect(last.event_count).toBe(2);
     expect(last.max_score).toBe(0.6);
@@ -76,7 +76,7 @@ describe("anomalyStore", () => {
     const store = createAnomalyStore();
     store.getState().replaceSeries([bucket({ bucket_start_ns: 0, event_count: 1, max_score: 0.2, avg_score: 0.2, upper_threshold: 0.9 })]);
     const e: AnomalyEvent = { timestamp_ns: 61_000_000_000, score: 0.3, upper_threshold: 0.95, source_type: "syslog" };
-    store.getState().appendScore(e, "1m");
+    store.getState().appendScore(e);
     const items = store.getState().items;
     expect(items).toHaveLength(2);
     expect(items.at(-1)!.bucket_start_ns).toBe(60_000_000_000);
@@ -88,7 +88,7 @@ describe("anomalyStore", () => {
     store.getState().replaceSeries([bucket({ bucket_start_ns: 0, event_count: 1, max_score: 0.2, avg_score: 0.2, upper_threshold: 0.9 })]);
     // 3 minutes ahead -> gap of 2 intermediate empty buckets.
     const e: AnomalyEvent = { timestamp_ns: 180_000_000_000, score: 0.3, upper_threshold: null, source_type: "syslog" };
-    store.getState().appendScore(e, "1m");
+    store.getState().appendScore(e);
     const items = store.getState().items;
     expect(items).toHaveLength(4);
     expect(items[1].bucket_start_ns).toBe(60_000_000_000);
@@ -101,7 +101,7 @@ describe("anomalyStore", () => {
     const store = createAnomalyStore();
     store.getState().replaceSeries([bucket({ bucket_start_ns: 60_000_000_000, event_count: 0 })]);
     const oldEvent: AnomalyEvent = { timestamp_ns: 30_000_000_000, score: 0.9, upper_threshold: 0.9, source_type: "syslog" };
-    store.getState().appendScore(oldEvent, "1m");
+    store.getState().appendScore(oldEvent);
     expect(store.getState().items).toHaveLength(1);
     expect(store.getState().items[0].event_count).toBe(0);
   });
@@ -109,7 +109,7 @@ describe("anomalyStore", () => {
   it("appendScore is a no-op when items is empty (waits for warm-up)", () => {
     const store = createAnomalyStore();
     const e: AnomalyEvent = { timestamp_ns: 0, score: 0.5, upper_threshold: 0.9, source_type: "syslog" };
-    store.getState().appendScore(e, "1m");
+    store.getState().appendScore(e);
     expect(store.getState().items).toHaveLength(0);
   });
 
@@ -118,7 +118,7 @@ describe("anomalyStore", () => {
     store.getState().replaceSeries([bucket({ bucket_start_ns: 0 })]);
     store.getState().setSource("syslog");
     const other: AnomalyEvent = { timestamp_ns: 0, score: 0.5, upper_threshold: 0.9, source_type: "otlp" };
-    store.getState().appendScore(other, "1m");
+    store.getState().appendScore(other);
     expect(store.getState().items[0].event_count).toBe(0);
   });
 });

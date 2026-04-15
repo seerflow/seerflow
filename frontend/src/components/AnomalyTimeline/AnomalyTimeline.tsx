@@ -11,11 +11,13 @@ import {
 } from "recharts";
 
 import { api } from "@/lib/api";
+import { RESOLUTION_NS } from "@/lib/buckets";
 import { logger } from "@/lib/logger";
 import type { TimelineResponse } from "@/lib/types";
 import { useAlertStore } from "@/stores/alerts";
-import { useAnomalyStore } from "@/stores/anomaly";
+import { selectKnownSources, useAnomalyStore } from "@/stores/anomaly";
 
+import { findAlertInBucket } from "./alertMatch";
 import { SourceSelect } from "./SourceSelect";
 import { TimeRangeChips } from "./TimeRangeChips";
 
@@ -40,6 +42,8 @@ export function AnomalyTimeline(): JSX.Element {
 
   const selectAlert = useAlertStore((s) => s.selectAlert);
   const alerts = useAlertStore((s) => s.alerts);
+  const knownSources = useAnomalyStore(selectKnownSources);
+  const rolloverIfStale = useAnomalyStore((s) => s.rolloverIfStale);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -67,13 +71,17 @@ export function AnomalyTimeline(): JSX.Element {
     return () => ctrl.abort();
   }, [range, resolution, source, replaceSeries, setLoading, setError]);
 
-  const knownSources = useMemo(
-    () =>
-      Array.from(
-        new Set(alerts.map((a) => a.source_type).filter((s): s is string => Boolean(s))),
-      ),
-    [alerts],
+  const resolutionMs = useMemo(
+    () => Number(RESOLUTION_NS[resolution] / 1_000_000n),
+    [resolution],
   );
+
+  useEffect(() => {
+    const handle = setInterval(() => {
+      rolloverIfStale(Date.now() * 1_000_000);
+    }, resolutionMs);
+    return () => clearInterval(handle);
+  }, [resolutionMs, rolloverIfStale]);
 
   const latestThreshold = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i -= 1) {
@@ -169,11 +177,12 @@ export function AnomalyTimeline(): JSX.Element {
                 connectNulls
               />
               {alertDots.map((b) => {
-                const alertInBucket = alerts.find((a) => {
-                  const bucketStart = b.bucket_start_ns;
-                  const next = bucketStart + Number(b.bucket_start_ns >= 0 ? 60_000_000_000 : 0);
-                  return a.timestamp_ns >= bucketStart && a.timestamp_ns < next + 60_000_000_000;
-                });
+                const resolutionNs = Number(RESOLUTION_NS[resolution]);
+                const alertInBucket = findAlertInBucket(
+                  alerts,
+                  b.bucket_start_ns,
+                  resolutionNs,
+                );
                 return (
                   <ReferenceDot
                     key={b.bucket_start_ns}
