@@ -350,19 +350,28 @@ class DSpotThreshold:
         return msgspec.json.encode(state)
 
     @classmethod
-    def deserialize(cls, data: bytes) -> DSpotThreshold:
+    def deserialize(
+        cls, data: bytes, *, cap_multiplier: float = _DEFAULT_CAP_MULTIPLIER
+    ) -> DSpotThreshold:
         """Restore threshold state from msgspec JSON bytes.
+
+        The ``cap_multiplier`` keyword sets the restored instance's
+        cap multiplier (must be finite and > 1.0); defaults to the
+        module default when not supplied.
 
         Older blobs lacking ``calibrated_upper_z_q`` are handled gracefully:
         the field is seeded from the current ``upper_z_q`` and an INFO
         message is logged.
         """
+        if not math.isfinite(cap_multiplier) or cap_multiplier <= 1.0:
+            msg = f"cap_multiplier must be finite and > 1.0, got {cap_multiplier}"
+            raise ValueError(msg)
         state = msgspec.json.decode(data, type=_BiDSpotState)
         obj = cls.__new__(cls)
         obj._calibration_window = state.calibration_window
         obj._risk_level = state.risk_level
         obj._initial_percentile = state.initial_percentile
-        obj._cap_multiplier = _DEFAULT_CAP_MULTIPLIER
+        obj._cap_multiplier = cap_multiplier
         obj._upper_threshold = state.upper.threshold
         obj._upper_z_q = state.upper.z_q if state.upper.z_q is not None else float("inf")
         obj._upper_excesses = state.upper.excesses

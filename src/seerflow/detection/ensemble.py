@@ -6,7 +6,7 @@ import logging
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import msgspec.json
 
@@ -33,6 +33,18 @@ _MEM_HW = 12_288  # ~12 KB: 1440 seasonal floats + state
 _MEM_CUSUM = 200  # ~200 B: O(1) counters + floats
 _MEM_MARKOV_ENTITY = 10_240  # ~10 KB: transition matrix per entity
 _MEM_DSPOT = 8_192  # ~8 KB: calibration window + tail state
+
+
+class ThresholdAdjustResult(NamedTuple):
+    """Result of ``DetectionEnsemble.adjust_upper_threshold``.
+
+    * ``applied`` — threshold scaled by the requested factor.
+    * ``clamped`` — clamp engaged; ``current_ratio`` equals the cap multiplier.
+    * ``not_calibrated`` — no-op; source was never calibrated. ``current_ratio`` is 0.0.
+    """
+
+    status: Literal["applied", "clamped", "not_calibrated"]
+    current_ratio: float
 
 
 class _WelfordAccumulator:
@@ -375,16 +387,33 @@ class DetectionEnsemble:
             calibration_window=self._config.dspot_calibration_window,
             risk_level=self._config.dspot_risk_level,
             initial_percentile=self._config.dspot_initial_percentile,
+            cap_multiplier=self._config.dspot_threshold_cap_multiplier,
         )
         return self._thresholds[source]
 
-    def adjust_upper_threshold(self, source_key: str, factor: float) -> bool:
-        """Adjust DSPOT upper threshold for a source. Returns True if applied."""
+    def adjust_upper_threshold(
+        self, source_key: str, factor: float
+    ) -> ThresholdAdjustResult:
+        """Adjust DSPOT upper threshold for *source_key*.
+
+        Returns a ``ThresholdAdjustResult`` describing whether the adjustment
+        was applied cleanly, clamped by the cap, or skipped because the
+        source is not yet calibrated.
+        """
         dspot = self._thresholds.get(source_key)
         if dspot is None or not dspot.is_calibrated:
-            return False
-        dspot.adjust_upper_threshold(factor)
-        return True
+            return ThresholdAdjustResult(status="not_calibrated", current_ratio=0.0)
+        was_clamped, ratio = dspot.adjust_upper_threshold(factor)
+        if was_clamped:
+            _log.warning(
+                "DSPOT threshold capped at %.2fx baseline for source %r "
+                "(factor=%.3f rejected; review detector for noise)",
+                ratio,
+                source_key,
+                factor,
+            )
+            return ThresholdAdjustResult(status="clamped", current_ratio=ratio)
+        return ThresholdAdjustResult(status="applied", current_ratio=ratio)
 
     def get_upper_threshold(self, source_key: str) -> float:
         """Get current DSPOT upper threshold for a source. Returns 0.0 if not found."""
@@ -539,6 +568,7 @@ class DetectionEnsemble:
                     try:
                         self._thresholds[source] = DSpotThreshold.deserialize(
                             thresh_data,
+                            cap_multiplier=self._config.dspot_threshold_cap_multiplier,
                         )
                         count += 1
                     except Exception:

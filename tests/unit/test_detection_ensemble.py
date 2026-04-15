@@ -7,10 +7,15 @@ import statistics
 import uuid
 from typing import Any
 
+import numpy as np
 import pytest
 
 from seerflow.config import DetectionConfig
-from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
+from seerflow.detection.ensemble import (
+    DetectionEnsemble,
+    DetectionResult,
+    ThresholdAdjustResult,
+)
 from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.models import SeerflowEvent, SeverityLevel
 
@@ -1505,26 +1510,26 @@ class TestDspotThresholdAdjustment:
         assert dspot.threshold == pytest.approx(old_threshold * 1.05)
 
     def test_adjust_returns_false_for_unknown_source(self) -> None:
-        """Adjusting an unknown source key should return False."""
+        """Adjusting an unknown source key should return not_calibrated."""
         config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
         ensemble = DetectionEnsemble(config)
-        assert ensemble.adjust_upper_threshold("nonexistent", 1.05) is False
+        assert ensemble.adjust_upper_threshold("nonexistent", 1.05).status == "not_calibrated"
 
     def test_adjust_returns_false_if_not_calibrated(self) -> None:
-        """Adjusting a source that exists but isn't calibrated should return False."""
+        """Adjusting a source that exists but isn't calibrated should return not_calibrated."""
         config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
         ensemble = DetectionEnsemble(config)
         # Process 1 event — not enough to calibrate (needs 200)
         ensemble.process_event(_make_event(source_type="syslog"))
-        assert ensemble.adjust_upper_threshold("syslog", 1.05) is False
+        assert ensemble.adjust_upper_threshold("syslog", 1.05).status == "not_calibrated"
 
     def test_adjust_returns_true_when_calibrated(self) -> None:
-        """Adjusting a calibrated source should return True."""
+        """Adjusting a calibrated source should return applied."""
         config = DetectionConfig(hw_seasonal_period=10, dspot_calibration_window=200)
         ensemble = DetectionEnsemble(config)
         for i in range(200):
             ensemble.process_event(_make_event(source_type="syslog", template_id=i % 5))
-        assert ensemble.adjust_upper_threshold("syslog", 1.05) is True
+        assert ensemble.adjust_upper_threshold("syslog", 1.05).status == "applied"
 
     def test_get_upper_threshold_returns_zero_for_unknown(self) -> None:
         """get_upper_threshold returns 0.0 for unknown source."""
@@ -1561,3 +1566,61 @@ class TestDspotThresholdAdjustment:
         ensemble.adjust_upper_threshold("syslog", 1.10)
         after = ensemble.get_upper_threshold("syslog")
         assert after == pytest.approx(before * 1.10)
+
+
+class TestAdjustUpperThresholdTriState:
+    def test_not_calibrated_source_returns_not_calibrated(self) -> None:
+        ens = DetectionEnsemble(DetectionConfig())
+        result = ens.adjust_upper_threshold("nope", 1.05)
+        assert isinstance(result, ThresholdAdjustResult)
+        assert result.status == "not_calibrated"
+        assert result.current_ratio == 0.0
+
+    def test_applied_returns_ratio(self) -> None:
+        ens = DetectionEnsemble(DetectionConfig(dspot_calibration_window=500))
+        dspot = ens._get_threshold("src")  # noqa: SLF001
+        rng = np.random.default_rng(1)
+        for _ in range(500):
+            dspot.update(float(rng.normal()))
+        result = ens.adjust_upper_threshold("src", 1.05)
+        assert result.status == "applied"
+        assert result.current_ratio == pytest.approx(1.05, rel=1e-9)
+
+    def test_clamped_returns_cap_ratio(self) -> None:
+        cfg = DetectionConfig(
+            dspot_calibration_window=500, dspot_threshold_cap_multiplier=2.0
+        )
+        ens = DetectionEnsemble(cfg)
+        dspot = ens._get_threshold("noisy")  # noqa: SLF001
+        rng = np.random.default_rng(2)
+        for _ in range(500):
+            dspot.update(float(rng.normal()))
+        result = ens.adjust_upper_threshold("noisy", 10.0)
+        assert result.status == "clamped"
+        assert result.current_ratio == pytest.approx(2.0, rel=1e-9)
+
+    def test_cap_multiplier_flows_from_config(self) -> None:
+        cfg = DetectionConfig(dspot_threshold_cap_multiplier=4.0)
+        ens = DetectionEnsemble(cfg)
+        dspot = ens._get_threshold("anything")  # noqa: SLF001
+        assert dspot.cap_multiplier == 4.0
+
+    def test_clamp_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging as _logging
+
+        cfg = DetectionConfig(
+            dspot_calibration_window=500, dspot_threshold_cap_multiplier=2.0
+        )
+        ens = DetectionEnsemble(cfg)
+        dspot = ens._get_threshold("noisy")  # noqa: SLF001
+        rng = np.random.default_rng(3)
+        for _ in range(500):
+            dspot.update(float(rng.normal()))
+        with caplog.at_level(_logging.WARNING, logger="seerflow.detection.ensemble"):
+            ens.adjust_upper_threshold("noisy", 10.0)
+        assert any(
+            "capped" in rec.message.lower() and "noisy" in rec.message
+            for rec in caplog.records
+        )
