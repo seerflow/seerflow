@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.mark.asyncio
 class TestConnectStorage:
     async def test_sqlite_returns_sqlite_backend(self, tmp_path: Path) -> None:
         cfg = StorageConfig(backend="sqlite", data_dir=str(tmp_path))

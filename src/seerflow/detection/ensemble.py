@@ -403,11 +403,12 @@ class DetectionEnsemble:
             return ThresholdAdjustResult(status="not_calibrated", current_ratio=0.0)
         was_clamped, ratio = dspot.adjust_upper_threshold(factor)
         if was_clamped:
+            safe_key = source_key[:64]
             _log.warning(
                 "DSPOT threshold capped at %.2fx baseline for source %r "
                 "(factor=%.3f rejected; review detector for noise)",
                 ratio,
-                source_key,
+                safe_key,
                 factor,
             )
             return ThresholdAdjustResult(status="clamped", current_ratio=ratio)
@@ -567,6 +568,7 @@ class DetectionEnsemble:
                         self._thresholds[source] = DSpotThreshold.deserialize(
                             thresh_data,
                             cap_multiplier=self._config.dspot_threshold_cap_multiplier,
+                            source_key=source,
                         )
                         count += 1
                     except Exception:

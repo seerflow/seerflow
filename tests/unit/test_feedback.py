@@ -100,7 +100,6 @@ class TestProcessFeedback:
     async def test_fp_adjusts_dspot_threshold(self) -> None:
         """FP feedback calls adjust_upper_threshold on ensemble with source_type from dedup_key."""
         from seerflow.alerting.feedback import process_feedback
-        from seerflow.detection.ensemble import ThresholdAdjustResult
 
         alert = _make_alert(dedup_key="hst:42:syslog:entity-abc")
         storage = AsyncMock()
@@ -176,7 +175,6 @@ class TestProcessFeedback:
     async def test_fp_ensemble_not_calibrated(self) -> None:
         """FP when DSPOT is not calibrated — no threshold msg."""
         from seerflow.alerting.feedback import process_feedback
-        from seerflow.detection.ensemble import ThresholdAdjustResult
 
         alert = _make_alert()
         storage = AsyncMock()
