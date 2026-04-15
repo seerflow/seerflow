@@ -13,6 +13,8 @@ import aiohttp
 from seerflow.alerting.dispatcher import _sanitize_body
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeverityLevel
 
@@ -73,6 +75,46 @@ def _build_resolve_payload(dedup_key: str, routing_key: str) -> dict[str, object
         "event_action": "resolve",
         "dedup_key": dedup_key,
     }
+
+
+_DEFAULT_RESOLVE_RETRIES = 2
+_DEFAULT_RESOLVE_DELAYS: tuple[float, ...] = (1.0,)
+
+
+async def post_resolve(
+    session: aiohttp.ClientSession,
+    dedup_key: str,
+    routing_key: str,
+    *,
+    max_retries: int = _DEFAULT_RESOLVE_RETRIES,
+    delays: Sequence[float] = _DEFAULT_RESOLVE_DELAYS,
+) -> None:
+    """POST a resolve event to PagerDuty with bounded retry.
+
+    `max_retries` is the total number of attempts (not retries-after-first).
+    Retries on 5xx and network errors. 4xx is logged and not retried.
+    """
+    payload = _build_resolve_payload(dedup_key, routing_key)
+    for attempt in range(max_retries):
+        try:
+            async with session.post(
+                _PD_ENDPOINT,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=10),
+                allow_redirects=False,
+            ) as resp:
+                if resp.status < 400:
+                    return
+                if resp.status < 500:
+                    _log.error("PagerDuty resolve client error %d", resp.status)
+                    return
+                _log.warning("PagerDuty resolve %d (attempt %d)", resp.status, attempt + 1)
+        except Exception as exc:
+            _log.warning("PagerDuty resolve failed (attempt %d): %s", attempt + 1, exc)
+        if attempt < max_retries - 1:
+            sleep_for = delays[attempt] if attempt < len(delays) else delays[-1]
+            await asyncio.sleep(sleep_for)
+    _log.error("PagerDuty resolve: all %d attempts exhausted for %s", max_retries, dedup_key)
 
 
 @dataclass(frozen=True, slots=True)

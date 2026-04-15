@@ -74,7 +74,7 @@ class TestProcessFeedback:
             storage=storage,
         )
 
-        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "fp")
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "fp", "")
         assert "fp" in result.lower() or "FP" in result
 
     async def test_tp_updates_storage(self) -> None:
@@ -92,7 +92,7 @@ class TestProcessFeedback:
             storage=storage,
         )
 
-        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp")
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "")
         assert "tp" in result.lower() or "TP" in result
 
     async def test_fp_adjusts_dspot_threshold(self) -> None:
@@ -334,3 +334,57 @@ class TestResolvePagerduty:
             await _resolve_pagerduty("key", "rk")
 
         assert any("failed" in r.message.lower() for r in caplog.records)
+
+
+class TestUpdateFeedbackNote:
+    async def test_update_feedback_forwards_note(self) -> None:
+        """process_feedback must forward note through storage.update_feedback."""
+        from seerflow.alerting.feedback import process_feedback
+
+        alert = _make_alert()
+        storage = MagicMock()
+        storage.get_alert_by_id = AsyncMock(return_value=alert)
+        storage.update_feedback = AsyncMock()
+
+        await process_feedback(
+            alert_id=alert.alert_id,
+            feedback="tp",
+            storage=storage,
+            note="manual triage: matches known vuln scanner",
+        )
+
+        storage.update_feedback.assert_awaited_once_with(
+            alert.alert_id, "tp", "manual triage: matches known vuln scanner"
+        )
+
+    async def test_update_feedback_defaults_note_to_empty(self) -> None:
+        from seerflow.alerting.feedback import process_feedback
+
+        alert = _make_alert()
+        storage = MagicMock()
+        storage.get_alert_by_id = AsyncMock(return_value=alert)
+        storage.update_feedback = AsyncMock()
+
+        await process_feedback(alert_id=alert.alert_id, feedback="tp", storage=storage)
+
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "")
+
+
+class TestResolvePagerDutyDelegates:
+    async def test_delegates_to_post_resolve(self) -> None:
+        """_resolve_pagerduty must open a session and call post_resolve."""
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.alerting.feedback import _resolve_pagerduty
+
+        with patch(
+            "seerflow.alerting.sinks.pagerduty.post_resolve",
+            new=AsyncMock(),
+        ) as mock_post:
+            await _resolve_pagerduty("dedup-key-99", "routing-key-xyz")
+
+        assert mock_post.await_count == 1
+        call_args = mock_post.await_args
+        # First positional is the session, then dedup_key, then routing_key.
+        assert call_args.args[1] == "dedup-key-99"
+        assert call_args.args[2] == "routing-key-xyz"

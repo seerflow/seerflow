@@ -132,5 +132,5 @@ async def submit_feedback(
     alert = await storage.alert_store.get_alert_by_id(alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
-    await storage.alert_store.update_feedback(alert_id, body.feedback)
+    await storage.alert_store.update_feedback(alert_id, body.feedback, body.note or "")
     return Response(status_code=204)

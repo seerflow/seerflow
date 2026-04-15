@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -62,6 +62,7 @@ class AlertResponse(BaseModel):
     message: str
     dedup_count: int = 1
     feedback: str | None = None
+    feedback_note: str = ""
     mitre_tactics: list[str] = Field(default_factory=list)
     mitre_techniques: list[str] = Field(default_factory=list)
 
@@ -81,6 +82,7 @@ class AlertResponse(BaseModel):
             message=alert.description,
             dedup_count=alert.dedup_count,
             feedback=alert.feedback or None,
+            feedback_note=alert.feedback_note,
             mitre_tactics=list(alert.mitre_tactics),
             mitre_techniques=list(alert.mitre_techniques),
         )
@@ -129,6 +131,15 @@ class FeedbackRequest(BaseModel):
     """Request body for alert feedback submission."""
 
     feedback: Literal["tp", "fp"]
+    note: str | None = Field(default=None, max_length=512)
+
+    @field_validator("note")
+    @classmethod
+    def _strip_control_chars(cls, v: str | None) -> str | None:
+        """Strip C0 control chars (including \\n, \\r, \\x00). Keep printable + space."""
+        if v is None:
+            return None
+        return "".join(ch for ch in v if ord(ch) >= 32)
 
 
 class EntitySearchResult(BaseModel):

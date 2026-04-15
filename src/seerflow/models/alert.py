@@ -109,6 +109,7 @@ class Alert(msgspec.Struct, frozen=True):
     dedup_key: str = ""
     dedup_count: int = 1
     feedback: FeedbackType = ""
+    feedback_note: str = ""  # NEW — trailing field for msgpack back-compat
 
 
 def create_ml_alerts(

@@ -758,7 +758,7 @@ class SqliteBackend:
         )
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
-    async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None:
+    async def update_feedback(self, alert_id: str, feedback: FeedbackType, note: str = "") -> None:
         """Update alert feedback and re-encode the BLOB.
 
         Implementation note: this performs a SELECT then UPDATE. On the SQLite
@@ -773,7 +773,7 @@ class SqliteBackend:
         if row is None:
             return
         alert = msgspec.msgpack.decode(row[0], type=Alert)
-        updated = msgspec.structs.replace(alert, feedback=feedback)
+        updated = msgspec.structs.replace(alert, feedback=feedback, feedback_note=note)
         data = msgspec.msgpack.encode(updated)
         try:
             await self._conn.execute(
