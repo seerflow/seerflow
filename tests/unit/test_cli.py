@@ -781,3 +781,40 @@ class TestGracefulStartupError:
 
         assert pipeline is not None
         assert any("Some receivers failed" in r.message for r in caplog.records)
+
+
+class TestRulesSubcommand:
+    def test_parse_rules_list_no_filters(self) -> None:
+        from seerflow.cli import parse_args
+
+        ns = parse_args(["rules", "list"])
+        assert ns.command == "rules"
+        assert ns.rules_cmd == "list"
+        assert ns.technique is None
+        assert ns.tactic is None
+        assert ns.format == "table"
+
+    def test_parse_rules_list_with_all_filters(self) -> None:
+        from seerflow.cli import parse_args
+
+        ns = parse_args(
+            [
+                "rules",
+                "list",
+                "--technique",
+                "T1053",
+                "--tactic",
+                "persistence",
+                "--format",
+                "json",
+            ]
+        )
+        assert ns.technique == "T1053"
+        assert ns.tactic == "persistence"
+        assert ns.format == "json"
+
+    def test_parse_rules_list_rejects_unknown_format(self) -> None:
+        from seerflow.cli import parse_args
+
+        with pytest.raises(SystemExit):
+            parse_args(["rules", "list", "--format", "yaml"])

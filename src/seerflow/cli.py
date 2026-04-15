@@ -96,6 +96,31 @@ def build_parser() -> argparse.ArgumentParser:
     feedback_parser.add_argument("type", choices=["tp", "fp"], help="Feedback type")
     feedback_parser.add_argument("--note", default="", help="Optional note")
 
+    rules_parser = subparsers.add_parser("rules", help="Inspect loaded Sigma rules")
+    rules_sub = rules_parser.add_subparsers(dest="rules_cmd")
+    rules_sub.required = True
+
+    rules_list = rules_sub.add_parser("list", help="List all loaded Sigma rules")
+    rules_list.add_argument(
+        "--technique",
+        type=str,
+        default=None,
+        help="Filter by ATT&CK technique (e.g., T1053 — prefix match includes sub-techniques)",
+    )
+    rules_list.add_argument(
+        "--tactic",
+        type=str,
+        default=None,
+        help="Filter by ATT&CK tactic name (e.g., persistence) or ID (e.g., TA0003)",
+    )
+    rules_list.add_argument(
+        "--format",
+        type=str,
+        choices=("table", "json"),
+        default="table",
+        help="Output format (default: table)",
+    )
+
     return parser
 
 
