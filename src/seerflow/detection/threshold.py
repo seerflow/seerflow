@@ -390,8 +390,7 @@ class DSpotThreshold:
         if state.calibrated_upper_z_q is None:
             safe_key = (source_key or "<unknown>")[:64]
             _log.info(
-                "Legacy DSPOT state detected for source %r — using current "
-                "upper_z_q as baseline",
+                "Legacy DSPOT state detected for source %r — using current upper_z_q as baseline",
                 safe_key,
             )
             obj._calibrated_upper_z_q = obj._upper_z_q
