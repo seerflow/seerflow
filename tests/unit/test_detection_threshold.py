@@ -92,6 +92,4 @@ class TestSerializationRoundTrip:
         with caplog.at_level(logging.INFO, logger="seerflow.detection.threshold"):
             restored = DSpotThreshold.deserialize(legacy_bytes)
         assert restored.calibrated_upper_z_q == restored.threshold
-        assert any(
-            "legacy dspot state" in rec.message.lower() for rec in caplog.records
-        )
+        assert any("legacy dspot state" in rec.message.lower() for rec in caplog.records)

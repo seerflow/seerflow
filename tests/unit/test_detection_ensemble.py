@@ -1578,7 +1578,7 @@ class TestAdjustUpperThresholdTriState:
 
     def test_applied_returns_ratio(self) -> None:
         ens = DetectionEnsemble(DetectionConfig(dspot_calibration_window=500))
-        dspot = ens._get_threshold("src")  # noqa: SLF001
+        dspot = ens._get_threshold("src")
         rng = np.random.default_rng(1)
         for _ in range(500):
             dspot.update(float(rng.normal()))
@@ -1587,11 +1587,9 @@ class TestAdjustUpperThresholdTriState:
         assert result.current_ratio == pytest.approx(1.05, rel=1e-9)
 
     def test_clamped_returns_cap_ratio(self) -> None:
-        cfg = DetectionConfig(
-            dspot_calibration_window=500, dspot_threshold_cap_multiplier=2.0
-        )
+        cfg = DetectionConfig(dspot_calibration_window=500, dspot_threshold_cap_multiplier=2.0)
         ens = DetectionEnsemble(cfg)
-        dspot = ens._get_threshold("noisy")  # noqa: SLF001
+        dspot = ens._get_threshold("noisy")
         rng = np.random.default_rng(2)
         for _ in range(500):
             dspot.update(float(rng.normal()))
@@ -1602,25 +1600,20 @@ class TestAdjustUpperThresholdTriState:
     def test_cap_multiplier_flows_from_config(self) -> None:
         cfg = DetectionConfig(dspot_threshold_cap_multiplier=4.0)
         ens = DetectionEnsemble(cfg)
-        dspot = ens._get_threshold("anything")  # noqa: SLF001
+        dspot = ens._get_threshold("anything")
         assert dspot.cap_multiplier == 4.0
 
-    def test_clamp_logs_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_clamp_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging as _logging
 
-        cfg = DetectionConfig(
-            dspot_calibration_window=500, dspot_threshold_cap_multiplier=2.0
-        )
+        cfg = DetectionConfig(dspot_calibration_window=500, dspot_threshold_cap_multiplier=2.0)
         ens = DetectionEnsemble(cfg)
-        dspot = ens._get_threshold("noisy")  # noqa: SLF001
+        dspot = ens._get_threshold("noisy")
         rng = np.random.default_rng(3)
         for _ in range(500):
             dspot.update(float(rng.normal()))
         with caplog.at_level(_logging.WARNING, logger="seerflow.detection.ensemble"):
             ens.adjust_upper_threshold("noisy", 10.0)
         assert any(
-            "capped" in rec.message.lower() and "noisy" in rec.message
-            for rec in caplog.records
+            "capped" in rec.message.lower() and "noisy" in rec.message for rec in caplog.records
         )

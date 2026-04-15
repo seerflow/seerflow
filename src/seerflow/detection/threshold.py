@@ -384,9 +384,7 @@ class DSpotThreshold:
         obj._calibrated = state.calibrated
         obj._scores = []
         if state.calibrated_upper_z_q is None:
-            _log.info(
-                "Legacy DSPOT state detected — using current upper_z_q as baseline"
-            )
+            _log.info("Legacy DSPOT state detected — using current upper_z_q as baseline")
             obj._calibrated_upper_z_q = obj._upper_z_q
         else:
             obj._calibrated_upper_z_q = state.calibrated_upper_z_q

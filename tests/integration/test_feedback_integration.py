@@ -126,9 +126,7 @@ class TestFeedbackIntegration:
 
 
 class TestFeedbackCLIInvalidBackend:
-    def test_unsupported_backend_rejected_by_load_config(
-        self, tmp_path: Path
-    ) -> None:
+    def test_unsupported_backend_rejected_by_load_config(self, tmp_path: Path) -> None:
         """`seerflow feedback` with an invalid storage.backend surfaces a
         ConfigError through load_config — the user-facing failure mode.
         """

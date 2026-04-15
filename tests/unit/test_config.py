@@ -1551,18 +1551,14 @@ class TestDspotThresholdCapMultiplier:
 
         yaml_path = tmp_path / "cfg.yaml"
         yaml_path.write_text(
-            "detection:\n"
-            "  dspot:\n"
-            "    threshold_cap_multiplier: 3.5\n",
+            "detection:\n  dspot:\n    threshold_cap_multiplier: 3.5\n",
             encoding="utf-8",
         )
         cfg = load_config(str(yaml_path))
         assert cfg.detection.dspot_threshold_cap_multiplier == 3.5
 
     @pytest.mark.parametrize("bad", [0.5, 1.0, 0.0, -1.0])
-    def test_numeric_invalid_multiplier_rejected(
-        self, tmp_path: Path, bad: float
-    ) -> None:
+    def test_numeric_invalid_multiplier_rejected(self, tmp_path: Path, bad: float) -> None:
         from seerflow.config import ConfigError, load_config
 
         yaml_path = tmp_path / "cfg.yaml"
@@ -1574,9 +1570,7 @@ class TestDspotThresholdCapMultiplier:
             load_config(str(yaml_path))
 
     @pytest.mark.parametrize("yaml_special", [".inf", "-.inf", ".nan"])
-    def test_nonfinite_multiplier_rejected(
-        self, tmp_path: Path, yaml_special: str
-    ) -> None:
+    def test_nonfinite_multiplier_rejected(self, tmp_path: Path, yaml_special: str) -> None:
         from seerflow.config import ConfigError, load_config
 
         yaml_path = tmp_path / "cfg.yaml"

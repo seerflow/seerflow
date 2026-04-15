@@ -391,9 +391,7 @@ class DetectionEnsemble:
         )
         return self._thresholds[source]
 
-    def adjust_upper_threshold(
-        self, source_key: str, factor: float
-    ) -> ThresholdAdjustResult:
+    def adjust_upper_threshold(self, source_key: str, factor: float) -> ThresholdAdjustResult:
         """Adjust DSPOT upper threshold for *source_key*.
 
         Returns a ``ThresholdAdjustResult`` describing whether the adjustment

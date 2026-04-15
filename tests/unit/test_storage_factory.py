@@ -35,9 +35,7 @@ class TestConnectStorage:
             await connect_storage(cfg)
 
     async def test_error_message_does_not_leak_credentials(self) -> None:
-        cfg = StorageConfig(
-            backend="postgresql", postgresql_url="postgres://secret@host/db"
-        )
+        cfg = StorageConfig(backend="postgresql", postgresql_url="postgres://secret@host/db")
         with pytest.raises(NotImplementedError) as exc:
             await connect_storage(cfg)
         assert "secret" not in str(exc.value)

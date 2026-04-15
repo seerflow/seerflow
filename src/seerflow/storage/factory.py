@@ -22,7 +22,6 @@ async def connect_storage(config: StorageConfig) -> SqliteBackend:
         return await SqliteBackend.connect(config)
     if backend == "postgresql":
         raise NotImplementedError(
-            "storage.backend='postgresql' is not yet implemented. "
-            "Use 'sqlite' for now."
+            "storage.backend='postgresql' is not yet implemented. Use 'sqlite' for now."
         )
     raise ValueError(f"Unsupported storage.backend: {backend!r}")
