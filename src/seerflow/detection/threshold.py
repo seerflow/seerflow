@@ -43,6 +43,7 @@ class _BiDSpotState(msgspec.Struct):
     lower: _TailState
     n_total: int
     calibrated: bool
+    calibrated_upper_z_q: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,17 +345,24 @@ class DSpotThreshold:
             ),
             n_total=self._n_total,
             calibrated=self._calibrated,
+            calibrated_upper_z_q=self._calibrated_upper_z_q,
         )
         return msgspec.json.encode(state)
 
     @classmethod
     def deserialize(cls, data: bytes) -> DSpotThreshold:
-        """Restore threshold state from msgspec JSON bytes."""
+        """Restore threshold state from msgspec JSON bytes.
+
+        Older blobs lacking ``calibrated_upper_z_q`` are handled gracefully:
+        the field is seeded from the current ``upper_z_q`` and an INFO
+        message is logged.
+        """
         state = msgspec.json.decode(data, type=_BiDSpotState)
         obj = cls.__new__(cls)
         obj._calibration_window = state.calibration_window
         obj._risk_level = state.risk_level
         obj._initial_percentile = state.initial_percentile
+        obj._cap_multiplier = _DEFAULT_CAP_MULTIPLIER
         obj._upper_threshold = state.upper.threshold
         obj._upper_z_q = state.upper.z_q if state.upper.z_q is not None else float("inf")
         obj._upper_excesses = state.upper.excesses
@@ -366,4 +374,11 @@ class DSpotThreshold:
         obj._n_total = state.n_total
         obj._calibrated = state.calibrated
         obj._scores = []
+        if state.calibrated_upper_z_q is None:
+            _log.info(
+                "Legacy DSPOT state detected — using current upper_z_q as baseline"
+            )
+            obj._calibrated_upper_z_q = obj._upper_z_q
+        else:
+            obj._calibrated_upper_z_q = state.calibrated_upper_z_q
         return obj

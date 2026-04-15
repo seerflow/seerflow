@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+
+import msgspec
 import numpy as np
 import pytest
 
@@ -66,3 +69,29 @@ class TestAdjustUpperThresholdCap:
         was_clamped, ratio = dspot.adjust_upper_threshold(1.5)
         assert was_clamped is False
         assert ratio == 0.0
+
+
+class TestSerializationRoundTrip:
+    def test_baseline_survives_serialize_deserialize(self) -> None:
+        dspot = DSpotThreshold(calibration_window=500, cap_multiplier=3.0)
+        _calibrate(dspot, seed=6)
+        dspot.adjust_upper_threshold(1.5)
+        baseline = dspot.calibrated_upper_z_q
+        restored = DSpotThreshold.deserialize(dspot.serialize())
+        assert restored.calibrated_upper_z_q == pytest.approx(baseline, rel=1e-9)
+
+    def test_legacy_blob_populates_baseline_from_current(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Older blobs lack calibrated_upper_z_q; fall back at load and log."""
+        dspot = DSpotThreshold(calibration_window=500)
+        _calibrate(dspot, seed=7)
+        full = msgspec.json.decode(dspot.serialize())
+        full.pop("calibrated_upper_z_q", None)
+        legacy_bytes = msgspec.json.encode(full)
+        with caplog.at_level(logging.INFO, logger="seerflow.detection.threshold"):
+            restored = DSpotThreshold.deserialize(legacy_bytes)
+        assert restored.calibrated_upper_z_q == restored.threshold
+        assert any(
+            "legacy dspot state" in rec.message.lower() for rec in caplog.records
+        )
