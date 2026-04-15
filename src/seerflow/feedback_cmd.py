@@ -6,6 +6,8 @@ import logging
 import sys
 from typing import TYPE_CHECKING
 
+from seerflow.storage import connect_storage
+
 if TYPE_CHECKING:
     import argparse
 
@@ -17,7 +19,6 @@ async def run_feedback(args: argparse.Namespace) -> None:
     from seerflow.alerting.feedback import process_feedback
     from seerflow.config import load_config
     from seerflow.detection.ensemble import DetectionEnsemble
-    from seerflow.storage.sqlite import SqliteBackend
 
     safe_note = ""
     if args.note:
@@ -25,7 +26,7 @@ async def run_feedback(args: argparse.Namespace) -> None:
         _log.info("Persisting feedback note (%d chars)", len(safe_note))
 
     config = load_config(args.config)
-    storage = await SqliteBackend.connect(config.storage)
+    storage = await connect_storage(config.storage)
     try:
         ensemble = DetectionEnsemble(config.detection)
         loaded = await ensemble.load_all_state(storage)

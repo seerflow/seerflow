@@ -10,7 +10,7 @@ import pytest
 from seerflow.cli import parse_args
 
 _PATCH_LOAD_CONFIG = "seerflow.config.load_config"
-_PATCH_SQLITE_CONNECT = "seerflow.storage.sqlite.SqliteBackend.connect"
+_PATCH_CONNECT = "seerflow.feedback_cmd.connect_storage"
 _PATCH_ENSEMBLE = "seerflow.detection.ensemble.DetectionEnsemble"
 _PATCH_PROCESS = "seerflow.alerting.feedback.process_feedback"
 
@@ -109,7 +109,7 @@ class TestRunFeedback:
         with (
             patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
             patch(
-                _PATCH_SQLITE_CONNECT,
+                _PATCH_CONNECT,
                 new_callable=AsyncMock,
                 return_value=mock_storage,
             ),
@@ -155,7 +155,7 @@ class TestRunFeedback:
         with (
             patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
             patch(
-                _PATCH_SQLITE_CONNECT,
+                _PATCH_CONNECT,
                 new_callable=AsyncMock,
                 return_value=mock_storage,
             ),
@@ -209,7 +209,7 @@ class TestRunFeedback:
         with (
             patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
             patch(
-                _PATCH_SQLITE_CONNECT,
+                _PATCH_CONNECT,
                 new_callable=AsyncMock,
                 return_value=mock_storage,
             ),
@@ -241,7 +241,7 @@ class TestRunFeedback:
         with (
             patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
             patch(
-                _PATCH_SQLITE_CONNECT,
+                _PATCH_CONNECT,
                 new_callable=AsyncMock,
                 return_value=mock_storage,
             ),
@@ -260,6 +260,35 @@ class TestRunFeedback:
             for r in caplog.records
         )
         assert not any("was a test" in r.message for r in caplog.records)
+
+    async def test_run_feedback_uses_storage_factory(self) -> None:
+        """run_feedback must dispatch storage selection via connect_storage."""
+        from seerflow.feedback_cmd import run_feedback
+
+        mock_storage = AsyncMock()
+        mock_storage.close = AsyncMock()
+
+        mock_ensemble = MagicMock()
+        mock_ensemble.load_all_state = AsyncMock(return_value=0)
+        mock_ensemble.save_all_state = AsyncMock(return_value=0)
+
+        storage_cfg = MagicMock()
+        mock_config = MagicMock()
+        mock_config.alerting.pagerduty_routing_key = ""
+        mock_config.storage = storage_cfg
+
+        args = argparse.Namespace(config=None, alert_id="x", type="fp", note="")
+
+        with (
+            patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
+            patch(_PATCH_CONNECT, new_callable=AsyncMock, return_value=mock_storage) as mock_conn,
+            patch(_PATCH_ENSEMBLE, return_value=mock_ensemble),
+            patch(_PATCH_PROCESS, new_callable=AsyncMock) as mock_pf,
+        ):
+            mock_pf.return_value = "ok"
+            await run_feedback(args)
+
+        mock_conn.assert_awaited_once_with(storage_cfg)
 
 
 class TestFeedbackCmdNote:
@@ -289,7 +318,7 @@ class TestFeedbackCmdNote:
         with (
             patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
             patch(
-                _PATCH_SQLITE_CONNECT,
+                _PATCH_CONNECT,
                 new_callable=AsyncMock,
                 return_value=mock_storage,
             ),
@@ -330,7 +359,7 @@ class TestFeedbackCmdNote:
         with (
             patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
             patch(
-                _PATCH_SQLITE_CONNECT,
+                _PATCH_CONNECT,
                 new_callable=AsyncMock,
                 return_value=mock_storage,
             ),

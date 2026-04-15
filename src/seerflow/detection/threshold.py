@@ -21,6 +21,7 @@ from scipy.stats import genpareto
 _log = logging.getLogger(__name__)
 
 _MAX_EXCESSES = 10_000
+_DEFAULT_CAP_MULTIPLIER = 5.0  # operator-feedback threshold cap; see S-169
 
 
 class _TailState(msgspec.Struct):
@@ -42,6 +43,7 @@ class _BiDSpotState(msgspec.Struct):
     lower: _TailState
     n_total: int
     calibrated: bool
+    calibrated_upper_z_q: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +78,9 @@ class DSpotThreshold:
 
     __slots__ = (
         "_calibrated",
+        "_calibrated_upper_z_q",
         "_calibration_window",
+        "_cap_multiplier",
         "_initial_percentile",
         "_lower_excesses",
         "_lower_n_exceed",
@@ -97,6 +101,7 @@ class DSpotThreshold:
         calibration_window: int = 1000,
         risk_level: float = 0.0001,
         initial_percentile: int = 98,
+        cap_multiplier: float = _DEFAULT_CAP_MULTIPLIER,
     ) -> None:
         if calibration_window < 200:
             msg = f"calibration_window must be >= 200, got {calibration_window}"
@@ -107,9 +112,14 @@ class DSpotThreshold:
         if not (50 <= initial_percentile <= 99):
             msg = f"initial_percentile must be in [50, 99], got {initial_percentile}"
             raise ValueError(msg)
+        if not math.isfinite(cap_multiplier) or cap_multiplier <= 1.0:
+            msg = f"cap_multiplier must be finite and > 1.0, got {cap_multiplier}"
+            raise ValueError(msg)
         self._calibration_window = calibration_window
         self._risk_level = risk_level
         self._initial_percentile = initial_percentile
+        self._cap_multiplier = cap_multiplier
+        self._calibrated_upper_z_q: float = 0.0
         self._scores: list[float] = []
         # Upper tail
         self._upper_threshold: float = 0.0
@@ -139,12 +149,40 @@ class DSpotThreshold:
         """Lower anomaly threshold (z_q)."""
         return self._lower_z_q
 
-    def adjust_upper_threshold(self, factor: float) -> None:
-        """Multiply the upper anomaly threshold by *factor* (must be > 0)."""
+    @property
+    def calibrated_upper_z_q(self) -> float:
+        """Upper-tail threshold captured at calibration time. 0.0 if not calibrated."""
+        return self._calibrated_upper_z_q
+
+    @property
+    def cap_multiplier(self) -> float:
+        """Maximum allowed cumulative growth of upper_z_q over calibrated baseline."""
+        return self._cap_multiplier
+
+    def adjust_upper_threshold(self, factor: float) -> tuple[bool, float]:
+        """Multiply the upper anomaly threshold by *factor* (must be > 0).
+
+        Clamps the result so that ``upper_z_q`` never exceeds
+        ``calibrated_upper_z_q * cap_multiplier``.
+
+        Returns ``(was_clamped, current_ratio)`` where ``current_ratio`` is
+        the resulting ``upper_z_q / calibrated_upper_z_q`` after the call.
+        If the threshold is not yet calibrated, no-op and returns
+        ``(False, 0.0)``.
+        """
         if factor <= 0 or not math.isfinite(factor):
             msg = f"factor must be finite and > 0, got {factor}"
             raise ValueError(msg)
-        self._upper_z_q *= factor
+        if not self._calibrated or self._calibrated_upper_z_q <= 0:
+            return False, 0.0
+        proposed = self._upper_z_q * factor
+        cap = self._calibrated_upper_z_q * self._cap_multiplier
+        if proposed > cap:
+            self._upper_z_q = cap
+            return True, self._cap_multiplier
+        self._upper_z_q = proposed
+        ratio = self._upper_z_q / self._calibrated_upper_z_q
+        return False, ratio
 
     def update(self, score: float) -> ThresholdResult:
         """Process a new score. Returns threshold result."""
@@ -245,6 +283,7 @@ class DSpotThreshold:
             )
             self._lower_z_q = self._lower_threshold
 
+        self._calibrated_upper_z_q = self._upper_z_q
         self._calibrated = True
 
     def _refit_upper(self) -> None:
@@ -306,17 +345,37 @@ class DSpotThreshold:
             ),
             n_total=self._n_total,
             calibrated=self._calibrated,
+            calibrated_upper_z_q=self._calibrated_upper_z_q,
         )
         return msgspec.json.encode(state)
 
     @classmethod
-    def deserialize(cls, data: bytes) -> DSpotThreshold:
-        """Restore threshold state from msgspec JSON bytes."""
+    def deserialize(
+        cls,
+        data: bytes,
+        *,
+        cap_multiplier: float = _DEFAULT_CAP_MULTIPLIER,
+        source_key: str = "",
+    ) -> DSpotThreshold:
+        """Restore threshold state from msgspec JSON bytes.
+
+        The ``cap_multiplier`` keyword sets the restored instance's
+        cap multiplier (must be finite and > 1.0); defaults to the
+        module default when not supplied.
+
+        Older blobs lacking ``calibrated_upper_z_q`` are handled gracefully:
+        the field is seeded from the current ``upper_z_q`` and an INFO
+        message is logged.
+        """
+        if not math.isfinite(cap_multiplier) or cap_multiplier <= 1.0:
+            msg = f"cap_multiplier must be finite and > 1.0, got {cap_multiplier}"
+            raise ValueError(msg)
         state = msgspec.json.decode(data, type=_BiDSpotState)
         obj = cls.__new__(cls)
         obj._calibration_window = state.calibration_window
         obj._risk_level = state.risk_level
         obj._initial_percentile = state.initial_percentile
+        obj._cap_multiplier = cap_multiplier
         obj._upper_threshold = state.upper.threshold
         obj._upper_z_q = state.upper.z_q if state.upper.z_q is not None else float("inf")
         obj._upper_excesses = state.upper.excesses
@@ -328,4 +387,13 @@ class DSpotThreshold:
         obj._n_total = state.n_total
         obj._calibrated = state.calibrated
         obj._scores = []
+        if state.calibrated_upper_z_q is None:
+            safe_key = (source_key or "<unknown>")[:64]
+            _log.info(
+                "Legacy DSPOT state detected for source %r — using current upper_z_q as baseline",
+                safe_key,
+            )
+            obj._calibrated_upper_z_q = obj._upper_z_q
+        else:
+            obj._calibrated_upper_z_q = state.calibrated_upper_z_q
         return obj

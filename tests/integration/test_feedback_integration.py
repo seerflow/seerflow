@@ -5,8 +5,14 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+import pytest
+
+from seerflow.alerting.feedback import process_feedback
+from seerflow.config import ConfigError, StorageConfig, load_config
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+from seerflow.storage import connect_storage
+from seerflow.storage.sqlite import SqliteBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,10 +40,6 @@ class TestFeedbackIntegration:
 
     async def test_fp_feedback_persists_and_appears_in_stats(self, tmp_path: Path) -> None:
         """FP feedback stored via process_feedback is queryable."""
-        from seerflow.alerting.feedback import process_feedback
-        from seerflow.config import StorageConfig
-        from seerflow.storage.sqlite import SqliteBackend
-
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
@@ -62,10 +64,6 @@ class TestFeedbackIntegration:
 
     async def test_tp_feedback_persists_and_appears_in_stats(self, tmp_path: Path) -> None:
         """TP feedback stored via process_feedback is queryable."""
-        from seerflow.alerting.feedback import process_feedback
-        from seerflow.config import StorageConfig
-        from seerflow.storage.sqlite import SqliteBackend
-
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
@@ -86,9 +84,6 @@ class TestFeedbackIntegration:
 
     async def test_update_feedback_persists_note(self, tmp_path: Path) -> None:
         """AlertStore.update_feedback stores note in the BLOB and round-trips."""
-        from seerflow.config import StorageConfig
-        from seerflow.storage.sqlite import SqliteBackend
-
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
@@ -106,12 +101,6 @@ class TestFeedbackIntegration:
 
     async def test_nonexistent_alert_raises_value_error(self, tmp_path: Path) -> None:
         """Feedback on a missing alert raises ValueError."""
-        import pytest
-
-        from seerflow.alerting.feedback import process_feedback
-        from seerflow.config import StorageConfig
-        from seerflow.storage.sqlite import SqliteBackend
-
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
@@ -123,3 +112,27 @@ class TestFeedbackIntegration:
                 )
         finally:
             await storage.close()
+
+
+class TestFeedbackCLIInvalidBackend:
+    def test_unsupported_backend_rejected_by_load_config(self, tmp_path: Path) -> None:
+        """`seerflow feedback` with an invalid storage.backend surfaces a
+        ConfigError through load_config — the user-facing failure mode.
+        """
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "storage:\n  backend: redis\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ConfigError, match=r"Invalid storage\.backend"):
+            load_config(str(yaml_path))
+
+    async def test_factory_error_message_does_not_leak_paths(self) -> None:
+        """Defense-in-depth: factory rejects unknown backend without leaking paths."""
+        cfg = StorageConfig(backend="nosuch", data_dir="/etc/secrets")
+        with pytest.raises(ValueError) as exc:
+            await connect_storage(cfg)
+        msg = str(exc.value)
+        assert "/etc/secrets" not in msg
+        assert "nosuch" in msg

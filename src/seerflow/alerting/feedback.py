@@ -48,9 +48,17 @@ async def process_feedback(
 
     if feedback == "fp" and ensemble is not None:
         source_key = _derive_source_key(alert)
-        adjusted = ensemble.adjust_upper_threshold(source_key, _FP_THRESHOLD_FACTOR)
-        if adjusted:
-            msg += f". DSPOT threshold adjusted for source '{source_key}'"
+        result = ensemble.adjust_upper_threshold(source_key, _FP_THRESHOLD_FACTOR)
+        if result.status == "clamped":
+            safe_key = source_key[:64]
+            msg += (
+                f". DSPOT threshold capped at {result.current_ratio:.2f}x baseline "
+                f"for source {safe_key!r} — review detector for noise"
+            )
+        elif result.status == "applied":
+            safe_key = source_key[:64]
+            msg += f". DSPOT threshold adjusted for source {safe_key!r}"
+        # not_calibrated: no CLI noise
 
     if feedback == "fp" and pagerduty_routing_key:
         dedup_key = f"{alert.alert_type}:{alert.rule_name}:{alert.entity_uuid}"

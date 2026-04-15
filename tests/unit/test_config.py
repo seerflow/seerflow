@@ -1537,3 +1537,46 @@ def test_api_coverage_rate_limit_invalid_raises(tmp_path: Path) -> None:
     yaml_path.write_text("api_coverage_rate_limit: not-a-limit\n")
     with pytest.raises(ConfigError, match="api_coverage_rate_limit"):
         load_config(str(yaml_path))
+
+
+class TestDspotThresholdCapMultiplier:
+    def test_default_is_5(self) -> None:
+        from seerflow.config import DetectionConfig
+
+        cfg = DetectionConfig()
+        assert cfg.dspot_threshold_cap_multiplier == 5.0
+
+    def test_yaml_override(self, tmp_path: Path) -> None:
+        from seerflow.config import load_config
+
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "detection:\n  dspot:\n    threshold_cap_multiplier: 3.5\n",
+            encoding="utf-8",
+        )
+        cfg = load_config(str(yaml_path))
+        assert cfg.detection.dspot_threshold_cap_multiplier == 3.5
+
+    @pytest.mark.parametrize("bad", [0.5, 1.0, 0.0, -1.0])
+    def test_numeric_invalid_multiplier_rejected(self, tmp_path: Path, bad: float) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            f"detection:\n  dspot:\n    threshold_cap_multiplier: {bad}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match="threshold_cap_multiplier"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("yaml_special", [".inf", "-.inf", ".nan"])
+    def test_nonfinite_multiplier_rejected(self, tmp_path: Path, yaml_special: str) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            f"detection:\n  dspot:\n    threshold_cap_multiplier: {yaml_special}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match="threshold_cap_multiplier"):
+            load_config(str(yaml_path))

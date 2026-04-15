@@ -147,6 +147,7 @@ class DetectionConfig:
     dspot_calibration_window: int = 1000
     dspot_risk_level: float = 0.0001
     dspot_initial_percentile: int = 98
+    dspot_threshold_cap_multiplier: float = 5.0
     hw_seasonal_period: int = 1440
     hw_alpha: float = 0.3
     hw_beta: float = 0.1
@@ -423,6 +424,14 @@ def _validate_detection_config(config: DetectionConfig) -> None:
             f"detection.dspot_initial_percentile must be in [1, 100], "
             f"got {config.dspot_initial_percentile!r}"
         )
+    if (
+        not math.isfinite(config.dspot_threshold_cap_multiplier)
+        or config.dspot_threshold_cap_multiplier <= 1.0
+    ):
+        raise ConfigError(
+            f"detection.dspot_threshold_cap_multiplier must be finite and > 1.0, "
+            f"got {config.dspot_threshold_cap_multiplier!r}"
+        )
 
     # Markov parameters
     if config.markov_min_events < 1:
@@ -600,6 +609,7 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
         dspot_calibration_window=dspot.get("calibration_window", 1000),
         dspot_risk_level=dspot.get("risk_level", 0.0001),
         dspot_initial_percentile=dspot.get("initial_percentile", 98),
+        dspot_threshold_cap_multiplier=dspot.get("threshold_cap_multiplier", 5.0),
         hw_seasonal_period=hw.get("seasonal_period", data.get("hw_seasonal_period", 1440)),
         hw_alpha=hw.get("alpha", data.get("hw_alpha", 0.3)),
         hw_beta=hw.get("beta", data.get("hw_beta", 0.1)),
