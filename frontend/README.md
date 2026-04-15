@@ -106,6 +106,37 @@ WebSocket. For hot-reload development:
   Regenerate via `npx shadcn@2.1.8 add <component>`; the version is
   pinned to keep generated output stable across contributors.
 
+## Event Stream
+
+The Event Stream widget renders raw pipeline events newest-first, like `tail -f`
+over the entire log fleet.
+
+- **Live ingestion:** consumes `event` and `batch` WS messages from
+  `/api/v1/ws` (shared connection owned by `AlertFeed` — no second socket).
+- **Warm-up:** REST `GET /api/v1/events?limit=100` on mount.
+- **Filters:**
+  - **Sources** — chip multi-select of every distinct `source_type` observed.
+  - **Min severity** — segmented select 0–6.
+  - **Template IDs** — free-form numeric chip input.
+  Filter changes push a merged `filter` WS message via `lib/wsFilter` so the
+  server stops sending non-matching events for any widget.
+- **Pause / Resume:** pause halts visible appends; new events accumulate in a
+  `pausedBuffer` (capped at 5000 — oldest evicted past the cap). Resume
+  prepends the buffer and truncates to the 1000-event ring.
+- **Virtualization:** `@tanstack/react-virtual` keeps DOM cost flat at high
+  ingest rates.
+
+Run end-to-end:
+
+```bash
+# terminal 1 — backend
+uv run python -m seerflow start
+
+# terminal 2 — frontend
+cd frontend && npm run dev
+# → http://localhost:5173 (Vite proxies /api → :8080)
+```
+
 ## Deferred dependencies (YAGNI)
 
 These libraries are reserved for downstream sprint stories and are
