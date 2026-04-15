@@ -27,8 +27,8 @@ export function AlertFeed(): JSX.Element {
   const alerts = useAlertStore(s => s.alerts);
   const filter = useAlertStore(s => s.filter);
   const status = useAlertStore(s => s.status);
-  const { prepend, backfill, setFilter, setStatus, setFeedback } = useAlertStore.getState();
-  const [openId, setOpenId] = useState<string | null>(null);
+  const openId = useAlertStore(s => s.selectedAlertId);
+  const { prepend, backfill, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
   const [wsUrl] = useState(() => {
     const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
     const url = base.replace(/^http/, "ws") + "/api/v1/ws";
@@ -91,7 +91,7 @@ export function AlertFeed(): JSX.Element {
           {visible.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">No alerts in the last hour.</div>
           ) : (
-            visible.map(a => <AlertRow key={a.alert_id} alert={a} isOpen={openId === a.alert_id} onClick={id => setOpenId(openId === id ? null : id)} />)
+            visible.map(a => <AlertRow key={a.alert_id} alert={a} isOpen={openId === a.alert_id} onClick={id => (openId === id ? clearSelection() : selectAlert(id))} />)
           )}
         </div>
       </div>

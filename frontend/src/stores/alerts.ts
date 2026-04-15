@@ -10,12 +10,15 @@ export interface AlertsState {
   filter: AlertFilter;
   status: WsStatus;
   dropped: number;
+  selectedAlertId: string | null;
   prepend: (a: Alert) => void;
   backfill: (a: Alert[]) => void;
   setFilter: (p: Partial<AlertFilter>) => void;
   setStatus: (s: WsStatus) => void;
   setDetail: (id: string, d: AlertDetail) => void;
   setFeedback: (id: string, f: Feedback) => void;
+  selectAlert: (id: string) => void;
+  clearSelection: () => void;
 }
 
 const emptyFilter = (): AlertFilter => ({
@@ -51,6 +54,7 @@ export function createAlertStore(max = MAX_ALERTS) {
     filter: emptyFilter(),
     status: "connecting",
     dropped: 0,
+    selectedAlertId: null,
     prepend: (a) => set(s => {
       const r = mergePrepend(s.alerts, a, max);
       return { alerts: r.alerts, dropped: s.dropped + r.dropped };
@@ -78,6 +82,8 @@ export function createAlertStore(max = MAX_ALERTS) {
     setFeedback: (id, feedback) => set(s => ({
       alerts: s.alerts.map(x => x.alert_id === id ? { ...x, feedback } : x),
     })),
+    selectAlert: (id) => set({ selectedAlertId: id }),
+    clearSelection: () => set({ selectedAlertId: null }),
   }));
 }
 

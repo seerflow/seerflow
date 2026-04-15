@@ -53,3 +53,14 @@ describe("alertStore", () => {
     expect(s.getState().alerts[0].feedback).toBe("tp");
   });
 });
+
+describe("alertStore selectedAlertId slice", () => {
+  it("selectAlert sets the id; clearSelection resets it", () => {
+    const store = createAlertStore();
+    expect(store.getState().selectedAlertId).toBeNull();
+    store.getState().selectAlert("abc");
+    expect(store.getState().selectedAlertId).toBe("abc");
+    store.getState().clearSelection();
+    expect(store.getState().selectedAlertId).toBeNull();
+  });
+});
