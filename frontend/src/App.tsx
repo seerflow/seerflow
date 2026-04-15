@@ -8,6 +8,7 @@ import { AlertFeed } from "@/components/AlertFeed/AlertFeed";
 import { AnomalyTimeline } from "@/components/AnomalyTimeline/AnomalyTimeline";
 import { EntitySearch } from "@/components/EntityExplorer/EntitySearch";
 import { EntityDetail } from "@/components/EntityExplorer/EntityDetail";
+import { EventStream } from "@/components/EventStream/EventStream";
 import { hashHasEntity } from "@/lib/hash";
 import { useEntityStore } from "@/stores/entity";
 
@@ -54,6 +55,7 @@ export default function App() {
         <div className="grid gap-3 lg:grid-cols-2">
           <AlertFeed />
           <AnomalyTimeline />
+          <div className="lg:col-span-2"><EventStream /></div>
         </div>
       )}
     </main>
