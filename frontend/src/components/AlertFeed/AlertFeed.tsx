@@ -7,8 +7,10 @@ import { FilterBar } from "./FilterBar";
 import { SummaryBadges } from "./SummaryBadges";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { api, ApiError } from "@/lib/api";
-import type { AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
+import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert, LiveEvent } from "@/lib/types";
 import { logger } from "@/lib/logger";
+import { useEventStore } from "@/stores/events";
+import { setIntent as setWsIntent } from "@/lib/wsFilter";
 
 const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
 
@@ -49,9 +51,15 @@ export function AlertFeed(): JSX.Element {
 
   const onMessage = (m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
-    else if (m.type === "batch") m.events.forEach(prepend);
+    else if (m.type === "batch") {
+      if (m.events.length && "event_id" in (m.events[0] as object)) {
+        useEventStore.getState().ingest(m.events as unknown as LiveEvent[]);
+      } else {
+        (m.events as Alert[]).forEach(prepend);
+      }
+    }
     else if (m.type === "event" && m.data !== null && typeof m.data === "object") {
-      const d = m.data as {
+      const d = m.data as unknown as {
         timestamp_ns?: number;
         score?: number | null;
         upper_threshold?: number | null;
@@ -65,19 +73,30 @@ export function AlertFeed(): JSX.Element {
           source_type: d.source_type,
         });
       }
+      useEventStore.getState().ingest([m.data as LiveEvent]);
     }
   };
 
   const { send } = useWebSocket(wsUrl, {
     onMessage,
     onStatusChange: setStatus,
-    getFilterMessage: () => toWsFilter(useAlertStore.getState().filter),
+    getFilterMessage: () => setWsIntent("alerts", toWsFilter(useAlertStore.getState().filter)),
   });
 
   useEffect(() => {
-    const t = setTimeout(() => send(toWsFilter(filter)), 150);
+    const merged = setWsIntent("alerts", toWsFilter(filter));
+    const t = setTimeout(() => send(merged), 150);
     return () => clearTimeout(t);
   }, [filter, send]);
+
+  useEffect(() => {
+    const handler = (): void => {
+      const merged = setWsIntent("alerts", toWsFilter(useAlertStore.getState().filter));
+      send(merged);
+    };
+    window.addEventListener("seerflow:wsfilter-changed", handler);
+    return () => window.removeEventListener("seerflow:wsfilter-changed", handler);
+  }, [send]);
 
   const [showDisconnected, setShowDisconnected] = useState(false);
   useEffect(() => {
