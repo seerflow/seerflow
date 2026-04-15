@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useEntityStore } from "@/stores/entity";
-import { serializeEntityHash } from "@/lib/hash";
+import { navigateToEntity } from "@/lib/hash";
 import type { EntitySearchResult } from "@/lib/types";
 
 const DEBOUNCE_MS = 250;
@@ -42,12 +42,7 @@ export function EntitySearch() {
 
   function navigate(r: EntitySearchResult) {
     pushRecent(r);
-    window.history.pushState(
-      null,
-      "",
-      serializeEntityHash({ entity_uuid: r.entity_uuid, range: "24h" }),
-    );
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    navigateToEntity(r.entity_uuid);
     setOpen(false);
   }
 

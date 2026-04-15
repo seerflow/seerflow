@@ -1,6 +1,6 @@
 import { useEntityStore } from "@/stores/entity";
 import { useAlertStore } from "@/stores/alerts";
-import { serializeEntityHash } from "@/lib/hash";
+import { navigateToEntity } from "@/lib/hash";
 import { EntityTimelineList } from "./EntityTimelineList";
 import { RelatedEntitiesPanel } from "./RelatedEntitiesPanel";
 import { EntityGraph } from "./EntityGraph";
@@ -22,15 +22,17 @@ export function EntityDetail() {
     ? alerts.filter((a) => a.entity_uuid === uuid).reduce((s, a) => s + a.risk_score, 0)
     : 0;
 
+  const selectedType = useEntityStore((s) => s.selectedEntityType);
+  const selectedValue = useEntityStore((s) => s.selectedEntityValue);
+
   function navigate(toUuid: string) {
-    window.history.pushState(null, "", serializeEntityHash({ entity_uuid: toUuid, range: "24h" }));
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    navigateToEntity(toUuid);
   }
 
   if (!uuid) return null;
 
-  const focalLabel = related[0]?.entity_value ?? uuid.slice(0, 8);
-  const focalType = "user"; // best-effort: real type inferred from first event or search result (stored separately in a later follow-up)
+  const focalLabel = selectedValue ?? related[0]?.entity_value ?? uuid.slice(0, 8);
+  const focalType = selectedType ?? related[0]?.entity_type ?? "user";
 
   return (
     <section className="flex flex-col gap-3" aria-label="Entity detail">

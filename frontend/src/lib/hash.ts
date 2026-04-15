@@ -38,3 +38,18 @@ export function serializeEntityHash(state: EntityViewState): string {
 export function hashHasEntity(hash: string): boolean {
   return parseEntityHash(hash) != null;
 }
+
+/**
+ * Navigate to an entity detail view by assigning `window.location.hash`.
+ *
+ * Setting `location.hash` natively pushes onto the history stack AND fires a
+ * real `hashchange` event (with populated `oldURL` / `newURL`). Using
+ * `pushState` + a synthetic `HashChangeEvent` would skip the native event and
+ * leave `popstate` listeners out of sync. This helper is the single writer so
+ * all call sites (search, related panel, graph) stay consistent.
+ */
+export function navigateToEntity(uuid: string, range: TimelineRange = "24h"): void {
+  const nextHash = serializeEntityHash({ entity_uuid: uuid, range });
+  if (window.location.hash === nextHash) return;
+  window.location.hash = nextHash;
+}

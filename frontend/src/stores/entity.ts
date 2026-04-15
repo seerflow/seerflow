@@ -27,6 +27,8 @@ interface State {
   searchResults: EntitySearchResult[];
   recent: EntitySearchResult[];
   selectedEntityUuid: string | null;
+  selectedEntityType: string | null;
+  selectedEntityValue: string | null;
   range: TimelineRange;
   sourceFilter: string | null;
   severityMin: number | null;
@@ -80,6 +82,8 @@ export const useEntityStore = create<State>((set, get) => ({
   searchResults: [],
   recent: loadRecent(),
   selectedEntityUuid: null,
+  selectedEntityType: null,
+  selectedEntityValue: null,
   range: "24h" as TimelineRange,
   sourceFilter: null,
   severityMin: null,
@@ -121,7 +125,16 @@ export const useEntityStore = create<State>((set, get) => ({
   },
 
   selectEntity: async (uuid) => {
-    set({ selectedEntityUuid: uuid });
+    const { searchResults, recent } = get();
+    const found =
+      searchResults.find((r) => r.entity_uuid === uuid) ??
+      recent.find((r) => r.entity_uuid === uuid) ??
+      null;
+    set({
+      selectedEntityUuid: uuid,
+      selectedEntityType: found ? String(found.entity_type) : null,
+      selectedEntityValue: found ? found.entity_value : null,
+    });
     await get().refresh();
   },
 
@@ -144,11 +157,11 @@ export const useEntityStore = create<State>((set, get) => ({
     const { selectedEntityUuid, range, sourceFilter, severityMin, _detailAbort } = get();
     if (!selectedEntityUuid) return;
     if (_detailAbort) _detailAbort.abort();
-    const now = Date.now() * 1_000_000;
-    const start = now - RANGE_TO_MS[range] * 1_000_000;
+    const nowNs = BigInt(Date.now()) * 1_000_000n;
+    const startNs = nowNs - BigInt(RANGE_TO_MS[range]) * 1_000_000n;
     const params = new URLSearchParams({
-      start_ns: String(start),
-      end_ns: String(now),
+      start_ns: startNs.toString(),
+      end_ns: nowNs.toString(),
       limit: "1000",
     });
     if (sourceFilter) params.set("source_type", sourceFilter);
@@ -181,11 +194,18 @@ export const useEntityStore = create<State>((set, get) => ({
   restoreFromHash: async (hash) => {
     const parsed = parseEntityHash(hash);
     if (!parsed) {
-      set({ selectedEntityUuid: null });
+      set({ selectedEntityUuid: null, selectedEntityType: null, selectedEntityValue: null });
       return;
     }
+    const { searchResults, recent } = get();
+    const found =
+      searchResults.find((r) => r.entity_uuid === parsed.entity_uuid) ??
+      recent.find((r) => r.entity_uuid === parsed.entity_uuid) ??
+      null;
     set({
       selectedEntityUuid: parsed.entity_uuid,
+      selectedEntityType: found ? String(found.entity_type) : null,
+      selectedEntityValue: found ? found.entity_value : null,
       range: parsed.range,
       sourceFilter: parsed.source ?? null,
       severityMin: parsed.severity_min ?? null,
@@ -196,6 +216,8 @@ export const useEntityStore = create<State>((set, get) => ({
   clearSelection: () =>
     set({
       selectedEntityUuid: null,
+      selectedEntityType: null,
+      selectedEntityValue: null,
       events: [],
       related: [],
       total: 0,

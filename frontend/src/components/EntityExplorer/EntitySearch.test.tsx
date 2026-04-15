@@ -67,27 +67,17 @@ describe("EntitySearch", () => {
       { entity_type: "user", entity_value: "alice", entity_uuid: UUID },
       { entity_type: "ip", entity_value: "10.0.0.5", entity_uuid: UUID2 },
     ]);
-    const pushSpy = vi.fn();
-    const origPush = window.history.pushState.bind(window.history);
-    window.history.pushState = (...args: Parameters<typeof origPush>) => {
-      pushSpy(...args);
-      return origPush(...args);
-    };
-    try {
-      render(<EntitySearch />);
-      const input = screen.getByRole("combobox") as HTMLInputElement;
-      fireEvent.change(input, { target: { value: "a" } });
-      await screen.findByText("alice");
-      fireEvent.keyDown(input, { key: "ArrowDown" });
-      fireEvent.keyDown(input, { key: "ArrowDown" });
-      fireEvent.keyDown(input, { key: "ArrowUp" });
-      fireEvent.keyDown(input, { key: "Enter" });
-      expect(pushSpy).toHaveBeenCalled();
-      const url = String(pushSpy.mock.calls[0][2]);
-      expect(url).toContain("entity=");
-    } finally {
-      window.history.pushState = origPush;
-    }
+    window.location.hash = "";
+    render(<EntitySearch />);
+    const input = screen.getByRole("combobox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "a" } });
+    await screen.findByText("alice");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(window.location.hash).toContain("entity=");
+    expect(window.location.hash).toContain(UUID);
   });
 
   it("clicking an option (mousedown) navigates and closes", async () => {
