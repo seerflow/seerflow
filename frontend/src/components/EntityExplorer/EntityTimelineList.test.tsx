@@ -30,4 +30,32 @@ describe("EntityTimelineList", () => {
     render(<EntityTimelineList events={many} total={1000} limit={1000} />);
     expect(screen.getByText(/may be truncated/i)).toBeInTheDocument();
   });
+
+  it("renders a sticky day header per distinct day", () => {
+    const day1 = new Date(2026, 0, 1, 12, 0, 0).getTime() * 1_000_000;
+    const day2 = new Date(2026, 0, 2, 12, 0, 0).getTime() * 1_000_000;
+    const events = [
+      mk({ event_id: "a", timestamp_ns: day1, message: "first" }),
+      mk({ event_id: "b", timestamp_ns: day2, message: "second" }),
+    ];
+    const { container } = render(<EntityTimelineList events={events} total={2} limit={1000} />);
+    // Two day headers, two event rows
+    const headers = container.querySelectorAll(".sticky");
+    expect(headers.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("first")).toBeInTheDocument();
+    expect(screen.getByText("second")).toBeInTheDocument();
+  });
+
+  it("uses virtualized branch when rows > 200", () => {
+    const base = Date.now() * 1_000_000;
+    const events = Array.from({ length: 250 }, (_, i) =>
+      mk({ event_id: `e${i}`, timestamp_ns: base + i * 1000 }),
+    );
+    const { container } = render(<EntityTimelineList events={events} total={250} limit={1000} />);
+    // The virtualized branch wraps the rows in a relative container with explicit
+    // pixel height set from virtualizer.getTotalSize().
+    const virtContainer = container.querySelector('div[style*="position: relative"]');
+    expect(virtContainer).not.toBeNull();
+    expect((virtContainer as HTMLElement).style.height).toMatch(/\d+px/);
+  });
 });
