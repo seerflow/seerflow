@@ -185,7 +185,7 @@ class TestAlertFeedback:
             json={"feedback": "tp"},
         )
         assert resp.status_code == 204
-        alert_store.update_feedback.assert_called_once_with("alert-001", "tp")
+        alert_store.update_feedback.assert_called_once_with("alert-001", "tp", "")
 
     def test_feedback_alert_not_found(self) -> None:
         alert_store = AsyncMock()
