@@ -74,6 +74,7 @@ export function EntitySearch() {
       <input
         ref={inputRef}
         role="combobox"
+        aria-label="Search entities"
         aria-expanded={open}
         aria-controls="entity-search-listbox"
         aria-autocomplete="list"

@@ -1,7 +1,9 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import App from "./App";
 import { useThemeStore } from "@/stores/theme";
+import { api } from "@/lib/api";
+import { useEntityStore } from "@/stores/entity";
 
 vi.mock("@/lib/api", () => ({
   api: { get: vi.fn().mockResolvedValue({ items: [] }), post: vi.fn() },
@@ -65,5 +67,33 @@ describe("App shell", () => {
   it("mounts AnomalyTimeline alongside AlertFeed", async () => {
     render(<App />);
     expect(await screen.findByText("Anomaly Timeline")).toBeInTheDocument();
+  });
+});
+
+describe("App hash routing", () => {
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
+    window.history.replaceState(null, "", "/");
+    useEntityStore.setState(useEntityStore.getInitialState());
+    useThemeStore.setState({ theme: "light" });
+    (globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
+      class { observe() {} disconnect() {} unobserve() {} } as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("renders dashboard when hash empty", () => {
+    render(<App />);
+    expect(screen.getByRole("combobox", { name: /search entities/i })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /entity detail/i })).toBeNull();
+  });
+
+  it("switches to EntityDetail when hash includes entity=<uuid>", async () => {
+    (api.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      entity_uuid: "u", events: [], related: [], total: 0,
+    });
+    window.history.replaceState(null, "", "/#entity=11111111-2222-3333-4444-555555555555");
+    render(<App />);
+    await act(async () => { window.dispatchEvent(new HashChangeEvent("hashchange")); });
+    expect(await screen.findByLabelText(/entity detail/i)).toBeInTheDocument();
   });
 });
