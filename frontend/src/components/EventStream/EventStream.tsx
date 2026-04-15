@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEventStore, selectVisibleEvents, selectPausedCount } from "@/stores/events";
+import { useEventStore, selectPausedCount } from "@/stores/events";
 import { EventRow } from "./EventRow";
 import { PauseControl } from "./PauseControl";
 import { EventFilterBar } from "./EventFilterBar";
 import { api, ApiError } from "@/lib/api";
 import { logger } from "@/lib/logger";
-import { setIntent as setWsIntent } from "@/lib/wsFilter";
+import { setIntent as setWsIntent, clearIntent as clearWsIntent } from "@/lib/wsFilter";
 import type { LiveEvent, EventFilter } from "@/lib/types";
 
 function intentFromFilter(f: EventFilter): Parameters<typeof setWsIntent>[1] {
@@ -22,11 +22,26 @@ export function EventStream(): JSX.Element {
   const paused = useEventStore((s) => s.paused);
   const status = useEventStore((s) => s.status);
   const knownSources = useEventStore((s) => s.knownSources);
-  const visible = useEventStore(selectVisibleEvents);
+  // Subscribe to raw events ref + filter; memoize the filtered slice locally so
+  // unrelated store updates (status, paused, dropped counters) don't cascade
+  // into a re-filter of the entire ring buffer.
+  const events = useEventStore((s) => s.events);
+  const visible = useMemo<LiveEvent[]>(() => {
+    if (filter.sources.size === 0 && filter.minSeverity === 0 && filter.templateIds.size === 0) {
+      return events;
+    }
+    return events.filter((e) => {
+      if (filter.sources.size && !filter.sources.has(e.source_type)) return false;
+      if (e.severity_id < filter.minSeverity) return false;
+      if (filter.templateIds.size && !filter.templateIds.has(e.template_id)) return false;
+      return true;
+    });
+  }, [events, filter]);
   const bufferedCount = useEventStore(selectPausedCount);
   const { backfill, pause, resume, setFilter } = useEventStore.getState();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showDisconnected, setShowDisconnected] = useState(false);
+  const [virtualizerReady, setVirtualizerReady] = useState(false);
 
   // REST warm-up
   useEffect(() => {
@@ -37,7 +52,8 @@ export function EventStream(): JSX.Element {
     return () => { cancelled = true; };
   }, [backfill]);
 
-  // Push WS filter intent on filter change (debounce 150 ms)
+  // Push WS filter intent on filter change (debounce 150 ms). Clear on unmount
+  // so a remount of EventStream doesn't inherit the previous instance's intent.
   useEffect(() => {
     const t = setTimeout(() => {
       setWsIntent("events", intentFromFilter(filter));
@@ -45,6 +61,11 @@ export function EventStream(): JSX.Element {
     }, 150);
     return () => clearTimeout(t);
   }, [filter]);
+
+  useEffect(() => () => {
+    clearWsIntent("events");
+    window.dispatchEvent(new CustomEvent("seerflow:wsfilter-changed"));
+  }, []);
 
   // Disconnected banner after 3 s
   useEffect(() => {
@@ -56,36 +77,59 @@ export function EventStream(): JSX.Element {
     return undefined;
   }, [status]);
 
-  // Virtualizer
+  // Virtualizer — keep estimateSize closure fresh by re-creating it whenever
+  // expandedId changes. useVirtualizer rebinds internally on instance change.
   const parentRef = useRef<HTMLDivElement>(null);
+  const estimateSize = useCallback(
+    (i: number): number => (visible[i]?.event_id === expandedId ? 220 : 28),
+    [visible, expandedId],
+  );
   const rv = useVirtualizer({
     count: visible.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (i) => (visible[i]?.event_id === expandedId ? 220 : 28),
+    estimateSize,
     overscan: 8,
   });
+
+  // Once parent is measured, virtualizer becomes the source of truth. Until
+  // then we render an empty placeholder rather than dumping the full list.
+  useEffect(() => {
+    if (parentRef.current && parentRef.current.clientHeight > 0) {
+      setVirtualizerReady(true);
+    }
+  }, [visible.length]);
+
+  // Re-measure on row expansion in a layout effect so estimateSize sees the new
+  // expandedId before the virtualizer reads it.
+  useEffect(() => { rv.measure(); }, [expandedId, rv]);
 
   const knownSourcesList = useMemo(
     () => [...knownSources].sort().slice(0, 50),
     [knownSources],
   );
 
-  const togglePause = (): void => {
+  const togglePause = useCallback((): void => {
     if (paused) resume(); else pause();
-  };
+  }, [paused, pause, resume]);
 
-  const toggleRow = (id: string): void => {
+  const toggleRow = useCallback((id: string): void => {
     setExpandedId((cur) => (cur === id ? null : id));
-    rv.measure();
-  };
+  }, []);
+
+  // True when @tanstack/react-virtual has produced items. In jsdom (no layout)
+  // and on the very first paint in production this is empty; we then fall back
+  // to a plain list. The virtualizerReady flag stops the fallback from running
+  // in production once the parent has measured even a single time.
+  const virtualItems = rv.getVirtualItems();
+  const useFallback = !virtualizerReady || virtualItems.length === 0;
 
   return (
-    <section className="flex flex-col h-[420px] rounded border bg-card">
+    <section className="flex flex-col min-h-[320px] h-[420px] rounded border bg-card">
       <header className="flex items-center justify-between gap-2 border-b px-3 py-2">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Live Event Stream</h2>
           <span
-            aria-label={`status ${status}`}
+            aria-label={`WebSocket status: ${status}`}
             className={`inline-block h-2 w-2 rounded-full ${status === "open" ? "bg-emerald-500" : status === "connecting" ? "bg-amber-500" : "bg-red-500"}`}
           />
         </div>
@@ -100,17 +144,18 @@ export function EventStream(): JSX.Element {
       <div ref={parentRef} className="flex-1 overflow-y-auto">
         {visible.length === 0 ? (
           <div className="p-6 text-center text-xs text-muted-foreground">No events yet — waiting for the pipeline to send some.</div>
-        ) : rv.getVirtualItems().length === 0 ? (
-          // Virtualizer has not measured yet (or running in jsdom with no layout).
-          // Render plain list so rows are reachable for a11y + tests.
+        ) : useFallback ? (
+          // Pre-measurement (or jsdom). Render the first MAX_FALLBACK rows so
+          // tests + a11y work and we don't dump 1000 unvirtualized rows on first
+          // paint. The virtualizer takes over the moment parent dimensions land.
           <div>
-            {visible.map((e) => (
+            {visible.slice(0, MAX_FALLBACK_ROWS).map((e) => (
               <EventRow key={e.event_id} event={e} expanded={expandedId === e.event_id} onToggle={toggleRow} />
             ))}
           </div>
         ) : (
           <div style={{ height: rv.getTotalSize(), position: "relative" }}>
-            {rv.getVirtualItems().map((vi) => {
+            {virtualItems.map((vi) => {
               const e = visible[vi.index];
               return (
                 <div
@@ -129,3 +174,5 @@ export function EventStream(): JSX.Element {
     </section>
   );
 }
+
+const MAX_FALLBACK_ROWS = 50;

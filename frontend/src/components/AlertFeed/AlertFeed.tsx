@@ -52,14 +52,16 @@ export function AlertFeed(): JSX.Element {
   const onMessage = (m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "batch") {
-      if (m.events.length && "event_id" in (m.events[0] as object)) {
+      const first = m.events.length > 0 ? m.events[0] : null;
+      if (first && typeof first === "object" && "event_id" in first) {
         useEventStore.getState().ingest(m.events as unknown as LiveEvent[]);
-      } else {
+      } else if (first) {
         (m.events as Alert[]).forEach(prepend);
       }
     }
     else if (m.type === "event" && m.data !== null && typeof m.data === "object") {
       const d = m.data as unknown as {
+        event_id?: string;
         timestamp_ns?: number;
         score?: number | null;
         upper_threshold?: number | null;
@@ -73,7 +75,9 @@ export function AlertFeed(): JSX.Element {
           source_type: d.source_type,
         });
       }
-      useEventStore.getState().ingest([m.data as LiveEvent]);
+      if (typeof d.event_id === "string") {
+        useEventStore.getState().ingest([m.data as LiveEvent]);
+      }
     }
   };
 

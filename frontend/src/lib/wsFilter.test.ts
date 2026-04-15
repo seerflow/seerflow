@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { setIntent, _resetForTests } from "./wsFilter";
+import { setIntent, clearIntent, _resetForTests } from "./wsFilter";
 
 describe("wsFilter", () => {
   beforeEach(() => _resetForTests());
@@ -41,5 +41,12 @@ describe("wsFilter", () => {
     setIntent("events", { sources: ["auth", "syslog"] });
     const r = setIntent("events", { sources: ["dns"] });
     expect(r.sources).toEqual(["dns"]);
+  });
+
+  it("clearIntent removes a widget's intent and re-merges", () => {
+    setIntent("alerts", { alert_types: ["sigma"], min_severity: 13 });
+    setIntent("events", { sources: ["auth"], min_severity: 4 });
+    const r = clearIntent("events");
+    expect(r).toEqual({ type: "filter", alert_types: ["sigma"], min_severity: 13 });
   });
 });

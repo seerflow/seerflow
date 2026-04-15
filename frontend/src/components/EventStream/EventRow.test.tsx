@@ -5,8 +5,8 @@ import type { LiveEvent } from "@/lib/types";
 
 const sample: LiveEvent = {
   event_id: "e1",
-  timestamp_ns: 1_700_000_000_000_000_000,
-  observed_ns: 1_700_000_000_000_000_001,
+  timestamp_ns: 1_700_000_000_000,
+  observed_ns: 1_700_000_000_001,
   severity_id: 4,
   severity_text: "WARN",
   source_type: "auth",

@@ -45,6 +45,11 @@ export function setIntent(widget: WidgetId, partial: Intent): WsFilter {
   return merged();
 }
 
+export function clearIntent(widget: WidgetId): WsFilter {
+  intents[widget] = {};
+  return merged();
+}
+
 export function _resetForTests(): void {
   intents.alerts = {};
   intents.events = {};

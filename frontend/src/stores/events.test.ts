@@ -68,6 +68,32 @@ describe("eventStore", () => {
     expect(s.droppedFromPausedBuffer).toBe(3);
   });
 
+  it("resume overflow drops oldest visible events in favor of newer paused (live-tail semantics)", () => {
+    // Fill ring with old visible events
+    const oldVisible = Array.from({ length: MAX_EVENTS }, (_, i) => ev(i, { event_id: `old${i}` }));
+    useEventStore.getState().ingest(oldVisible);
+    expect(useEventStore.getState().events.length).toBe(MAX_EVENTS);
+
+    // Pause then ingest 100 newer events while paused
+    useEventStore.getState().pause();
+    const newPaused = Array.from({ length: 100 }, (_, i) => ev(MAX_EVENTS + i, { event_id: `new${i}` }));
+    useEventStore.getState().ingest(newPaused);
+    expect(useEventStore.getState().pausedBuffer.length).toBe(100);
+
+    // Resume — newest 100 paused should win, oldest 100 visible should be dropped
+    const dropBefore = useEventStore.getState().droppedFromRing;
+    useEventStore.getState().resume();
+    const s = useEventStore.getState();
+    expect(s.events.length).toBe(MAX_EVENTS);
+    expect(s.pausedBuffer).toEqual([]);
+    expect(s.paused).toBe(false);
+    expect(s.droppedFromRing).toBe(dropBefore + 100);
+    // Newest paused now at the head
+    expect(s.events[0].event_id.startsWith("new")).toBe(true);
+    // Oldest visible (old0..old99) should be evicted; oldest surviving = old100
+    expect(s.events[s.events.length - 1].event_id).toBe("old100");
+  });
+
   it("backfill bypasses paused", () => {
     useEventStore.getState().pause();
     useEventStore.getState().backfill([ev(1), ev(2)]);
