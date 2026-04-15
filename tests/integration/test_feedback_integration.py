@@ -84,6 +84,26 @@ class TestFeedbackIntegration:
         finally:
             await storage.close()
 
+    async def test_update_feedback_persists_note(self, tmp_path: Path) -> None:
+        """AlertStore.update_feedback stores note in the BLOB and round-trips."""
+        from seerflow.config import StorageConfig
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        try:
+            alert = _make_alert()
+            await storage.write_alert(alert, dedup_window_ns=0)
+
+            await storage.update_feedback(alert.alert_id, "fp", "benign scan")
+
+            reloaded = await storage.get_alert_by_id(alert.alert_id)
+            assert reloaded is not None
+            assert reloaded.feedback == "fp"
+            assert reloaded.feedback_note == "benign scan"
+        finally:
+            await storage.close()
+
     async def test_nonexistent_alert_raises_value_error(self, tmp_path: Path) -> None:
         """Feedback on a missing alert raises ValueError."""
         import pytest

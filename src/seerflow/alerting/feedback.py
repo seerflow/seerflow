@@ -35,13 +35,14 @@ async def process_feedback(
     storage: AlertStore,
     ensemble: DetectionEnsemble | None = None,
     pagerduty_routing_key: str = "",
+    note: str = "",
 ) -> str:
     """Process feedback for an alert. Returns status message."""
     alert = await storage.get_alert_by_id(alert_id)
     if alert is None:
         raise ValueError(f"Alert {alert_id} not found")
 
-    await storage.update_feedback(alert_id, feedback)
+    await storage.update_feedback(alert_id, feedback, note)
 
     msg = f"Alert {alert_id[:8]}... marked as {feedback.upper()}"
 

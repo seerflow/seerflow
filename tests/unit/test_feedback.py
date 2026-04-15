@@ -74,7 +74,7 @@ class TestProcessFeedback:
             storage=storage,
         )
 
-        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "fp")
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "fp", "")
         assert "fp" in result.lower() or "FP" in result
 
     async def test_tp_updates_storage(self) -> None:
@@ -92,7 +92,7 @@ class TestProcessFeedback:
             storage=storage,
         )
 
-        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp")
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "")
         assert "tp" in result.lower() or "TP" in result
 
     async def test_fp_adjusts_dspot_threshold(self) -> None:
@@ -334,3 +334,37 @@ class TestResolvePagerduty:
             await _resolve_pagerduty("key", "rk")
 
         assert any("failed" in r.message.lower() for r in caplog.records)
+
+
+class TestUpdateFeedbackNote:
+    async def test_update_feedback_forwards_note(self) -> None:
+        """process_feedback must forward note through storage.update_feedback."""
+        from seerflow.alerting.feedback import process_feedback
+
+        alert = _make_alert()
+        storage = MagicMock()
+        storage.get_alert_by_id = AsyncMock(return_value=alert)
+        storage.update_feedback = AsyncMock()
+
+        await process_feedback(
+            alert_id=alert.alert_id,
+            feedback="tp",
+            storage=storage,
+            note="manual triage: matches known vuln scanner",
+        )
+
+        storage.update_feedback.assert_awaited_once_with(
+            alert.alert_id, "tp", "manual triage: matches known vuln scanner"
+        )
+
+    async def test_update_feedback_defaults_note_to_empty(self) -> None:
+        from seerflow.alerting.feedback import process_feedback
+
+        alert = _make_alert()
+        storage = MagicMock()
+        storage.get_alert_by_id = AsyncMock(return_value=alert)
+        storage.update_feedback = AsyncMock()
+
+        await process_feedback(alert_id=alert.alert_id, feedback="tp", storage=storage)
+
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "")
