@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import msgspec.json
 import yaml
 
+from seerflow.cli_format import format_table
 from seerflow.sigma.attack import format_tactic, format_technique
 
 if TYPE_CHECKING:
@@ -55,28 +56,6 @@ def format_timestamp(ns: int) -> str:
     dt = datetime.fromtimestamp(ns / 1_000_000_000, tz=UTC)
     local_dt = dt.astimezone()
     return local_dt.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def format_table(headers: list[str], rows: list[list[str]]) -> str:
-    """Format headers and rows into an auto-sized text table.
-
-    Computes maximum width per column, pads with spaces, and adds
-    a separator line of dashes below the header row.
-    """
-    if not headers:
-        return ""
-    col_widths = [len(h) for h in headers]
-    for row in rows:
-        for i, cell in enumerate(row):
-            if i < len(col_widths):
-                col_widths[i] = max(col_widths[i], len(cell))
-    fmt = "  ".join(f"{{:<{w}}}" for w in col_widths)
-    lines = [fmt.format(*headers)]
-    lines.append("  ".join("-" * w for w in col_widths))
-    for row in rows:
-        padded = row + [""] * (len(headers) - len(row))
-        lines.append(fmt.format(*padded[: len(headers)]))
-    return "\n".join(lines) + "\n"
 
 
 async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> None:
