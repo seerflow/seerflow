@@ -64,11 +64,13 @@ function EventRowImpl({ event, expanded, onToggle }: Props): JSX.Element {
           <dt className="font-semibold">message</dt><dd className="font-mono">{event.message}</dd>
           <dt className="font-semibold">template_id</dt><dd>{event.template_id}</dd>
           <dt className="font-semibold">observed_ns</dt><dd>{event.observed_ns}</dd>
-          {Object.entries(event.entity_summary).map(([k, vs]) => (
-            <span key={k} className="contents">
-              <dt className="font-semibold">{k}</dt><dd>{vs?.join(", ")}</dd>
-            </span>
-          ))}
+          {Object.entries(event.entity_summary)
+            .filter(([k]) => Object.hasOwn(event.entity_summary, k))
+            .map(([k, vs]) => (
+              <span key={k} className="contents">
+                <dt className="font-semibold">{k}</dt><dd>{vs?.join(", ")}</dd>
+              </span>
+            ))}
           {typeof event.score === "number" && (<><dt className="font-semibold">score</dt><dd>{event.score.toFixed(3)}</dd></>)}
           {event.is_anomaly && <><dt className="font-semibold">anomaly</dt><dd className="text-red-600">true</dd></>}
         </dl>
