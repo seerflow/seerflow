@@ -12,21 +12,11 @@ from seerflow.api.anomaly_timeline import (
 )
 
 
-def _score(
-    ts_ns: int,
-    score: float,
-    thr: float,
-    source: str = "syslog",
-) -> tuple[int, float, float, str]:
-    """Helper -- produce a tuple the ring will accept."""
-    return (ts_ns, score, thr, source)
-
-
 @pytest.mark.unit
 class TestAnomalyTimelineRing:
     def test_record_single_event_one_bucket(self) -> None:
         ring = AnomalyTimelineRing(capacity_buckets=10)
-        ring.record_score(*_score(BUCKET_NS * 3 + 500, 0.5, 0.9))
+        ring.record_score(BUCKET_NS * 3 + 500, 0.5, 0.9, "syslog")
         out = ring.query(
             range_ns=RANGE_NS["1h"],
             resolution_ns=RESOLUTION_NS["1m"],

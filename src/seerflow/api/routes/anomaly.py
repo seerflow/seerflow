@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -26,7 +26,12 @@ from seerflow.models.query import AlertQuery, TimeRange
 
 router = APIRouter(tags=["anomaly"])
 
-_SOURCE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+_SOURCE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+# Ceiling for the single-page alert scan that joins alert_count into the
+# bucket series. Pagination is deliberately out-of-scope for S-059; this
+# constant caps the worst-case join cost per request.
+_ALERT_QUERY_LIMIT: Final[int] = 10_000
 
 
 RangeArg = Annotated[Literal["1h", "6h", "24h", "7d"], Query(description="Window size")]
@@ -72,7 +77,10 @@ async def get_anomaly_timeline(
     start_ns = items[0].bucket_start_ns if items else now_ns - RANGE_NS[range]
     end_ns = now_ns
     alert_page = await storage.alert_store.query_alerts(
-        AlertQuery(time_range=TimeRange(start_ns=start_ns, end_ns=end_ns), limit=10_000)
+        AlertQuery(
+            time_range=TimeRange(start_ns=start_ns, end_ns=end_ns),
+            limit=_ALERT_QUERY_LIMIT,
+        )
     )
     bucket_ns = RESOLUTION_NS[resolved_resolution]
     alert_counts: dict[int, int] = {}

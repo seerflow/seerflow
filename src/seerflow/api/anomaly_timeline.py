@@ -3,6 +3,12 @@
 The ring records scored events from the WS broadcast path and serves bucketed
 queries for GET /api/v1/anomaly/timeline. It is intentionally ephemeral --
 no persistence, no schema migration. A process restart empties it.
+
+Concurrency note: ``_SourceBucket`` is intentionally mutable for O(1)
+amortized append. This is safe under FastAPI's single-event-loop-per-worker
+model: ``record_score`` (invoked from ``ConnectionManager.broadcast_event``)
+and ``query`` (invoked from the REST handler) both run in the same asyncio
+event loop. Do not call ``record_score`` from threads outside the event loop.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ RANGE_NS: Final[dict[str, int]] = {
     "7d": 7 * 24 * 3600 * 1_000_000_000,
 }
 
-_ALLOWED: Final[dict[str, tuple[str, ...]]] = {
+_ALLOWED: Final[dict[TimelineRange, tuple[TimelineResolution, ...]]] = {
     "1h": ("1m",),
     "6h": ("1m", "5m"),
     "24h": ("5m", "15m"),
@@ -40,13 +46,20 @@ _ALLOWED: Final[dict[str, tuple[str, ...]]] = {
 }
 
 
-def allowed_resolutions(rng: str) -> tuple[str, ...]:
-    """Return the allowed resolution tokens for a range."""
+def allowed_resolutions(rng: TimelineRange) -> tuple[TimelineResolution, ...]:
+    """Return the allowed resolution tokens for a range.
+
+    Unknown keys raise ``KeyError`` by design — callers must pass a validated
+    ``TimelineRange`` literal. No silent fallback.
+    """
     return _ALLOWED[rng]
 
 
-def default_resolution(rng: str) -> str:
-    """Return the default (smallest allowed) resolution for a range."""
+def default_resolution(rng: TimelineRange) -> TimelineResolution:
+    """Return the default (smallest allowed) resolution for a range.
+
+    Unknown keys raise ``KeyError`` by design — see ``allowed_resolutions``.
+    """
     return _ALLOWED[rng][0]
 
 

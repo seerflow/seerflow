@@ -27,6 +27,7 @@ export function TimeRangeChips({ value, onChange }: Props): JSX.Element {
           {r}
         </button>
       ))}
+      {/* TODO: Custom date-range picker — follow-up story (see S-059 Out-of-Scope). */}
       <button
         type="button"
         disabled

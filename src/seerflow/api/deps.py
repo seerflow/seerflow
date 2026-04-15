@@ -91,14 +91,14 @@ def get_engines(request: Request) -> DetectionEngines:
 def get_anomaly_timeline_ring(request: Request) -> AnomalyTimelineRing:
     """Return the AnomalyTimelineRing stored on app.state.
 
-    Creates a lazy default for tests that skip the app factory path.
+    Raises RuntimeError if the ring was not configured via ``create_api_app``
+    or an explicit test setup. No lazy fallback — a missing ring is a wiring
+    bug, not a runtime condition to paper over.
     """
-    from seerflow.api.anomaly_timeline import AnomalyTimelineRing as _Ring
-
     ring: AnomalyTimelineRing | None = getattr(request.app.state, "anomaly_timeline_ring", None)
     if ring is None:
-        ring = _Ring()
-        request.app.state.anomaly_timeline_ring = ring
+        msg = "anomaly_timeline_ring not configured on app.state"
+        raise RuntimeError(msg)
     return ring
 
 

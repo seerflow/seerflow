@@ -15,12 +15,19 @@ import msgspec
 import pytest
 from fastapi import WebSocketException
 
+from seerflow.api.anomaly_timeline import (
+    BUCKET_NS,
+    RANGE_NS,
+    RESOLUTION_NS,
+    AnomalyTimelineRing,
+)
 from seerflow.api.ws import (
     ClientFilter,
     ConnectionManager,
     serialize_alert,
     serialize_event,
 )
+from seerflow.detection.ensemble import DetectionResult
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 
@@ -1189,14 +1196,6 @@ class TestTimelineRingIntegration:
         )
 
     def test_broadcast_event_records_scored_events_into_timeline_ring(self) -> None:
-        from seerflow.api.anomaly_timeline import (
-            BUCKET_NS,
-            RANGE_NS,
-            RESOLUTION_NS,
-            AnomalyTimelineRing,
-        )
-        from seerflow.detection.ensemble import DetectionResult
-
         ring = AnomalyTimelineRing()
         mgr = ConnectionManager(timeline_ring=ring)
         ts = BUCKET_NS * 7
@@ -1224,13 +1223,6 @@ class TestTimelineRingIntegration:
         assert hit[0].upper_threshold == 0.9
 
     def test_broadcast_event_skips_ring_when_detection_is_none(self) -> None:
-        from seerflow.api.anomaly_timeline import (
-            BUCKET_NS,
-            RANGE_NS,
-            RESOLUTION_NS,
-            AnomalyTimelineRing,
-        )
-
         ring = AnomalyTimelineRing()
         mgr = ConnectionManager(timeline_ring=ring)
         ts = BUCKET_NS * 7
