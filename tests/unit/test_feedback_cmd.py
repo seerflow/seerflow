@@ -221,7 +221,7 @@ class TestRunFeedback:
         assert call_order == ["load", "process", "save"]
 
     async def test_run_feedback_with_note_logs(self, caplog: pytest.LogCaptureFixture) -> None:
-        """When --note is provided, it is logged."""
+        """When --note is provided, its length (not content) is logged to avoid PII leak."""
         import logging
 
         from seerflow.feedback_cmd import run_feedback
@@ -255,7 +255,11 @@ class TestRunFeedback:
             mock_pf.return_value = "done"
             await run_feedback(args)
 
-        assert any("was a test" in r.message for r in caplog.records)
+        assert any(
+            "Persisting feedback note" in r.message and "10 chars" in r.message
+            for r in caplog.records
+        )
+        assert not any("was a test" in r.message for r in caplog.records)
 
 
 class TestFeedbackCmdNote:

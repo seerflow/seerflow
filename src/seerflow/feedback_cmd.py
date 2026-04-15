@@ -22,7 +22,7 @@ async def run_feedback(args: argparse.Namespace) -> None:
     safe_note = ""
     if args.note:
         safe_note = args.note[:512].replace("\n", " ").replace("\r", " ")
-        _log.info("Persisting feedback note: %s", safe_note)
+        _log.info("Persisting feedback note (%d chars)", len(safe_note))
 
     config = load_config(args.config)
     storage = await SqliteBackend.connect(config.storage)
