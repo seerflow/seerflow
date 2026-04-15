@@ -21,6 +21,7 @@ from scipy.stats import genpareto
 _log = logging.getLogger(__name__)
 
 _MAX_EXCESSES = 10_000
+_DEFAULT_CAP_MULTIPLIER = 5.0  # operator-feedback threshold cap; see S-169
 
 
 class _TailState(msgspec.Struct):
@@ -76,7 +77,9 @@ class DSpotThreshold:
 
     __slots__ = (
         "_calibrated",
+        "_calibrated_upper_z_q",
         "_calibration_window",
+        "_cap_multiplier",
         "_initial_percentile",
         "_lower_excesses",
         "_lower_n_exceed",
@@ -97,6 +100,7 @@ class DSpotThreshold:
         calibration_window: int = 1000,
         risk_level: float = 0.0001,
         initial_percentile: int = 98,
+        cap_multiplier: float = _DEFAULT_CAP_MULTIPLIER,
     ) -> None:
         if calibration_window < 200:
             msg = f"calibration_window must be >= 200, got {calibration_window}"
@@ -107,9 +111,14 @@ class DSpotThreshold:
         if not (50 <= initial_percentile <= 99):
             msg = f"initial_percentile must be in [50, 99], got {initial_percentile}"
             raise ValueError(msg)
+        if not math.isfinite(cap_multiplier) or cap_multiplier <= 1.0:
+            msg = f"cap_multiplier must be finite and > 1.0, got {cap_multiplier}"
+            raise ValueError(msg)
         self._calibration_window = calibration_window
         self._risk_level = risk_level
         self._initial_percentile = initial_percentile
+        self._cap_multiplier = cap_multiplier
+        self._calibrated_upper_z_q: float = 0.0
         self._scores: list[float] = []
         # Upper tail
         self._upper_threshold: float = 0.0
@@ -138,6 +147,16 @@ class DSpotThreshold:
     def lower_threshold(self) -> float:
         """Lower anomaly threshold (z_q)."""
         return self._lower_z_q
+
+    @property
+    def calibrated_upper_z_q(self) -> float:
+        """Upper-tail threshold captured at calibration time. 0.0 if not calibrated."""
+        return self._calibrated_upper_z_q
+
+    @property
+    def cap_multiplier(self) -> float:
+        """Maximum allowed cumulative growth of upper_z_q over calibrated baseline."""
+        return self._cap_multiplier
 
     def adjust_upper_threshold(self, factor: float) -> None:
         """Multiply the upper anomaly threshold by *factor* (must be > 0)."""
@@ -245,6 +264,7 @@ class DSpotThreshold:
             )
             self._lower_z_q = self._lower_threshold
 
+        self._calibrated_upper_z_q = self._upper_z_q
         self._calibrated = True
 
     def _refit_upper(self) -> None:
