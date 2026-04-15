@@ -467,3 +467,50 @@ class TestPDResponseBodyLogging:
             await asyncio.wait_for(sink.run(), timeout=5.0)
 
         assert resp_mock.text.call_count == 3  # 3 retries
+
+
+class TestPostResolve:
+    async def test_success_on_200_no_retry(self) -> None:
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = _mock_session(status=200)
+        await post_resolve(session, "dedup-1", "routing-key")
+        assert session.post.call_count == 1
+
+    async def test_retry_once_on_500_then_give_up(self) -> None:
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = _mock_session(status=500)
+        await post_resolve(session, "dedup-1", "routing-key", delays=(0.0,))
+        assert session.post.call_count == 2
+
+    async def test_no_retry_on_400(self) -> None:
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = _mock_session(status=400)
+        await post_resolve(session, "dedup-1", "routing-key")
+        assert session.post.call_count == 1
+
+    async def test_retry_on_network_error(self) -> None:
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = MagicMock()
+        session.post = MagicMock(side_effect=ConnectionError("boom"))
+
+        await post_resolve(session, "dedup-1", "routing-key", delays=(0.0,))
+        assert session.post.call_count == 2
+
+    async def test_payload_reuses_build_resolve_payload(self) -> None:
+        """The helper must POST to _PD_ENDPOINT with the _build_resolve_payload output."""
+        from seerflow.alerting.sinks.pagerduty import (
+            _PD_ENDPOINT,
+            _build_resolve_payload,
+            post_resolve,
+        )
+
+        session = _mock_session(status=200)
+        await post_resolve(session, "dedup-42", "rk-abc")
+
+        args, kwargs = session.post.call_args
+        assert args[0] == _PD_ENDPOINT
+        assert kwargs["json"] == _build_resolve_payload("dedup-42", "rk-abc")
