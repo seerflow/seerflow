@@ -19,9 +19,10 @@ async def run_feedback(args: argparse.Namespace) -> None:
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.storage.sqlite import SqliteBackend
 
+    safe_note = ""
     if args.note:
         safe_note = args.note[:512].replace("\n", " ").replace("\r", " ")
-        _log.info("Feedback note: %s", safe_note)
+        _log.info("Persisting feedback note: %s", safe_note)
 
     config = load_config(args.config)
     storage = await SqliteBackend.connect(config.storage)
@@ -37,6 +38,7 @@ async def run_feedback(args: argparse.Namespace) -> None:
                 storage=storage,
                 ensemble=ensemble,
                 pagerduty_routing_key=config.alerting.pagerduty_routing_key,
+                note=safe_note,
             )
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)  # noqa: T201

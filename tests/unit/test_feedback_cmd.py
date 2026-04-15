@@ -129,6 +129,7 @@ class TestRunFeedback:
             storage=mock_storage,
             ensemble=mock_ensemble,
             pagerduty_routing_key="",
+            note="",
         )
         mock_ensemble.save_all_state.assert_awaited_once_with(mock_storage)
         mock_storage.close.assert_awaited_once()
@@ -255,3 +256,92 @@ class TestRunFeedback:
             await run_feedback(args)
 
         assert any("was a test" in r.message for r in caplog.records)
+
+
+class TestFeedbackCmdNote:
+    """Tests for --note forwarding through run_feedback into process_feedback."""
+
+    async def test_note_forwarded_to_process_feedback(self) -> None:
+        """run_feedback must forward args.note to process_feedback (post-sanitisation)."""
+        from seerflow.feedback_cmd import run_feedback
+
+        mock_storage = AsyncMock()
+        mock_storage.close = AsyncMock()
+
+        mock_ensemble = MagicMock()
+        mock_ensemble.load_all_state = AsyncMock(return_value=0)
+        mock_ensemble.save_all_state = AsyncMock(return_value=0)
+
+        mock_config = MagicMock()
+        mock_config.alerting.pagerduty_routing_key = ""
+
+        args = argparse.Namespace(
+            config=None,
+            alert_id="alert-xyz",
+            type="fp",
+            note="manual review: false positive, known scanner",
+        )
+
+        with (
+            patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
+            patch(
+                _PATCH_SQLITE_CONNECT,
+                new_callable=AsyncMock,
+                return_value=mock_storage,
+            ),
+            patch(_PATCH_ENSEMBLE, return_value=mock_ensemble),
+            patch(
+                _PATCH_PROCESS,
+                new_callable=AsyncMock,
+            ) as mock_pf,
+        ):
+            mock_pf.return_value = "ok"
+            await run_feedback(args)
+
+        kwargs = mock_pf.await_args.kwargs
+        assert kwargs.get("note") == "manual review: false positive, known scanner"
+
+    async def test_note_sanitised_before_forwarding(self) -> None:
+        """Newlines and CRs are stripped; note is capped at 512 chars."""
+        from seerflow.feedback_cmd import run_feedback
+
+        mock_storage = AsyncMock()
+        mock_storage.close = AsyncMock()
+
+        mock_ensemble = MagicMock()
+        mock_ensemble.load_all_state = AsyncMock(return_value=0)
+        mock_ensemble.save_all_state = AsyncMock(return_value=0)
+
+        mock_config = MagicMock()
+        mock_config.alerting.pagerduty_routing_key = ""
+
+        raw_note = "line1\nline2\r\nline3" + ("x" * 600)
+        args = argparse.Namespace(
+            config=None,
+            alert_id="alert-xyz",
+            type="fp",
+            note=raw_note,
+        )
+
+        with (
+            patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
+            patch(
+                _PATCH_SQLITE_CONNECT,
+                new_callable=AsyncMock,
+                return_value=mock_storage,
+            ),
+            patch(_PATCH_ENSEMBLE, return_value=mock_ensemble),
+            patch(
+                _PATCH_PROCESS,
+                new_callable=AsyncMock,
+            ) as mock_pf,
+        ):
+            mock_pf.return_value = "ok"
+            await run_feedback(args)
+
+        kwargs = mock_pf.await_args.kwargs
+        forwarded = kwargs.get("note")
+        assert isinstance(forwarded, str)
+        assert "\n" not in forwarded
+        assert "\r" not in forwarded
+        assert len(forwarded) == 512
