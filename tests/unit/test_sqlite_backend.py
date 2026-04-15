@@ -1716,3 +1716,18 @@ class TestCountBySeverity:
             assert counts.get("unknown") == 1
         finally:
             await backend.close()
+
+
+def test_sqlite_backend_has_no_dict():
+    """Guard: SqliteBackend + mixin MUST preserve __slots__.
+
+    Skip __init__ to isolate the slot-discipline check from constructor
+    behavior. If any class in the MRO forgets ``__slots__ = ()``, the
+    resulting instance gains a ``__dict__`` regardless of __init__.
+    """
+    from seerflow.storage.sqlite import SqliteBackend
+
+    backend = object.__new__(SqliteBackend)
+    assert not hasattr(backend, "__dict__"), (
+        "SqliteBackend gained a __dict__ — a mixin in the MRO is missing __slots__ = ()"
+    )
