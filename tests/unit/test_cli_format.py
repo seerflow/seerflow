@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from seerflow.cli_format import format_table
 
 
