@@ -13,11 +13,18 @@ event loop. Do not call ``record_score`` from threads outside the event loop.
 
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
 import msgspec
+
+# Defence-in-depth: validate source_type at ring ingestion, not just at the
+# REST boundary. Events arriving from the WS broadcast path originate in
+# external log sources, so malformed keys must be silently dropped before
+# reaching the ring, ``SourceSelect`` options, or response ``meta.source``.
+_SOURCE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 TimelineRange = Literal["1h", "6h", "24h", "7d"]
 TimelineResolution = Literal["1m", "5m", "15m", "1h"]
@@ -128,7 +135,14 @@ class AnomalyTimelineRing:
         upper_threshold: float | None,
         source: str,
     ) -> None:
-        """Merge a scored event into its base bucket."""
+        """Merge a scored event into its base bucket.
+
+        Silently drops events whose ``source`` does not match
+        ``_SOURCE_RE`` — the same allowlist the REST query param enforces.
+        Defence-in-depth against malformed or adversarial log sources.
+        """
+        if not _SOURCE_RE.match(source):
+            return
         idx = bucket_index(timestamp_ns)
         slot = idx % self._capacity
         existing = self._buckets[slot]

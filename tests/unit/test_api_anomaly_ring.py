@@ -144,6 +144,37 @@ class TestAnomalyTimelineRing:
         hit = [b for b in out if b.event_count > 0]
         assert hit == []
 
+    @pytest.mark.parametrize(
+        "bad_source",
+        [
+            "with space",
+            "with\nnewline",
+            "<script>",
+            "a" * 65,  # over max length
+            "",  # empty
+            "name;drop",
+            "../etc",
+        ],
+    )
+    def test_record_score_silently_drops_malformed_source(self, bad_source: str) -> None:
+        """Defence-in-depth: malformed source_type at ingestion is dropped.
+
+        Regression guard for security finding — source_type from external log
+        events must not reach the ring's dict keys without passing _SOURCE_RE.
+        """
+        ring = AnomalyTimelineRing()
+        ts = BUCKET_NS * 2
+        ring.record_score(ts, 0.5, 0.9, bad_source)
+        out = ring.query(
+            range_ns=RANGE_NS["1h"],
+            resolution_ns=RESOLUTION_NS["1m"],
+            source=None,
+            now_ns=ts + 100,
+        )
+        assert all(b.event_count == 0 for b in out), (
+            f"malformed source {bad_source!r} reached the ring"
+        )
+
     def test_query_returns_only_buckets_within_range(self) -> None:
         ring = AnomalyTimelineRing(capacity_buckets=100)
         for i in range(10):

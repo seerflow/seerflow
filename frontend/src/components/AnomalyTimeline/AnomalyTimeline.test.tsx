@@ -93,12 +93,15 @@ describe("AnomalyTimeline", () => {
     expect(await screen.findByText(/No scored events/i)).toBeInTheDocument();
   });
 
-  it("shows error state when fetch rejects", async () => {
-    fetchMock.mockRejectedValueOnce(new Error("boom"));
+  it("shows a fixed sanitized error state when fetch rejects (does not echo raw error)", async () => {
+    // Raw error contains a URL-like string — would be dangerous to reflect to DOM.
+    fetchMock.mockRejectedValueOnce(new Error("https://internal.example.com/500 leak"));
     render(<AnomalyTimeline />);
     await waitFor(() => {
-      expect(screen.getByText(/boom/i)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to load anomaly timeline/i)).toBeInTheDocument();
     });
+    // Raw error message must not appear anywhere in the DOM.
+    expect(screen.queryByText(/internal.example.com/)).not.toBeInTheDocument();
   });
 
   it("renders header with widget title", async () => {

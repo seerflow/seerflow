@@ -63,7 +63,9 @@ export function AnomalyTimeline(): JSX.Element {
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;
         logger.warn("anomaly timeline fetch failed", e);
-        setError(e instanceof Error ? e.message : String(e));
+        // User-facing message is fixed; raw error goes only to the logger so
+        // internal detail (stack fragments, response bodies) never reflects to the DOM.
+        setError("Failed to load anomaly timeline. Retrying on next change.");
       })
       .finally(() => {
         if (!ctrl.signal.aborted) setLoading(false);
@@ -78,7 +80,10 @@ export function AnomalyTimeline(): JSX.Element {
 
   useEffect(() => {
     const handle = setInterval(() => {
-      rolloverIfStale(Date.now() * 1_000_000);
+      // BigInt math: Date.now() * 1_000_000 overflows JS number precision
+      // for far-future timestamps. Stay in bigint then convert at the boundary.
+      const nowNs = Number(BigInt(Date.now()) * 1_000_000n);
+      rolloverIfStale(nowNs);
     }, resolutionMs);
     return () => clearInterval(handle);
   }, [resolutionMs, rolloverIfStale]);
