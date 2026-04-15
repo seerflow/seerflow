@@ -1716,3 +1716,15 @@ class TestCountBySeverity:
             assert counts.get("unknown") == 1
         finally:
             await backend.close()
+
+
+def test_sqlite_backend_has_no_dict():
+    """Guard: SqliteBackend + mixin MUST preserve __slots__."""
+    from seerflow.storage.sqlite import SqliteBackend
+
+    # Construct with a dummy conn (constructor does not use it).
+    backend = SqliteBackend.__new__(SqliteBackend)
+    backend.__init__(conn=None)  # type: ignore[arg-type]
+    assert not hasattr(backend, "__dict__"), (
+        "SqliteBackend gained a __dict__ — a mixin in the MRO is missing __slots__ = ()"
+    )
