@@ -61,7 +61,12 @@ def _apply_filters(
 
 
 def _format_logsource(logsource: tuple[str, str, str]) -> str:
-    """Render logsource tuple as ``product/category/service`` with empty parts elided."""
+    """Render logsource tuple as ``product/category/service`` with empty parts elided.
+
+    The tuple layout is ``(category, product, service)`` (matching
+    ``CompiledRule.logsource_key``), but the display order puts product first
+    to mirror the SigmaHQ rule-path convention (``windows/process_creation``).
+    """
     category, product, service = logsource
     parts = [p for p in (product, category, service) if p]
     return "/".join(parts) if parts else "-"
@@ -112,12 +117,13 @@ def run_rules_list(args: argparse.Namespace) -> int:
 
     rules = _rules_from_engine(engine)
     total = len(rules)
+    filter_active = technique is not None or tactic_name is not None
     filtered = _apply_filters(rules, technique=technique, tactic_name=tactic_name)
 
     if args.format == "json":
         _print_json(filtered)
     else:
-        _print_table(filtered, total=total)
+        _print_table(filtered, total=total, filter_active=filter_active)
     return 0
 
 
@@ -141,10 +147,9 @@ def _print_json(rules: list[CompiledRule]) -> None:
     print()
 
 
-def _print_table(rules: list[CompiledRule], *, total: int) -> None:
+def _print_table(rules: list[CompiledRule], *, total: int, filter_active: bool) -> None:
     if total == 0:
         print("No rules loaded.")
-        print("0 rules loaded, 0 matching filter")
         return
 
     headers = ["NAME", "SEVERITY", "LOGSOURCE", "TACTICS", "TECHNIQUES"]
@@ -159,7 +164,10 @@ def _print_table(rules: list[CompiledRule], *, total: int) -> None:
         for r in rules
     ]
     print(format_table(headers, rows), end="")
-    print(f"\n{total} rules loaded, {len(rules)} matching filter")
+    if filter_active:
+        print(f"\n{total} rules loaded, {len(rules)} matching filter")
+    else:
+        print(f"\n{total} rules loaded")
 
 
 __all__ = ["run_rules_list"]

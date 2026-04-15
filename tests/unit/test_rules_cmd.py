@@ -152,7 +152,8 @@ def test_run_rules_list_table_no_filter(
     assert "Suspicious Scheduled Task" in out
     assert "LSASS Memory Dump" in out
     assert "SMB Lateral Move" in out
-    assert "3 rules loaded, 3 matching filter" in out
+    assert "3 rules loaded" in out
+    assert "matching filter" not in out
 
 
 def test_run_rules_list_table_technique_prefix(
@@ -250,4 +251,33 @@ def test_run_rules_list_no_rules_loaded_table(
     assert rc == 0
     out = capsys.readouterr().out
     assert "No rules loaded." in out
-    assert "0 rules loaded, 0 matching filter" in out
+    assert "matching filter" not in out
+
+
+def test_run_rules_list_passes_custom_dirs_from_config(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Happy-path config load wires sigma_rules_dirs through to load_custom."""
+    received_dirs: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(SigmaEngine, "load_bundled", lambda self: None)
+
+    def _fake_load_custom(self: SigmaEngine, dirs: tuple[str, ...]) -> None:
+        received_dirs.append(tuple(dirs))
+
+    monkeypatch.setattr(SigmaEngine, "load_custom", _fake_load_custom)
+
+    class _FakeDetection:
+        sigma_rules_dirs: tuple[str, ...] = ("/tmp/a", "/tmp/b")
+
+    class _FakeConfig:
+        detection = _FakeDetection()
+
+    monkeypatch.setattr("seerflow.config.load_config", lambda path: _FakeConfig())
+
+    rc = run_rules_list(_ns(config="/tmp/seerflow.yaml"))
+    assert rc == 0
+    assert received_dirs == [("/tmp/a", "/tmp/b")]
+    out = capsys.readouterr().out
+    assert "No rules loaded." in out
