@@ -18,10 +18,12 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from seerflow.api import ws as ws_module
+from seerflow.api.anomaly_timeline import AnomalyTimelineRing
 from seerflow.api.deps import DetectionEngines, StorageDeps
 from seerflow.api.limits import configure_limiter, limiter, resolve_allowed_origins
 from seerflow.api.routes import (
     alerts,
+    anomaly,
     attack,
     config,
     entities,
@@ -56,6 +58,7 @@ def _default_allowed_origins(dashboard_port: int) -> frozenset[str]:
 def _build_ws_manager(
     alert_store: AlertStore,
     config: SeerflowConfig | None,
+    timeline_ring: AnomalyTimelineRing | None = None,
 ) -> ConnectionManager:
     """Construct a ConnectionManager from SeerflowConfig ws_* fields.
 
@@ -64,7 +67,7 @@ def _build_ws_manager(
     ``None`` (tests, direct app construction), no Origin check is applied.
     """
     if config is None:
-        return ConnectionManager(alert_store=alert_store)
+        return ConnectionManager(alert_store=alert_store, timeline_ring=timeline_ring)
     allowed_origins: frozenset[str]
     if config.ws_allowed_origins:
         allowed_origins = frozenset(config.ws_allowed_origins)
@@ -79,6 +82,7 @@ def _build_ws_manager(
         status_interval_s=config.ws_status_interval_s,
         allowed_origins=allowed_origins,
         filter_min_interval_ns=config.ws_filter_min_interval_ms * 1_000_000,
+        timeline_ring=timeline_ring,
     )
 
 
@@ -166,6 +170,7 @@ def _register_routes(app: FastAPI) -> None:
     app.include_router(entities.router, prefix=_API_PREFIX)
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
+    app.include_router(anomaly.router, prefix=_API_PREFIX)
     app.include_router(ws_module.router, prefix=_API_PREFIX)
 
 
@@ -217,7 +222,10 @@ def create_api_app(
     app.state.config = config
     app.state.pipeline_metrics_provider = None
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
-    app.state.ws_manager = ws_manager or _build_ws_manager(alert_store, config)
+    app.state.anomaly_timeline_ring = AnomalyTimelineRing()
+    app.state.ws_manager = ws_manager or _build_ws_manager(
+        alert_store, config, app.state.anomaly_timeline_ring
+    )
 
     _register_routes(app)
     _install_security_middlewares(app, config)

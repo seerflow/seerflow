@@ -44,3 +44,33 @@ export type WsMessage =
   | { type: "status"; data: { events_per_sec: number; alerts_24h: number; connected_clients: number; dropped_messages: number } }
   | { type: "event"; data: unknown }
   | { type: "batch"; events: Alert[] };
+
+export type TimelineRange = "1h" | "6h" | "24h" | "7d";
+export type TimelineResolution = "1m" | "5m" | "15m" | "1h";
+
+export interface TimelineBucket {
+  bucket_start_ns: number;
+  max_score: number | null;
+  avg_score: number | null;
+  event_count: number;
+  upper_threshold: number | null;
+  alert_count: number;
+}
+
+export interface TimelineMeta {
+  range: TimelineRange;
+  resolution: TimelineResolution;
+  source: string | null;
+}
+
+export interface TimelineResponse {
+  meta: TimelineMeta;
+  items: TimelineBucket[];
+}
+
+export interface AnomalyEvent {
+  timestamp_ns: number;
+  score: number;
+  upper_threshold: number | null;
+  source_type: string;
+}

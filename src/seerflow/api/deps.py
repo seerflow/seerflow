@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, Request
 
 if TYPE_CHECKING:
+    from seerflow.api.anomaly_timeline import AnomalyTimelineRing
     from seerflow.api.metrics import MetricsProvider
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
@@ -85,6 +86,20 @@ class DetectionEngines:
 def get_engines(request: Request) -> DetectionEngines:
     """FastAPI Depends provider -- retrieve DetectionEngines from app.state."""
     return request.app.state.engines  # type: ignore[no-any-return]
+
+
+def get_anomaly_timeline_ring(request: Request) -> AnomalyTimelineRing:
+    """Return the AnomalyTimelineRing stored on app.state.
+
+    Raises RuntimeError if the ring was not configured via ``create_api_app``
+    or an explicit test setup. No lazy fallback — a missing ring is a wiring
+    bug, not a runtime condition to paper over.
+    """
+    ring: AnomalyTimelineRing | None = getattr(request.app.state, "anomaly_timeline_ring", None)
+    if ring is None:
+        msg = "anomaly_timeline_ring not configured on app.state"
+        raise RuntimeError(msg)
+    return ring
 
 
 def get_pipeline_metrics_provider(request: Request) -> MetricsProvider | None:

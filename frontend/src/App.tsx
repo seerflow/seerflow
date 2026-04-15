@@ -4,6 +4,7 @@ import { useThemeStore } from "@/stores/theme";
 import wordmarkLight from "@/assets/wordmark-light.svg";
 import wordmarkDark from "@/assets/wordmark-dark.svg";
 import { AlertFeed } from "@/components/AlertFeed/AlertFeed";
+import { AnomalyTimeline } from "@/components/AnomalyTimeline/AnomalyTimeline";
 
 export default function App() {
   const theme = useThemeStore((s) => s.theme);
@@ -18,7 +19,10 @@ export default function App() {
           <Icon className="h-5 w-5" />
         </Button>
       </header>
-      <AlertFeed />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <AlertFeed />
+        <AnomalyTimeline />
+      </div>
     </main>
   );
 }

@@ -22,6 +22,29 @@ wheel bundles the built assets.
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — ESLint, zero warnings allowed
 
+### Anomaly Timeline
+
+Live time-series chart of anomaly scores (S-059). Powered by:
+
+- `GET /api/v1/anomaly/timeline?range={1h|6h|24h|7d}&resolution={1m|5m|15m|1h}&source=…`
+  on mount and on range / source change.
+- WebSocket `event` messages with `score != null` for live tailing.
+
+Data is ephemeral: a pipeline restart empties the in-memory ring, so
+the chart shows "No scored events in this range" until new scores
+arrive.
+
+Allowed (range, resolution) combinations:
+
+| Range | Resolutions |
+|-------|-------------|
+| 1h    | 1m          |
+| 6h    | 1m, 5m      |
+| 24h   | 5m, 15m     |
+| 7d    | 15m, 1h     |
+
+The "Custom…" chip is stubbed for a follow-up story.
+
 ### Alert Feed
 
 Live alert feed widget (S-058) runs against the backend over HTTP +
@@ -70,7 +93,6 @@ intentionally NOT installed by this scaffold story:
 
 | Library | Lands in | Purpose |
 |---------|----------|---------|
-| `recharts` | S-059 | anomaly timeline |
 | `d3` | S-060 | entity force-directed graph |
 | `react-grid-layout` | S-062 | widget grid |
 | `@tanstack/react-table` | S-058 / S-061 | alert / event tables |

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAlertStore, selectVisible, selectCounts } from "@/stores/alerts";
+import { useAnomalyStore } from "@/stores/anomaly";
 import { AlertRow } from "./AlertRow";
 import { AlertDetailPanel } from "./AlertDetailPanel";
 import { FilterBar } from "./FilterBar";
@@ -27,8 +28,8 @@ export function AlertFeed(): JSX.Element {
   const alerts = useAlertStore(s => s.alerts);
   const filter = useAlertStore(s => s.filter);
   const status = useAlertStore(s => s.status);
-  const { prepend, backfill, setFilter, setStatus, setFeedback } = useAlertStore.getState();
-  const [openId, setOpenId] = useState<string | null>(null);
+  const openId = useAlertStore(s => s.selectedAlertId);
+  const { prepend, backfill, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
   const [wsUrl] = useState(() => {
     const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
     const url = base.replace(/^http/, "ws") + "/api/v1/ws";
@@ -49,6 +50,22 @@ export function AlertFeed(): JSX.Element {
   const onMessage = (m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "batch") m.events.forEach(prepend);
+    else if (m.type === "event" && m.data !== null && typeof m.data === "object") {
+      const d = m.data as {
+        timestamp_ns?: number;
+        score?: number | null;
+        upper_threshold?: number | null;
+        source_type?: string;
+      };
+      if (typeof d.timestamp_ns === "number" && typeof d.score === "number" && typeof d.source_type === "string") {
+        useAnomalyStore.getState().appendScore({
+          timestamp_ns: d.timestamp_ns,
+          score: d.score,
+          upper_threshold: d.upper_threshold ?? null,
+          source_type: d.source_type,
+        });
+      }
+    }
   };
 
   const { send } = useWebSocket(wsUrl, {
@@ -91,7 +108,7 @@ export function AlertFeed(): JSX.Element {
           {visible.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">No alerts in the last hour.</div>
           ) : (
-            visible.map(a => <AlertRow key={a.alert_id} alert={a} isOpen={openId === a.alert_id} onClick={id => setOpenId(openId === id ? null : id)} />)
+            visible.map(a => <AlertRow key={a.alert_id} alert={a} isOpen={openId === a.alert_id} onClick={id => (openId === id ? clearSelection() : selectAlert(id))} />)
           )}
         </div>
       </div>
