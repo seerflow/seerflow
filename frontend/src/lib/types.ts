@@ -37,13 +37,14 @@ export type WsFilter = {
   sources?: string[];
   min_severity?: number;
   alert_types?: AlertType[];
+  template_ids?: number[];
 };
 
 export type WsMessage =
   | { type: "alert"; data: Alert }
   | { type: "status"; data: { events_per_sec: number; alerts_24h: number; connected_clients: number; dropped_messages: number } }
-  | { type: "event"; data: unknown }
-  | { type: "batch"; events: Alert[] };
+  | { type: "event"; data: LiveEvent }
+  | { type: "batch"; events: LiveEvent[] | Alert[] };
 
 export type TimelineRange = "1h" | "6h" | "24h" | "7d";
 export type TimelineResolution = "1m" | "5m" | "15m" | "1h";
@@ -123,4 +124,28 @@ export interface EntityViewState {
   range: TimelineRange;
   source?: string;
   severity_min?: number;
+}
+
+// --- Live event stream (S-061) ---
+
+export interface LiveEvent {
+  event_id: string;
+  timestamp_ns: number;
+  observed_ns: number;
+  severity_id: number;       // 0..6
+  severity_text: string;
+  source_type: string;
+  message: string;
+  template_id: number;
+  entity_refs: string[];
+  entity_summary: Partial<Record<"ips" | "users" | "hosts" | "domains" | "files" | "processes", string[]>>;
+  score?: number;
+  is_anomaly?: boolean;
+  upper_threshold?: number;
+}
+
+export interface EventFilter {
+  sources: Set<string>;       // empty = all
+  minSeverity: number;        // 0..6, default 0
+  templateIds: Set<number>;   // empty = all
 }
