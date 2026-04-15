@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAlertStore, selectVisible, selectCounts } from "@/stores/alerts";
+import { useAnomalyStore } from "@/stores/anomaly";
 import { AlertRow } from "./AlertRow";
 import { AlertDetailPanel } from "./AlertDetailPanel";
 import { FilterBar } from "./FilterBar";
@@ -49,6 +50,26 @@ export function AlertFeed(): JSX.Element {
   const onMessage = (m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "batch") m.events.forEach(prepend);
+    else if (m.type === "event" && m.data !== null && typeof m.data === "object") {
+      const d = m.data as {
+        timestamp_ns?: number;
+        score?: number | null;
+        upper_threshold?: number | null;
+        source_type?: string;
+      };
+      if (typeof d.timestamp_ns === "number" && typeof d.score === "number" && typeof d.source_type === "string") {
+        const anomaly = useAnomalyStore.getState();
+        anomaly.appendScore(
+          {
+            timestamp_ns: d.timestamp_ns,
+            score: d.score,
+            upper_threshold: d.upper_threshold ?? null,
+            source_type: d.source_type,
+          },
+          anomaly.resolution,
+        );
+      }
+    }
   };
 
   const { send } = useWebSocket(wsUrl, {

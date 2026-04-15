@@ -61,4 +61,9 @@ describe("App shell", () => {
     fireEvent.click(btn);
     expect(document.documentElement.dataset.theme).toBe("light");
   });
+
+  it("mounts AnomalyTimeline alongside AlertFeed", async () => {
+    render(<App />);
+    expect(await screen.findByText("Anomaly Timeline")).toBeInTheDocument();
+  });
 });
