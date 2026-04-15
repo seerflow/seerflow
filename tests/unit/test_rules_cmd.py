@@ -254,6 +254,34 @@ def test_run_rules_list_no_rules_loaded_table(
     assert "matching filter" not in out
 
 
+def test_run_rules_list_table_filter_active_zero_matches(
+    stub_engine: list[CompiledRule],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = run_rules_list(_ns(technique="T9999"))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "3 rules loaded, 0 matching filter" in out
+
+
+def test_run_rules_list_returns_exit_1_on_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from seerflow.config import ConfigError
+
+    def _raise_config_error(path: object) -> None:
+        raise ConfigError("bad value in detection section")
+
+    monkeypatch.setattr("seerflow.config.load_config", _raise_config_error)
+
+    rc = run_rules_list(_ns(config="/tmp/bad.yaml"))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Error loading config" in err
+    assert "bad value" in err
+
+
 def test_run_rules_list_passes_custom_dirs_from_config(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

@@ -100,13 +100,13 @@ def run_rules_list(args: argparse.Namespace) -> int:
 
     sigma_dirs: tuple[str, ...] = ()
     try:
-        from seerflow.config import load_config
+        from seerflow.config import ConfigError, load_config
 
         cfg = load_config(args.config)
         sigma_dirs = cfg.detection.sigma_rules_dirs
     except FileNotFoundError:
         sigma_dirs = ()
-    except Exception as exc:  # pragma: no cover
+    except ConfigError as exc:
         print(f"Error loading config: {exc}", file=sys.stderr)
         return 1
 
