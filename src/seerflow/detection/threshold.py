@@ -158,12 +158,30 @@ class DSpotThreshold:
         """Maximum allowed cumulative growth of upper_z_q over calibrated baseline."""
         return self._cap_multiplier
 
-    def adjust_upper_threshold(self, factor: float) -> None:
-        """Multiply the upper anomaly threshold by *factor* (must be > 0)."""
+    def adjust_upper_threshold(self, factor: float) -> tuple[bool, float]:
+        """Multiply the upper anomaly threshold by *factor* (must be > 0).
+
+        Clamps the result so that ``upper_z_q`` never exceeds
+        ``calibrated_upper_z_q * cap_multiplier``.
+
+        Returns ``(was_clamped, current_ratio)`` where ``current_ratio`` is
+        the resulting ``upper_z_q / calibrated_upper_z_q`` after the call.
+        If the threshold is not yet calibrated, no-op and returns
+        ``(False, 0.0)``.
+        """
         if factor <= 0 or not math.isfinite(factor):
             msg = f"factor must be finite and > 0, got {factor}"
             raise ValueError(msg)
-        self._upper_z_q *= factor
+        if not self._calibrated or self._calibrated_upper_z_q <= 0:
+            return False, 0.0
+        proposed = self._upper_z_q * factor
+        cap = self._calibrated_upper_z_q * self._cap_multiplier
+        if proposed > cap:
+            self._upper_z_q = cap
+            return True, self._cap_multiplier
+        self._upper_z_q = proposed
+        ratio = self._upper_z_q / self._calibrated_upper_z_q
+        return False, ratio
 
     def update(self, score: float) -> ThresholdResult:
         """Process a new score. Returns threshold result."""

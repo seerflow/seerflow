@@ -27,3 +27,42 @@ class TestCalibratedBaseline:
     def test_baseline_uninitialized_before_calibration(self) -> None:
         dspot = DSpotThreshold(calibration_window=500)
         assert dspot.calibrated_upper_z_q == 0.0
+
+
+class TestAdjustUpperThresholdCap:
+    def test_adjust_returns_clamp_info_under_cap(self) -> None:
+        dspot = DSpotThreshold(calibration_window=500, cap_multiplier=5.0)
+        _calibrate(dspot, seed=2)
+        was_clamped, ratio = dspot.adjust_upper_threshold(1.05)
+        assert was_clamped is False
+        assert ratio == pytest.approx(1.05, rel=1e-9)
+
+    def test_adjust_clamps_at_cap(self) -> None:
+        dspot = DSpotThreshold(calibration_window=500, cap_multiplier=2.0)
+        _calibrate(dspot, seed=3)
+        baseline = dspot.calibrated_upper_z_q
+        was_clamped, ratio = dspot.adjust_upper_threshold(10.0)
+        assert was_clamped is True
+        assert ratio == pytest.approx(2.0, rel=1e-9)
+        assert dspot.threshold == pytest.approx(baseline * 2.0, rel=1e-9)
+
+    def test_adjust_cumulative_growth_capped(self) -> None:
+        dspot = DSpotThreshold(calibration_window=500, cap_multiplier=2.0)
+        _calibrate(dspot, seed=4)
+        baseline = dspot.calibrated_upper_z_q
+        for _ in range(200):
+            dspot.adjust_upper_threshold(1.05)
+        assert dspot.threshold == pytest.approx(baseline * 2.0, rel=1e-9)
+
+    @pytest.mark.parametrize("bad", [0.0, -1.0, float("inf"), float("nan")])
+    def test_adjust_rejects_invalid_factor(self, bad: float) -> None:
+        dspot = DSpotThreshold(calibration_window=500)
+        _calibrate(dspot, seed=5)
+        with pytest.raises(ValueError, match="factor must be finite and > 0"):
+            dspot.adjust_upper_threshold(bad)
+
+    def test_adjust_noop_when_not_calibrated(self) -> None:
+        dspot = DSpotThreshold(calibration_window=500)
+        was_clamped, ratio = dspot.adjust_upper_threshold(1.5)
+        assert was_clamped is False
+        assert ratio == 0.0
