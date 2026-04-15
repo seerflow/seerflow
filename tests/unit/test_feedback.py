@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from seerflow.alerting.feedback import process_feedback
+from seerflow.detection.ensemble import ThresholdAdjustResult
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 
@@ -98,6 +100,7 @@ class TestProcessFeedback:
     async def test_fp_adjusts_dspot_threshold(self) -> None:
         """FP feedback calls adjust_upper_threshold on ensemble with source_type from dedup_key."""
         from seerflow.alerting.feedback import process_feedback
+        from seerflow.detection.ensemble import ThresholdAdjustResult
 
         alert = _make_alert(dedup_key="hst:42:syslog:entity-abc")
         storage = AsyncMock()
@@ -105,7 +108,9 @@ class TestProcessFeedback:
         storage.update_feedback = AsyncMock()
 
         ensemble = MagicMock()
-        ensemble.adjust_upper_threshold = MagicMock(return_value=True)
+        ensemble.adjust_upper_threshold = MagicMock(
+            return_value=ThresholdAdjustResult(status="applied", current_ratio=1.05)
+        )
 
         result = await process_feedback(
             alert_id=alert.alert_id,
@@ -119,15 +124,13 @@ class TestProcessFeedback:
 
     async def test_tp_does_not_adjust_threshold(self) -> None:
         """TP feedback does NOT adjust DSPOT threshold."""
-        from seerflow.alerting.feedback import process_feedback
-
         alert = _make_alert()
         storage = AsyncMock()
         storage.get_alert_by_id = AsyncMock(return_value=alert)
         storage.update_feedback = AsyncMock()
 
         ensemble = MagicMock()
-        ensemble.adjust_upper_threshold = MagicMock(return_value=True)
+        # no need to configure adjust_upper_threshold — test asserts it is NOT called
 
         await process_feedback(
             alert_id=alert.alert_id,
@@ -171,8 +174,9 @@ class TestProcessFeedback:
         assert "threshold" not in result.lower()
 
     async def test_fp_ensemble_not_calibrated(self) -> None:
-        """FP when DSPOT is not calibrated (returns False) — no threshold msg."""
+        """FP when DSPOT is not calibrated — no threshold msg."""
         from seerflow.alerting.feedback import process_feedback
+        from seerflow.detection.ensemble import ThresholdAdjustResult
 
         alert = _make_alert()
         storage = AsyncMock()
@@ -180,7 +184,9 @@ class TestProcessFeedback:
         storage.update_feedback = AsyncMock()
 
         ensemble = MagicMock()
-        ensemble.adjust_upper_threshold = MagicMock(return_value=False)
+        ensemble.adjust_upper_threshold = MagicMock(
+            return_value=ThresholdAdjustResult(status="not_calibrated", current_ratio=0.0)
+        )
 
         result = await process_feedback(
             alert_id=alert.alert_id,
@@ -388,3 +394,80 @@ class TestResolvePagerDutyDelegates:
         # First positional is the session, then dedup_key, then routing_key.
         assert call_args.args[1] == "dedup-key-99"
         assert call_args.args[2] == "routing-key-xyz"
+
+
+class TestProcessFeedbackClampMessage:
+    async def test_fp_appends_capped_ratio_on_clamp(self) -> None:
+        storage = AsyncMock()
+        alert = MagicMock(spec=Alert)
+        alert.dedup_key = "hst:tpl:auth:abc"
+        alert.alert_type = "anomaly"
+        storage.get_alert_by_id = AsyncMock(return_value=alert)
+        storage.update_feedback = AsyncMock()
+
+        ensemble = MagicMock()
+        ensemble.adjust_upper_threshold = MagicMock(
+            return_value=ThresholdAdjustResult(status="clamped", current_ratio=5.0)
+        )
+
+        msg = await process_feedback(
+            alert_id="x",
+            feedback="fp",
+            storage=storage,
+            ensemble=ensemble,
+            pagerduty_routing_key="",
+            note="",
+        )
+
+        assert "capped at 5.00x baseline" in msg
+        assert "'auth'" in msg
+
+    async def test_fp_applied_path_preserves_original_message(self) -> None:
+        storage = AsyncMock()
+        alert = MagicMock(spec=Alert)
+        alert.dedup_key = "hst:tpl:auth:abc"
+        alert.alert_type = "anomaly"
+        storage.get_alert_by_id = AsyncMock(return_value=alert)
+        storage.update_feedback = AsyncMock()
+
+        ensemble = MagicMock()
+        ensemble.adjust_upper_threshold = MagicMock(
+            return_value=ThresholdAdjustResult(status="applied", current_ratio=1.05)
+        )
+
+        msg = await process_feedback(
+            alert_id="x",
+            feedback="fp",
+            storage=storage,
+            ensemble=ensemble,
+            pagerduty_routing_key="",
+            note="",
+        )
+
+        assert "capped" not in msg
+        assert "DSPOT threshold adjusted for source 'auth'" in msg
+
+    async def test_fp_not_calibrated_path_is_silent(self) -> None:
+        storage = AsyncMock()
+        alert = MagicMock(spec=Alert)
+        alert.dedup_key = "hst:tpl:auth:abc"
+        alert.alert_type = "anomaly"
+        storage.get_alert_by_id = AsyncMock(return_value=alert)
+        storage.update_feedback = AsyncMock()
+
+        ensemble = MagicMock()
+        ensemble.adjust_upper_threshold = MagicMock(
+            return_value=ThresholdAdjustResult(status="not_calibrated", current_ratio=0.0)
+        )
+
+        msg = await process_feedback(
+            alert_id="x",
+            feedback="fp",
+            storage=storage,
+            ensemble=ensemble,
+            pagerduty_routing_key="",
+            note="",
+        )
+
+        assert "DSPOT" not in msg
+        assert "capped" not in msg
