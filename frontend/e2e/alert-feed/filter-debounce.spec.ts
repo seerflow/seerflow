@@ -4,9 +4,16 @@
 // rather than sleeping -- keeps the spec deterministic on loaded CI.
 
 import { expect, test } from "@playwright/test";
+import { _resetForTests as resetWsFilterIntents } from "../../src/lib/wsFilter";
 import { stubRestAlerts, stubWebSocket } from "../fixtures/stubs";
 
 test.skip(process.env.RUN_E2E !== "1", "set RUN_E2E=1 to run");
+
+// `wsFilter.ts` stores per-widget intents in a module-level singleton. Specs
+// running in the same worker process would otherwise see leaked state from a
+// previous test and observe a non-empty `min_severity` before the "Critical"
+// chip is ever clicked. The exported helper resets the singleton.
+test.beforeEach(() => resetWsFilterIntents());
 
 test("Critical chip filters rows and sends one filter frame after debounce", async ({ page }) => {
   await stubRestAlerts(page);
@@ -28,12 +35,12 @@ test("Critical chip filters rows and sends one filter frame after debounce", asy
     page.getByRole("button", { name: "Critical" }),
   ).toHaveAttribute("aria-pressed", "true");
 
-  // Wire shape: `{type:"filter", min_severity:17, ...}` per
+  // AC-7 debounce contract: exactly one `filter` frame fires per debounce
+  // window. Wire shape: `{type:"filter", min_severity:17, ...}` per
   // `frontend/src/components/AlertFeed/AlertFeed.tsx:18-28`.
   const filters = ws.sent
     .map((s) => JSON.parse(s))
     .filter((m: { type?: string }) => m.type === "filter");
-  expect(filters.length).toBeGreaterThanOrEqual(1);
-  const last = filters[filters.length - 1] as { min_severity?: number };
-  expect(last.min_severity).toBe(17);
+  expect(filters).toHaveLength(1);
+  expect((filters[0] as { min_severity?: number }).min_severity).toBe(17);
 });

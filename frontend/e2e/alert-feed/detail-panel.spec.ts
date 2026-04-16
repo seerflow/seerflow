@@ -16,8 +16,11 @@ test("row click opens detail panel with events, MITRE chips, risk score", async 
   const rows = page.getByRole("button", { name: /^alert / });
   await expect(rows).toHaveCount(5);
 
-  // Click wu-005 (newest, top row). `detailFor` returns the canned detail
-  // with two contributing events + three MITRE techniques.
+  // Click wu-005 (newest, top row). `detailFor("wu-005")` spreads the
+  // matched base alert, overriding `mitre_techniques` to the canned
+  // three-chip array and attaching two contributing events. Message +
+  // rule_name come from the wu-005 base ("Registry autorun" / "HKCU\\Run
+  // modified").
   await rows.first().click();
 
   // Detail panel has no unique landmark role; query by heading + chips.

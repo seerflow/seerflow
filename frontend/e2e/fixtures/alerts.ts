@@ -30,6 +30,13 @@ export type FixtureAlert = {
 };
 
 export type FixtureAlertDetail = FixtureAlert & {
+  /**
+   * `contributing_events[].timestamp_ns` is typed `number` because the
+   * front-end `AlertDetail.contributing_events[].timestamp_ns` has not yet
+   * been migrated to `bigint` (S-194 scope). Keep values within
+   * `Number.MAX_SAFE_INTEGER` until the follow-up migration lands;
+   * do NOT copy a nanosecond-precision string literal here.
+   */
   contributing_events?: Array<{ event_id: string; timestamp_ns: number; message: string }>;
 };
 

@@ -36,11 +36,11 @@ test("TP click POSTs feedback:tp and fills button (204 path)", async ({ page }) 
   await expect.poll(() => posts.length).toBeGreaterThanOrEqual(1);
   expect(JSON.parse(posts[0])).toMatchObject({ feedback: "tp" });
 
-  // Default variant (`bg-primary`) differentiates active from outline.
-  // Stable visual assertion: the button retains `True positive` as its
-  // accessible name and no error toast fires.
+  // Shadcn Button renders `variant="default"` (active) with `bg-primary`
+  // text-primary-foreground; `variant="outline"` renders `border bg-...`.
+  // Optimistic TP fill flips the button variant before the POST resolves.
   await expect(tpBtn).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(tpBtn).toHaveClass(/bg-primary/);
 });
 
 test("500 response rolls TP button back to neutral", async ({ page }) => {
@@ -55,7 +55,11 @@ test("500 response rolls TP button back to neutral", async ({ page }) => {
   const tpBtn = page.getByRole("button", { name: "True positive" });
   await tpBtn.click();
 
-  // Rollback restores the initial `feedback: ""` state. We assert the
-  // button still responds and no second click is blocked.
+  // Rollback restores `feedback: ""`, which re-renders the button as
+  // `variant="outline"` (no `bg-primary`). `expect.poll` gives the store's
+  // async rollback (inside `AlertDetailPanel.submit` catch) time to land.
   await expect(tpBtn).toBeEnabled();
+  await expect
+    .poll(async () => (await tpBtn.getAttribute("class")) ?? "")
+    .not.toMatch(/bg-primary/);
 });

@@ -98,7 +98,7 @@ jobs:
     # Runs on pull_request + push; dev / main runs catch drift outside PRs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - uses: dorny/paths-filter@v3
         id: filter
@@ -167,7 +167,11 @@ jobs:
         run: npx playwright test --project=quarantine
 
       - name: Upload Playwright artefacts on failure
-        if: steps.filter.outputs.frontend == 'true' && failure()
+        # `always()` so a failed quarantine step (which runs with
+        # `continue-on-error: true` and therefore does not fail the job)
+        # still uploads its trace. The `if:` cost is one empty upload on
+        # green runs, which the `if-no-files-found: ignore` guard zeros out.
+        if: steps.filter.outputs.frontend == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-artifacts-${{ github.run_id }}
@@ -175,3 +179,4 @@ jobs:
             frontend/test-results/
             frontend/playwright-report/
           retention-days: 7
+          if-no-files-found: ignore

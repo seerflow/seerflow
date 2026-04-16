@@ -28,8 +28,17 @@ test("disconnect banner appears 3s after WS close and hides on reconnect", async
   await page.clock.fastForward(3500);
   await expect(banner).toBeVisible();
 
-  // Reconnect: fast-forward past the first exponential-backoff attempt.
+  // Reconnect timing contract: `ws.reopen()` arms a resolver that fires when
+  // the next routeWebSocket callback runs. Order matters:
+  //   1. Arm the resolver BEFORE advancing the clock so the reconnect
+  //      attempt triggered by `useWebSocket`'s exponential backoff has
+  //      something to resolve. Without the guard in `stubs.ts::reopen`
+  //      (resolves immediately if `route` is already non-null), inverting
+  //      this order can hang the test.
+  //   2. Fast-forward past the first backoff window (useWebSocket.ts uses
+  //      1s as the first delay; 2000 ms gives safety margin).
+  const reopened = ws.reopen();
   await page.clock.fastForward(2000);
-  await ws.reopen();
+  await reopened;
   await expect(banner).toBeHidden();
 });

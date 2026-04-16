@@ -45,7 +45,7 @@ Moving a spec to `quarantine/` is a last-resort mitigation, not a solution:
 3. The owner has 30 days to fix or delete the spec.
 4. Reviewers check quarantined spec ages on every PR that touches `frontend/e2e/`.
 
-The sample flaky spec (`quarantine/sample-flaky.spec.ts`) exists to prove the project runs — do not fix it.
+The sample flaky spec (`quarantine/sample-flaky.spec.ts`) exists to prove the project runs — do not fix it. It is gated on `RUN_E2E=1`, so the quarantine project's retry logic only exercises when the env flag is set. CI always sets the flag; locally, use `RUN_E2E=1 npx playwright test --project=quarantine` to verify.
 
 ## Three-run stability gate
 
@@ -64,6 +64,7 @@ On failure, Playwright uploads `frontend/test-results/` (traces, videos, screens
 - `timestamp_ns` is a **JSON string** on the wire (S-194 bigint-safe serialization). Fixtures write string literals, not numbers — `JSON.stringify(BigInt(x))` throws.
 - Alert IDs use disjoint ranges (`wu-*` warm-up, `lp-*` live-push) so the alert-store dedup merge does not silently fail the "new row at position 0" assertion.
 - Deterministic timing: filter-debounce and disconnect-banner specs drive `page.clock.install()` + `page.clock.fastForward(ms)` rather than sleeping.
+- `wsFilter` singleton reset: `frontend/src/lib/wsFilter.ts` caches per-widget filter intents at module scope. Specs that assert on the filter wire shape must call `_resetForTests()` in a `beforeEach` hook so prior-spec state does not leak into the current run. See `alert-feed/filter-debounce.spec.ts` for the pattern.
 
 ## Layout
 

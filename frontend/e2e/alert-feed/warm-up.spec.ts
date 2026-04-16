@@ -18,7 +18,10 @@ test("warm-up REST populates five rows with severity counts", async ({ page }) =
   const rows = page.getByRole("button", { name: /^alert / });
   await expect(rows).toHaveCount(5);
 
-  // Newest-first: wu-005 (timestamp_ns ...005) is `Registry autorun`.
+  // Fixture sends alerts in ascending `timestamp_ns` order; the store
+  // (`stores/alerts.ts`) sorts descending on `backfill`, so wu-005 -- the
+  // highest `timestamp_ns` ("...005") with rule_name "Registry autorun" --
+  // ends up first. Assertion breaks if the store ever changes sort order.
   await expect(rows.first()).toHaveAccessibleName(/Registry autorun/);
 
   // Summary badges render as "<Label> <count>" text spans. Two critical
