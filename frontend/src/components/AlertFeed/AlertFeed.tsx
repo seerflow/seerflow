@@ -31,7 +31,8 @@ export function AlertFeed(): JSX.Element {
   const filter = useAlertStore(s => s.filter);
   const status = useAlertStore(s => s.status);
   const openId = useAlertStore(s => s.selectedAlertId);
-  const { prepend, backfill, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
+  const backfill = useAlertStore(s => s.backfill);
+  const { prepend, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
   const [wsUrl] = useState(() => {
     const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
     const url = base.replace(/^http/, "ws") + "/api/v1/ws";
