@@ -17,6 +17,7 @@ import type { TimelineResponse } from "@/lib/types";
 import { useAlertStore } from "@/stores/alerts";
 import { selectKnownSources, useAnomalyStore } from "@/stores/anomaly";
 
+import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { findAlertInBucket } from "./alertMatch";
 import { SourceSelect } from "./SourceSelect";
 import { TimeRangeChips } from "./TimeRangeChips";
@@ -42,6 +43,7 @@ export function AnomalyTimeline(): JSX.Element {
 
   const selectAlert = useAlertStore((s) => s.selectAlert);
   const alerts = useAlertStore((s) => s.alerts);
+  const status = useAlertStore((s) => s.status);
   const knownSources = useAnomalyStore(selectKnownSources);
   const rolloverIfStale = useAnomalyStore((s) => s.rolloverIfStale);
   const abortRef = useRef<AbortController | null>(null);
@@ -135,6 +137,7 @@ export function AnomalyTimeline(): JSX.Element {
           <TimeRangeChips value={range} onChange={setRange} />
         </div>
       </header>
+      <DisconnectedBanner status={status} />
       <div role="img" aria-label={ariaLabel} style={{ height: 320 }}>
         {loading && items.length === 0 ? (
           <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
