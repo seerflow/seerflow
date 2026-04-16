@@ -71,7 +71,15 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
         try { raw = JSON.parse(ev.data); }
         catch (e) { logger.warn("ws parse fail", e); return; }
         const result = v.safeParse(WsMessageSchema, raw);
-        if (!result.success) { logger.warn("ws schema mismatch", result.issues); return; }
+        if (!result.success) {
+          // S-194: log only diagnostic shape (kind/type/path), not raw `input`/`received` —
+          // the rejected frame may contain PII (entity_value, rule_name, etc.).
+          logger.warn(
+            "ws schema mismatch",
+            result.issues.map(i => ({ kind: i.kind, type: i.type, path: i.path?.map(p => p.key) })),
+          );
+          return;
+        }
         const msg = result.output;
         try {
           if (msg.type === "alert") {
