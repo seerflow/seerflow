@@ -47,6 +47,7 @@ export function AlertFeed(): JSX.Element {
 
   const handleMessage = useCallback((m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
+    else if (m.type === "alert_batch") (m.alerts as Alert[]).forEach(prepend);
     else if (m.type === "batch") {
       const first = m.events.length > 0 ? m.events[0] : null;
       if (first && typeof first === "object" && "event_id" in first) {
