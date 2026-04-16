@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -65,6 +65,11 @@ class AlertResponse(BaseModel):
     feedback_note: str = ""
     mitre_tactics: list[str] = Field(default_factory=list)
     mitre_techniques: list[str] = Field(default_factory=list)
+
+    @field_serializer("timestamp_ns")
+    def _serialize_timestamp_ns(self, v: int) -> str:
+        """Render as JSON string — JS bigint safety (S-194)."""
+        return str(v)
 
     @classmethod
     def from_alert(cls, alert: Alert) -> AlertResponse:

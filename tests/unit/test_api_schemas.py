@@ -105,6 +105,32 @@ class TestAlertResponse:
         assert resp.mitre_tactics == []
         assert resp.mitre_techniques == []
 
+    def test_alert_response_serialises_timestamp_ns_as_string(self) -> None:
+        """S-194 AC-1: timestamp_ns must round-trip as a JSON string for JS bigint safety."""
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+
+        alert = Alert(
+            alert_id="a1",
+            alert_type="ml",
+            timestamp_ns=1_700_000_000_000_000_123,
+            severity_id=SeverityLevel.ERROR,
+            rule_name="r",
+            description="m",
+            entity_uuid="u",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            risk_score=0.5,
+            dedup_count=1,
+            mitre_tactics=(),
+            mitre_techniques=(),
+        )
+        payload = AlertResponse.from_alert(alert).model_dump(mode="json")
+
+        assert payload["timestamp_ns"] == "1700000000000000123"
+        assert isinstance(payload["timestamp_ns"], str)
+
 
 class TestFeedbackRequest:
     """Tests for feedback request validation."""
