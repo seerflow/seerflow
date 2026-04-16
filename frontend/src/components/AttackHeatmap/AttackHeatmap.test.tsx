@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { AttackHeatmap } from "./AttackHeatmap";
-import { useCoverageStore } from "@/stores/coverage";
+import { useCoverageStore, type CoverageState } from "@/stores/coverage";
+
+type StoreSelector = <T>(state: CoverageState) => T;
 
 const mockFetch = vi.fn();
 
@@ -24,31 +26,31 @@ const mockCoverageData = {
   summary: { total_techniques_covered: 1, total_techniques_detected: 1, total_rules_with_attack_tags: 2, total_alerts_matched: 1 },
 };
 
+function mockStore(state: CoverageState): void {
+  vi.mocked(useCoverageStore).mockImplementation(
+    ((sel: StoreSelector) => sel(state)) as unknown as typeof useCoverageStore,
+  );
+}
+
 describe("AttackHeatmap", () => {
   beforeEach(() => {
     mockFetch.mockReset();
   });
 
   it("shows loading state", () => {
-    vi.mocked(useCoverageStore).mockImplementation((sel: any) =>
-      sel({ data: null, loading: true, error: null, fetch: mockFetch }),
-    );
+    mockStore({ data: null, loading: true, error: null, fetch: mockFetch });
     render(<AttackHeatmap />);
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
   it("shows error state", () => {
-    vi.mocked(useCoverageStore).mockImplementation((sel: any) =>
-      sel({ data: null, loading: false, error: "network", fetch: mockFetch }),
-    );
+    mockStore({ data: null, loading: false, error: "network", fetch: mockFetch });
     render(<AttackHeatmap />);
     expect(screen.getByText(/network/i)).toBeInTheDocument();
   });
 
   it("renders all 14 tactic columns when data loaded", () => {
-    vi.mocked(useCoverageStore).mockImplementation((sel: any) =>
-      sel({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch }),
-    );
+    mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
     render(<AttackHeatmap />);
     // All 14 tactic headers should render from the static catalog
     expect(screen.getByText("Reconnaissance")).toBeInTheDocument();
@@ -57,9 +59,7 @@ describe("AttackHeatmap", () => {
   });
 
   it("calls fetch on mount", () => {
-    vi.mocked(useCoverageStore).mockImplementation((sel: any) =>
-      sel({ data: null, loading: false, error: null, fetch: mockFetch }),
-    );
+    mockStore({ data: null, loading: false, error: null, fetch: mockFetch });
     render(<AttackHeatmap />);
     expect(mockFetch).toHaveBeenCalledOnce();
   });
