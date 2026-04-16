@@ -5,7 +5,7 @@ export type Feedback = "" | "tp" | "fp";
 
 export interface Alert {
   alert_id: string;
-  timestamp_ns: number;
+  timestamp_ns: bigint;        // S-194: serialised as JSON string by backend, parsed at REST/WS boundary
   alert_type: AlertType;
   rule_name: string;
   severity: number;                   // wire field = severity_id

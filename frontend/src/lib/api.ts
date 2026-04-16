@@ -7,12 +7,32 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Walk a parsed JSON value and convert any `timestamp_ns` key whose value is a string
+ * into a bigint. The backend serialises `Alert.timestamp_ns` as a JSON string for JS
+ * bigint safety (S-194). Numeric `timestamp_ns` values (used by other endpoints such
+ * as the entity timeline) are left untouched.
+ */
+function reviveAlertTimestamps(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reviveAlertTimestamps);
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = k === "timestamp_ns" && typeof v === "string" ? BigInt(v) : reviveAlertTimestamps(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 async function request<T>(path: string, init: RequestInit): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`, init);
     const text = await res.text();
-    const body = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text;
-    if (!res.ok) throw new ApiError(res.status, (body && typeof body === "object" && "detail" in body) ? String(body.detail) : text);
+    const parsed = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text;
+    if (!res.ok) throw new ApiError(res.status, (parsed && typeof parsed === "object" && "detail" in parsed) ? String(parsed.detail) : text);
+    const body = typeof parsed === "object" && parsed !== null ? reviveAlertTimestamps(parsed) : parsed;
     return body as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
