@@ -4,6 +4,7 @@ import App from "./App";
 import { useThemeStore } from "@/stores/theme";
 import { api } from "@/lib/api";
 import { useEntityStore } from "@/stores/entity";
+import { hashHasCoverage } from "@/lib/hash";
 
 vi.mock("@/lib/api", () => ({
   api: { get: vi.fn().mockResolvedValue({ items: [] }), post: vi.fn() },
@@ -67,6 +68,20 @@ describe("App shell", () => {
   it("mounts AnomalyTimeline alongside AlertFeed", async () => {
     render(<App />);
     expect(await screen.findByText("Anomaly Timeline")).toBeInTheDocument();
+  });
+});
+
+describe("hashHasCoverage", () => {
+  it("returns true for #coverage", () => {
+    expect(hashHasCoverage("#coverage")).toBe(true);
+  });
+
+  it("returns false for empty hash", () => {
+    expect(hashHasCoverage("")).toBe(false);
+  });
+
+  it("returns false for entity hash", () => {
+    expect(hashHasCoverage("#entity=abc")).toBe(false);
   });
 });
 

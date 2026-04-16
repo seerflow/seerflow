@@ -264,6 +264,7 @@ class TestAttackCoverageSchemas:
             alert_count=1,
             covered=True,
             detected=True,
+            rule_names=["rule_a", "rule_b"],
         )
         assert cell.model_dump() == {
             "tactic": "discovery",
@@ -272,7 +273,21 @@ class TestAttackCoverageSchemas:
             "alert_count": 1,
             "covered": True,
             "detected": True,
+            "rule_names": ["rule_a", "rule_b"],
         }
+
+    def test_attack_coverage_cell_rule_names_defaults_empty(self) -> None:
+        from seerflow.api.schemas import AttackCoverageCell
+
+        cell = AttackCoverageCell(
+            tactic="discovery",
+            technique="T1033",
+            rule_count=0,
+            alert_count=0,
+            covered=False,
+            detected=False,
+        )
+        assert cell.rule_names == []
 
     def test_attack_coverage_tactic_default_techniques_empty(self) -> None:
         from seerflow.api.schemas import AttackCoverageTactic

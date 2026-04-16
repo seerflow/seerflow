@@ -149,3 +149,35 @@ export interface EventFilter {
   minSeverity: number;        // 0..6, default 0
   templateIds: Set<number>;   // empty = all
 }
+
+// --- ATT&CK coverage heatmap (S-174) ---
+
+export interface AttackCoverageCell {
+  tactic: string;
+  technique: string;
+  rule_count: number;
+  alert_count: number;
+  covered: boolean;
+  detected: boolean;
+  rule_names: string[];
+}
+
+export interface AttackCoverageTactic {
+  tactic: string;
+  tactic_display_name: string;
+  techniques: AttackCoverageCell[];
+}
+
+export interface AttackCoverageSummary {
+  total_techniques_covered: number;
+  total_techniques_detected: number;
+  total_rules_with_attack_tags: number;
+  total_alerts_matched: number;
+}
+
+export interface AttackCoverageResponse {
+  window_since: string;
+  window_until: string;
+  tactics: AttackCoverageTactic[];
+  summary: AttackCoverageSummary;
+}

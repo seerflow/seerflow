@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from seerflow.api.attack import (
+    CellData,
     build_matrix,
     collect_alert_cells,
     collect_correlation_cells,
     collect_sigma_cells,
-    merge_rule_counts,
+    merge_rule_data,
 )
 from seerflow.models.alert import Alert, CorrelationRule, SourceCondition
 from seerflow.models.event import SeverityLevel
@@ -29,9 +30,11 @@ class _StubCompiled:
         self,
         tactics: tuple[str, ...],
         techniques: tuple[str, ...],
+        rule_name: str = "test",
     ) -> None:
         self.attack_tactics = tactics
         self.attack_techniques = techniques
+        self.rule_name = rule_name
 
 
 def _alert(
@@ -59,9 +62,11 @@ def _alert(
 def _corr(
     tactics: tuple[str, ...],
     techniques: tuple[str, ...],
+    *,
+    name: str = "brute_force_lateral",
 ) -> CorrelationRule:
     return CorrelationRule(
-        name="c",
+        name=name,
         entity_type="ip",
         window_seconds=60,
         sources=(SourceCondition(source_type="syslog", conditions={}),),
@@ -84,8 +89,8 @@ class TestCollectSigmaCells:
             ]
         )
         counts = collect_sigma_cells(engine)  # type: ignore[arg-type]
-        assert counts[("discovery", "T1033")] == 2
-        assert counts[("discovery", "T1087")] == 1
+        assert counts[("discovery", "T1033")].count == 2
+        assert counts[("discovery", "T1087")].count == 1
 
     def test_drops_orphans(self) -> None:
         engine = _StubSigmaEngine(
@@ -105,14 +110,32 @@ class TestCollectSigmaCells:
             ]
         )
         counts = collect_sigma_cells(engine)  # type: ignore[arg-type]
-        assert counts == {("discovery", "T1033"): 1}
+        assert list(counts.keys()) == [("discovery", "T1033")]
+        assert counts[("discovery", "T1033")].count == 1
+
+
+def test_collect_sigma_cells_returns_cell_data_with_rule_names() -> None:
+    rules = [
+        _StubCompiled(("persistence",), ("T1053",), rule_name="sched_task_cron"),
+        _StubCompiled(("persistence",), ("T1053",), rule_name="crontab_mod"),
+    ]
+    engine = _StubSigmaEngine(rules)
+    result = collect_sigma_cells(engine)  # type: ignore[arg-type]
+    cell = result[("persistence", "T1053")]
+    assert cell.count == 2
+    assert cell.rule_names == ("sched_task_cron", "crontab_mod")
+
+
+def test_collect_sigma_cells_none_engine_returns_empty() -> None:
+    result = collect_sigma_cells(None)
+    assert result == {}
 
 
 class TestCollectCorrelationCells:
     def test_normalizes_technique_case(self) -> None:
         rules = [_corr(("lateral_movement",), ("T1021",))]
         counts = collect_correlation_cells(rules)
-        assert counts == {("lateral_movement", "T1021"): 1}
+        assert counts[("lateral_movement", "T1021")].count == 1
 
     def test_empty_sequence_returns_empty(self) -> None:
         assert collect_correlation_cells([]) == {}
@@ -128,7 +151,8 @@ class TestCollectCorrelationCells:
             _corr(("lateral_movement",), ("T1021",)),
         ]
         counts = collect_correlation_cells(rules)
-        assert counts == {("lateral_movement", "T1021"): 1}
+        assert list(counts.keys()) == [("lateral_movement", "T1021")]
+        assert counts[("lateral_movement", "T1021")].count == 1
 
 
 class TestCollectAlertCells:
@@ -138,7 +162,7 @@ class TestCollectAlertCells:
             _alert(("discovery",), ("T1033",), alert_id="a2"),
         ]
         counts = collect_alert_cells(alerts)
-        assert counts == {("discovery", "T1033"): 2}
+        assert counts[("discovery", "T1033")].count == 2
 
     def test_drops_orphans(self) -> None:
         alerts = [_alert((), ("t1033",), alert_id="a1")]
@@ -151,7 +175,8 @@ class TestCollectAlertCells:
             _alert(("discovery",), ("t1033",), alert_id="a3"),
         ]
         counts = collect_alert_cells(alerts)
-        assert counts == {("discovery", "T1033"): 1}
+        assert list(counts.keys()) == [("discovery", "T1033")]
+        assert counts[("discovery", "T1033")].count == 1
 
 
 class TestBuildMatrix:
@@ -165,10 +190,13 @@ class TestBuildMatrix:
             assert tactic.techniques == []
 
     def test_fills_cell_flags_and_summary(self) -> None:
-        rule_counts = {("discovery", "T1033"): 2, ("execution", "T1059"): 1}
-        alert_counts = {("discovery", "T1033"): 5}
+        rule_data = {
+            ("discovery", "T1033"): CellData(count=2),
+            ("execution", "T1059"): CellData(count=1),
+        }
+        alert_data = {("discovery", "T1033"): CellData(count=5)}
         resp = build_matrix(
-            rule_counts, alert_counts, window_since=self._since, window_until=self._until
+            rule_data, alert_data, window_since=self._since, window_until=self._until
         )
         discovery = next(t for t in resp.tactics if t.tactic == "discovery")
         assert discovery.tactic_display_name == "Discovery (TA0007)"
@@ -189,8 +217,8 @@ class TestBuildMatrix:
         assert resp.summary.total_alerts_matched == 5
 
     def test_unknown_tactics_appended(self) -> None:
-        rule_counts = {("custom_tactic", "T9999"): 1}
-        resp = build_matrix(rule_counts, {}, window_since=self._since, window_until=self._until)
+        rule_data = {("custom_tactic", "T9999"): CellData(count=1)}
+        resp = build_matrix(rule_data, {}, window_since=self._since, window_until=self._until)
         known_count = len(TACTICS)
         assert len(resp.tactics) == known_count + 1
         assert resp.tactics[-1].tactic == "custom_tactic"
@@ -198,14 +226,14 @@ class TestBuildMatrix:
         assert resp.tactics[-1].techniques[0].technique == "T9999"
 
     def test_techniques_sorted_within_tactic(self) -> None:
-        rule_counts = {
-            ("discovery", "T1087"): 1,
-            ("discovery", "T1033"): 1,
-            ("discovery", "T1053"): 1,
-            ("discovery", "T1053.001"): 1,
-            ("discovery", "T1059"): 1,
+        rule_data = {
+            ("discovery", "T1087"): CellData(count=1),
+            ("discovery", "T1033"): CellData(count=1),
+            ("discovery", "T1053"): CellData(count=1),
+            ("discovery", "T1053.001"): CellData(count=1),
+            ("discovery", "T1059"): CellData(count=1),
         }
-        resp = build_matrix(rule_counts, {}, window_since=self._since, window_until=self._until)
+        resp = build_matrix(rule_data, {}, window_since=self._since, window_until=self._until)
         discovery = next(t for t in resp.tactics if t.tactic == "discovery")
         techs = [c.technique for c in discovery.techniques]
         # Lexicographic ordering — T1033 < T1053 < T1053.001 < T1059 < T1087.
@@ -217,32 +245,53 @@ class TestBuildMatrix:
         assert resp.window_until.startswith("2026-04-11")
 
 
-class TestMergeRuleCounts:
-    def test_empty_inputs_return_empty(self) -> None:
-        assert merge_rule_counts() == {}
-        assert merge_rule_counts({}) == {}
-        assert merge_rule_counts({}, {}) == {}
+def test_build_matrix_populates_rule_names() -> None:
+    rule_data = {
+        ("persistence", "T1053"): CellData(count=2, rule_names=("sched_task", "crontab")),
+    }
+    alert_data = {
+        ("persistence", "T1053"): CellData(count=1),
+    }
+    now = datetime.now(UTC)
+    resp = build_matrix(rule_data, alert_data, window_since=now, window_until=now)
+    tactic = next(t for t in resp.tactics if t.tactic == "persistence")
+    cell = next(c for c in tactic.techniques if c.technique == "T1053")
+    assert cell.rule_names == ["sched_task", "crontab"]
+    assert cell.rule_count == 2
+    assert cell.alert_count == 1
 
-    def test_disjoint_sources_are_concatenated(self) -> None:
-        sigma = {("discovery", "T1033"): 2}
-        correlation = {("lateral_movement", "T1021"): 1}
-        merged = merge_rule_counts(sigma, correlation)
-        assert merged == {
-            ("discovery", "T1033"): 2,
-            ("lateral_movement", "T1021"): 1,
-        }
 
-    def test_overlapping_sources_are_summed(self) -> None:
-        sigma = {("discovery", "T1033"): 2, ("execution", "T1059"): 1}
-        correlation = {("discovery", "T1033"): 3}
-        merged = merge_rule_counts(sigma, correlation)
-        assert merged == {
-            ("discovery", "T1033"): 5,
-            ("execution", "T1059"): 1,
-        }
+# ---------------------------------------------------------------------------
+# New Task 2 tests: CellData-aware collectors and merge_rule_data
+# ---------------------------------------------------------------------------
 
-    def test_variadic_three_sources(self) -> None:
-        a = {("discovery", "T1033"): 1}
-        b = {("discovery", "T1033"): 2}
-        c = {("discovery", "T1033"): 4}
-        assert merge_rule_counts(a, b, c) == {("discovery", "T1033"): 7}
+
+def test_collect_correlation_cells_returns_cell_data_with_names() -> None:
+    rules = [
+        _corr(("lateral_movement",), ("T1021",)),
+    ]
+    result = collect_correlation_cells(rules)
+    cell = result[("lateral_movement", "T1021")]
+    assert cell.count == 1
+    assert cell.rule_names == ("brute_force_lateral",)
+
+
+def test_collect_alert_cells_returns_cell_data() -> None:
+    alerts = [_alert(("persistence",), ("T1053",))]
+    result = collect_alert_cells(alerts)
+    cell = result[("persistence", "T1053")]
+    assert cell.count == 1
+    assert cell.rule_names == ()  # alerts don't carry rule_names into cell
+
+
+def test_merge_rule_data_combines_counts_and_names() -> None:
+    a: dict[tuple[str, str], CellData] = {
+        ("persistence", "T1053"): CellData(count=2, rule_names=("r1", "r2"))
+    }
+    b: dict[tuple[str, str], CellData] = {
+        ("persistence", "T1053"): CellData(count=1, rule_names=("r3",))
+    }
+    merged = merge_rule_data(a, b)
+    cell = merged[("persistence", "T1053")]
+    assert cell.count == 3
+    assert cell.rule_names == ("r1", "r2", "r3")

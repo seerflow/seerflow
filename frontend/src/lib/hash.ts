@@ -61,3 +61,9 @@ export function navigateToEntity(uuid: string, range: TimelineRange = "24h"): vo
 export function isValidEntityUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value);
 }
+
+export function hashHasCoverage(hash: string): boolean {
+  if (!hash) return false;
+  const trimmed = hash.startsWith("#") ? hash.slice(1) : hash;
+  return trimmed === "coverage";
+}

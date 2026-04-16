@@ -15,7 +15,7 @@ from seerflow.api.attack import (
     collect_alert_cells,
     collect_correlation_cells,
     collect_sigma_cells,
-    merge_rule_counts,
+    merge_rule_data,
 )
 from seerflow.api.constants import MAX_ALERT_SCAN
 from seerflow.api.deps import (
@@ -98,12 +98,12 @@ async def get_coverage(
         end_ns=int(window_until.timestamp() * 1_000_000_000),
     )
     alerts = await _scan_alerts(storage.alert_store, time_range)
-    rule_counts = merge_rule_counts(
+    rule_data = merge_rule_data(
         collect_sigma_cells(engines.sigma_engine),
         collect_correlation_cells(engines.correlation_rules),
     )
     return build_matrix(
-        rule_counts,
+        rule_data,
         collect_alert_cells(alerts),
         window_since=window_since,
         window_until=window_until,

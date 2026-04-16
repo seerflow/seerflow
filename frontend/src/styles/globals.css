@@ -84,3 +84,16 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 }
+
+/* ATT&CK heatmap cell states */
+@layer utilities {
+  .cell-detected {
+    @apply bg-blue-600 dark:bg-blue-500;
+  }
+  .cell-covered {
+    @apply bg-blue-200 dark:bg-blue-800;
+  }
+  .cell-gap {
+    @apply bg-zinc-100 dark:bg-zinc-800;
+  }
+}
