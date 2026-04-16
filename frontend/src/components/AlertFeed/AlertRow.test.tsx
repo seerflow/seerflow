@@ -25,4 +25,10 @@ describe("AlertRow", () => {
     fireEvent.click(screen.getByRole("button", { name: /alert/i }));
     expect(onClick).toHaveBeenCalledWith("a1");
   });
+
+  it("renders boundary timestamp_ns above 2^53 without precision loss (S-194 AC-1)", () => {
+    const a: Alert = { ...alert, timestamp_ns: 1_700_000_000_000_000_123n };
+    render(<AlertRow alert={a} onClick={() => {}} />);
+    expect(screen.getByText("22:13:20")).toBeInTheDocument();
+  });
 });
