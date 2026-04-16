@@ -88,7 +88,11 @@ export function AlertFeed(): JSX.Element {
     api.get<{ items: Parameters<typeof backfill>[0] }>("/api/v1/alerts?limit=50")
       .then(r => { if (cancelled) return; backfill(r.items); finish(); })
       .catch((e: ApiError) => { logger.warn("warm-up failed", e); finish(); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      warmedUpRef.current = false;
+      wsBufferRef.current = [];
+    };
   }, [backfill, handleMessage]);
 
   const onMessage = useCallback((m: WsMessage): void => {

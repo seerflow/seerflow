@@ -92,4 +92,36 @@ describe("AlertFeed integration", () => {
     await waitFor(() => expect(screen.getByText("live-rule")).toBeInTheDocument());
     expect(screen.getByText("warmup-rule")).toBeInTheDocument();
   });
+
+  it("resets warmedUp on unmount so a remount re-buffers WS frames (S-194 AC-3 regression)", async () => {
+    // First mount: warm-up resolves, WS frame goes through immediately.
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    const { unmount } = render(<AlertFeed />);
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+    await new Promise(r => setTimeout(r, 0)); // let warm-up promise resolve
+    unmount();
+
+    // Second mount: warm-up is deferred; WS frame must be buffered, not visible.
+    let resolveWarmup: (v: { items: unknown[] }) => void = () => {};
+    const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
+    fetchMock.mockReturnValueOnce(warmupPromise);
+    useAlertStore.setState({ alerts: [], detail: {}, dropped: 0, selectedAlertId: null });
+
+    render(<AlertFeed />);
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => {
+      MockWS.last!._open();
+      MockWS.last!._msg({ type: "alert", data: {
+        alert_id: "remounted", timestamp_ns: "1", alert_type: "ml", rule_name: "remount-rule",
+        severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+        entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
+        dedup_count: 1, source_type: "syslog",
+      } });
+    });
+    expect(screen.queryByText("remount-rule")).toBeNull();
+
+    await act(async () => { resolveWarmup({ items: [] }); await warmupPromise; });
+    await waitFor(() => expect(screen.getByText("remount-rule")).toBeInTheDocument());
+  });
 });
