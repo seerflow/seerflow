@@ -13,6 +13,8 @@ describe("logger DEV gate (S-194 AC-4)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("emits info/warn/error in DEV", async () => {
@@ -26,13 +28,13 @@ describe("logger DEV gate (S-194 AC-4)", () => {
   });
 
   it("no-ops info/warn but emits error in production", async () => {
-    vi.doMock("./logger", () => ({
-      logger: {
-        info: () => {},
-        warn: () => {},
-        error: (...a: unknown[]) => console.error(...a),
-      },
-    }));
+    // import.meta.env.DEV is a compile-time literal in Vitest 2.x; vi.stubEnv
+    // cannot flip it (DEV stays true even when MODE=production).  Instead,
+    // logger.ts initialises globalThis.__DEV__ from import.meta.env.DEV on
+    // first load, so tests can override it via vi.stubGlobal before the module
+    // is re-evaluated under a fresh module registry.
+    vi.stubGlobal("__DEV__", false);
+    vi.resetModules();
     const { logger } = await import("./logger");
     logger.info("i");
     logger.warn("w");
