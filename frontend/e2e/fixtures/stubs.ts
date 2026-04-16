@@ -89,14 +89,21 @@ export type WsHandle = {
   send: (msg: unknown) => void;
   close: () => void;
   reopen: () => Promise<void>;
+  blockReconnects: () => void;
+  allowReconnects: () => void;
 };
 
 export async function stubWebSocket(page: Page): Promise<WsHandle> {
   const sent: string[] = [];
   let route: WebSocketRoute | null = null;
   const openers: Array<() => void> = [];
+  let blocked = false;
 
   await page.routeWebSocket("**/api/v1/ws", (ws) => {
+    if (blocked) {
+      ws.close();
+      return;
+    }
     route = ws;
     ws.onMessage((data) => {
       sent.push(typeof data === "string" ? data : data.toString());
@@ -125,5 +132,11 @@ export async function stubWebSocket(page: Page): Promise<WsHandle> {
         }
         openers.push(resolve);
       }),
+    blockReconnects: () => {
+      blocked = true;
+    },
+    allowReconnects: () => {
+      blocked = false;
+    },
   };
 }

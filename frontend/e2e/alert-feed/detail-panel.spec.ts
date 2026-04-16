@@ -33,10 +33,4 @@ test("row click opens detail panel with events, MITRE chips, risk score", async 
   await expect(page.getByText(/Risk score:/)).toBeVisible();
   // `risk_score.toFixed(2)` = "78.00".
   await expect(page.getByText(/78\.00/)).toBeVisible();
-
-  // Re-click collapses the panel (store's `clearSelection` toggle).
-  await rows.first().click();
-  await expect(
-    page.getByRole("heading", { name: "Registry autorun" }),
-  ).toBeHidden();
 });

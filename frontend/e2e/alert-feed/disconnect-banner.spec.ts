@@ -29,16 +29,15 @@ test("disconnect banner appears 3s after WS close and hides on reconnect", async
     .filter({ hasText: "Live stream disconnected" });
   await expect(banner).toBeHidden();
 
+  // Block reconnects so the status stays "closed" for the full 3s the
+  // banner timer needs. Without this, the 1s reconnect backoff succeeds
+  // before the 3s timer fires and the banner never appears.
+  ws.blockReconnects();
   ws.close();
-  // Banner fires on `status === "closed"` + 3000ms setTimeout. `toBeVisible`
-  // polls up to 10s (configured below via assertion timeout) which covers the
-  // banner's 3s delay plus the close-event propagation.
   await expect(banner).toBeVisible({ timeout: 10_000 });
 
-  // Reconnect: `useWebSocket` retries with exponential backoff; the first
-  // retry fires after ~1s. On reconnect, `page.routeWebSocket` fires the
-  // handler again and `ws.reopen()` resolves. Banner hides when `status`
-  // flips back to "open".
+  // Allow reconnect and wait for the banner to clear.
+  ws.allowReconnects();
   await ws.reopen();
   await expect(banner).toBeHidden({ timeout: 10_000 });
 });
