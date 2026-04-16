@@ -16,20 +16,19 @@ import {
  * Stub `GET /api/v1/alerts` (list) and `GET /api/v1/alerts/{id}` (detail).
  * Feedback POSTs are routed separately via `stubFeedback` so per-test
  * success/500 behaviour can be scripted independently.
+ *
+ * URL matching uses a regex rather than the glob `**\/api/v1/alerts*` because
+ * Playwright's single `*` in a glob does NOT cross `/` separators, so the
+ * glob pattern silently misses the detail path `/api/v1/alerts/{id}` and
+ * requests fall through to the live server.
  */
 export async function stubRestAlerts(
   page: Page,
   alerts: FixtureAlert[] = warmUpAlerts,
 ): Promise<void> {
-  await page.route("**/api/v1/alerts*", async (route) => {
+  await page.route(/\/api\/v1\/alerts(\/[^/]+)?(\?.*)?$/, async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
-
-    if (url.pathname.endsWith("/feedback")) {
-      // Handled by stubFeedback if registered; otherwise pass through.
-      await route.fallback();
-      return;
-    }
 
     if (method === "GET" && url.pathname.endsWith("/api/v1/alerts")) {
       await route.fulfill({

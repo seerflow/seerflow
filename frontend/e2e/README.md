@@ -69,6 +69,6 @@ On failure, Playwright uploads `frontend/test-results/` (traces, videos, screens
 ## Layout
 
 - `alert-feed/*.spec.ts` — per-journey specs for the alert-feed widget. New alert-feed journeys go here.
-- `anomaly-timeline.spec.ts`, `entity-explorer.spec.ts` — legacy smoke files, each gated by `RUN_E2E=1`. When their full rollouts land (follow-up stories), they move to `timeline/` and `entity-explorer/` subdirectories following the alert-feed layout.
+- `anomaly-timeline.spec.ts`, `entity-explorer.spec.ts` — legacy smoke files. **Excluded** from the `e2e` project (see `playwright.config.ts::projects[0].testIgnore`) because they expect a live backend and the new CI job does not boot one. They run only when pointed at explicitly: `RUN_E2E=1 npx playwright test e2e/anomaly-timeline.spec.ts`. When their full Playwright rollouts land in their own stories, move them to `timeline/` and `entity-explorer/` subdirectories following the alert-feed layout and drop the ignore entry.
 - `fixtures/` — shared fixture data and stub factories.
 - `quarantine/` — deliberately flaky specs (see policy above).

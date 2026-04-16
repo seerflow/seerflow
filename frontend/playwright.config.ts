@@ -24,7 +24,16 @@ export default defineConfig({
     {
       name: "e2e",
       testDir: "./e2e",
-      testIgnore: ["**/quarantine/**"],
+      // Exclude legacy top-level smoke specs (`anomaly-timeline.spec.ts`,
+      // `entity-explorer.spec.ts`) until their own Playwright rollout
+      // stories land -- they expect a live backend and were only
+      // `RUN_E2E=1`-gated to stay out of CI. The new CI job sets
+      // `RUN_E2E=1` unconditionally, so an explicit ignore is required.
+      testIgnore: [
+        "**/quarantine/**",
+        "anomaly-timeline.spec.ts",
+        "entity-explorer.spec.ts",
+      ],
     },
     {
       name: "quarantine",

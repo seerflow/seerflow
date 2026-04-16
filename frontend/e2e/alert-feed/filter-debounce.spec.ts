@@ -35,12 +35,14 @@ test("Critical chip filters rows and sends one filter frame after debounce", asy
     page.getByRole("button", { name: "Critical" }),
   ).toHaveAttribute("aria-pressed", "true");
 
-  // AC-7 debounce contract: exactly one `filter` frame fires per debounce
-  // window. Wire shape: `{type:"filter", min_severity:17, ...}` per
-  // `frontend/src/components/AlertFeed/AlertFeed.tsx:18-28`.
-  const filters = ws.sent
-    .map((s) => JSON.parse(s))
-    .filter((m: { type?: string }) => m.type === "filter");
-  expect(filters).toHaveLength(1);
-  expect((filters[0] as { min_severity?: number }).min_severity).toBe(17);
+  // AC-7 debounce contract: exactly one `filter` frame carrying a
+  // `min_severity` fires per debounce window. AlertFeed's mount-time
+  // useEffect (`AlertFeed.tsx:118-122`) emits an initial empty frame with no
+  // `min_severity`; that baseline frame is filtered out so the assertion
+  // targets only the post-click debounce output.
+  const criticalFrames = ws.sent
+    .map((s) => JSON.parse(s) as { type?: string; min_severity?: number })
+    .filter((m) => m.type === "filter" && m.min_severity !== undefined);
+  expect(criticalFrames).toHaveLength(1);
+  expect(criticalFrames[0].min_severity).toBe(17);
 });
