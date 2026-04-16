@@ -10,7 +10,6 @@ from seerflow.api.attack import (
     collect_alert_cells,
     collect_correlation_cells,
     collect_sigma_cells,
-    merge_rule_counts,
     merge_rule_data,
 )
 from seerflow.models.alert import Alert, CorrelationRule, SourceCondition
@@ -191,10 +190,13 @@ class TestBuildMatrix:
             assert tactic.techniques == []
 
     def test_fills_cell_flags_and_summary(self) -> None:
-        rule_counts = {("discovery", "T1033"): 2, ("execution", "T1059"): 1}
-        alert_counts = {("discovery", "T1033"): 5}
+        rule_data = {
+            ("discovery", "T1033"): CellData(count=2),
+            ("execution", "T1059"): CellData(count=1),
+        }
+        alert_data = {("discovery", "T1033"): CellData(count=5)}
         resp = build_matrix(
-            rule_counts, alert_counts, window_since=self._since, window_until=self._until
+            rule_data, alert_data, window_since=self._since, window_until=self._until
         )
         discovery = next(t for t in resp.tactics if t.tactic == "discovery")
         assert discovery.tactic_display_name == "Discovery (TA0007)"
@@ -215,8 +217,8 @@ class TestBuildMatrix:
         assert resp.summary.total_alerts_matched == 5
 
     def test_unknown_tactics_appended(self) -> None:
-        rule_counts = {("custom_tactic", "T9999"): 1}
-        resp = build_matrix(rule_counts, {}, window_since=self._since, window_until=self._until)
+        rule_data = {("custom_tactic", "T9999"): CellData(count=1)}
+        resp = build_matrix(rule_data, {}, window_since=self._since, window_until=self._until)
         known_count = len(TACTICS)
         assert len(resp.tactics) == known_count + 1
         assert resp.tactics[-1].tactic == "custom_tactic"
@@ -224,14 +226,14 @@ class TestBuildMatrix:
         assert resp.tactics[-1].techniques[0].technique == "T9999"
 
     def test_techniques_sorted_within_tactic(self) -> None:
-        rule_counts = {
-            ("discovery", "T1087"): 1,
-            ("discovery", "T1033"): 1,
-            ("discovery", "T1053"): 1,
-            ("discovery", "T1053.001"): 1,
-            ("discovery", "T1059"): 1,
+        rule_data = {
+            ("discovery", "T1087"): CellData(count=1),
+            ("discovery", "T1033"): CellData(count=1),
+            ("discovery", "T1053"): CellData(count=1),
+            ("discovery", "T1053.001"): CellData(count=1),
+            ("discovery", "T1059"): CellData(count=1),
         }
-        resp = build_matrix(rule_counts, {}, window_since=self._since, window_until=self._until)
+        resp = build_matrix(rule_data, {}, window_since=self._since, window_until=self._until)
         discovery = next(t for t in resp.tactics if t.tactic == "discovery")
         techs = [c.technique for c in discovery.techniques]
         # Lexicographic ordering — T1033 < T1053 < T1053.001 < T1059 < T1087.
@@ -243,35 +245,20 @@ class TestBuildMatrix:
         assert resp.window_until.startswith("2026-04-11")
 
 
-class TestMergeRuleCounts:
-    def test_empty_inputs_return_empty(self) -> None:
-        assert merge_rule_counts() == {}
-        assert merge_rule_counts({}) == {}
-        assert merge_rule_counts({}, {}) == {}
-
-    def test_disjoint_sources_are_concatenated(self) -> None:
-        sigma = {("discovery", "T1033"): 2}
-        correlation = {("lateral_movement", "T1021"): 1}
-        merged = merge_rule_counts(sigma, correlation)
-        assert merged == {
-            ("discovery", "T1033"): 2,
-            ("lateral_movement", "T1021"): 1,
-        }
-
-    def test_overlapping_sources_are_summed(self) -> None:
-        sigma = {("discovery", "T1033"): 2, ("execution", "T1059"): 1}
-        correlation = {("discovery", "T1033"): 3}
-        merged = merge_rule_counts(sigma, correlation)
-        assert merged == {
-            ("discovery", "T1033"): 5,
-            ("execution", "T1059"): 1,
-        }
-
-    def test_variadic_three_sources(self) -> None:
-        a = {("discovery", "T1033"): 1}
-        b = {("discovery", "T1033"): 2}
-        c = {("discovery", "T1033"): 4}
-        assert merge_rule_counts(a, b, c) == {("discovery", "T1033"): 7}
+def test_build_matrix_populates_rule_names() -> None:
+    rule_data = {
+        ("persistence", "T1053"): CellData(count=2, rule_names=("sched_task", "crontab")),
+    }
+    alert_data = {
+        ("persistence", "T1053"): CellData(count=1),
+    }
+    now = datetime.now(UTC)
+    resp = build_matrix(rule_data, alert_data, window_since=now, window_until=now)
+    tactic = next(t for t in resp.tactics if t.tactic == "persistence")
+    cell = next(c for c in tactic.techniques if c.technique == "T1053")
+    assert cell.rule_names == ["sched_task", "crontab"]
+    assert cell.rule_count == 2
+    assert cell.alert_count == 1
 
 
 # ---------------------------------------------------------------------------

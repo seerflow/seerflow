@@ -96,23 +96,6 @@ def collect_alert_cells(alerts: Iterable[Alert]) -> dict[CellKey, CellData]:
     return cells
 
 
-def merge_rule_counts(
-    *sources: dict[CellKey, int],
-) -> dict[CellKey, int]:
-    """Merge multiple rule-count dicts into one.
-
-    The route handler collects counts from the Sigma engine and the
-    correlation-rules list separately, then merges here. Keeping the
-    merge in this pure module prevents the route from growing merge
-    logic when new rule sources are added.
-    """
-    merged: dict[CellKey, int] = defaultdict(int)
-    for source in sources:
-        for key, count in source.items():
-            merged[key] += count
-    return merged
-
-
 def merge_rule_data(
     *sources: dict[CellKey, CellData],
 ) -> dict[CellKey, CellData]:
@@ -130,36 +113,37 @@ def merge_rule_data(
 
 def _cells_for_tactic(
     keys: list[CellKey],
-    rule_counts: dict[CellKey, int],
-    alert_counts: dict[CellKey, int],
+    rule_data: dict[CellKey, CellData],
+    alert_data: dict[CellKey, CellData],
 ) -> list[AttackCoverageCell]:
     cells: list[AttackCoverageCell] = []
     for key in keys:
-        rc = rule_counts.get(key, 0)
-        ac = alert_counts.get(key, 0)
+        rd = rule_data.get(key, CellData())
+        ad = alert_data.get(key, CellData())
         cells.append(
             AttackCoverageCell(
                 tactic=key[0],
                 technique=key[1],
-                rule_count=rc,
-                alert_count=ac,
-                covered=rc > 0,
-                detected=ac > 0,
+                rule_count=rd.count,
+                alert_count=ad.count,
+                covered=rd.count > 0,
+                detected=ad.count > 0,
+                rule_names=list(rd.rule_names),
             )
         )
     return cells
 
 
 def build_matrix(
-    rule_counts: dict[CellKey, int],
-    alert_counts: dict[CellKey, int],
+    rule_data: dict[CellKey, CellData],
+    alert_data: dict[CellKey, CellData],
     *,
     window_since: datetime,
     window_until: datetime,
 ) -> AttackCoverageResponse:
-    """Merge rule and alert counts into a stable-ordered coverage response."""
+    """Merge rule and alert CellData into a stable-ordered coverage response."""
     by_tactic: dict[str, list[CellKey]] = defaultdict(list)
-    all_keys = set(rule_counts) | set(alert_counts)
+    all_keys = set(rule_data) | set(alert_data)
     for key in sorted(all_keys):
         by_tactic[key[0]].append(key)
 
@@ -171,7 +155,7 @@ def build_matrix(
             AttackCoverageTactic(
                 tactic=tactic,
                 tactic_display_name=format_tactic(tactic),
-                techniques=_cells_for_tactic(by_tactic.get(tactic, []), rule_counts, alert_counts),
+                techniques=_cells_for_tactic(by_tactic.get(tactic, []), rule_data, alert_data),
             )
         )
 
@@ -180,7 +164,7 @@ def build_matrix(
             AttackCoverageTactic(
                 tactic=tactic,
                 tactic_display_name=format_tactic(tactic),
-                techniques=_cells_for_tactic(by_tactic[tactic], rule_counts, alert_counts),
+                techniques=_cells_for_tactic(by_tactic[tactic], rule_data, alert_data),
             )
         )
 
@@ -194,7 +178,7 @@ def build_matrix(
         summary=AttackCoverageSummary(
             total_techniques_covered=total_covered,
             total_techniques_detected=total_detected,
-            total_rules_with_attack_tags=sum(rule_counts.values()),
-            total_alerts_matched=sum(alert_counts.values()),
+            total_rules_with_attack_tags=sum(d.count for d in rule_data.values()),
+            total_alerts_matched=sum(d.count for d in alert_data.values()),
         ),
     )

@@ -193,6 +193,7 @@ class AttackCoverageCell(BaseModel):
     alert_count: int = Field(ge=0)
     covered: bool
     detected: bool
+    rule_names: list[str] = Field(default_factory=list)
 
 
 class AttackCoverageTactic(BaseModel):
