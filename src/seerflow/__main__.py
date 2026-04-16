@@ -62,6 +62,10 @@ def main() -> None:
             from seerflow.feedback_cmd import run_feedback
 
             _run_async(run_feedback(args))
+        elif args.command == "rules":
+            from seerflow.rules_cmd import run_rules_list
+
+            sys.exit(run_rules_list(args))
         else:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:

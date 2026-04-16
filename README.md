@@ -39,6 +39,23 @@ uv run python -m seerflow --config /path/to/seerflow.yaml start
 uv run python -m seerflow --version
 ```
 
+### Inspect loaded detection rules
+
+```bash
+# List everything
+uv run python -m seerflow rules list
+
+# Only rules tagged with a MITRE technique (prefix match includes sub-techniques)
+uv run python -m seerflow rules list --technique T1053
+
+# Filter by tactic (name or ATT&CK ID)
+uv run python -m seerflow rules list --tactic persistence
+uv run python -m seerflow rules list --tactic TA0003
+
+# JSON for scripting
+uv run python -m seerflow rules list --format json
+```
+
 ### Docker
 
 ```bash
