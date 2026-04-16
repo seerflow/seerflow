@@ -23,19 +23,22 @@ const AlertDataSchema = v.looseObject({
 });
 
 const StatusDataSchema = v.looseObject({
-  events_per_sec: v.number(),
+  events_ingested_per_sec: v.number(),
   alerts_24h: v.number(),
   connected_clients: v.number(),
-  dropped_messages: v.number(),
+  dropped_events: v.number(),
+  dropped_alerts: v.number(),
+  dropped_total: v.number(),
 });
 
 const EventDataSchema = v.looseObject({});  // event payload shape varies; keep open
 
 const WsMessageSchema = v.union([
-  v.object({ type: v.literal("alert"),  data: AlertDataSchema }),
-  v.object({ type: v.literal("status"), data: StatusDataSchema }),
-  v.object({ type: v.literal("event"),  data: EventDataSchema }),
-  v.object({ type: v.literal("batch"),  events: v.array(v.unknown()) }),
+  v.object({ type: v.literal("alert"),       data: AlertDataSchema }),
+  v.object({ type: v.literal("alert_batch"), alerts: v.array(AlertDataSchema) }),
+  v.object({ type: v.literal("status"),      data: StatusDataSchema }),
+  v.object({ type: v.literal("event"),       data: EventDataSchema }),
+  v.object({ type: v.literal("batch"),       events: v.array(v.unknown()) }),
 ]);
 
 export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => void } {
@@ -74,6 +77,10 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
           // S-194 AC-1: convert string wire timestamp into bigint at the boundary.
           const data = { ...msg.data, timestamp_ns: BigInt(msg.data.timestamp_ns) };
           optsRef.current.onMessage({ type: "alert", data } as unknown as WsMessage);
+        } else if (msg.type === "alert_batch") {
+          // S-194: convert each alert's string timestamp_ns to bigint before dispatch.
+          const alerts = msg.alerts.map(a => ({ ...a, timestamp_ns: BigInt(a.timestamp_ns) }));
+          optsRef.current.onMessage({ type: "alert_batch", alerts } as unknown as WsMessage);
         } else {
           optsRef.current.onMessage(msg as unknown as WsMessage);
         }

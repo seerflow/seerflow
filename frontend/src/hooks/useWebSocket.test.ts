@@ -28,7 +28,7 @@ describe("useWebSocket", () => {
     const ws = MockWS.instances[0];
     act(() => { ws._open(); });
     expect(onStatusChange).toHaveBeenCalledWith("open");
-    act(() => { ws._msg({ type: "status", data: { events_per_sec: 0, alerts_24h: 0, connected_clients: 0, dropped_messages: 0 } }); });
+    act(() => { ws._msg({ type: "status", data: { events_ingested_per_sec: 0, alerts_24h: 0, connected_clients: 0, dropped_events: 0, dropped_alerts: 0, dropped_total: 0 } }); });
     expect(onMessage).toHaveBeenCalled();
   });
 
@@ -107,8 +107,34 @@ describe("useWebSocket schema validation (S-194)", () => {
     const ws = MockWS.instances[0]; act(() => { ws._open(); });
 
     act(() => { ws._msg({ type: "status", data: {
-      events_per_sec: 10, alerts_24h: 5, connected_clients: 1, dropped_messages: 0,
+      events_ingested_per_sec: 10, alerts_24h: 5, connected_clients: 1, dropped_events: 0, dropped_alerts: 0, dropped_total: 0,
     } }); });
     expect(onMessage).toHaveBeenCalledOnce();
+  });
+
+  it("accepts real backend status frame shape (regression: events_ingested_per_sec, dropped_total)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+    act(() => { ws._msg({ type: "status", data: {
+      events_ingested_per_sec: 100, alerts_24h: 5, connected_clients: 1,
+      dropped_events: 0, dropped_alerts: 0, dropped_total: 0,
+    } }); });
+    expect(onMessage).toHaveBeenCalledOnce();
+  });
+
+  it("accepts and converts alert_batch frames (regression: previously dropped)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+    act(() => { ws._msg({ type: "alert_batch", alerts: [
+      { alert_id: "a1", timestamp_ns: "1700000000000000123", alert_type: "ml", rule_name: "r", severity: 10, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
+      { alert_id: "a2", timestamp_ns: "1700000000000000456", alert_type: "sigma", rule_name: "r", severity: 14, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
+    ] }); });
+    expect(onMessage).toHaveBeenCalledOnce();
+    const arg = onMessage.mock.calls[0][0];
+    expect(arg.type).toBe("alert_batch");
+    expect(arg.alerts).toHaveLength(2);
+    expect(arg.alerts[0].timestamp_ns).toBe(1700000000000000123n);
   });
 });
