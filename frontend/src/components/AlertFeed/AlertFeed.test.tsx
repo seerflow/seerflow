@@ -39,7 +39,7 @@ describe("AlertFeed integration", () => {
     act(() => {
       MockWS.last!._open();
       MockWS.last!._msg({ type: "alert", data: {
-        alert_id: "live", timestamp_ns: 2n, alert_type: "sigma", rule_name: "live-rule",
+        alert_id: "live", timestamp_ns: "2", alert_type: "sigma", rule_name: "live-rule",
         severity: 17, risk_score: 0.9, entity_uuid: null, entity_type: null,
         entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
         dedup_count: 1, source_type: "syslog",
