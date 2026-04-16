@@ -72,7 +72,9 @@ export function createAlertStore(max = MAX_ALERTS) {
           byId.set(a.alert_id, { ...a, ...existing, dedup_count: Math.max(existing.dedup_count, a.dedup_count) });
         }
       }
-      const sorted = [...byId.values()].sort((x, y) => y.timestamp_ns - x.timestamp_ns);
+      const sorted = [...byId.values()].sort((x, y) =>
+        y.timestamp_ns === x.timestamp_ns ? 0 : y.timestamp_ns > x.timestamp_ns ? 1 : -1,
+      );
       const dropped = Math.max(0, sorted.length - max);
       return { alerts: sorted.slice(0, max), dropped: s.dropped + dropped };
     }),
