@@ -30,7 +30,7 @@ describe("AlertFeed integration", () => {
     vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
     fetchMock.mockReset();
     MockWS.last = null;
-    useAlertStore.setState({ alerts: [], status: "connecting", dropped: 0, selectedAlertId: null });
+    useAlertStore.setState({ alerts: [], filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() }, status: "connecting", dropped: 0, selectedAlertId: null });
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -107,7 +107,7 @@ describe("AlertFeed integration", () => {
     let resolveWarmup: (v: { items: unknown[] }) => void = () => {};
     const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
     fetchMock.mockReturnValueOnce(warmupPromise);
-    useAlertStore.setState({ alerts: [], detail: {}, dropped: 0, selectedAlertId: null });
+    useAlertStore.setState({ alerts: [], detail: {}, filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() }, dropped: 0, selectedAlertId: null });
 
     render(<AlertFeed />);
     await waitFor(() => expect(MockWS.last).not.toBeNull());
