@@ -10,7 +10,7 @@ export function findAlertInBucket<A extends { timestamp_ns: bigint | number }>(
   resolutionNs: number,
 ): A | undefined {
   const start = BigInt(bucketStartNs);
-  const end = BigInt(bucketStartNs + resolutionNs);
+  const end = start + BigInt(resolutionNs);
   return alerts.find((a) => {
     const ts = typeof a.timestamp_ns === "bigint" ? a.timestamp_ns : BigInt(a.timestamp_ns);
     return ts >= start && ts < end;
