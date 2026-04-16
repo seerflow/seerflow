@@ -7,7 +7,7 @@ interface Props { alert: Alert; onClick: (id: string) => void; isOpen?: boolean 
 
 function Row({ alert, onClick, isOpen }: Props): JSX.Element {
   const bucket = severityBucket(alert.severity);
-  const ts = new Date(Math.floor(alert.timestamp_ns / 1_000_000)).toISOString().slice(11, 19);
+  const ts = new Date(Number(alert.timestamp_ns / 1_000_000n)).toISOString().slice(11, 19);
   return (
     <button
       type="button"

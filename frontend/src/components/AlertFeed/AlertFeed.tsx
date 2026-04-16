@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useAlertStore, selectVisible, selectCounts } from "@/stores/alerts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAlertStore, selectVisibleAndCounts } from "@/stores/alerts";
 import { useAnomalyStore } from "@/stores/anomaly";
 import { AlertRow } from "./AlertRow";
 import { AlertDetailPanel } from "./AlertDetailPanel";
@@ -13,6 +13,7 @@ import { useEventStore } from "@/stores/events";
 import { setIntent as setWsIntent } from "@/lib/wsFilter";
 
 const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
+const MAX_WS_BUFFER = 200;  // S-194: bound buffer to survive slow warm-up under high WS load
 
 function toWsFilter(f: AlertFilter): WsFilter {
   const minSev = f.severities.size
@@ -31,7 +32,8 @@ export function AlertFeed(): JSX.Element {
   const filter = useAlertStore(s => s.filter);
   const status = useAlertStore(s => s.status);
   const openId = useAlertStore(s => s.selectedAlertId);
-  const { prepend, backfill, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
+  const backfill = useAlertStore(s => s.backfill);
+  const { prepend, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
   const [wsUrl] = useState(() => {
     const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
     const url = base.replace(/^http/, "ws") + "/api/v1/ws";
@@ -41,16 +43,12 @@ export function AlertFeed(): JSX.Element {
     return url;
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    api.get<{ items: Parameters<typeof backfill>[0] }>("/api/v1/alerts?limit=50")
-      .then(r => { if (!cancelled) backfill(r.items); })
-      .catch((e: ApiError) => logger.warn("warm-up failed", e));
-    return () => { cancelled = true; };
-  }, [backfill]);
+  const wsBufferRef = useRef<WsMessage[]>([]);
+  const warmedUpRef = useRef(false);
 
-  const onMessage = (m: WsMessage): void => {
+  const handleMessage = useCallback((m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
+    else if (m.type === "alert_batch") m.alerts.forEach(prepend);
     else if (m.type === "batch") {
       const first = m.events.length > 0 ? m.events[0] : null;
       if (first && typeof first === "object" && "event_id" in first) {
@@ -79,7 +77,37 @@ export function AlertFeed(): JSX.Element {
         useEventStore.getState().ingest([m.data as LiveEvent]);
       }
     }
-  };
+  }, [prepend]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const finish = (): void => {
+      if (cancelled) return;
+      warmedUpRef.current = true;
+      for (const m of wsBufferRef.current) handleMessage(m);
+      wsBufferRef.current = [];
+    };
+    api.get<{ items: Parameters<typeof backfill>[0] }>("/api/v1/alerts?limit=50")
+      .then(r => { if (cancelled) return; backfill(r.items); finish(); })
+      .catch((e: ApiError) => { logger.warn("warm-up failed", e); finish(); });
+    return () => {
+      cancelled = true;
+      warmedUpRef.current = false;
+      wsBufferRef.current = [];
+    };
+  }, [backfill, handleMessage]);
+
+  const onMessage = useCallback((m: WsMessage): void => {
+    if (!warmedUpRef.current) {
+      if (wsBufferRef.current.length < MAX_WS_BUFFER) {
+        wsBufferRef.current.push(m);
+      } else {
+        logger.warn("ws buffer full during warm-up; dropping frame", { type: m.type });
+      }
+      return;
+    }
+    handleMessage(m);
+  }, [handleMessage]);
 
   const { send } = useWebSocket(wsUrl, {
     onMessage,
@@ -112,8 +140,7 @@ export function AlertFeed(): JSX.Element {
     return undefined;
   }, [status]);
 
-  const counts = useAlertStore(selectCounts);
-  const visible = useAlertStore(selectVisible);
+  const { visible, counts } = useAlertStore(selectVisibleAndCounts);
   const sources = useMemo(
     () => [...new Set(alerts.map(a => a.source_type).filter((s): s is string => Boolean(s)))],
     [alerts],

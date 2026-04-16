@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -65,6 +65,17 @@ class AlertResponse(BaseModel):
     feedback_note: str = ""
     mitre_tactics: list[str] = Field(default_factory=list)
     mitre_techniques: list[str] = Field(default_factory=list)
+
+    @field_serializer("timestamp_ns", when_used="json")
+    def _serialize_timestamp_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-194).
+
+        ``when_used="json"`` keeps ``model_dump(mode="python")`` returning the
+        native ``int`` so the field's type annotation stays honest for
+        in-process callers; only ``model_dump(mode="json")`` (and the FastAPI
+        response path) emits a string.
+        """
+        return str(v)
 
     @classmethod
     def from_alert(cls, alert: Alert) -> AlertResponse:

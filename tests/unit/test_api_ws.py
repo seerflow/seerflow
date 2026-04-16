@@ -539,6 +539,13 @@ class TestSerialization:
         assert "rule_name" in data
         assert "entity_value" in data
 
+    def test_serialize_alert_emits_string_timestamp_ns(self) -> None:
+        """S-194 AC-1: WS alert frames must carry timestamp_ns as JSON string for JS bigint safety."""  # noqa: E501
+        alert = _make_alert(alert_type="sigma", severity=4)
+        payload = serialize_alert(alert)
+        assert isinstance(payload["data"]["timestamp_ns"], str)
+        assert payload["data"]["timestamp_ns"] == str(alert.timestamp_ns)
+
     def test_serialize_event_includes_observed_ns_and_severity_text(self) -> None:
         from seerflow.api.ws import BroadcastEvent
 

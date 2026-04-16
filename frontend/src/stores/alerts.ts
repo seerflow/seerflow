@@ -72,7 +72,9 @@ export function createAlertStore(max = MAX_ALERTS) {
           byId.set(a.alert_id, { ...a, ...existing, dedup_count: Math.max(existing.dedup_count, a.dedup_count) });
         }
       }
-      const sorted = [...byId.values()].sort((x, y) => y.timestamp_ns - x.timestamp_ns);
+      const sorted = [...byId.values()].sort((x, y) =>
+        y.timestamp_ns === x.timestamp_ns ? 0 : y.timestamp_ns > x.timestamp_ns ? 1 : -1,
+      );
       const dropped = Math.max(0, sorted.length - max);
       return { alerts: sorted.slice(0, max), dropped: s.dropped + dropped };
     }),
@@ -107,4 +109,31 @@ export function selectCounts(s: AlertsState): { total: number; critical: number;
     out[severityBucket(a.severity)]++;
   }
   return out;
+}
+
+// S-194 AC-5: single-pass selector returning {visible, counts}. Memoised by
+// (alerts, filter) reference identity so zustand's strict equality keeps the
+// subscription stable across renders that don't change either source.
+let _vcCacheKey: { alerts: Alert[]; filter: AlertFilter } | null = null;
+let _vcCacheVal: { visible: Alert[]; counts: ReturnType<typeof selectCounts> } | null = null;
+
+export function selectVisibleAndCounts(s: AlertsState): { visible: Alert[]; counts: ReturnType<typeof selectCounts> } {
+  if (_vcCacheKey && _vcCacheKey.alerts === s.alerts && _vcCacheKey.filter === s.filter && _vcCacheVal) {
+    return _vcCacheVal;
+  }
+  const { severities, types, sources, tactics } = s.filter;
+  const visible: Alert[] = [];
+  const counts = { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
+  for (const a of s.alerts) {
+    if (severities.size && !severities.has(severityBucket(a.severity) as SeverityBucket)) continue;
+    if (types.size && !types.has(a.alert_type)) continue;
+    if (sources.size && a.source_type && !sources.has(a.source_type)) continue;
+    if (tactics.size && !a.mitre_tactics.some(t => tactics.has(t))) continue;
+    visible.push(a);
+    counts.total++;
+    counts[severityBucket(a.severity)]++;
+  }
+  _vcCacheKey = { alerts: s.alerts, filter: s.filter };
+  _vcCacheVal = { visible, counts };
+  return _vcCacheVal;
 }

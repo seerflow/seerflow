@@ -5,7 +5,7 @@ export type Feedback = "" | "tp" | "fp";
 
 export interface Alert {
   alert_id: string;
-  timestamp_ns: number;
+  timestamp_ns: bigint;        // S-194: serialised as JSON string by backend, parsed at REST/WS boundary
   alert_type: AlertType;
   rule_name: string;
   severity: number;                   // wire field = severity_id
@@ -42,7 +42,8 @@ export type WsFilter = {
 
 export type WsMessage =
   | { type: "alert"; data: Alert }
-  | { type: "status"; data: { events_per_sec: number; alerts_24h: number; connected_clients: number; dropped_messages: number } }
+  | { type: "alert_batch"; alerts: Alert[] }
+  | { type: "status"; data: { events_ingested_per_sec: number; alerts_24h: number; connected_clients: number; dropped_events: number; dropped_alerts: number; dropped_total: number } }
   | { type: "event"; data: LiveEvent }
   | { type: "batch"; events: LiveEvent[] | Alert[] };
 

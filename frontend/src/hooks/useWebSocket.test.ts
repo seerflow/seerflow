@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useWebSocket } from "./useWebSocket";
+import { logger } from "@/lib/logger";
 
 class MockWS {
   static instances: MockWS[] = [];
@@ -27,8 +28,8 @@ describe("useWebSocket", () => {
     const ws = MockWS.instances[0];
     act(() => { ws._open(); });
     expect(onStatusChange).toHaveBeenCalledWith("open");
-    act(() => { ws._msg({ type: "alert", data: {} }); });
-    expect(onMessage).toHaveBeenCalledWith({ type: "alert", data: {} });
+    act(() => { ws._msg({ type: "status", data: { events_ingested_per_sec: 0, alerts_24h: 0, connected_clients: 0, dropped_events: 0, dropped_alerts: 0, dropped_total: 0 } }); });
+    expect(onMessage).toHaveBeenCalled();
   });
 
   it("reconnects with exponential backoff", () => {
@@ -50,5 +51,104 @@ describe("useWebSocket", () => {
     act(() => { ws0.close(); vi.advanceTimersByTime(1000); });
     const ws1 = MockWS.instances[1]; act(() => { ws1._open(); });
     expect(ws1.sent).toEqual([{ type: "filter", min_severity: 13 }]);
+  });
+});
+
+describe("useWebSocket schema validation (S-194)", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("drops malformed alert frames with logger.warn (S-194 AC-2)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    act(() => { ws._msg({ type: "alert", data: { alert_id: 7 } }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("drops messages with unknown type (S-194 AC-2)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    act(() => { ws._msg({ type: "garbage", data: {} }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("converts alert.data.timestamp_ns string to bigint (S-194 AC-1)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    act(() => { ws._msg({
+      type: "alert",
+      data: {
+        alert_id: "a1", timestamp_ns: "1700000000000000123", alert_type: "ml",
+        rule_name: "r", severity: 10, risk_score: 0,
+        entity_uuid: "u", entity_type: "ip", entity_value: "x",
+        message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
+      },
+    }); });
+
+    expect(onMessage).toHaveBeenCalledOnce();
+    const arg = onMessage.mock.calls[0][0];
+    expect(arg.type).toBe("alert");
+    expect(arg.data.timestamp_ns).toBe(1700000000000000123n);
+  });
+
+  it("passes status frames through unchanged (S-194 AC-2 happy path)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    act(() => { ws._msg({ type: "status", data: {
+      events_ingested_per_sec: 10, alerts_24h: 5, connected_clients: 1, dropped_events: 0, dropped_alerts: 0, dropped_total: 0,
+    } }); });
+    expect(onMessage).toHaveBeenCalledOnce();
+  });
+
+  it("accepts real backend status frame shape (regression: events_ingested_per_sec, dropped_total)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+    act(() => { ws._msg({ type: "status", data: {
+      events_ingested_per_sec: 100, alerts_24h: 5, connected_clients: 1,
+      dropped_events: 0, dropped_alerts: 0, dropped_total: 0,
+    } }); });
+    expect(onMessage).toHaveBeenCalledOnce();
+  });
+
+  it("accepts and converts alert_batch frames (regression: previously dropped)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+    act(() => { ws._msg({ type: "alert_batch", alerts: [
+      { alert_id: "a1", timestamp_ns: "1700000000000000123", alert_type: "ml", rule_name: "r", severity: 10, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
+      { alert_id: "a2", timestamp_ns: "1700000000000000456", alert_type: "sigma", rule_name: "r", severity: 14, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
+    ] }); });
+    expect(onMessage).toHaveBeenCalledOnce();
+    const arg = onMessage.mock.calls[0][0];
+    expect(arg.type).toBe("alert_batch");
+    expect(arg.alerts).toHaveLength(2);
+    expect(arg.alerts[0].timestamp_ns).toBe(1700000000000000123n);
+  });
+
+  it("rejects alert frame with non-numeric timestamp_ns string at the schema layer", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+    act(() => { ws._msg({ type: "alert", data: {
+      alert_id: "a1", timestamp_ns: "not-a-number", alert_type: "ml", rule_name: "r",
+      severity: 10, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x",
+      message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
+    } }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
   });
 });
