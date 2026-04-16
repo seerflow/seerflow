@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from seerflow.api.attack import (
+    CellData,
     build_matrix,
     collect_alert_cells,
     collect_correlation_cells,
     collect_sigma_cells,
     merge_rule_counts,
+    merge_rule_data,
 )
 from seerflow.models.alert import Alert, CorrelationRule, SourceCondition
 from seerflow.models.event import SeverityLevel
@@ -61,9 +63,11 @@ def _alert(
 def _corr(
     tactics: tuple[str, ...],
     techniques: tuple[str, ...],
+    *,
+    name: str = "brute_force_lateral",
 ) -> CorrelationRule:
     return CorrelationRule(
-        name="c",
+        name=name,
         entity_type="ip",
         window_seconds=60,
         sources=(SourceCondition(source_type="syslog", conditions={}),),
@@ -132,7 +136,7 @@ class TestCollectCorrelationCells:
     def test_normalizes_technique_case(self) -> None:
         rules = [_corr(("lateral_movement",), ("T1021",))]
         counts = collect_correlation_cells(rules)
-        assert counts == {("lateral_movement", "T1021"): 1}
+        assert counts[("lateral_movement", "T1021")].count == 1
 
     def test_empty_sequence_returns_empty(self) -> None:
         assert collect_correlation_cells([]) == {}
@@ -148,7 +152,8 @@ class TestCollectCorrelationCells:
             _corr(("lateral_movement",), ("T1021",)),
         ]
         counts = collect_correlation_cells(rules)
-        assert counts == {("lateral_movement", "T1021"): 1}
+        assert list(counts.keys()) == [("lateral_movement", "T1021")]
+        assert counts[("lateral_movement", "T1021")].count == 1
 
 
 class TestCollectAlertCells:
@@ -158,7 +163,7 @@ class TestCollectAlertCells:
             _alert(("discovery",), ("T1033",), alert_id="a2"),
         ]
         counts = collect_alert_cells(alerts)
-        assert counts == {("discovery", "T1033"): 2}
+        assert counts[("discovery", "T1033")].count == 2
 
     def test_drops_orphans(self) -> None:
         alerts = [_alert((), ("t1033",), alert_id="a1")]
@@ -171,7 +176,8 @@ class TestCollectAlertCells:
             _alert(("discovery",), ("t1033",), alert_id="a3"),
         ]
         counts = collect_alert_cells(alerts)
-        assert counts == {("discovery", "T1033"): 1}
+        assert list(counts.keys()) == [("discovery", "T1033")]
+        assert counts[("discovery", "T1033")].count == 1
 
 
 class TestBuildMatrix:
@@ -266,3 +272,39 @@ class TestMergeRuleCounts:
         b = {("discovery", "T1033"): 2}
         c = {("discovery", "T1033"): 4}
         assert merge_rule_counts(a, b, c) == {("discovery", "T1033"): 7}
+
+
+# ---------------------------------------------------------------------------
+# New Task 2 tests: CellData-aware collectors and merge_rule_data
+# ---------------------------------------------------------------------------
+
+
+def test_collect_correlation_cells_returns_cell_data_with_names() -> None:
+    rules = [
+        _corr(("lateral_movement",), ("T1021",)),
+    ]
+    result = collect_correlation_cells(rules)
+    cell = result[("lateral_movement", "T1021")]
+    assert cell.count == 1
+    assert cell.rule_names == ("brute_force_lateral",)
+
+
+def test_collect_alert_cells_returns_cell_data() -> None:
+    alerts = [_alert(("persistence",), ("T1053",))]
+    result = collect_alert_cells(alerts)
+    cell = result[("persistence", "T1053")]
+    assert cell.count == 1
+    assert cell.rule_names == ()  # alerts don't carry rule_names into cell
+
+
+def test_merge_rule_data_combines_counts_and_names() -> None:
+    a: dict[tuple[str, str], CellData] = {
+        ("persistence", "T1053"): CellData(count=2, rule_names=("r1", "r2"))
+    }
+    b: dict[tuple[str, str], CellData] = {
+        ("persistence", "T1053"): CellData(count=1, rule_names=("r3",))
+    }
+    merged = merge_rule_data(a, b)
+    cell = merged[("persistence", "T1053")]
+    assert cell.count == 3
+    assert cell.rule_names == ("r1", "r2", "r3")

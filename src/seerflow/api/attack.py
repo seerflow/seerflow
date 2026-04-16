@@ -37,28 +37,8 @@ class CellData:
     rule_names: tuple[str, ...] = ()
 
     def add(self, name: str) -> CellData:
-        return CellData(count=self.count + 1, rule_names=(*self.rule_names, name))
-
-
-def _count_tag_pairs(
-    tactics: tuple[str, ...],
-    techniques: tuple[str, ...],
-    counts: dict[CellKey, int],
-) -> None:
-    """Increment ``counts`` for every valid (tactic, technique) pair.
-
-    Drops empty-string entries and pairs where either tuple is empty.
-    Techniques are normalized with ``format_technique`` before keying.
-    """
-    if not tactics or not techniques:
-        return
-    for tactic in tactics:
-        if not tactic:
-            continue
-        for technique in techniques:
-            if not technique:
-                continue
-            counts[(tactic, format_technique(technique))] += 1
+        new_names = (*self.rule_names, name) if name else self.rule_names
+        return CellData(count=self.count + 1, rule_names=new_names)
 
 
 def _collect_tag_pairs(
@@ -97,20 +77,23 @@ def collect_sigma_cells(engine: SigmaEngine | None) -> dict[CellKey, CellData]:
 
 def collect_correlation_cells(
     rules: Sequence[CorrelationRule],
-) -> dict[CellKey, int]:
-    """Count one hit per (tactic, technique) pair per correlation rule."""
-    counts: dict[CellKey, int] = defaultdict(int)
+) -> dict[CellKey, CellData]:
+    """Collect one CellData per (tactic, technique) pair per correlation rule."""
+    cells: dict[CellKey, CellData] = {}
     for rule in rules:
-        _count_tag_pairs(rule.mitre_tactics, rule.mitre_techniques, counts)
-    return counts
+        _collect_tag_pairs(rule.mitre_tactics, rule.mitre_techniques, cells, rule.name)
+    return cells
 
 
-def collect_alert_cells(alerts: Iterable[Alert]) -> dict[CellKey, int]:
-    """Count one hit per (tactic, technique) pair per alert."""
-    counts: dict[CellKey, int] = defaultdict(int)
+def collect_alert_cells(alerts: Iterable[Alert]) -> dict[CellKey, CellData]:
+    """Count one hit per (tactic, technique) pair per alert.
+
+    Alerts contribute to cell counts but do not carry rule names into the cell.
+    """
+    cells: dict[CellKey, CellData] = {}
     for alert in alerts:
-        _count_tag_pairs(alert.mitre_tactics, alert.mitre_techniques, counts)
-    return counts
+        _collect_tag_pairs(alert.mitre_tactics, alert.mitre_techniques, cells)
+    return cells
 
 
 def merge_rule_counts(
@@ -127,6 +110,21 @@ def merge_rule_counts(
     for source in sources:
         for key, count in source.items():
             merged[key] += count
+    return merged
+
+
+def merge_rule_data(
+    *sources: dict[CellKey, CellData],
+) -> dict[CellKey, CellData]:
+    """Merge multiple CellData dicts, summing counts and concatenating rule names."""
+    merged: dict[CellKey, CellData] = {}
+    for source in sources:
+        for key, data in source.items():
+            existing = merged.get(key, CellData())
+            merged[key] = CellData(
+                count=existing.count + data.count,
+                rule_names=(*existing.rule_names, *data.rule_names),
+            )
     return merged
 
 
