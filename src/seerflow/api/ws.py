@@ -130,7 +130,11 @@ def _event_data(be: BroadcastEvent) -> dict[str, Any]:
 
 
 def _alert_data(alert: Alert) -> dict[str, Any]:
-    """Build the inner ``data`` payload for an alert wire message."""
+    """Build the inner ``data`` payload for an alert wire message.
+
+    ``timestamp_ns`` is emitted as a decimal string (not int) for JS bigint
+    safety — see S-194.
+    """
     return {
         "alert_id": alert.alert_id,
         "timestamp_ns": str(alert.timestamp_ns),  # JSON string for JS bigint safety (S-194)
