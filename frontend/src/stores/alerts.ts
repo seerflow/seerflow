@@ -121,9 +121,18 @@ export function selectVisibleAndCounts(s: AlertsState): { visible: Alert[]; coun
   if (_vcCacheKey && _vcCacheKey.alerts === s.alerts && _vcCacheKey.filter === s.filter && _vcCacheVal) {
     return _vcCacheVal;
   }
-  const visible = selectVisible(s);
+  const { severities, types, sources, tactics } = s.filter;
+  const visible: Alert[] = [];
   const counts = { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
-  for (const v of visible) { counts.total++; counts[severityBucket(v.severity)]++; }
+  for (const a of s.alerts) {
+    if (severities.size && !severities.has(severityBucket(a.severity) as SeverityBucket)) continue;
+    if (types.size && !types.has(a.alert_type)) continue;
+    if (sources.size && a.source_type && !sources.has(a.source_type)) continue;
+    if (tactics.size && !a.mitre_tactics.some(t => tactics.has(t))) continue;
+    visible.push(a);
+    counts.total++;
+    counts[severityBucket(a.severity)]++;
+  }
   _vcCacheKey = { alerts: s.alerts, filter: s.filter };
   _vcCacheVal = { visible, counts };
   return _vcCacheVal;
