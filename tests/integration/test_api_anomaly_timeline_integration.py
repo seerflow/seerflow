@@ -12,29 +12,16 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from seerflow.api.anomaly_timeline import BUCKET_NS
 from seerflow.api.app import create_api_app
-from seerflow.config import StorageConfig
 from seerflow.detection.ensemble import DetectionResult
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
-from seerflow.storage.sqlite import SqliteBackend
 
-
-@pytest.fixture
-async def backend(tmp_path: Path) -> AsyncIterator[SqliteBackend]:
-    db_path = str(tmp_path / "test_anomaly_timeline.db")
-    config = StorageConfig(backend="sqlite", sqlite_path=db_path)
-    b = await SqliteBackend.connect(config)
-    yield b
-    await b.close()
+if TYPE_CHECKING:
+    from seerflow.storage.sqlite import SqliteBackend
 
 
 @pytest.fixture

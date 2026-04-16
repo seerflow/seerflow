@@ -5,28 +5,16 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-import pytest
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
-from seerflow.config import StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.sigma.attack import TACTICS
 from seerflow.sigma.engine import SigmaEngine
-from seerflow.storage.sqlite import SqliteBackend
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-
-@pytest.fixture
-async def backend(tmp_path: Path) -> SqliteBackend:
-    db_path = str(tmp_path / "test_attack_coverage.db")
-    config = StorageConfig(backend="sqlite", sqlite_path=db_path)
-    b = await SqliteBackend.connect(config)
-    yield b  # type: ignore[misc]
-    await b.close()
+    from seerflow.storage.sqlite import SqliteBackend
 
 
 def _make_alert(i: int) -> Alert:

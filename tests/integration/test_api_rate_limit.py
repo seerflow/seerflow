@@ -4,24 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
-from seerflow.config import SeerflowConfig, StorageConfig
-from seerflow.storage.sqlite import SqliteBackend
+from seerflow.config import SeerflowConfig
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-
-@pytest.fixture
-async def backend(tmp_path: Path) -> AsyncIterator[SqliteBackend]:
-    cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "rl.db"))
-    b = await SqliteBackend.connect(cfg)
-    yield b
-    await b.close()
+    from seerflow.storage.sqlite import SqliteBackend
 
 
 def _client(backend: SqliteBackend, **overrides: object) -> TestClient:
