@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAlertStore, selectVisible, selectCounts } from "@/stores/alerts";
 import { useAnomalyStore } from "@/stores/anomaly";
 import { AlertRow } from "./AlertRow";
@@ -41,15 +41,10 @@ export function AlertFeed(): JSX.Element {
     return url;
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    api.get<{ items: Parameters<typeof backfill>[0] }>("/api/v1/alerts?limit=50")
-      .then(r => { if (!cancelled) backfill(r.items); })
-      .catch((e: ApiError) => logger.warn("warm-up failed", e));
-    return () => { cancelled = true; };
-  }, [backfill]);
+  const wsBufferRef = useRef<WsMessage[]>([]);
+  const warmedUpRef = useRef(false);
 
-  const onMessage = (m: WsMessage): void => {
+  const handleMessage = useCallback((m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "batch") {
       const first = m.events.length > 0 ? m.events[0] : null;
@@ -79,7 +74,26 @@ export function AlertFeed(): JSX.Element {
         useEventStore.getState().ingest([m.data as LiveEvent]);
       }
     }
-  };
+  }, [prepend]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const finish = (): void => {
+      if (cancelled) return;
+      warmedUpRef.current = true;
+      for (const m of wsBufferRef.current) handleMessage(m);
+      wsBufferRef.current = [];
+    };
+    api.get<{ items: Parameters<typeof backfill>[0] }>("/api/v1/alerts?limit=50")
+      .then(r => { if (cancelled) return; backfill(r.items); finish(); })
+      .catch((e: ApiError) => { logger.warn("warm-up failed", e); finish(); });
+    return () => { cancelled = true; };
+  }, [backfill, handleMessage]);
+
+  const onMessage = useCallback((m: WsMessage): void => {
+    if (!warmedUpRef.current) { wsBufferRef.current.push(m); return; }
+    handleMessage(m);
+  }, [handleMessage]);
 
   const { send } = useWebSocket(wsUrl, {
     onMessage,
