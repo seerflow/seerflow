@@ -92,3 +92,86 @@ jobs:
           comment-on-alert: true
           fail-on-alert: false
           benchmark-data-dir-path: 'benchmarks'
+
+  frontend-e2e:
+    # Path-filtered (see `filter` step) so Python-only PRs skip the job.
+    # Runs on pull_request + push; dev / main runs catch drift outside PRs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - 'src/seerflow/web/**'
+              - '.github/workflows/ci.yml'
+
+      - name: Set up Node
+        if: steps.filter.outputs.frontend == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install npm deps
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Resolve Playwright version
+        if: steps.filter.outputs.frontend == 'true'
+        id: pw-version
+        working-directory: frontend
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        if: steps.filter.outputs.frontend == 'true'
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.filter.outputs.frontend == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit)
+        if: steps.filter.outputs.frontend == 'true' && steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: frontend
+        run: npx playwright install-deps chromium
+
+      - name: Build frontend
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Playwright (e2e project)
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        env:
+          RUN_E2E: '1'
+        run: npx playwright test --project=e2e
+
+      - name: Run Playwright (quarantine project, non-blocking)
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        continue-on-error: true
+        env:
+          RUN_E2E: '1'
+        run: npx playwright test --project=quarantine
+
+      - name: Upload Playwright artefacts on failure
+        if: steps.filter.outputs.frontend == 'true' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts-${{ github.run_id }}
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
