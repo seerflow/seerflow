@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { TechniqueCell } from "./TechniqueCell";
 
 describe("TechniqueCell", () => {
-  const base = { tactic: "persistence", technique: "T1053", name: "Scheduled Task/Job" };
+  const base = { technique: "T1053", name: "Scheduled Task/Job" };
 
   it("renders with detected color when covered and detected", () => {
     const { container } = render(

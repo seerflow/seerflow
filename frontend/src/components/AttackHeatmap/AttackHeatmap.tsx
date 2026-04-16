@@ -22,6 +22,15 @@ interface MergedTactic {
   techniques: MergedTechnique[];
 }
 
+/**
+ * Merge API coverage response with the static ATT&CK catalog.
+ *
+ * Known limitation: the static catalog contains only top-level technique IDs
+ * (e.g. T1053). Sub-technique IDs returned by the backend (e.g. T1053.005)
+ * will not match any catalog entry and render as gap cells even when rules
+ * cover them. This is a known gap tracked for future iteration — rolling up
+ * sub-techniques into parents at the backend is the preferred fix.
+ */
 function mergeCatalog(apiData: AttackCoverageResponse): MergedTactic[] {
   const cellMap = new Map<
     string,
@@ -132,7 +141,6 @@ export function AttackHeatmap() {
         {merged.map((tactic) => (
           <TacticColumn
             key={tactic.id}
-            tacticId={tactic.id}
             tacticName={tactic.name}
             techniques={tactic.techniques}
           />

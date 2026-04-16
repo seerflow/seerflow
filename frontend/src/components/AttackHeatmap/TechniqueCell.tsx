@@ -1,7 +1,6 @@
 import { useState } from "react";
 
 interface TechniqueCellProps {
-  tactic: string;
   technique: string;
   name: string;
   ruleCount: number;
@@ -45,8 +44,8 @@ export function TechniqueCell({
             <>
               <p>Rules: {ruleCount}</p>
               <ul className="ml-3 list-disc">
-                {ruleNames.map((r) => (
-                  <li key={r}>{r}</li>
+                {ruleNames.map((r, i) => (
+                  <li key={i}>{r}</li>
                 ))}
               </ul>
               <p className="mt-1">Alerts (window): {alertCount}</p>

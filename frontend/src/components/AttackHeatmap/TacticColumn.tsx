@@ -11,7 +11,6 @@ interface TechniqueEntry {
 }
 
 interface TacticColumnProps {
-  tacticId: string;
   tacticName: string;
   techniques: TechniqueEntry[];
 }
@@ -28,7 +27,6 @@ export function TacticColumn({ tacticName, techniques }: TacticColumnProps) {
       {techniques.map((t) => (
         <TechniqueCell
           key={t.id}
-          tactic=""
           technique={t.id}
           name={t.name}
           ruleCount={t.ruleCount}
