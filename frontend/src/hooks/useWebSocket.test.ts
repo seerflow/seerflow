@@ -137,4 +137,18 @@ describe("useWebSocket schema validation (S-194)", () => {
     expect(arg.alerts).toHaveLength(2);
     expect(arg.alerts[0].timestamp_ns).toBe(1700000000000000123n);
   });
+
+  it("rejects alert frame with non-numeric timestamp_ns string at the schema layer", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+    act(() => { ws._msg({ type: "alert", data: {
+      alert_id: "a1", timestamp_ns: "not-a-number", alert_type: "ml", rule_name: "r",
+      severity: 10, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x",
+      message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
+    } }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
 });

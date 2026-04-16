@@ -19,7 +19,12 @@ function reviveAlertTimestamps(value: unknown): unknown {
     const obj = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
-      out[k] = k === "timestamp_ns" && typeof v === "string" ? BigInt(v) : reviveAlertTimestamps(v);
+      if (k === "timestamp_ns" && typeof v === "string") {
+        try { out[k] = BigInt(v); }
+        catch { out[k] = v; }  // leave as string; caller decides
+      } else {
+        out[k] = reviveAlertTimestamps(v);
+      }
     }
     return out;
   }

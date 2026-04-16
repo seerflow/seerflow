@@ -58,4 +58,12 @@ describe("api boundary parsing", () => {
     expect(res.events[0].timestamp_ns).toBe(1234567890);
     expect(typeof res.events[0].timestamp_ns).toBe("number");
   });
+
+  it("falls back to string timestamp_ns when BigInt() throws (defensive)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [{ alert_id: "a1", timestamp_ns: "not-a-number" }],
+    }), { status: 200, headers: {"content-type":"application/json"} }));
+    const res = await api.get<{ items: { timestamp_ns: unknown }[] }>("/api/v1/alerts?limit=1");
+    expect(res.items[0].timestamp_ns).toBe("not-a-number");
+  });
 });

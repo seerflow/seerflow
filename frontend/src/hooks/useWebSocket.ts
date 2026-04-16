@@ -19,7 +19,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 // preserved and passed through to consumers unchanged.
 const AlertDataSchema = v.looseObject({
   alert_id: v.string(),
-  timestamp_ns: v.string(),
+  timestamp_ns: v.pipe(v.string(), v.regex(/^\d+$/)),
 });
 
 const StatusDataSchema = v.looseObject({
@@ -73,16 +73,20 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
         const result = v.safeParse(WsMessageSchema, raw);
         if (!result.success) { logger.warn("ws schema mismatch", result.issues); return; }
         const msg = result.output;
-        if (msg.type === "alert") {
-          // S-194 AC-1: convert string wire timestamp into bigint at the boundary.
-          const data = { ...msg.data, timestamp_ns: BigInt(msg.data.timestamp_ns) };
-          optsRef.current.onMessage({ type: "alert", data } as unknown as WsMessage);
-        } else if (msg.type === "alert_batch") {
-          // S-194: convert each alert's string timestamp_ns to bigint before dispatch.
-          const alerts = msg.alerts.map(a => ({ ...a, timestamp_ns: BigInt(a.timestamp_ns) }));
-          optsRef.current.onMessage({ type: "alert_batch", alerts } as unknown as WsMessage);
-        } else {
-          optsRef.current.onMessage(msg as unknown as WsMessage);
+        try {
+          if (msg.type === "alert") {
+            // S-194 AC-1: convert string wire timestamp into bigint at the boundary.
+            const data = { ...msg.data, timestamp_ns: BigInt(msg.data.timestamp_ns) };
+            optsRef.current.onMessage({ type: "alert", data } as unknown as WsMessage);
+          } else if (msg.type === "alert_batch") {
+            // S-194: convert each alert's string timestamp_ns to bigint before dispatch.
+            const alerts = msg.alerts.map(a => ({ ...a, timestamp_ns: BigInt(a.timestamp_ns) }));
+            optsRef.current.onMessage({ type: "alert_batch", alerts } as unknown as WsMessage);
+          } else {
+            optsRef.current.onMessage(msg as unknown as WsMessage);
+          }
+        } catch (e) {
+          logger.warn("ws timestamp conversion failed", e);
         }
       };
       ws.onerror = () => logger.warn("ws error");
