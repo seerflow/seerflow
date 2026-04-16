@@ -1,20 +1,18 @@
 /* eslint-disable no-console */
 
-// __DEV__ is exposed on globalThis so Vitest tests can stub it via
-// vi.stubGlobal("__DEV__", false) to exercise the production code path.
-// (import.meta.env.DEV is a compile-time literal in Vite/Vitest and cannot
-// be changed at runtime via vi.stubEnv — it is always `true` in test mode.)
-declare global {
-  // eslint-disable-next-line no-var
-  var __DEV__: boolean | undefined;
+/**
+ * Pure logger factory. Exported so tests can construct a logger with an
+ * arbitrary `dev` flag and exercise both code paths without stubbing
+ * `import.meta.env` (which Vite static-replaces at build time).
+ */
+export function makeLogger(dev: boolean) {
+  return {
+    info:  dev ? (...a: unknown[]) => console.info(...a) : () => {},
+    warn:  dev ? (...a: unknown[]) => console.warn(...a) : () => {},
+    error: (...a: unknown[]) => console.error(...a),
+  };
 }
 
-if (typeof globalThis.__DEV__ === "undefined") {
-  globalThis.__DEV__ = import.meta.env.DEV;
-}
-
-export const logger = {
-  info:  (...a: unknown[]) => { if (globalThis.__DEV__) console.info(...a); },
-  warn:  (...a: unknown[]) => { if (globalThis.__DEV__) console.warn(...a); },
-  error: (...a: unknown[]) => console.error(...a),
-};
+// Production binding. Vite replaces `import.meta.env.DEV` with a literal at
+// build time, so the unused arm of each ternary becomes dead code.
+export const logger = makeLogger(import.meta.env.DEV);
