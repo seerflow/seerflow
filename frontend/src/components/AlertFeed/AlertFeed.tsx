@@ -13,6 +13,7 @@ import { useEventStore } from "@/stores/events";
 import { setIntent as setWsIntent } from "@/lib/wsFilter";
 
 const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
+const MAX_WS_BUFFER = 200;  // S-194: bound buffer to survive slow warm-up under high WS load
 
 function toWsFilter(f: AlertFilter): WsFilter {
   const minSev = f.severities.size
@@ -97,7 +98,14 @@ export function AlertFeed(): JSX.Element {
   }, [backfill, handleMessage]);
 
   const onMessage = useCallback((m: WsMessage): void => {
-    if (!warmedUpRef.current) { wsBufferRef.current.push(m); return; }
+    if (!warmedUpRef.current) {
+      if (wsBufferRef.current.length < MAX_WS_BUFFER) {
+        wsBufferRef.current.push(m);
+      } else {
+        logger.warn("ws buffer full during warm-up; dropping frame", { type: m.type });
+      }
+      return;
+    }
     handleMessage(m);
   }, [handleMessage]);
 

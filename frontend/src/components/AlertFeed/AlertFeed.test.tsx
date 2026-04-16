@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import { AlertFeed } from "./AlertFeed";
 import { useAlertStore } from "@/stores/alerts";
+import { logger } from "@/lib/logger";
 
 const fetchMock = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -123,5 +124,36 @@ describe("AlertFeed integration", () => {
 
     await act(async () => { resolveWarmup({ items: [] }); await warmupPromise; });
     await waitFor(() => expect(screen.getByText("remount-rule")).toBeInTheDocument());
+  });
+
+  it("caps wsBufferRef during slow warm-up so a WS storm cannot OOM the tab (S-194)", async () => {
+    let resolveWarmup: (v: { items: unknown[] }) => void = () => {};
+    const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
+    fetchMock.mockReturnValueOnce(warmupPromise);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    render(<AlertFeed />);
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+
+    // Pump 250 frames (limit is 200) before warm-up resolves.
+    await act(async () => {
+      for (let i = 0; i < 250; i++) {
+        MockWS.last!._msg({ type: "alert", data: {
+          alert_id: `a${i}`, timestamp_ns: String(i + 1), alert_type: "ml", rule_name: `r${i}`,
+          severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+          entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
+          dedup_count: 1, source_type: "syslog",
+        } });
+      }
+    });
+
+    expect(warn).toHaveBeenCalled();  // overflow logged
+
+    await act(async () => { resolveWarmup({ items: [] }); await warmupPromise; });
+    // After replay, store should hold at most MAX_WS_BUFFER (200) of the 250 sent.
+    await waitFor(() => {
+      expect(useAlertStore.getState().alerts.length).toBeLessThanOrEqual(200);
+    });
   });
 });
