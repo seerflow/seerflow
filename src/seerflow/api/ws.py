@@ -133,7 +133,7 @@ def _alert_data(alert: Alert) -> dict[str, Any]:
     """Build the inner ``data`` payload for an alert wire message."""
     return {
         "alert_id": alert.alert_id,
-        "timestamp_ns": alert.timestamp_ns,
+        "timestamp_ns": str(alert.timestamp_ns),  # JSON string for JS bigint safety (S-194)
         "alert_type": alert.alert_type,
         "rule_name": alert.rule_name,
         "severity": alert.severity_id,
