@@ -220,25 +220,60 @@ class SeerflowConfig:
 # Deferred imports from seerflow._config_builders. Placed AFTER dataclasses so
 # the builder module can resolve section dataclass symbols when it is imported.
 # Also re-exports private helpers used by tests/unit/test_config.py (S-172).
-from seerflow._config_builders import (  # noqa: E402, F401 — deferred re-export
-    _ApiFields,
-    _build_alerting,
-    _build_correlation,
-    _build_detection,
-    _build_graph_structural,
-    _build_kill_chain,
-    _build_llm,
-    _build_receivers,
-    _build_storage,
-    _build_webhook_configs,
-    _build_webhook_targets,
-    _default_data_dir,
-    _load_yaml_file,
-    _parse_api_fields,
-    _parse_dedup_overrides,
-    _parse_ws_fields,
-    _walk_and_interpolate,
-    _WsFields,
+# Explicit `X as X` form marks each as an intentional re-export for mypy strict.
+from seerflow._config_builders import (  # noqa: E402
+    _ApiFields as _ApiFields,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_alerting as _build_alerting,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_correlation as _build_correlation,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_detection as _build_detection,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_graph_structural as _build_graph_structural,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_kill_chain as _build_kill_chain,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_llm as _build_llm,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_receivers as _build_receivers,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_storage as _build_storage,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_webhook_configs as _build_webhook_configs,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_webhook_targets as _build_webhook_targets,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _default_data_dir as _default_data_dir,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _load_yaml_file as _load_yaml_file,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _parse_api_fields as _parse_api_fields,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _parse_dedup_overrides as _parse_dedup_overrides,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _parse_ws_fields as _parse_ws_fields,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _walk_and_interpolate as _walk_and_interpolate,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _WsFields as _WsFields,
 )
 
 # ---------------------------------------------------------------------------

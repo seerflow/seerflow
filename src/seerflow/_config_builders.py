@@ -314,9 +314,7 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
         url = wh.get("url", "")
         if not url:
             raise ConfigError("alerting.webhooks[*].url must be a non-empty string")
-        from urllib.parse import urlparse as _urlparse
-
-        _parsed = _urlparse(url)
+        _parsed = urlparse(url)
         if _parsed.scheme not in ("http", "https"):
             raise ConfigError(
                 f"alerting.webhooks[*].url must use http or https, got {_parsed.scheme!r}"

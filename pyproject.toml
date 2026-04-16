@@ -143,6 +143,7 @@ markers = [
     "docker: integration tests requiring Docker daemon",
     "e2e: end-to-end pipeline integration tests",
     "slow: heavyweight benchmarks, run with pytest -m slow",
+    "unit: fast isolated unit tests",
 ]
 
 [tool.coverage.run]
