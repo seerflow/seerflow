@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createAlertStore, selectVisible, selectCounts } from "./alerts";
+import { createAlertStore, selectVisible, selectCounts, selectVisibleAndCounts } from "./alerts";
 import type { Alert } from "@/lib/types";
 
 const a = (overrides: Partial<Alert> = {}): Alert => ({
@@ -62,6 +62,29 @@ describe("alertStore selectedAlertId slice", () => {
     expect(store.getState().selectedAlertId).toBe("abc");
     store.getState().clearSelection();
     expect(store.getState().selectedAlertId).toBeNull();
+  });
+});
+
+describe("selectVisibleAndCounts (S-194 AC-5)", () => {
+  it("selectVisibleAndCounts returns one-pass {visible, counts} (S-194 AC-5)", () => {
+    const s = createAlertStore(10);
+    s.getState().backfill([
+      a({ alert_id: "crit", severity: 18, timestamp_ns: 3n }),  // critical (>=17)
+      a({ alert_id: "high", severity: 14, timestamp_ns: 2n }),  // high     (>=13)
+      a({ alert_id: "med",  severity: 10, timestamp_ns: 1n }),  // medium   (>=9)
+    ]);
+    const r = selectVisibleAndCounts(s.getState());
+    expect(r.visible.map(x => x.alert_id)).toEqual(["crit", "high", "med"]);
+    expect(r.counts).toEqual({ total: 3, critical: 1, high: 1, medium: 1, low: 0 });
+  });
+
+  it("selectVisibleAndCounts caches by (alerts, filter) reference identity (S-194 AC-5)", () => {
+    const s = createAlertStore(10);
+    s.getState().backfill([a({ alert_id: "x", severity: 18, timestamp_ns: 1n })]);
+    const a1 = selectVisibleAndCounts(s.getState());
+    const a2 = selectVisibleAndCounts(s.getState());
+    // Same store state -> same returned object reference (cache hit).
+    expect(a1).toBe(a2);
   });
 });
 

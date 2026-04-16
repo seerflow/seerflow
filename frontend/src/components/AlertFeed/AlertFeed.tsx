@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAlertStore, selectVisible, selectCounts } from "@/stores/alerts";
+import { useAlertStore, selectVisibleAndCounts } from "@/stores/alerts";
 import { useAnomalyStore } from "@/stores/anomaly";
 import { AlertRow } from "./AlertRow";
 import { AlertDetailPanel } from "./AlertDetailPanel";
@@ -126,8 +126,7 @@ export function AlertFeed(): JSX.Element {
     return undefined;
   }, [status]);
 
-  const counts = useAlertStore(selectCounts);
-  const visible = useAlertStore(selectVisible);
+  const { visible, counts } = useAlertStore(selectVisibleAndCounts);
   const sources = useMemo(
     () => [...new Set(alerts.map(a => a.source_type).filter((s): s is string => Boolean(s)))],
     [alerts],

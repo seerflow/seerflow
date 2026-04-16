@@ -110,3 +110,21 @@ export function selectCounts(s: AlertsState): { total: number; critical: number;
   }
   return out;
 }
+
+// S-194 AC-5: single-pass selector returning {visible, counts}. Memoised by
+// (alerts, filter) reference identity so zustand's strict equality keeps the
+// subscription stable across renders that don't change either source.
+let _vcCacheKey: { alerts: Alert[]; filter: AlertFilter } | null = null;
+let _vcCacheVal: { visible: Alert[]; counts: ReturnType<typeof selectCounts> } | null = null;
+
+export function selectVisibleAndCounts(s: AlertsState): { visible: Alert[]; counts: ReturnType<typeof selectCounts> } {
+  if (_vcCacheKey && _vcCacheKey.alerts === s.alerts && _vcCacheKey.filter === s.filter && _vcCacheVal) {
+    return _vcCacheVal;
+  }
+  const visible = selectVisible(s);
+  const counts = { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
+  for (const v of visible) { counts.total++; counts[severityBucket(v.severity)]++; }
+  _vcCacheKey = { alerts: s.alerts, filter: s.filter };
+  _vcCacheVal = { visible, counts };
+  return _vcCacheVal;
+}
