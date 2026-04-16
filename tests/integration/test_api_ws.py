@@ -7,37 +7,23 @@ from typing import TYPE_CHECKING, Any
 
 import msgspec
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
 from seerflow.api.ws import ConnectionManager
-from seerflow.config import StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
-from seerflow.storage.sqlite import SqliteBackend
 
 if TYPE_CHECKING:
     from starlette.testclient import WebSocketTestSession
+
+    from seerflow.storage.sqlite import SqliteBackend
 
 
 def _recv(ws: WebSocketTestSession) -> dict[str, Any]:
     """Receive a binary WebSocket frame and decode it as JSON."""
     raw = ws.receive_bytes()
     return msgspec.json.decode(raw)  # type: ignore[no-any-return]
-
-
-@pytest.fixture
-async def backend(tmp_path: Path) -> AsyncIterator[SqliteBackend]:
-    db_path = str(tmp_path / "test_ws.db")
-    config = StorageConfig(backend="sqlite", sqlite_path=db_path)
-    b = await SqliteBackend.connect(config)
-    yield b
-    await b.close()
 
 
 @pytest.fixture
