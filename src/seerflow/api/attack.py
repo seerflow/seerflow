@@ -8,6 +8,7 @@ and rule snapshots plus an alert iterable and return a fully-formed
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
 
 from seerflow.api.schemas import (
@@ -26,6 +27,17 @@ if TYPE_CHECKING:
     from seerflow.sigma.engine import SigmaEngine
 
 CellKey: TypeAlias = tuple[str, str]  # (tactic_raw, technique_uppercase)
+
+
+@dataclass(frozen=True)
+class CellData:
+    """Aggregated rule data for one (tactic, technique) cell."""
+
+    count: int = 0
+    rule_names: tuple[str, ...] = ()
+
+    def add(self, name: str) -> CellData:
+        return CellData(count=self.count + 1, rule_names=(*self.rule_names, name))
 
 
 def _count_tag_pairs(
@@ -49,14 +61,38 @@ def _count_tag_pairs(
             counts[(tactic, format_technique(technique))] += 1
 
 
-def collect_sigma_cells(engine: SigmaEngine | None) -> dict[CellKey, int]:
-    """Count one hit per (tactic, technique) pair per Sigma rule."""
-    counts: dict[CellKey, int] = defaultdict(int)
+def _collect_tag_pairs(
+    tactics: tuple[str, ...],
+    techniques: tuple[str, ...],
+    cells: dict[CellKey, CellData],
+    rule_name: str = "",
+) -> None:
+    """Add rule_name to ``cells`` for every valid (tactic, technique) pair.
+
+    Drops empty-string entries and pairs where either tuple is empty.
+    Techniques are normalized with ``format_technique`` before keying.
+    """
+    if not tactics or not techniques:
+        return
+    for tactic in tactics:
+        if not tactic:
+            continue
+        for technique in techniques:
+            if not technique:
+                continue
+            key = (tactic, format_technique(technique))
+            existing = cells.get(key, CellData())
+            cells[key] = existing.add(rule_name)
+
+
+def collect_sigma_cells(engine: SigmaEngine | None) -> dict[CellKey, CellData]:
+    """Collect one CellData per (tactic, technique) pair per Sigma rule."""
+    cells: dict[CellKey, CellData] = {}
     if engine is None:
-        return counts
+        return cells
     for rule in engine.iter_compiled_rules():
-        _count_tag_pairs(rule.attack_tactics, rule.attack_techniques, counts)
-    return counts
+        _collect_tag_pairs(rule.attack_tactics, rule.attack_techniques, cells, rule.rule_name)
+    return cells
 
 
 def collect_correlation_cells(

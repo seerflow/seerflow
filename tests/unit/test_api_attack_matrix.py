@@ -29,9 +29,11 @@ class _StubCompiled:
         self,
         tactics: tuple[str, ...],
         techniques: tuple[str, ...],
+        rule_name: str = "test",
     ) -> None:
         self.attack_tactics = tactics
         self.attack_techniques = techniques
+        self.rule_name = rule_name
 
 
 def _alert(
@@ -84,8 +86,8 @@ class TestCollectSigmaCells:
             ]
         )
         counts = collect_sigma_cells(engine)  # type: ignore[arg-type]
-        assert counts[("discovery", "T1033")] == 2
-        assert counts[("discovery", "T1087")] == 1
+        assert counts[("discovery", "T1033")].count == 2
+        assert counts[("discovery", "T1087")].count == 1
 
     def test_drops_orphans(self) -> None:
         engine = _StubSigmaEngine(
@@ -105,7 +107,25 @@ class TestCollectSigmaCells:
             ]
         )
         counts = collect_sigma_cells(engine)  # type: ignore[arg-type]
-        assert counts == {("discovery", "T1033"): 1}
+        assert list(counts.keys()) == [("discovery", "T1033")]
+        assert counts[("discovery", "T1033")].count == 1
+
+
+def test_collect_sigma_cells_returns_cell_data_with_rule_names() -> None:
+    rules = [
+        _StubCompiled(("persistence",), ("T1053",), rule_name="sched_task_cron"),
+        _StubCompiled(("persistence",), ("T1053",), rule_name="crontab_mod"),
+    ]
+    engine = _StubSigmaEngine(rules)
+    result = collect_sigma_cells(engine)  # type: ignore[arg-type]
+    cell = result[("persistence", "T1053")]
+    assert cell.count == 2
+    assert cell.rule_names == ("sched_task_cron", "crontab_mod")
+
+
+def test_collect_sigma_cells_none_engine_returns_empty() -> None:
+    result = collect_sigma_cells(None)
+    assert result == {}
 
 
 class TestCollectCorrelationCells:
