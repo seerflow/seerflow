@@ -369,3 +369,24 @@ class TestFeedbackRequestSanitisation:
 
         with pytest.raises(ValidationError):
             FeedbackRequest(feedback="fp", note="x" * 513)
+
+
+def test_event_response_serialises_timestamp_ns_as_string() -> None:
+    from seerflow.api.schemas import EventResponse
+
+    payload = EventResponse(
+        event_id="e1",
+        timestamp_ns=1_700_000_000_000_000_123,
+        observed_ns=1_700_000_000_000_000_456,
+        severity_id=10,
+        severity_text="ERROR",
+        source_type="syslog",
+        message="m",
+        template_id=7,
+        entity_refs=[],
+    ).model_dump(mode="json")
+
+    assert payload["timestamp_ns"] == "1700000000000000123"
+    assert isinstance(payload["timestamp_ns"], str)
+    assert payload["observed_ns"] == "1700000000000000456"
+    assert isinstance(payload["observed_ns"], str)
