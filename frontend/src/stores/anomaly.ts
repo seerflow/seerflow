@@ -28,7 +28,7 @@ export interface AnomalyState {
   setSource: (s: string | null) => void;
   replaceSeries: (items: TimelineBucket[]) => void;
   appendScore: (e: AnomalyEvent) => void;
-  rolloverIfStale: (nowNs: number) => void;
+  rolloverIfStale: (nowNs: bigint) => void;
   setLoading: (b: boolean) => void;
   setError: (s: string | null) => void;
   setAlertCountTruncated: (b: boolean) => void;
@@ -36,8 +36,8 @@ export interface AnomalyState {
 
 const MAX_ITEMS = 2016;
 
-function bucketIndexFor(ts_ns: number, resolution: TimelineResolution): number {
-  return Number(bucketStartNs(BigInt(ts_ns), resolution));
+function bucketIndexFor(ts_ns: bigint, resolution: TimelineResolution): bigint {
+  return bucketStartNs(ts_ns, resolution);
 }
 
 const INITIAL_STATE = {
@@ -99,7 +99,7 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
         return;
       }
 
-      const resNs = Number(RESOLUTION_NS[resolution]);
+      const resNs = RESOLUTION_NS[resolution];
       const intermediates: TimelineBucket[] = [];
       for (let b = last.bucket_start_ns + resNs; b < targetStart; b += resNs) {
         intermediates.push({
@@ -128,13 +128,13 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
       set({ items: next });
     },
 
-    rolloverIfStale: (nowNs) => {
+    rolloverIfStale: (nowNs: bigint) => {
       const state = get();
       if (state.items.length === 0) return;
       const last = state.items[state.items.length - 1];
-      const resNs = Number(RESOLUTION_NS[state.resolution]);
+      const resNs = RESOLUTION_NS[state.resolution];
       if (nowNs - last.bucket_start_ns < resNs) return;
-      const targetStart = Math.floor(nowNs / resNs) * resNs;
+      const targetStart = (nowNs / resNs) * resNs;
       const intermediates: TimelineBucket[] = [];
       for (let b = last.bucket_start_ns + resNs; b <= targetStart; b += resNs) {
         intermediates.push({
