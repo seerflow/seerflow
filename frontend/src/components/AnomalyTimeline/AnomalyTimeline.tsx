@@ -10,6 +10,8 @@ import {
   YAxis,
 } from "recharts";
 
+import { useShallow } from "zustand/react/shallow";
+
 import { RESOLUTION_NS } from "@/lib/buckets";
 import { useAlertStore } from "@/stores/alerts";
 import { selectKnownSources, useAnomalyStore } from "@/stores/anomaly";
@@ -28,17 +30,20 @@ function nsToMs(ns: number): number {
 
 export function AnomalyTimeline(): JSX.Element {
   const { items, loading, error } = useAnomalyTimeline();
-  const range = useAnomalyStore((s) => s.range);
-  const resolution = useAnomalyStore((s) => s.resolution);
-  const source = useAnomalyStore((s) => s.source);
-  const setRange = useAnomalyStore((s) => s.setRange);
-  const setSource = useAnomalyStore((s) => s.setSource);
 
-  const selectAlert = useAlertStore((s) => s.selectAlert);
+  // Grouped state via useShallow — one subscription instead of many
+  const { range, resolution, source } = useAnomalyStore(
+    useShallow((s) => ({ range: s.range, resolution: s.resolution, source: s.source })),
+  );
+
+  // Actions via getState() — no subscription needed, stable references
+  const { setRange, setSource, rolloverIfStale } = useAnomalyStore.getState();
+  const knownSources = useAnomalyStore(selectKnownSources);
+
+  // Alert store — keep separate subscriptions (different store)
+  const selectAlert = useAlertStore.getState().selectAlert;
   const alerts = useAlertStore((s) => s.alerts);
   const status = useAlertStore((s) => s.status);
-  const knownSources = useAnomalyStore(selectKnownSources);
-  const rolloverIfStale = useAnomalyStore((s) => s.rolloverIfStale);
 
   const resolutionMs = useMemo(
     () => Number(RESOLUTION_NS[resolution] / 1_000_000n),
