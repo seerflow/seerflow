@@ -79,6 +79,13 @@ class TestWebSocketIntegration:
             msg = _recv(ws)
             assert msg["type"] == "event"
             assert msg["data"]["source_type"] == "syslog"
+            # S-199: event frames must emit *_ns fields as decimal strings so
+            # the JS bigint boundary in useWebSocket can round-trip values
+            # above 2^53 without precision loss.
+            assert isinstance(msg["data"]["timestamp_ns"], str)
+            assert isinstance(msg["data"]["observed_ns"], str)
+            assert msg["data"]["timestamp_ns"] == "1800000000000000000"
+            assert msg["data"]["observed_ns"] == "1800000000000000001"
 
     def test_filter_suppresses_non_matching_event(
         self, client: TestClient, ws_manager: ConnectionManager

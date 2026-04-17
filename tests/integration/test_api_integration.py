@@ -72,7 +72,11 @@ class TestEventsIntegration:
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] >= 1
-        assert any(item["event_id"] == str(sample_event.event_id) for item in body["items"])
+        item = next(i for i in body["items"] if i["event_id"] == str(sample_event.event_id))
+        assert isinstance(item["timestamp_ns"], str)
+        assert isinstance(item["observed_ns"], str)
+        assert item["timestamp_ns"] == str(sample_event.timestamp_ns)
+        assert item["observed_ns"] == str(sample_event.observed_ns)
 
 
 class TestAlertsIntegration:

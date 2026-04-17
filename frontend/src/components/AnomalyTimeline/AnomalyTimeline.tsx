@@ -153,7 +153,7 @@ export function AnomalyTimeline(): JSX.Element {
                 connectNulls
               />
               {alertDots.map((b) => {
-                const resolutionNs = Number(RESOLUTION_NS[resolution]);
+                const resolutionNs = RESOLUTION_NS[resolution];
                 const alertInBucket = findAlertInBucket(
                   alerts,
                   b.bucket_start_ns,
