@@ -114,7 +114,6 @@ def _event_data(be: BroadcastEvent) -> dict[str, Any]:
         "event_id": str(event.event_id),
         "timestamp_ns": str(event.timestamp_ns),  # JSON string for JS bigint safety (S-199)
         "observed_ns": str(event.observed_ns),  # JSON string for JS bigint safety (S-199)
-
         "severity_id": event.severity_id,
         "severity_text": event.severity_id.text,
         "source_type": event.source_type,
