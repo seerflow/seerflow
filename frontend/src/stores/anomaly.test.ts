@@ -121,4 +121,37 @@ describe("anomalyStore", () => {
     store.getState().appendScore(other);
     expect(store.getState().items[0].event_count).toBe(0);
   });
+
+  it("appendScore under capacity appends without trimming", () => {
+    const store = createAnomalyStore();
+    store.getState().replaceSeries([bucket({ bucket_start_ns: 0, event_count: 1, max_score: 0.2, avg_score: 0.2, upper_threshold: 0.9 })]);
+    const e: AnomalyEvent = { timestamp_ns: 61_000_000_000, score: 0.3, upper_threshold: 0.9, source_type: "syslog" };
+    store.getState().appendScore(e);
+    expect(store.getState().items.length).toBe(2);
+    expect(store.getState().items[0].bucket_start_ns).toBe(0);
+  });
+
+  it("appendScore at capacity evicts oldest buckets", () => {
+    const store = createAnomalyStore();
+    const base = 0;
+    const oneMinNs = 60_000_000_000;
+    const full: import("@/lib/types").TimelineBucket[] = [];
+    for (let i = 0; i < 2016; i++) {
+      full.push(bucket({ bucket_start_ns: base + i * oneMinNs, event_count: 1, max_score: 0.1, avg_score: 0.1, upper_threshold: 0.9 }));
+    }
+    store.getState().replaceSeries(full);
+    expect(store.getState().items.length).toBe(2016);
+
+    const e: AnomalyEvent = {
+      timestamp_ns: (base + 2016 * oneMinNs) + 1_000_000_000,
+      score: 0.5,
+      upper_threshold: 0.9,
+      source_type: "syslog",
+    };
+    store.getState().appendScore(e);
+    const items = store.getState().items;
+    expect(items.length).toBe(2016);
+    expect(items[0].bucket_start_ns).toBe(base + oneMinNs);
+    expect(items.at(-1)!.max_score).toBe(0.5);
+  });
 });

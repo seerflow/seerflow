@@ -115,7 +115,13 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
         upper_threshold: e.upper_threshold ?? last.upper_threshold,
         alert_count: 0,
       };
-      const next = state.items.concat(intermediates, fresh).slice(-MAX_ITEMS);
+      // Ring-buffer bounded push: avoid intermediate concat allocation.
+      // Only slice when adding fresh data would exceed capacity.
+      const combined = [...intermediates, fresh];
+      const total = state.items.length + combined.length;
+      const next = total <= MAX_ITEMS
+        ? [...state.items, ...combined]
+        : [...state.items.slice(total - MAX_ITEMS), ...combined];
       set({ items: next });
     },
 
@@ -138,7 +144,10 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
         });
       }
       if (intermediates.length === 0) return;
-      const nextItems = state.items.concat(intermediates).slice(-MAX_ITEMS);
+      const total = state.items.length + intermediates.length;
+      const nextItems = total <= MAX_ITEMS
+        ? [...state.items, ...intermediates]
+        : [...state.items.slice(total - MAX_ITEMS), ...intermediates];
       set({ items: nextItems });
     },
   }));
