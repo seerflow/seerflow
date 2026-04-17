@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from seerflow.api.anomaly_timeline import BUCKET_NS
@@ -68,7 +69,7 @@ class TestAnomalyTimelineIntegration:
         ts = now_bucket - BUCKET_NS
 
         # Seed a scored event into the ring via the real WS broadcast path.
-        ws_manager = client.app.state.ws_manager
+        ws_manager = cast(FastAPI, client.app).state.ws_manager
         ws_manager.broadcast_event(
             _event_at(ts, "syslog"),
             detection=DetectionResult(
@@ -112,7 +113,7 @@ class TestAnomalyTimelineIntegration:
         ts_base = now_bucket - BUCKET_NS
 
         # Seed a scored event into the ring via the real WS broadcast path.
-        ws_manager = client.app.state.ws_manager
+        ws_manager = cast(FastAPI, client.app).state.ws_manager
         ws_manager.broadcast_event(
             _event_at(ts_base, "syslog"),
             detection=DetectionResult(
