@@ -198,12 +198,12 @@ class EntityTimelineResponse(BaseModel):
 class TimelineBucketResponse(BaseModel):
     """One bucket in the anomaly timeline series."""
 
-    bucket_start_ns: int
+    bucket_start_ns: int = Field(ge=0)
     max_score: float | None
     avg_score: float | None
-    event_count: int
+    event_count: int = Field(ge=0)
     upper_threshold: float | None
-    alert_count: int
+    alert_count: int = Field(ge=0)
 
 
 class TimelineMetaResponse(BaseModel):

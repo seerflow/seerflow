@@ -107,7 +107,7 @@ async def get_anomaly_timeline(
             range=range,
             resolution=resolved_resolution,
             source=source,
-            alert_count_truncated=alert_page.total > _ALERT_QUERY_LIMIT,
+            alert_count_truncated=alert_page.total > len(alert_page.items),
         ),
         items=bucket_items,
     )

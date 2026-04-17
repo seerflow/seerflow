@@ -21,7 +21,7 @@ export function useAnomalyTimeline(): UseAnomalyTimelineResult {
   const items = useAnomalyStore((s) => s.items);
   const loading = useAnomalyStore((s) => s.loading);
   const error = useAnomalyStore((s) => s.error);
-  const { replaceSeries, setLoading, setError } = useAnomalyStore.getState();
+  const { replaceSeries, setLoading, setError, setAlertCountTruncated } = useAnomalyStore.getState();
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function useAnomalyTimeline(): UseAnomalyTimelineResult {
       .then((res) => {
         if (ctrl.signal.aborted) return;
         replaceSeries(res.items);
-        useAnomalyStore.getState().setAlertCountTruncated(res.meta.alert_count_truncated ?? false);
+        setAlertCountTruncated(res.meta.alert_count_truncated ?? false);
       })
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;
