@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
+from seerflow.utils.text import NOTE_MAX_LENGTH, sanitise_feedback_note
+
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
@@ -142,15 +144,15 @@ class FeedbackRequest(BaseModel):
     """Request body for alert feedback submission."""
 
     feedback: Literal["tp", "fp"]
-    note: str | None = Field(default=None, max_length=512)
+    note: str | None = Field(default=None, max_length=NOTE_MAX_LENGTH)
 
     @field_validator("note")
     @classmethod
-    def _strip_control_chars(cls, v: str | None) -> str | None:
-        """Strip C0 control chars (including \\n, \\r, \\x00). Keep printable + space."""
+    def _clean_note(cls, v: str | None) -> str | None:
+        """Strip C0 controls and DEL via the shared feedback-note sanitiser."""
         if v is None:
             return None
-        return "".join(ch for ch in v if ord(ch) >= 32)
+        return sanitise_feedback_note(v)
 
 
 class EntitySearchResult(BaseModel):

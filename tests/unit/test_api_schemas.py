@@ -341,3 +341,31 @@ class TestAttackCoverageSchemas:
         body = resp.model_dump()
         assert body["summary"]["total_techniques_covered"] == 0
         assert body["tactics"] == []
+
+
+class TestFeedbackRequestSanitisation:
+    def test_strips_del_char(self) -> None:
+        from seerflow.api.schemas import FeedbackRequest
+
+        req = FeedbackRequest(feedback="fp", note="a\x7fb")
+        assert req.note == "ab"
+
+    def test_strips_tab_and_null(self) -> None:
+        from seerflow.api.schemas import FeedbackRequest
+
+        req = FeedbackRequest(feedback="tp", note="a\tb\x00c")
+        assert req.note == "abc"
+
+    def test_preserves_none_note(self) -> None:
+        from seerflow.api.schemas import FeedbackRequest
+
+        req = FeedbackRequest(feedback="fp", note=None)
+        assert req.note is None
+
+    def test_rejects_note_over_512_chars(self) -> None:
+        from pydantic import ValidationError
+
+        from seerflow.api.schemas import FeedbackRequest
+
+        with pytest.raises(ValidationError):
+            FeedbackRequest(feedback="fp", note="x" * 513)

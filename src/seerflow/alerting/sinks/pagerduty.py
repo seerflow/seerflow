@@ -109,12 +109,19 @@ async def post_resolve(
                     _log.error("PagerDuty resolve client error %d", resp.status)
                     return
                 _log.warning("PagerDuty resolve %d (attempt %d)", resp.status, attempt + 1)
-        except Exception as exc:
+        except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+            # asyncio.CancelledError is BaseException (not Exception) since 3.8
+            # and therefore propagates naturally without being caught here.
             _log.warning("PagerDuty resolve failed (attempt %d): %s", attempt + 1, exc)
         if attempt < max_retries - 1:
             sleep_for = delays[attempt] if attempt < len(delays) else delays[-1]
             await asyncio.sleep(sleep_for)
-    _log.error("PagerDuty resolve: all %d attempts exhausted for %s", max_retries, dedup_key)
+    truncated = dedup_key[:8] + ("..." if len(dedup_key) > 8 else "")
+    _log.error(
+        "PagerDuty resolve: all %d attempts exhausted for %s",
+        max_retries,
+        truncated,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +170,8 @@ class PagerDutySink:
         try:
             self._queue.put_nowait(_PagerDutyEvent(payload=payload))
         except asyncio.QueueFull:
-            _log.warning("PagerDuty queue full — dropping resolve for %s", dedup_key)
+            truncated = dedup_key[:8] + ("..." if len(dedup_key) > 8 else "")
+            _log.warning("PagerDuty queue full — dropping resolve for %s", truncated)
 
     async def run(self) -> None:
         """Background consumer loop. Runs until stopped and queue is empty."""
