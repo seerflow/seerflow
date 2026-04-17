@@ -8,6 +8,7 @@ import logging
 import ssl as _ssl
 import sys
 import time
+from pathlib import Path
 
 import aiohttp
 import aiohttp.web
@@ -38,8 +39,6 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     _log.info("Seerflow %s starting", __version__)
 
     # Connect storage
-    from pathlib import Path
-
     data_dir = Path(config.storage.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     storage = await connect_storage(config.storage)
