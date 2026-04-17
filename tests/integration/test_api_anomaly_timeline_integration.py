@@ -86,7 +86,12 @@ class TestAnomalyTimelineIntegration:
         resp = client.get("/api/v1/anomaly/timeline?range=1h&resolution=1m")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["meta"] == {"range": "1h", "resolution": "1m", "source": None}
+        assert body["meta"] == {
+            "range": "1h",
+            "resolution": "1m",
+            "source": None,
+            "alert_count_truncated": False,
+        }
         assert isinstance(body["items"], list)
         assert len(body["items"]) == 60
 
