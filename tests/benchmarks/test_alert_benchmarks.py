@@ -185,18 +185,36 @@ def test_benchmark_warn_uses_explicit_user_warning_category() -> None:
     """S-187: the SQL/decode ratio warning must pass category explicitly.
 
     Static-analysis tools and CI warning filters can reliably target the
-    benchmark warning only when ``category=`` is passed. Walks the AST
-    of :func:`test_mitre_filter_sql_vs_decode_baseline` so the assertion
-    is not fooled by the keyword appearing in a comment or string, and
-    fires deterministically without running the slow benchmark body.
+    benchmark warning only when ``category=`` is passed. Walks the AST of
+    :func:`test_mitre_filter_sql_vs_decode_baseline` so the assertion is
+    not fooled by the keyword appearing in a comment or string, and fires
+    deterministically without running the slow benchmark body.
+
+    S-193: source is loaded via ``pathlib.Path(__file__)`` instead of
+    ``inspect.getsource`` so the guard does not depend on CPython linecache
+    state — the latter is not reliable under pytest-xdist, bytecode-only
+    wheels, or plugins that clear linecache between tests.
     """
     import ast
-    import inspect
+    from pathlib import Path
 
-    tree = ast.parse(inspect.getsource(test_mitre_filter_sql_vs_decode_baseline))
+    module_tree = ast.parse(Path(__file__).read_text())
+    target_fn = next(
+        (
+            node
+            for node in ast.walk(module_tree)
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+            and node.name == "test_mitre_filter_sql_vs_decode_baseline"
+        ),
+        None,
+    )
+    assert target_fn is not None, (
+        "test_mitre_filter_sql_vs_decode_baseline not found in module — "
+        "the S-187/S-193 category guard is targeting a function that no longer exists"
+    )
     warn_calls = [
         node
-        for node in ast.walk(tree)
+        for node in ast.walk(target_fn)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "warn"
