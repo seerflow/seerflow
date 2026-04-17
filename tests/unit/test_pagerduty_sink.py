@@ -514,3 +514,16 @@ class TestPostResolve:
         args, kwargs = session.post.call_args
         assert args[0] == _PD_ENDPOINT
         assert kwargs["json"] == _build_resolve_payload("dedup-42", "rk-abc")
+
+    async def test_typeerror_propagates_not_swallowed(self) -> None:
+        """Unexpected bugs (TypeError, AttributeError) must surface, not be retried."""
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = MagicMock()
+        session.post = MagicMock(side_effect=TypeError("programmer error"))
+
+        with pytest.raises(TypeError, match="programmer error"):
+            await post_resolve(session, "dedup-1", "routing-key", delays=(0.0,))
+
+        # Bug propagated on the first attempt — no retry occurred.
+        assert session.post.call_count == 1

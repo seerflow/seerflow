@@ -109,7 +109,7 @@ async def post_resolve(
                     _log.error("PagerDuty resolve client error %d", resp.status)
                     return
                 _log.warning("PagerDuty resolve %d (attempt %d)", resp.status, attempt + 1)
-        except Exception as exc:
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
             _log.warning("PagerDuty resolve failed (attempt %d): %s", attempt + 1, exc)
         if attempt < max_retries - 1:
             sleep_for = delays[attempt] if attempt < len(delays) else delays[-1]
