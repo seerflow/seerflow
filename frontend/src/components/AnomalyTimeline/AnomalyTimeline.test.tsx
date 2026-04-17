@@ -22,8 +22,8 @@ vi.mock("@/lib/api", () => ({
 const okResponse = (): TimelineResponse => ({
   meta: { range: "1h", resolution: "1m", source: null },
   items: [
-    { bucket_start_ns: 0, max_score: 0.3, avg_score: 0.2, event_count: 2, upper_threshold: 0.9, alert_count: 0 },
-    { bucket_start_ns: 60_000_000_000, max_score: 0.7, avg_score: 0.5, event_count: 3, upper_threshold: 0.9, alert_count: 1 },
+    { bucket_start_ns: 0n, max_score: 0.3, avg_score: 0.2, event_count: 2, upper_threshold: 0.9, alert_count: 0 },
+    { bucket_start_ns: 60_000_000_000n, max_score: 0.7, avg_score: 0.5, event_count: 3, upper_threshold: 0.9, alert_count: 1 },
   ],
 });
 
@@ -113,7 +113,7 @@ describe("AnomalyTimeline", () => {
     fetchMock.mockResolvedValueOnce({
       meta: { range: "1h", resolution: "1m", source: null, alert_count_truncated: true },
       items: [
-        { bucket_start_ns: 0, max_score: 0.3, avg_score: 0.2, event_count: 2, upper_threshold: 0.9, alert_count: 5 },
+        { bucket_start_ns: 0n, max_score: 0.3, avg_score: 0.2, event_count: 2, upper_threshold: 0.9, alert_count: 5 },
       ],
     });
     render(<AnomalyTimeline />);
@@ -134,7 +134,7 @@ describe("findAlertInBucket (H1)", () => {
   const oneMinNs = 60 * 1_000_000_000;
 
   it("matches an alert inside a 5m bucket whose timestamp falls outside the 1m window", () => {
-    const alert = { alert_id: "a1", timestamp_ns: 90 * 1_000_000_000 }; // 90 s
+    const alert = { alert_id: "a1", timestamp_ns: 90n * 1_000_000_000n }; // 90 s
     // At 5m resolution, bucket [0, 300s) contains 90s.
     expect(findAlertInBucket([alert], 0, fiveMinNs)?.alert_id).toBe("a1");
     // At 1m resolution, bucket [0, 60s) excludes 90s.
@@ -142,13 +142,30 @@ describe("findAlertInBucket (H1)", () => {
   });
 
   it("excludes alerts whose timestamp is before the bucket start", () => {
-    const alert = { alert_id: "a1", timestamp_ns: -1 };
+    const alert = { alert_id: "a1", timestamp_ns: -1n };
     expect(findAlertInBucket([alert], 0, fiveMinNs)).toBeUndefined();
   });
 
   it("excludes alerts at exactly bucket_start + resolutionNs (half-open interval)", () => {
-    const alert = { alert_id: "a1", timestamp_ns: fiveMinNs };
+    const alert = { alert_id: "a1", timestamp_ns: BigInt(fiveMinNs) };
     expect(findAlertInBucket([alert], 0, fiveMinNs)).toBeUndefined();
+  });
+});
+
+// ---- S-199 AC-7: bigint bucket_start_ns above 2^53 at recharts boundary ----
+
+describe("AnomalyTimeline bigint boundary (S-199 AC-7)", () => {
+  it("renders chart without throwing for bucket_start_ns above 2^53 (S-199 AC-7)", async () => {
+    // Seed store with a boundary bucket_start_ns; recharts internals are hard
+    // to assert — the stable signal is "no bigint-as-child React error".
+    useAnomalyStore.setState({
+      items: [{
+        bucket_start_ns: 1_700_000_000_000_000_000n,
+        max_score: 0.7, avg_score: 0.5, event_count: 1, upper_threshold: 0.9, alert_count: 0,
+      }],
+    });
+    render(<AnomalyTimeline />);
+    expect(await screen.findByLabelText(/Anomaly score chart/i)).toBeInTheDocument();
   });
 });
 
@@ -164,7 +181,7 @@ describe("AnomalyTimeline rollover timer", () => {
     useAnomalyStore.setState({
       items: [
         {
-          bucket_start_ns: 0,
+          bucket_start_ns: 0n,
           max_score: 0.5,
           avg_score: 0.5,
           event_count: 1,
@@ -175,7 +192,7 @@ describe("AnomalyTimeline rollover timer", () => {
     });
 
     // Simulate "now" 90 s into the future: new 1-min bucket boundary crossed.
-    const nowNs = 90 * 1_000_000_000;
+    const nowNs = 90n * 1_000_000_000n;
     useAnomalyStore.getState().rolloverIfStale(nowNs);
 
     const items = useAnomalyStore.getState().items;
@@ -193,7 +210,7 @@ describe("AnomalyTimeline rollover timer", () => {
         meta: { range: "1h", resolution: "1m", source: null },
         items: [
           {
-            bucket_start_ns: 0,
+            bucket_start_ns: 0n,
             max_score: 0.3,
             avg_score: 0.2,
             event_count: 1,
