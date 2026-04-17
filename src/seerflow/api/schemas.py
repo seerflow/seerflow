@@ -217,6 +217,11 @@ class TimelineBucketResponse(BaseModel):
     upper_threshold: float | None
     alert_count: int = Field(ge=0)
 
+    @field_serializer("bucket_start_ns", when_used="json")
+    def _serialize_bucket_start_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199)."""
+        return str(v)
+
 
 class TimelineMetaResponse(BaseModel):
     """Metadata for the anomaly timeline response."""

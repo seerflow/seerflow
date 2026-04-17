@@ -390,3 +390,19 @@ def test_event_response_serialises_timestamp_ns_as_string() -> None:
     assert isinstance(payload["timestamp_ns"], str)
     assert payload["observed_ns"] == "1700000000000000456"
     assert isinstance(payload["observed_ns"], str)
+
+
+def test_timeline_bucket_response_serialises_bucket_start_ns_as_string() -> None:
+    from seerflow.api.schemas import TimelineBucketResponse
+
+    payload = TimelineBucketResponse(
+        bucket_start_ns=1_700_000_000_000_000_123,
+        max_score=0.9,
+        avg_score=0.5,
+        event_count=3,
+        upper_threshold=1.0,
+        alert_count=1,
+    ).model_dump(mode="json")
+
+    assert payload["bucket_start_ns"] == "1700000000000000123"
+    assert isinstance(payload["bucket_start_ns"], str)

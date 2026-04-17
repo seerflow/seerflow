@@ -98,7 +98,7 @@ class TestAnomalyTimelineIntegration:
         assert isinstance(body["items"], list)
         assert len(body["items"]) == 60
 
-        target = next(b for b in body["items"] if b["bucket_start_ns"] == ts)
+        target = next(b for b in body["items"] if b["bucket_start_ns"] == str(ts))
         assert target["event_count"] == 1
         assert target["max_score"] == pytest.approx(0.7)
         assert target["upper_threshold"] == pytest.approx(0.9)
