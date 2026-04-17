@@ -205,3 +205,23 @@ def test_benchmark_warn_uses_explicit_user_warning_category() -> None:
     assert all(any(kw.arg == "category" for kw in call.keywords) for call in warn_calls), (
         "every warnings.warn() call must pass category= explicitly"
     )
+
+
+def test_benchmark_warn_category_guard_independent_of_inspect_getsource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-193: the category guard must resolve module source via __file__,
+    not via ``inspect.getsource``. Monkey-patching ``inspect.getsource`` to
+    raise ``OSError`` reproduces the CI flake observed on dev at S-187. If
+    the guard still depends on ``inspect.getsource`` this test will fail
+    the same way the original flake did.
+    """
+    import inspect as _inspect
+
+    def _boom(*_args: object, **_kwargs: object) -> str:
+        raise OSError("could not get source code")
+
+    monkeypatch.setattr(_inspect, "getsource", _boom)
+
+    # Invoke the guard exactly as pytest does. The guard must not raise.
+    test_benchmark_warn_uses_explicit_user_warning_category()
