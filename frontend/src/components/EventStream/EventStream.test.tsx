@@ -7,7 +7,7 @@ import type { LiveEvent } from "@/lib/types";
 
 function ev(i: number, over: Partial<LiveEvent> = {}): LiveEvent {
   return {
-    event_id: `e${i}`, timestamp_ns: i, observed_ns: i,
+    event_id: `e${i}`, timestamp_ns: BigInt(i), observed_ns: BigInt(i),
     severity_id: 2, severity_text: "INFO", source_type: "syslog",
     message: `m${i}`, template_id: 1, entity_refs: [], entity_summary: {},
     ...over,
