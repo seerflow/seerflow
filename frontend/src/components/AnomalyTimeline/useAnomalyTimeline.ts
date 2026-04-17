@@ -34,6 +34,7 @@ export function useAnomalyTimeline(): UseAnomalyTimelineResult {
       .then((res) => {
         if (ctrl.signal.aborted) return;
         replaceSeries(res.items);
+        useAnomalyStore.getState().setAlertCountTruncated(res.meta?.alert_count_truncated ?? false);
       })
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;

@@ -108,6 +108,23 @@ describe("AnomalyTimeline", () => {
     render(<AnomalyTimeline />);
     expect(await screen.findByText("Anomaly Timeline")).toBeInTheDocument();
   });
+
+  it("shows truncation indicator when meta.alert_count_truncated is true", async () => {
+    fetchMock.mockResolvedValueOnce({
+      meta: { range: "1h", resolution: "1m", source: null, alert_count_truncated: true },
+      items: [
+        { bucket_start_ns: 0, max_score: 0.3, avg_score: 0.2, event_count: 2, upper_threshold: 0.9, alert_count: 5 },
+      ],
+    });
+    render(<AnomalyTimeline />);
+    expect(await screen.findByText(/not shown/i)).toBeInTheDocument();
+  });
+
+  it("does not show truncation indicator when meta.alert_count_truncated is false", async () => {
+    render(<AnomalyTimeline />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.queryByText(/not shown/i)).not.toBeInTheDocument();
+  });
 });
 
 // ---- H1: alert-bucket window uses the current resolution -----------------

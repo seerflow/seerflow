@@ -21,6 +21,7 @@ export interface AnomalyState {
   error: string | null;
 
   knownSources: Set<string>;
+  alertCountTruncated: boolean;
 
   setRange: (r: TimelineRange) => void;
   setResolution: (r: TimelineResolution) => void;
@@ -30,6 +31,7 @@ export interface AnomalyState {
   rolloverIfStale: (nowNs: number) => void;
   setLoading: (b: boolean) => void;
   setError: (s: string | null) => void;
+  setAlertCountTruncated: (b: boolean) => void;
 }
 
 const MAX_ITEMS = 2016;
@@ -46,6 +48,7 @@ const INITIAL_STATE = {
   loading: false,
   error: null as string | null,
   knownSources: new Set<string>() as Set<string>,
+  alertCountTruncated: false,
 };
 
 export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
@@ -58,6 +61,7 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
     replaceSeries: (items) => set({ items: items.slice(-MAX_ITEMS) }),
     setLoading: (b) => set({ loading: b }),
     setError: (s) => set({ error: s }),
+    setAlertCountTruncated: (b) => set({ alertCountTruncated: b }),
 
     appendScore: (e) => {
       const state = get();
@@ -165,5 +169,6 @@ export function resetAnomalyStore(): void {
   useAnomalyStore.setState({
     ...INITIAL_STATE,
     knownSources: new Set<string>(),
+    alertCountTruncated: false,
   });
 }

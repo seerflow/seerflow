@@ -36,6 +36,8 @@ export function AnomalyTimeline(): JSX.Element {
     useShallow((s) => ({ range: s.range, resolution: s.resolution, source: s.source })),
   );
 
+  const alertCountTruncated = useAnomalyStore((s) => s.alertCountTruncated);
+
   // Actions via getState() — no subscription needed, stable references
   const { setRange, setSource, rolloverIfStale } = useAnomalyStore.getState();
   const knownSources = useAnomalyStore(selectKnownSources);
@@ -102,6 +104,9 @@ export function AnomalyTimeline(): JSX.Element {
         <h2 id="anomaly-timeline-title" className="text-sm font-medium">
           Anomaly Timeline
         </h2>
+        {alertCountTruncated && (
+          <span className="text-xs text-muted-foreground">Some alert markers not shown</span>
+        )}
         <div className="flex items-center gap-2">
           <SourceSelect value={source} options={knownSources} onChange={setSource} />
           <TimeRangeChips value={range} onChange={setRange} />
