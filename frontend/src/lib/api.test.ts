@@ -59,6 +59,24 @@ describe("api boundary parsing", () => {
     expect(typeof res.events[0].timestamp_ns).toBe("number");
   });
 
+  it("leaves numeric observed_ns unchanged when wire still emits int (S-199 deploy window)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      events: [{ event_id: "e1", observed_ns: 1234567890 }],
+    }), { status: 200, headers: {"content-type":"application/json"} }));
+    const res = await api.get<{ events: { observed_ns: number }[] }>("/api/v1/events");
+    expect(res.events[0].observed_ns).toBe(1234567890);
+    expect(typeof res.events[0].observed_ns).toBe("number");
+  });
+
+  it("leaves numeric bucket_start_ns unchanged when wire still emits int (S-199 deploy window)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [{ bucket_start_ns: 1234567890, max_score: 0.1 }],
+    }), { status: 200, headers: {"content-type":"application/json"} }));
+    const res = await api.get<{ items: { bucket_start_ns: number }[] }>("/api/v1/anomaly/timeline");
+    expect(res.items[0].bucket_start_ns).toBe(1234567890);
+    expect(typeof res.items[0].bucket_start_ns).toBe("number");
+  });
+
   it("falls back to string timestamp_ns when BigInt() throws (defensive)", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       items: [{ alert_id: "a1", timestamp_ns: "not-a-number" }],

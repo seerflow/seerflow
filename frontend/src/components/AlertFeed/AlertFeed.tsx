@@ -59,6 +59,9 @@ export function AlertFeed(): JSX.Element {
       }
     }
     else if (m.type === "event" && m.data !== null && typeof m.data === "object") {
+      // S-199: useWebSocket's `event` arm pre-validates (Valibot regex) and converts
+      // `timestamp_ns` / `observed_ns` to `bigint` before dispatch. The narrowing below
+      // relies on that contract — do not relax the `typeof === "bigint"` guard.
       const d = m.data as unknown as {
         event_id?: string;
         timestamp_ns?: bigint;
