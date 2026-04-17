@@ -146,11 +146,13 @@ class FeedbackRequest(BaseModel):
 
     @field_validator("note")
     @classmethod
-    def _strip_control_chars(cls, v: str | None) -> str | None:
-        """Strip C0 control chars (including \\n, \\r, \\x00). Keep printable + space."""
+    def _clean_note(cls, v: str | None) -> str | None:
+        """Strip C0 controls and DEL via the shared feedback-note sanitiser."""
         if v is None:
             return None
-        return "".join(ch for ch in v if ord(ch) >= 32)
+        from seerflow.utils.text import sanitise_feedback_note
+
+        return sanitise_feedback_note(v)
 
 
 class EntitySearchResult(BaseModel):
