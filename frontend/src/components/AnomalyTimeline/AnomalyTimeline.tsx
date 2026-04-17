@@ -10,8 +10,6 @@ import {
   YAxis,
 } from "recharts";
 
-import { useShallow } from "zustand/react/shallow";
-
 import { RESOLUTION_NS } from "@/lib/buckets";
 import { useAlertStore } from "@/stores/alerts";
 import { selectKnownSources, useAnomalyStore } from "@/stores/anomaly";
@@ -29,12 +27,7 @@ function nsToMs(ns: number): number {
 }
 
 export function AnomalyTimeline(): JSX.Element {
-  const { items, loading, error } = useAnomalyTimeline();
-
-  // Grouped state via useShallow — one subscription instead of many
-  const { range, resolution, source } = useAnomalyStore(
-    useShallow((s) => ({ range: s.range, resolution: s.resolution, source: s.source })),
-  );
+  const { items, loading, error, range, resolution, source } = useAnomalyTimeline();
 
   const alertCountTruncated = useAnomalyStore((s) => s.alertCountTruncated);
 

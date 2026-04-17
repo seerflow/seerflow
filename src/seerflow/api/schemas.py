@@ -209,8 +209,8 @@ class TimelineBucketResponse(BaseModel):
 class TimelineMetaResponse(BaseModel):
     """Metadata for the anomaly timeline response."""
 
-    range: str
-    resolution: str
+    range: Literal["1h", "6h", "24h", "7d"]
+    resolution: Literal["1m", "5m", "15m", "1h"]
     source: str | None
     alert_count_truncated: bool = False
 

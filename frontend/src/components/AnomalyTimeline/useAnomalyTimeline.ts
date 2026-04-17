@@ -2,13 +2,16 @@ import { useEffect, useRef } from "react";
 
 import { api } from "@/lib/api";
 import { logger } from "@/lib/logger";
-import type { TimelineBucket, TimelineResponse } from "@/lib/types";
+import type { TimelineBucket, TimelineRange, TimelineResolution, TimelineResponse } from "@/lib/types";
 import { useAnomalyStore } from "@/stores/anomaly";
 
 export interface UseAnomalyTimelineResult {
   items: TimelineBucket[];
   loading: boolean;
   error: string | null;
+  range: TimelineRange;
+  resolution: TimelineResolution;
+  source: string | null;
 }
 
 export function useAnomalyTimeline(): UseAnomalyTimelineResult {
@@ -34,7 +37,7 @@ export function useAnomalyTimeline(): UseAnomalyTimelineResult {
       .then((res) => {
         if (ctrl.signal.aborted) return;
         replaceSeries(res.items);
-        useAnomalyStore.getState().setAlertCountTruncated(res.meta?.alert_count_truncated ?? false);
+        useAnomalyStore.getState().setAlertCountTruncated(res.meta.alert_count_truncated ?? false);
       })
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;
@@ -47,5 +50,5 @@ export function useAnomalyTimeline(): UseAnomalyTimelineResult {
     return () => ctrl.abort();
   }, [range, resolution, source, replaceSeries, setLoading, setError]);
 
-  return { items, loading, error };
+  return { items, loading, error, range, resolution, source };
 }
