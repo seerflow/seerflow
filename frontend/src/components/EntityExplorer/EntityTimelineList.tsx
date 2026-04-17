@@ -9,12 +9,12 @@ interface Props {
   limit: number;
 }
 
-function dayKey(ns: number): string {
-  return new Date(ns / 1_000_000).toLocaleDateString();
+function dayKey(ns: bigint): string {
+  return new Date(Number(ns / 1_000_000n)).toLocaleDateString();
 }
 
-function formatTime(ns: number): string {
-  return new Date(ns / 1_000_000).toLocaleTimeString(undefined, { hour12: false });
+function formatTime(ns: bigint): string {
+  return new Date(Number(ns / 1_000_000n)).toLocaleTimeString(undefined, { hour12: false });
 }
 
 interface Row { type: "header" | "event"; key: string; date?: string; event?: EntityEvent; }
