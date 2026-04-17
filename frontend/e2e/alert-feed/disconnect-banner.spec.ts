@@ -24,7 +24,10 @@ test("disconnect banner appears 3s after WS close and hides on reconnect", async
 
   await expect(page.getByRole("button", { name: /^alert / })).toHaveCount(5);
 
-  const banner = page
+  // Scope to the AlertFeed section to avoid matching the AnomalyTimeline
+  // banner (both widgets render the shared DisconnectedBanner component).
+  const alertFeed = page.locator("section").filter({ has: page.getByRole("button", { name: /^alert /i }) });
+  const banner = alertFeed
     .getByRole("status")
     .filter({ hasText: "Live stream disconnected" });
   await expect(banner).toBeHidden();
