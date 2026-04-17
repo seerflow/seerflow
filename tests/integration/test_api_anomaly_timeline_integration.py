@@ -42,7 +42,7 @@ def _event_at(ts_ns: int, source: str = "syslog") -> SeerflowEvent:
     )
 
 
-def _alert_at(ts_ns: int) -> Alert:
+def _alert_at(ts_ns: int, dedup_key: str = "") -> Alert:
     return Alert(
         alert_id=str(uuid.uuid4()),
         alert_type="ml",
@@ -55,6 +55,7 @@ def _alert_at(ts_ns: int) -> Alert:
         entity_type="ip",
         contributing_events=(uuid.uuid4(),),
         risk_score=0.9,
+        dedup_key=dedup_key,
     )
 
 
@@ -100,3 +101,40 @@ class TestAnomalyTimelineIntegration:
         assert target["max_score"] == pytest.approx(0.7)
         assert target["upper_threshold"] == pytest.approx(0.9)
         assert target["alert_count"] == 1
+
+    async def test_alert_count_truncated_when_over_limit(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        from seerflow.api.routes.anomaly import _ALERT_QUERY_LIMIT
+
+        # Anchor near wall-clock now so the 1h window covers the event.
+        now_bucket = (time.time_ns() // BUCKET_NS) * BUCKET_NS
+        ts_base = now_bucket - BUCKET_NS
+
+        # Seed a scored event into the ring via the real WS broadcast path.
+        ws_manager = client.app.state.ws_manager
+        ws_manager.broadcast_event(
+            _event_at(ts_base, "syslog"),
+            detection=DetectionResult(
+                score=0.8,
+                upper_threshold=0.9,
+                lower_threshold=0.0,
+                is_anomaly=True,
+                anomaly_direction=None,
+                source_type="syslog",
+            ),
+        )
+
+        # Seed _ALERT_QUERY_LIMIT + 50 alerts with unique dedup_keys so each
+        # alert is stored as a distinct row (dedup_window_ns=0 disables dedup).
+        total_alerts = _ALERT_QUERY_LIMIT + 50
+        for i in range(total_alerts):
+            await backend.write_alert(
+                _alert_at(ts_base + i, dedup_key=f"trunc-test-{i}"),
+                dedup_window_ns=0,
+            )
+
+        resp = client.get("/api/v1/anomaly/timeline?range=1h&resolution=1m")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["meta"]["alert_count_truncated"] is True
