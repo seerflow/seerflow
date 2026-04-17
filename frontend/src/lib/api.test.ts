@@ -66,4 +66,20 @@ describe("api boundary parsing", () => {
     const res = await api.get<{ items: { timestamp_ns: unknown }[] }>("/api/v1/alerts?limit=1");
     expect(res.items[0].timestamp_ns).toBe("not-a-number");
   });
+
+  it("parses observed_ns string into bigint without precision loss (S-199 AC-5)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [{ event_id: "e1", observed_ns: "1700000000000000123" }],
+    }), { status: 200, headers: {"content-type":"application/json"} }));
+    const res = await api.get<{ items: { observed_ns: bigint }[] }>("/api/v1/events?limit=1");
+    expect(res.items[0].observed_ns).toBe(1700000000000000123n);
+  });
+
+  it("parses bucket_start_ns string into bigint without precision loss (S-199 AC-5)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [{ bucket_start_ns: "1700000000000000123", max_score: 0.9 }],
+    }), { status: 200, headers: {"content-type":"application/json"} }));
+    const res = await api.get<{ items: { bucket_start_ns: bigint }[] }>("/api/v1/anomaly/timeline");
+    expect(res.items[0].bucket_start_ns).toBe(1700000000000000123n);
+  });
 });

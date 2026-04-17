@@ -7,23 +7,27 @@ export class ApiError extends Error {
   }
 }
 
+const BIGINT_KEYS = new Set(["timestamp_ns", "observed_ns", "bucket_start_ns"]);
+
 /**
- * Walk a parsed JSON value and convert any `timestamp_ns` key whose value is a string
- * into a bigint. The backend serialises `Alert.timestamp_ns` as a JSON string for JS
- * bigint safety (S-194). Numeric `timestamp_ns` values (used by other endpoints such
- * as the entity timeline) are left untouched.
+ * Walk a parsed JSON value and convert any key in BIGINT_KEYS whose value is
+ * a digits-only string into a bigint. The backend serialises these fields as
+ * JSON strings for JS bigint safety (S-194 for alert timestamps, S-199 for
+ * every other *_ns field). Numeric values at those keys are left untouched
+ * so this is a no-op on payloads that have not yet been migrated — required
+ * for graceful two-sided deploys.
  */
-function reviveAlertTimestamps(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(reviveAlertTimestamps);
+function reviveBigintTimestamps(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reviveBigintTimestamps);
   if (value && typeof value === "object") {
     const obj = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
-      if (k === "timestamp_ns" && typeof v === "string") {
+      if (BIGINT_KEYS.has(k) && typeof v === "string") {
         try { out[k] = BigInt(v); }
-        catch { out[k] = v; }  // leave as string; caller decides
+        catch { out[k] = v; }
       } else {
-        out[k] = reviveAlertTimestamps(v);
+        out[k] = reviveBigintTimestamps(v);
       }
     }
     return out;
@@ -37,7 +41,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     const text = await res.text();
     const parsed = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text;
     if (!res.ok) throw new ApiError(res.status, (parsed && typeof parsed === "object" && "detail" in parsed) ? String(parsed.detail) : text);
-    const body = typeof parsed === "object" && parsed !== null ? reviveAlertTimestamps(parsed) : parsed;
+    const body = typeof parsed === "object" && parsed !== null ? reviveBigintTimestamps(parsed) : parsed;
     return body as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
