@@ -38,12 +38,17 @@ class TestAnomalyRoute:
         now_bucket = (time.time_ns() // BUCKET_NS) * BUCKET_NS
         ring.record_score(now_bucket - BUCKET_NS, 0.5, 0.9, "syslog")
         alert_store = MagicMock()
-        alert_store.query_alerts = AsyncMock(return_value=MagicMock(items=[]))
+        alert_store.query_alerts = AsyncMock(return_value=MagicMock(items=[], total=0))
         with TestClient(_app(ring, alert_store)) as client:
             r = client.get("/api/v1/anomaly/timeline?range=1h&resolution=1m")
         assert r.status_code == 200
         body = r.json()
-        assert body["meta"] == {"range": "1h", "resolution": "1m", "source": None}
+        assert body["meta"] == {
+            "range": "1h",
+            "resolution": "1m",
+            "source": None,
+            "alert_count_truncated": False,
+        }
         assert isinstance(body["items"], list)
         assert len(body["items"]) == 60
 
@@ -80,7 +85,7 @@ class TestAnomalyRoute:
         alert = MagicMock()
         alert.timestamp_ns = ts + 1000
         alert_store = MagicMock()
-        alert_store.query_alerts = AsyncMock(return_value=MagicMock(items=[alert]))
+        alert_store.query_alerts = AsyncMock(return_value=MagicMock(items=[alert], total=1))
         with TestClient(_app(ring, alert_store)) as client:
             r = client.get("/api/v1/anomaly/timeline?range=1h&resolution=1m")
         items = r.json()["items"]

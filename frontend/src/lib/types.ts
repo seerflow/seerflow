@@ -51,6 +51,11 @@ export type TimelineRange = "1h" | "6h" | "24h" | "7d";
 export type TimelineResolution = "1m" | "5m" | "15m" | "1h";
 
 export interface TimelineBucket {
+  /**
+   * Bucket start as nanosecond epoch (float64).
+   * At 2026 epoch: ~256 ns precision — safe for >= 1-minute buckets.
+   * If bucket size ever drops below 1 ms, migrate to string + BigInt.
+   */
   bucket_start_ns: number;
   max_score: number | null;
   avg_score: number | null;
@@ -63,6 +68,7 @@ export interface TimelineMeta {
   range: TimelineRange;
   resolution: TimelineResolution;
   source: string | null;
+  alert_count_truncated?: boolean;
 }
 
 export interface TimelineResponse {

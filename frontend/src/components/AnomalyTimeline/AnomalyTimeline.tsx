@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import {
   CartesianGrid,
   Line,
@@ -10,16 +10,15 @@ import {
   YAxis,
 } from "recharts";
 
-import { api } from "@/lib/api";
 import { RESOLUTION_NS } from "@/lib/buckets";
-import { logger } from "@/lib/logger";
-import type { TimelineResponse } from "@/lib/types";
 import { useAlertStore } from "@/stores/alerts";
 import { selectKnownSources, useAnomalyStore } from "@/stores/anomaly";
 
+import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { findAlertInBucket } from "./alertMatch";
 import { SourceSelect } from "./SourceSelect";
 import { TimeRangeChips } from "./TimeRangeChips";
+import { useAnomalyTimeline } from "./useAnomalyTimeline";
 
 const MAX_DOTS = 50;
 
@@ -28,50 +27,18 @@ function nsToMs(ns: number): number {
 }
 
 export function AnomalyTimeline(): JSX.Element {
-  const range = useAnomalyStore((s) => s.range);
-  const resolution = useAnomalyStore((s) => s.resolution);
-  const source = useAnomalyStore((s) => s.source);
-  const items = useAnomalyStore((s) => s.items);
-  const loading = useAnomalyStore((s) => s.loading);
-  const error = useAnomalyStore((s) => s.error);
-  const setRange = useAnomalyStore((s) => s.setRange);
-  const setSource = useAnomalyStore((s) => s.setSource);
-  const replaceSeries = useAnomalyStore((s) => s.replaceSeries);
-  const setLoading = useAnomalyStore((s) => s.setLoading);
-  const setError = useAnomalyStore((s) => s.setError);
+  const { items, loading, error, range, resolution, source } = useAnomalyTimeline();
 
-  const selectAlert = useAlertStore((s) => s.selectAlert);
-  const alerts = useAlertStore((s) => s.alerts);
+  const alertCountTruncated = useAnomalyStore((s) => s.alertCountTruncated);
+
+  // Actions via getState() — no subscription needed, stable references
+  const { setRange, setSource, rolloverIfStale } = useAnomalyStore.getState();
   const knownSources = useAnomalyStore(selectKnownSources);
-  const rolloverIfStale = useAnomalyStore((s) => s.rolloverIfStale);
-  const abortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    const ctrl = new AbortController();
-    abortRef.current?.abort();
-    abortRef.current = ctrl;
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ range, resolution });
-    if (source) params.set("source", source);
-    api
-      .get<TimelineResponse>(`/api/v1/anomaly/timeline?${params.toString()}`, { signal: ctrl.signal })
-      .then((res) => {
-        if (ctrl.signal.aborted) return;
-        replaceSeries(res.items);
-      })
-      .catch((e: unknown) => {
-        if (ctrl.signal.aborted) return;
-        logger.warn("anomaly timeline fetch failed", e);
-        // User-facing message is fixed; raw error goes only to the logger so
-        // internal detail (stack fragments, response bodies) never reflects to the DOM.
-        setError("Failed to load anomaly timeline. Retrying on next change.");
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setLoading(false);
-      });
-    return () => ctrl.abort();
-  }, [range, resolution, source, replaceSeries, setLoading, setError]);
+  // Alert store — keep separate subscriptions (different store)
+  const selectAlert = useAlertStore.getState().selectAlert;
+  const alerts = useAlertStore((s) => s.alerts);
+  const status = useAlertStore((s) => s.status);
 
   const resolutionMs = useMemo(
     () => Number(RESOLUTION_NS[resolution] / 1_000_000n),
@@ -130,11 +97,15 @@ export function AnomalyTimeline(): JSX.Element {
         <h2 id="anomaly-timeline-title" className="text-sm font-medium">
           Anomaly Timeline
         </h2>
+        {alertCountTruncated && (
+          <span className="text-xs text-muted-foreground">Some alert markers not shown</span>
+        )}
         <div className="flex items-center gap-2">
           <SourceSelect value={source} options={knownSources} onChange={setSource} />
           <TimeRangeChips value={range} onChange={setRange} />
         </div>
       </header>
+      <DisconnectedBanner status={status} />
       <div role="img" aria-label={ariaLabel} style={{ height: 320 }}>
         {loading && items.length === 0 ? (
           <div className="h-full flex items-center justify-center text-xs text-muted-foreground">

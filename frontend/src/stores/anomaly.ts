@@ -21,6 +21,7 @@ export interface AnomalyState {
   error: string | null;
 
   knownSources: Set<string>;
+  alertCountTruncated: boolean;
 
   setRange: (r: TimelineRange) => void;
   setResolution: (r: TimelineResolution) => void;
@@ -30,6 +31,7 @@ export interface AnomalyState {
   rolloverIfStale: (nowNs: number) => void;
   setLoading: (b: boolean) => void;
   setError: (s: string | null) => void;
+  setAlertCountTruncated: (b: boolean) => void;
 }
 
 const MAX_ITEMS = 2016;
@@ -46,6 +48,7 @@ const INITIAL_STATE = {
   loading: false,
   error: null as string | null,
   knownSources: new Set<string>() as Set<string>,
+  alertCountTruncated: false,
 };
 
 export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
@@ -58,6 +61,7 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
     replaceSeries: (items) => set({ items: items.slice(-MAX_ITEMS) }),
     setLoading: (b) => set({ loading: b }),
     setError: (s) => set({ error: s }),
+    setAlertCountTruncated: (b) => set({ alertCountTruncated: b }),
 
     appendScore: (e) => {
       const state = get();
@@ -115,7 +119,12 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
         upper_threshold: e.upper_threshold ?? last.upper_threshold,
         alert_count: 0,
       };
-      const next = state.items.concat(intermediates, fresh).slice(-MAX_ITEMS);
+      // Ring-buffer bounded push: avoid intermediate concat allocation.
+      // Only slice when adding fresh data would exceed capacity.
+      // Apply cap to full output to handle gaps exceeding MAX_ITEMS.
+      const combined = [...intermediates, fresh];
+      const raw = [...state.items, ...combined];
+      const next = raw.length <= MAX_ITEMS ? raw : raw.slice(-MAX_ITEMS);
       set({ items: next });
     },
 
@@ -138,7 +147,8 @@ export function createAnomalyStore(): UseBoundStore<StoreApi<AnomalyState>> {
         });
       }
       if (intermediates.length === 0) return;
-      const nextItems = state.items.concat(intermediates).slice(-MAX_ITEMS);
+      const raw = [...state.items, ...intermediates];
+      const nextItems = raw.length <= MAX_ITEMS ? raw : raw.slice(-MAX_ITEMS);
       set({ items: nextItems });
     },
   }));
@@ -156,5 +166,6 @@ export function resetAnomalyStore(): void {
   useAnomalyStore.setState({
     ...INITIAL_STATE,
     knownSources: new Set<string>(),
+    alertCountTruncated: false,
   });
 }

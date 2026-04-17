@@ -195,6 +195,33 @@ class EntityTimelineResponse(BaseModel):
     total: int
 
 
+class TimelineBucketResponse(BaseModel):
+    """One bucket in the anomaly timeline series."""
+
+    bucket_start_ns: int = Field(ge=0)
+    max_score: float | None
+    avg_score: float | None
+    event_count: int = Field(ge=0)
+    upper_threshold: float | None
+    alert_count: int = Field(ge=0)
+
+
+class TimelineMetaResponse(BaseModel):
+    """Metadata for the anomaly timeline response."""
+
+    range: Literal["1h", "6h", "24h", "7d"]
+    resolution: Literal["1m", "5m", "15m", "1h"]
+    source: str | None
+    alert_count_truncated: bool = False
+
+
+class TimelineResponse(BaseModel):
+    """Top-level response for GET /api/v1/anomaly/timeline."""
+
+    meta: TimelineMetaResponse
+    items: list[TimelineBucketResponse]
+
+
 class AttackCoverageCell(BaseModel):
     """One (tactic, technique) cell in the ATT&CK coverage matrix."""
 

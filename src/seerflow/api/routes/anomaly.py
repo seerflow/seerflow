@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -22,6 +22,7 @@ from seerflow.api.anomaly_timeline import (
 )
 from seerflow.api.deps import StorageDeps, get_anomaly_timeline_ring, get_storage
 from seerflow.api.limits import limiter, list_limit
+from seerflow.api.schemas import TimelineBucketResponse, TimelineMetaResponse, TimelineResponse
 from seerflow.models.query import AlertQuery, TimeRange
 
 router = APIRouter(tags=["anomaly"])
@@ -44,6 +45,7 @@ SourceArg = Annotated[str | None, Query(description="Source type filter", max_le
 
 @router.get(
     "/anomaly/timeline",
+    response_model=TimelineResponse,
     responses={429: {"description": "Rate limit exceeded"}},
 )
 @limiter.limit(list_limit)
@@ -54,7 +56,7 @@ async def get_anomaly_timeline(
     range: RangeArg = "1h",  # noqa: A002 -- matches public query param name
     resolution: ResolutionArg = None,
     source: SourceArg = None,
-) -> dict[str, Any]:
+) -> TimelineResponse:
     """Return a bucketed anomaly-score series for the requested window."""
     if source is not None and not _SOURCE_RE.match(source):
         raise HTTPException(status_code=422, detail="source contains invalid characters")
@@ -88,19 +90,24 @@ async def get_anomaly_timeline(
         key = (a.timestamp_ns // bucket_ns) * bucket_ns
         alert_counts[key] = alert_counts.get(key, 0) + 1
 
-    out = [
-        {
-            "bucket_start_ns": b.bucket_start_ns,
-            "max_score": b.max_score,
-            "avg_score": b.avg_score,
-            "event_count": b.event_count,
-            "upper_threshold": b.upper_threshold,
-            "alert_count": alert_counts.get(b.bucket_start_ns, 0),
-        }
+    bucket_items = [
+        TimelineBucketResponse(
+            bucket_start_ns=b.bucket_start_ns,
+            max_score=b.max_score,
+            avg_score=b.avg_score,
+            event_count=b.event_count,
+            upper_threshold=b.upper_threshold,
+            alert_count=alert_counts.get(b.bucket_start_ns, 0),
+        )
         for b in items
     ]
 
-    return {
-        "meta": {"range": range, "resolution": resolved_resolution, "source": source},
-        "items": out,
-    }
+    return TimelineResponse(
+        meta=TimelineMetaResponse(
+            range=range,
+            resolution=resolved_resolution,
+            source=source,
+            alert_count_truncated=alert_page.total > len(alert_page.items),
+        ),
+        items=bucket_items,
+    )
