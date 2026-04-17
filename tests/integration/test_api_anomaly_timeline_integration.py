@@ -12,7 +12,6 @@ import uuid
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from seerflow.api.anomaly_timeline import BUCKET_NS
@@ -22,6 +21,8 @@ from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
+
     from seerflow.storage.sqlite import SqliteBackend
 
 
@@ -69,7 +70,7 @@ class TestAnomalyTimelineIntegration:
         ts = now_bucket - BUCKET_NS
 
         # Seed a scored event into the ring via the real WS broadcast path.
-        ws_manager = cast(FastAPI, client.app).state.ws_manager
+        ws_manager = cast("FastAPI", client.app).state.ws_manager
         ws_manager.broadcast_event(
             _event_at(ts, "syslog"),
             detection=DetectionResult(
@@ -113,7 +114,7 @@ class TestAnomalyTimelineIntegration:
         ts_base = now_bucket - BUCKET_NS
 
         # Seed a scored event into the ring via the real WS broadcast path.
-        ws_manager = cast(FastAPI, client.app).state.ws_manager
+        ws_manager = cast("FastAPI", client.app).state.ws_manager
         ws_manager.broadcast_event(
             _event_at(ts_base, "syslog"),
             detection=DetectionResult(
