@@ -30,14 +30,7 @@ export type FixtureAlert = {
 };
 
 export type FixtureAlertDetail = FixtureAlert & {
-  /**
-   * `contributing_events[].timestamp_ns` is typed `number` because the
-   * front-end `AlertDetail.contributing_events[].timestamp_ns` has not yet
-   * been migrated to `bigint` (S-194 scope). Keep values within
-   * `Number.MAX_SAFE_INTEGER` until the follow-up migration lands;
-   * do NOT copy a nanosecond-precision string literal here.
-   */
-  contributing_events?: Array<{ event_id: string; timestamp_ns: number; message: string }>;
+  contributing_events?: Array<{ event_id: string; timestamp_ns: bigint; message: string }>;
 };
 
 // Five warm-up alerts. Severity buckets (per SEE-58 mapping, 17-24=critical,
@@ -173,14 +166,12 @@ export function detailFor(id: string): FixtureAlertDetail {
     contributing_events: [
       {
         event_id: "evt-1",
-        // `AlertDetail.contributing_events[].timestamp_ns` is still `number`
-        // in the frontend types (not migrated to bigint yet -- S-194 scope).
-        timestamp_ns: 1_700_000_000_000_000,
+        timestamp_ns: 1_700_000_000_000_000n,
         message: "Process launched",
       },
       {
         event_id: "evt-2",
-        timestamp_ns: 1_700_000_000_000_001,
+        timestamp_ns: 1_700_000_000_000_001n,
         message: "Network connection",
       },
     ],
