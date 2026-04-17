@@ -20,9 +20,11 @@ async def run_feedback(args: argparse.Namespace) -> None:
     from seerflow.config import load_config
     from seerflow.detection.ensemble import DetectionEnsemble
 
+    from seerflow.utils.text import sanitise_feedback_note
+
     safe_note = ""
     if args.note:
-        safe_note = args.note[:512].replace("\n", " ").replace("\r", " ")
+        safe_note = sanitise_feedback_note(args.note)
         _log.info("Persisting feedback note (%d chars)", len(safe_note))
 
     config = load_config(args.config)

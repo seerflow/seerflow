@@ -378,3 +378,79 @@ class TestFeedbackCmdNote:
         assert "\n" not in forwarded
         assert "\r" not in forwarded
         assert len(forwarded) == 512
+
+
+class TestFeedbackCLISanitisation:
+    """CLI feedback notes are sanitised via seerflow.utils.text.sanitise_feedback_note."""
+
+    async def test_run_feedback_strips_control_chars(self) -> None:
+        from seerflow import feedback_cmd
+
+        captured: dict[str, str] = {}
+
+        async def fake_process(**kwargs: object) -> str:
+            captured["note"] = kwargs["note"]  # type: ignore[assignment]
+            return "ok"
+
+        mock_storage = AsyncMock()
+        mock_ensemble = MagicMock()
+        mock_ensemble.load_all_state = AsyncMock(return_value=0)
+        mock_ensemble.save_all_state = AsyncMock(return_value=0)
+        mock_config = MagicMock()
+        mock_config.alerting.pagerduty_routing_key = ""
+
+        args = argparse.Namespace(
+            config=None,
+            alert_id="a",
+            type="fp",
+            note="hello\n\r\t\x00\x7fworld",
+        )
+
+        with (
+            patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
+            patch(_PATCH_CONNECT, AsyncMock(return_value=mock_storage)),
+            patch(
+                "seerflow.detection.ensemble.DetectionEnsemble",
+                return_value=mock_ensemble,
+            ),
+            patch(_PATCH_PROCESS, side_effect=fake_process),
+        ):
+            await feedback_cmd.run_feedback(args)
+
+        assert captured["note"] == "helloworld"
+
+    async def test_run_feedback_truncates_long_note(self) -> None:
+        from seerflow import feedback_cmd
+
+        captured: dict[str, str] = {}
+
+        async def fake_process(**kwargs: object) -> str:
+            captured["note"] = kwargs["note"]  # type: ignore[assignment]
+            return "ok"
+
+        mock_storage = AsyncMock()
+        mock_ensemble = MagicMock()
+        mock_ensemble.load_all_state = AsyncMock(return_value=0)
+        mock_ensemble.save_all_state = AsyncMock(return_value=0)
+        mock_config = MagicMock()
+        mock_config.alerting.pagerduty_routing_key = ""
+
+        args = argparse.Namespace(
+            config=None,
+            alert_id="a",
+            type="fp",
+            note="x" * 1000,
+        )
+
+        with (
+            patch(_PATCH_LOAD_CONFIG, return_value=mock_config),
+            patch(_PATCH_CONNECT, AsyncMock(return_value=mock_storage)),
+            patch(
+                "seerflow.detection.ensemble.DetectionEnsemble",
+                return_value=mock_ensemble,
+            ),
+            patch(_PATCH_PROCESS, side_effect=fake_process),
+        ):
+            await feedback_cmd.run_feedback(args)
+
+        assert captured["note"] == "x" * 512
