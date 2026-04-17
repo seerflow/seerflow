@@ -185,18 +185,36 @@ def test_benchmark_warn_uses_explicit_user_warning_category() -> None:
     """S-187: the SQL/decode ratio warning must pass category explicitly.
 
     Static-analysis tools and CI warning filters can reliably target the
-    benchmark warning only when ``category=`` is passed. Walks the AST
-    of :func:`test_mitre_filter_sql_vs_decode_baseline` so the assertion
-    is not fooled by the keyword appearing in a comment or string, and
-    fires deterministically without running the slow benchmark body.
+    benchmark warning only when ``category=`` is passed. Walks the AST of
+    :func:`test_mitre_filter_sql_vs_decode_baseline` so the assertion is
+    not fooled by the keyword appearing in a comment or string, and fires
+    deterministically without running the slow benchmark body.
+
+    S-193: source is loaded via ``pathlib.Path(__file__)`` instead of
+    ``inspect.getsource`` so the guard does not depend on CPython linecache
+    state — the latter is not reliable under pytest-xdist, bytecode-only
+    wheels, or plugins that clear linecache between tests.
     """
     import ast
-    import inspect
+    from pathlib import Path
 
-    tree = ast.parse(inspect.getsource(test_mitre_filter_sql_vs_decode_baseline))
+    module_tree = ast.parse(Path(__file__).read_text())
+    target_fn = next(
+        (
+            node
+            for node in ast.walk(module_tree)
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+            and node.name == "test_mitre_filter_sql_vs_decode_baseline"
+        ),
+        None,
+    )
+    assert target_fn is not None, (
+        "test_mitre_filter_sql_vs_decode_baseline not found in module — "
+        "the S-187/S-193 category guard is targeting a function that no longer exists"
+    )
     warn_calls = [
         node
-        for node in ast.walk(tree)
+        for node in ast.walk(target_fn)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "warn"
@@ -205,3 +223,24 @@ def test_benchmark_warn_uses_explicit_user_warning_category() -> None:
     assert all(any(kw.arg == "category" for kw in call.keywords) for call in warn_calls), (
         "every warnings.warn() call must pass category= explicitly"
     )
+
+
+def test_benchmark_warn_category_guard_independent_of_inspect_getsource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-193: the category guard must resolve module source via __file__,
+    not via ``inspect.getsource``. Monkey-patching ``inspect.getsource`` to
+    raise ``OSError`` reproduces the CI flake observed on dev at S-187. If
+    the guard still depends on ``inspect.getsource`` this test will fail
+    the same way the original flake did.
+    """
+    import inspect as _inspect
+    from typing import NoReturn
+
+    def _boom(*_args: object, **_kwargs: object) -> NoReturn:
+        raise OSError("could not get source code")
+
+    monkeypatch.setattr(_inspect, "getsource", _boom)
+
+    # Invoke the guard exactly as pytest does. The guard must not raise.
+    test_benchmark_warn_uses_explicit_user_warning_category()
