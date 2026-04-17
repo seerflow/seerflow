@@ -552,8 +552,28 @@ class TestSerialization:
         event = _make_event(severity_id=3)
         payload = serialize_event(BroadcastEvent(event=event))
         data = payload["data"]
-        assert data["observed_ns"] == event.observed_ns
+        assert data["observed_ns"] == str(event.observed_ns)
         assert data["severity_text"] == "Warning"
+
+    def test_serialize_event_emits_string_timestamp_ns_and_observed_ns(self) -> None:
+        """S-199 AC: WS event frames must carry timestamp_ns and observed_ns as JSON strings for JS bigint safety."""  # noqa: E501
+        from seerflow.api.ws import BroadcastEvent
+
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_123,
+            observed_ns=1_700_000_000_000_000_456,
+            message="bigint test",
+            source_type="syslog",
+            severity_id=SeverityLevel(3),
+            template_id=1,
+        )
+        be = BroadcastEvent(event=event)
+        frame = serialize_event(be)
+        assert frame["data"]["timestamp_ns"] == "1700000000000000123"
+        assert frame["data"]["observed_ns"] == "1700000000000000456"
+        assert isinstance(frame["data"]["timestamp_ns"], str)
+        assert isinstance(frame["data"]["observed_ns"], str)
 
     def test_serialize_event_is_json_encodable(self) -> None:
         from seerflow.api.ws import BroadcastEvent

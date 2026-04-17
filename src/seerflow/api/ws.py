@@ -106,12 +106,15 @@ def _event_data(be: BroadcastEvent) -> dict[str, Any]:
 
     Field parity with REST ``EventResponse`` (see ``api/schemas.py``) so
     dashboard consumers don't need to duplicate serialization logic.
+    ``timestamp_ns`` and ``observed_ns`` are emitted as decimal strings (not
+    int) for JS bigint safety — see S-199.
     """
     event = be.event
     data: dict[str, Any] = {
         "event_id": str(event.event_id),
-        "timestamp_ns": event.timestamp_ns,
-        "observed_ns": event.observed_ns,
+        "timestamp_ns": str(event.timestamp_ns),  # JSON string for JS bigint safety (S-199)
+        "observed_ns": str(event.observed_ns),  # JSON string for JS bigint safety (S-199)
+
         "severity_id": event.severity_id,
         "severity_text": event.severity_id.text,
         "source_type": event.source_type,
