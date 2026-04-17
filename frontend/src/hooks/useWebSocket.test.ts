@@ -152,3 +152,49 @@ describe("useWebSocket schema validation (S-194)", () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
+describe("useWebSocket event arm (S-199)", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("parses event timestamp_ns + observed_ns strings into bigint (S-199 AC-6)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    act(() => {
+      ws._msg({
+        type: "event",
+        data: {
+          event_id: "e1",
+          timestamp_ns: "1700000000000000123",
+          observed_ns:  "1700000000000000456",
+          severity_id: 10,
+          severity_text: "ERROR",
+          source_type: "syslog",
+          message: "m",
+          template_id: 7,
+          entity_refs: [],
+          entity_summary: {},
+        },
+      });
+    });
+
+    expect(onMessage).toHaveBeenCalledOnce();
+    const payload = onMessage.mock.calls[0][0];
+    expect(payload.type).toBe("event");
+    expect(payload.data.timestamp_ns).toBe(1700000000000000123n);
+    expect(payload.data.observed_ns).toBe(1700000000000000456n);
+  });
+
+  it("drops event frames with missing timestamp_ns (S-199 AC-6)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    act(() => { ws._msg({ type: "event", data: { event_id: "e1" } }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+});

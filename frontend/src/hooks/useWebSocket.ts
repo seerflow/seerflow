@@ -31,7 +31,13 @@ const StatusDataSchema = v.looseObject({
   dropped_total: v.number(),
 });
 
-const EventDataSchema = v.looseObject({});  // event payload shape varies; keep open
+// S-199: require bigint-safe string timestamps on the event arm, mirroring
+// the alert arm. Other fields (score, is_anomaly, template_id, ...) stay
+// loose so schema drift on optional metadata doesn't drop live events.
+const EventDataSchema = v.looseObject({
+  timestamp_ns: v.pipe(v.string(), v.regex(/^\d+$/)),
+  observed_ns:  v.pipe(v.string(), v.regex(/^\d+$/)),
+});
 
 const WsMessageSchema = v.union([
   v.object({ type: v.literal("alert"),       data: AlertDataSchema }),
@@ -90,6 +96,26 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
             // S-194: convert each alert's string timestamp_ns to bigint before dispatch.
             const alerts = msg.alerts.map(a => ({ ...a, timestamp_ns: BigInt(a.timestamp_ns) }));
             optsRef.current.onMessage({ type: "alert_batch", alerts } as unknown as WsMessage);
+          } else if (msg.type === "event") {
+            // S-199 AC-6: convert string wire timestamps into bigint at the boundary.
+            const data = {
+              ...msg.data,
+              timestamp_ns: BigInt(msg.data.timestamp_ns),
+              observed_ns:  BigInt(msg.data.observed_ns),
+            };
+            optsRef.current.onMessage({ type: "event", data } as unknown as WsMessage);
+          } else if (msg.type === "batch") {
+            // S-199: defensive per-element conversion — heterogeneous batch accepts
+            // both LiveEvent and Alert shapes, so convert only what looks convertible.
+            const events = msg.events.map((e) => {
+              if (!e || typeof e !== "object") return e;
+              const rec = e as Record<string, unknown>;
+              const next: Record<string, unknown> = { ...rec };
+              if (typeof rec.timestamp_ns === "string") next.timestamp_ns = BigInt(rec.timestamp_ns);
+              if (typeof rec.observed_ns  === "string") next.observed_ns  = BigInt(rec.observed_ns);
+              return next;
+            });
+            optsRef.current.onMessage({ type: "batch", events } as unknown as WsMessage);
           } else {
             optsRef.current.onMessage(msg as unknown as WsMessage);
           }
