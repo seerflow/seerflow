@@ -235,8 +235,9 @@ def test_benchmark_warn_category_guard_independent_of_inspect_getsource(
     the same way the original flake did.
     """
     import inspect as _inspect
+    from typing import NoReturn
 
-    def _boom(*_args: object, **_kwargs: object) -> str:
+    def _boom(*_args: object, **_kwargs: object) -> NoReturn:
         raise OSError("could not get source code")
 
     monkeypatch.setattr(_inspect, "getsource", _boom)
