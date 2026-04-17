@@ -89,5 +89,5 @@ class TestAnomalyRoute:
         with TestClient(_app(ring, alert_store)) as client:
             r = client.get("/api/v1/anomaly/timeline?range=1h&resolution=1m")
         items = r.json()["items"]
-        target = next(b for b in items if b["bucket_start_ns"] == ts)
+        target = next(b for b in items if b["bucket_start_ns"] == str(ts))
         assert target["alert_count"] == 1
