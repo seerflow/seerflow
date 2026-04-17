@@ -13,3 +13,25 @@ test("anomaly timeline warm-up + range switch", async ({ page }) => {
     "true",
   );
 });
+
+test("threshold line renders on mount", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Anomaly Timeline")).toBeVisible();
+  const chartArea = page.locator("[role='img'][aria-label*='Anomaly score chart']");
+  await expect(chartArea).toBeVisible();
+  const thresholdLine = chartArea.locator("path[stroke-dasharray='4 2']");
+  await expect(thresholdLine).toBeVisible();
+});
+
+test("alert marker click opens detail panel", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Anomaly Timeline")).toBeVisible();
+  const dots = page.locator("[role='img'] circle[fill='var(--color-chart-alert)']");
+  const count = await dots.count();
+  if (count > 0) {
+    await dots.first().click();
+    await expect(
+      page.locator("text=Alert Details").or(page.locator("[data-testid='alert-detail']")),
+    ).toBeVisible({ timeout: 3000 });
+  }
+});
