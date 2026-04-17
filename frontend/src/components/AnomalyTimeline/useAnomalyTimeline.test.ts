@@ -56,7 +56,7 @@ describe("useAnomalyTimeline", () => {
   it("aborts previous fetch on re-trigger", async () => {
     renderHook(() => useAnomalyTimeline());
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const firstSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;
+    const firstSignal = (fetchMock.mock.calls[0][1] as { signal: AbortSignal }).signal;
     useAnomalyStore.getState().setRange("6h");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(firstSignal.aborted).toBe(true);
