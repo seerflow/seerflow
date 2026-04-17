@@ -114,7 +114,11 @@ async def post_resolve(
         if attempt < max_retries - 1:
             sleep_for = delays[attempt] if attempt < len(delays) else delays[-1]
             await asyncio.sleep(sleep_for)
-    _log.error("PagerDuty resolve: all %d attempts exhausted for %s", max_retries, dedup_key)
+    _log.error(
+        "PagerDuty resolve: all %d attempts exhausted for %s...",
+        max_retries,
+        dedup_key[:8],
+    )
 
 
 @dataclass(frozen=True, slots=True)

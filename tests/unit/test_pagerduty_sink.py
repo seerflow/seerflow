@@ -527,3 +527,34 @@ class TestPostResolve:
 
         # Bug propagated on the first attempt — no retry occurred.
         assert session.post.call_count == 1
+
+    async def test_exhaustion_log_truncates_dedup_key_to_8_chars(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """After all retries, the exhaustion log leaks at most 8 chars of dedup_key."""
+        import logging
+
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = _mock_session(status=500)
+        full_key = "ml:hst-anomaly:entity-uuid-001"  # 30 chars; rule_name is PII-ish.
+
+        with caplog.at_level(logging.ERROR, logger="seerflow"):
+            await post_resolve(
+                session,
+                full_key,
+                "routing-key",
+                delays=(0.0,),
+            )
+
+        exhaustion = [
+            r for r in caplog.records if "attempts exhausted" in r.message
+        ]
+        assert exhaustion, "expected one exhaustion log record"
+        message = exhaustion[0].getMessage()
+
+        # First 8 chars appear; full rule_name + entity_uuid do not.
+        assert full_key[:8] in message
+        assert "hst-anomaly" not in message
+        assert "entity-uuid-001" not in message
