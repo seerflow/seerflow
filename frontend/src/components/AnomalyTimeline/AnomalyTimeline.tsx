@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import {
   CartesianGrid,
   Line,
@@ -10,10 +10,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { api } from "@/lib/api";
 import { RESOLUTION_NS } from "@/lib/buckets";
-import { logger } from "@/lib/logger";
-import type { TimelineResponse } from "@/lib/types";
 import { useAlertStore } from "@/stores/alerts";
 import { selectKnownSources, useAnomalyStore } from "@/stores/anomaly";
 
@@ -21,6 +18,7 @@ import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { findAlertInBucket } from "./alertMatch";
 import { SourceSelect } from "./SourceSelect";
 import { TimeRangeChips } from "./TimeRangeChips";
+import { useAnomalyTimeline } from "./useAnomalyTimeline";
 
 const MAX_DOTS = 50;
 
@@ -29,51 +27,18 @@ function nsToMs(ns: number): number {
 }
 
 export function AnomalyTimeline(): JSX.Element {
+  const { items, loading, error } = useAnomalyTimeline();
   const range = useAnomalyStore((s) => s.range);
   const resolution = useAnomalyStore((s) => s.resolution);
   const source = useAnomalyStore((s) => s.source);
-  const items = useAnomalyStore((s) => s.items);
-  const loading = useAnomalyStore((s) => s.loading);
-  const error = useAnomalyStore((s) => s.error);
   const setRange = useAnomalyStore((s) => s.setRange);
   const setSource = useAnomalyStore((s) => s.setSource);
-  const replaceSeries = useAnomalyStore((s) => s.replaceSeries);
-  const setLoading = useAnomalyStore((s) => s.setLoading);
-  const setError = useAnomalyStore((s) => s.setError);
 
   const selectAlert = useAlertStore((s) => s.selectAlert);
   const alerts = useAlertStore((s) => s.alerts);
   const status = useAlertStore((s) => s.status);
   const knownSources = useAnomalyStore(selectKnownSources);
   const rolloverIfStale = useAnomalyStore((s) => s.rolloverIfStale);
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    abortRef.current?.abort();
-    abortRef.current = ctrl;
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ range, resolution });
-    if (source) params.set("source", source);
-    api
-      .get<TimelineResponse>(`/api/v1/anomaly/timeline?${params.toString()}`, { signal: ctrl.signal })
-      .then((res) => {
-        if (ctrl.signal.aborted) return;
-        replaceSeries(res.items);
-      })
-      .catch((e: unknown) => {
-        if (ctrl.signal.aborted) return;
-        logger.warn("anomaly timeline fetch failed", e);
-        // User-facing message is fixed; raw error goes only to the logger so
-        // internal detail (stack fragments, response bodies) never reflects to the DOM.
-        setError("Failed to load anomaly timeline. Retrying on next change.");
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setLoading(false);
-      });
-    return () => ctrl.abort();
-  }, [range, resolution, source, replaceSeries, setLoading, setError]);
 
   const resolutionMs = useMemo(
     () => Number(RESOLUTION_NS[resolution] / 1_000_000n),
