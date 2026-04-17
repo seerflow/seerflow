@@ -68,3 +68,35 @@ class TestSanitiseFeedbackNote:
 
         with pytest.raises(ValueError):
             sanitise_feedback_note("abc", max_length=-1)
+
+
+class TestCliApiParity:
+    """The CLI (sanitise_feedback_note) and API (FeedbackRequest.note) paths
+    must produce byte-identical persisted notes for the same raw input."""
+
+    def test_cli_and_api_produce_identical_note(self) -> None:
+        from seerflow.api.schemas import FeedbackRequest
+        from seerflow.utils.text import sanitise_feedback_note
+
+        # Raw input exercises \n, \r, \t, \x00, \x7f, and a tail of printable chars.
+        # Note: Field(max_length=512) would reject a >512-char input at the API
+        # before the validator runs, so the parity input is deliberately <=512.
+        raw = "hello\nworld\r\n\ttab\x00null\x7fdel end"
+
+        cli_note = sanitise_feedback_note(raw)
+        api_note = FeedbackRequest(feedback="fp", note=raw).note
+
+        assert cli_note == "helloworldtabnulldel end"
+        assert api_note == cli_note
+
+    def test_cli_and_api_identical_for_mixed_control_input(self) -> None:
+        from seerflow.api.schemas import FeedbackRequest
+        from seerflow.utils.text import sanitise_feedback_note
+
+        raw = "".join(chr(c) for c in range(32)) + "payload" + "\x7f"
+
+        cli_note = sanitise_feedback_note(raw)
+        api_note = FeedbackRequest(feedback="tp", note=raw).note
+
+        assert cli_note == "payload"
+        assert api_note == cli_note
