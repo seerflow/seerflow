@@ -548,9 +548,7 @@ class TestPostResolve:
                 delays=(0.0,),
             )
 
-        exhaustion = [
-            r for r in caplog.records if "attempts exhausted" in r.message
-        ]
+        exhaustion = [r for r in caplog.records if "attempts exhausted" in r.message]
         assert exhaustion, "expected one exhaustion log record"
         message = exhaustion[0].getMessage()
 
