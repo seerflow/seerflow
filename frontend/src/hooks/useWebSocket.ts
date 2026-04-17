@@ -2,6 +2,13 @@ import { useCallback, useEffect, useRef } from "react";
 import * as v from "valibot";
 import type { WsStatus, WsFilter, WsMessage } from "@/lib/types";
 import { logger } from "@/lib/logger";
+import { MAX_NS_STRING_LEN, toBigintNs } from "@/lib/api";
+
+// S-199 security: a 1-25 digit decimal bound caps the work BigInt(...) must do
+// on any single wire value. Larger strings are rejected by Valibot before they
+// reach BigInt; see the `MAX_NS_STRING_LEN` constant in `@/lib/api` for the
+// rationale behind 25 digits.
+const NS_WIRE_RE = new RegExp(`^\\d{1,${MAX_NS_STRING_LEN}}$`);
 
 interface Opts {
   onMessage: (m: WsMessage) => void;
@@ -19,7 +26,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 // preserved and passed through to consumers unchanged.
 const AlertDataSchema = v.looseObject({
   alert_id: v.string(),
-  timestamp_ns: v.pipe(v.string(), v.regex(/^\d+$/)),
+  timestamp_ns: v.pipe(v.string(), v.regex(NS_WIRE_RE)),
 });
 
 const StatusDataSchema = v.looseObject({
@@ -35,8 +42,8 @@ const StatusDataSchema = v.looseObject({
 // the alert arm. Other fields (score, is_anomaly, template_id, ...) stay
 // loose so schema drift on optional metadata doesn't drop live events.
 const EventDataSchema = v.looseObject({
-  timestamp_ns: v.pipe(v.string(), v.regex(/^\d+$/)),
-  observed_ns:  v.pipe(v.string(), v.regex(/^\d+$/)),
+  timestamp_ns: v.pipe(v.string(), v.regex(NS_WIRE_RE)),
+  observed_ns:  v.pipe(v.string(), v.regex(NS_WIRE_RE)),
 });
 
 const WsMessageSchema = v.union([
@@ -107,12 +114,14 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
           } else if (msg.type === "batch") {
             // S-199: defensive per-element conversion — heterogeneous batch accepts
             // both LiveEvent and Alert shapes, so convert only what looks convertible.
+            // `toBigintNs` caps the digit count to guard against BigInt-allocation DoS
+            // from a crafted batch frame (the `batch` arm is `v.array(v.unknown())`).
             const events = msg.events.map((e) => {
               if (!e || typeof e !== "object") return e;
               const rec = e as Record<string, unknown>;
               const next: Record<string, unknown> = { ...rec };
-              if (typeof rec.timestamp_ns === "string") next.timestamp_ns = BigInt(rec.timestamp_ns);
-              if (typeof rec.observed_ns  === "string") next.observed_ns  = BigInt(rec.observed_ns);
+              if (typeof rec.timestamp_ns === "string") next.timestamp_ns = toBigintNs(rec.timestamp_ns);
+              if (typeof rec.observed_ns  === "string") next.observed_ns  = toBigintNs(rec.observed_ns);
               return next;
             });
             optsRef.current.onMessage({ type: "batch", events } as unknown as WsMessage);

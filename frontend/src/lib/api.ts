@@ -10,6 +10,28 @@ export class ApiError extends Error {
 const BIGINT_KEYS = new Set(["timestamp_ns", "observed_ns", "bucket_start_ns"]);
 
 /**
+ * Upper bound on the decimal length of a nanosecond timestamp string before
+ * we refuse to call BigInt() on it. A 25-digit value encodes ~3×10^16 seconds
+ * (roughly 10^9 years past the epoch), well above any real wire timestamp. The
+ * cap defends the client against a malicious/buggy peer that sends a giant
+ * digit string — BigInt construction is O(n^2) in the digit count and will
+ * block the UI thread for seconds on megabyte-scale inputs.
+ */
+export const MAX_NS_STRING_LEN = 25;
+
+/**
+ * Safe-guarded string → bigint conversion for the `*_ns` wire fields.
+ * Returns the raw string back unchanged when the input is malformed or too
+ * long so callers (REST walker, WS dispatch) degrade gracefully instead of
+ * crashing or hanging.
+ */
+export function toBigintNs(v: string): bigint | string {
+  if (v.length === 0 || v.length > MAX_NS_STRING_LEN) return v;
+  try { return BigInt(v); }
+  catch { return v; }
+}
+
+/**
  * Walk a parsed JSON value and convert any key in BIGINT_KEYS whose value is
  * a digits-only string into a bigint. The backend serialises these fields as
  * JSON strings for JS bigint safety (S-194 for alert timestamps, S-199 for
@@ -24,8 +46,7 @@ function reviveBigintTimestamps(value: unknown): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
       if (BIGINT_KEYS.has(k) && typeof v === "string") {
-        try { out[k] = BigInt(v); }
-        catch { out[k] = v; }
+        out[k] = toBigintNs(v);
       } else {
         out[k] = reviveBigintTimestamps(v);
       }

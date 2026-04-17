@@ -197,4 +197,44 @@ describe("useWebSocket event arm (S-199)", () => {
     expect(onMessage).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
   });
+
+  it("rejects event frames with over-long timestamp_ns strings (S-199 DoS guard)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    // 26-digit string exceeds MAX_NS_STRING_LEN (25). Valibot regex must reject
+    // before BigInt() is ever called — guards against BigInt-allocation DoS.
+    act(() => { ws._msg({
+      type: "event",
+      data: {
+        event_id: "e-dos",
+        timestamp_ns: "1".repeat(26),
+        observed_ns: "1700000000000000000",
+      },
+    }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("caps BigInt conversion in batch arm to prevent DoS (S-199)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    // The batch arm is v.array(v.unknown()) so crafted strings reach the
+    // converter directly. toBigintNs must return the raw string for >25-digit
+    // values rather than calling BigInt() on them.
+    act(() => { ws._msg({
+      type: "batch",
+      events: [{ event_id: "e1", timestamp_ns: "1".repeat(50), observed_ns: "1700000000000000000" }],
+    }); });
+    expect(onMessage).toHaveBeenCalledOnce();
+    const payload = onMessage.mock.calls[0][0];
+    expect(payload.type).toBe("batch");
+    // Over-long timestamp_ns left as string (no BigInt call); observed_ns converted normally.
+    expect(payload.events[0].timestamp_ns).toBe("1".repeat(50));
+    expect(payload.events[0].observed_ns).toBe(1700000000000000000n);
+  });
 });

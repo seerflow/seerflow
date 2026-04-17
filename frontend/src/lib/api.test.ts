@@ -77,6 +77,17 @@ describe("api boundary parsing", () => {
     expect(typeof res.items[0].bucket_start_ns).toBe("number");
   });
 
+  it("leaves over-long timestamp_ns string unconverted (S-199 DoS guard)", async () => {
+    // A 26-digit string exceeds MAX_NS_STRING_LEN (25). The walker must return
+    // the raw string rather than spending O(n^2) time on a giant BigInt.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [{ alert_id: "a1", timestamp_ns: "1".repeat(26) }],
+    }), { status: 200, headers: {"content-type":"application/json"} }));
+    const res = await api.get<{ items: { timestamp_ns: unknown }[] }>("/api/v1/alerts?limit=1");
+    expect(res.items[0].timestamp_ns).toBe("1".repeat(26));
+    expect(typeof res.items[0].timestamp_ns).toBe("string");
+  });
+
   it("falls back to string timestamp_ns when BigInt() throws (defensive)", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       items: [{ alert_id: "a1", timestamp_ns: "not-a-number" }],
