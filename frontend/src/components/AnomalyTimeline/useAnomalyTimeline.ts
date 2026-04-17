@@ -48,7 +48,7 @@ export function useAnomalyTimeline(): UseAnomalyTimelineResult {
         if (!ctrl.signal.aborted) setLoading(false);
       });
     return () => ctrl.abort();
-  }, [range, resolution, source, replaceSeries, setLoading, setError]);
+  }, [range, resolution, source, replaceSeries, setLoading, setError, setAlertCountTruncated]);
 
   return { items, loading, error, range, resolution, source };
 }

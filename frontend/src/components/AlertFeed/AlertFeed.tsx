@@ -61,12 +61,12 @@ export function AlertFeed(): JSX.Element {
     else if (m.type === "event" && m.data !== null && typeof m.data === "object") {
       const d = m.data as unknown as {
         event_id?: string;
-        timestamp_ns?: number;
+        timestamp_ns?: bigint;
         score?: number | null;
         upper_threshold?: number | null;
         source_type?: string;
       };
-      if (typeof d.timestamp_ns === "number" && typeof d.score === "number" && typeof d.source_type === "string") {
+      if (typeof d.timestamp_ns === "bigint" && typeof d.score === "number" && typeof d.source_type === "string") {
         useAnomalyStore.getState().appendScore({
           timestamp_ns: d.timestamp_ns,
           score: d.score,
