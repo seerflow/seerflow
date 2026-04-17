@@ -66,8 +66,35 @@ class TestSanitiseFeedbackNote:
     def test_max_length_must_be_non_negative(self) -> None:
         from seerflow.utils.text import sanitise_feedback_note
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="max_length must be non-negative"):
             sanitise_feedback_note("abc", max_length=-1)
+
+    def test_preserves_unicode_line_separators_by_design(self) -> None:
+        """U+2028 / U+2029 / U+0085 are above 0x7F and are NOT stripped.
+
+        This is intentional — the helper strips only C0 + DEL so that CJK, Latin-1
+        accents, and other high-plane characters survive. Downstream consumers that
+        cannot tolerate these characters must strip them separately.
+        """
+        from seerflow.utils.text import sanitise_feedback_note
+
+        assert sanitise_feedback_note("a\u2028b\u2029c\u0085d") == "a\u2028b\u2029c\u0085d"
+
+    def test_sanitise_is_idempotent(self) -> None:
+        """Applying the sanitiser twice is a no-op — a persisted note round-trips cleanly."""
+        from seerflow.utils.text import sanitise_feedback_note
+
+        raw = "hello\nworld\tpayload\x7fend"
+        once = sanitise_feedback_note(raw)
+        twice = sanitise_feedback_note(once)
+        assert once == twice
+
+    def test_exposes_note_max_length_constant(self) -> None:
+        """NOTE_MAX_LENGTH is the shared cap — schemas imports it to stay in sync."""
+        from seerflow.utils.text import NOTE_MAX_LENGTH, sanitise_feedback_note
+
+        assert NOTE_MAX_LENGTH == 512
+        assert sanitise_feedback_note("a" * (NOTE_MAX_LENGTH + 10)) == "a" * NOTE_MAX_LENGTH
 
 
 class TestCliApiParity:

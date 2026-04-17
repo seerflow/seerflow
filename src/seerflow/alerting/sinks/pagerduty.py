@@ -110,14 +110,17 @@ async def post_resolve(
                     return
                 _log.warning("PagerDuty resolve %d (attempt %d)", resp.status, attempt + 1)
         except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+            # asyncio.CancelledError is BaseException (not Exception) since 3.8
+            # and therefore propagates naturally without being caught here.
             _log.warning("PagerDuty resolve failed (attempt %d): %s", attempt + 1, exc)
         if attempt < max_retries - 1:
             sleep_for = delays[attempt] if attempt < len(delays) else delays[-1]
             await asyncio.sleep(sleep_for)
+    truncated = dedup_key[:8] + ("..." if len(dedup_key) > 8 else "")
     _log.error(
-        "PagerDuty resolve: all %d attempts exhausted for %s...",
+        "PagerDuty resolve: all %d attempts exhausted for %s",
         max_retries,
-        dedup_key[:8],
+        truncated,
     )
 
 

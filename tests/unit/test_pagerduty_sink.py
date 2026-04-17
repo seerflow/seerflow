@@ -556,3 +556,41 @@ class TestPostResolve:
         assert full_key[:8] in message
         assert "hst-anomaly" not in message
         assert "entity-uuid-001" not in message
+
+    async def test_exhaustion_log_no_ellipsis_for_short_dedup_key(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """When dedup_key is <= 8 chars, the exhaustion log MUST NOT append '...'.
+
+        The ellipsis signals truncation; emitting it for an untruncated key would mislead
+        log parsers that detect truncated identifiers by the literal suffix.
+        """
+        import logging
+
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = _mock_session(status=500)
+        short_key = "fp:rate"  # 7 chars — fully visible, no truncation.
+
+        with caplog.at_level(logging.ERROR, logger="seerflow"):
+            await post_resolve(session, short_key, "routing-key", delays=(0.0,))
+
+        exhaustion = [r for r in caplog.records if "attempts exhausted" in r.message]
+        assert exhaustion, "expected one exhaustion log record"
+        message = exhaustion[0].getMessage()
+        assert short_key in message
+        assert "..." not in message
+
+    async def test_asyncio_timeout_error_is_retried(self) -> None:
+        """A raw asyncio.TimeoutError must be caught and retried (same class as builtin
+        TimeoutError in Python 3.11+, but pinning the behaviour explicitly)."""
+        from seerflow.alerting.sinks.pagerduty import post_resolve
+
+        session = MagicMock()
+        session.post = MagicMock(side_effect=TimeoutError("timeout"))
+
+        await post_resolve(session, "dedup-1", "routing-key", delays=(0.0,))
+
+        # 2 attempts (default max_retries), both raised TimeoutError and were caught+retried.
+        assert session.post.call_count == 2
