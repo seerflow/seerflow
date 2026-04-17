@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
+from seerflow.storage import connect_storage
+
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
@@ -87,7 +89,6 @@ async def run_import(
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.pipeline.handler import make_handler
     from seerflow.receivers.base import RawEvent
-    from seerflow.storage.sqlite import SqliteBackend
 
     start = time.monotonic()
     expanded = expand_paths(paths)
@@ -106,7 +107,7 @@ async def run_import(
         data_dir=str(Path(db_path).parent),
         sqlite_path=db_path,
     )
-    storage = await SqliteBackend.connect(storage_config)
+    storage = await connect_storage(storage_config)
 
     try:
         ensemble = DetectionEnsemble(config.detection)

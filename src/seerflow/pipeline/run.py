@@ -8,6 +8,7 @@ import logging
 import ssl as _ssl
 import sys
 import time
+from pathlib import Path
 
 import aiohttp
 import aiohttp.web
@@ -17,6 +18,7 @@ from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
 from seerflow.pipeline.handler import make_handler
+from seerflow.storage import connect_storage
 
 _log = logging.getLogger("seerflow")
 
@@ -37,13 +39,9 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     _log.info("Seerflow %s starting", __version__)
 
     # Connect storage
-    from pathlib import Path
-
-    from seerflow.storage.sqlite import SqliteBackend
-
     data_dir = Path(config.storage.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
-    storage = await SqliteBackend.connect(config.storage)
+    storage = await connect_storage(config.storage)
     _log.info("Storage: %s", config.storage.sqlite_path)
 
     ensemble = DetectionEnsemble(config.detection)

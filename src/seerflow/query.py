@@ -18,6 +18,7 @@ import yaml
 
 from seerflow.cli_format import format_table
 from seerflow.sigma.attack import format_tactic, format_technique
+from seerflow.storage import connect_storage
 
 if TYPE_CHECKING:
     import argparse
@@ -431,7 +432,6 @@ async def run_query_health(args: argparse.Namespace) -> None:
     """Execute health query — load ensemble from storage, print stats."""
     from seerflow.config import ConfigError, load_config
     from seerflow.detection.ensemble import DetectionEnsemble
-    from seerflow.storage.sqlite import SqliteBackend
 
     try:
         config = load_config(args.config)
@@ -439,7 +439,7 @@ async def run_query_health(args: argparse.Namespace) -> None:
         print(f"Error loading config: {exc}", file=sys.stderr)
         sys.exit(1)
     try:
-        storage = await SqliteBackend.connect(config.storage)
+        storage = await connect_storage(config.storage)
     except OSError as exc:
         print(f"Error connecting to storage: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -466,10 +466,9 @@ async def run_query(args: argparse.Namespace) -> None:
         return
 
     from seerflow.config import load_config
-    from seerflow.storage.sqlite import SqliteBackend
 
     config = load_config(args.config)
-    storage = await SqliteBackend.connect(config.storage)
+    storage = await connect_storage(config.storage)
     try:
         if args.query_type == "events":
             await run_query_events(storage, args)

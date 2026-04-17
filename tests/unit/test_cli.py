@@ -719,7 +719,7 @@ class TestGracefulStartupError:
 
         with (
             patch("seerflow.pipeline.run.build_pipeline", new_callable=AsyncMock) as mock_build,
-            patch("seerflow.storage.sqlite.SqliteBackend.connect", new_callable=AsyncMock),
+            patch("seerflow.pipeline.run.connect_storage", new_callable=AsyncMock),
             pytest.raises(SystemExit) as exc_info,
         ):
             mock_build.side_effect = RuntimeError("All receivers failed to start: ['syslog']")
@@ -743,7 +743,7 @@ class TestGracefulStartupError:
 
         with (
             patch("seerflow.pipeline.run.build_pipeline", new_callable=AsyncMock) as mock_build,
-            patch("seerflow.storage.sqlite.SqliteBackend.connect", new_callable=AsyncMock),
+            patch("seerflow.pipeline.run.connect_storage", new_callable=AsyncMock),
             caplog.at_level(logging.ERROR, logger="seerflow"),
             pytest.raises(SystemExit),
         ):

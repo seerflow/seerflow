@@ -1277,7 +1277,7 @@ class TestRunQueryHealth:
         with (
             patch("seerflow.config.load_config") as mock_cfg,
             patch(
-                "seerflow.storage.sqlite.SqliteBackend.connect",
+                "seerflow.query.connect_storage",
                 new_callable=AsyncMock,
             ) as mock_connect,
         ):
@@ -1306,7 +1306,7 @@ class TestRunQueryHealth:
         with (
             patch("seerflow.config.load_config") as mock_cfg,
             patch(
-                "seerflow.storage.sqlite.SqliteBackend.connect",
+                "seerflow.query.connect_storage",
                 new_callable=AsyncMock,
             ) as mock_connect,
         ):
@@ -1339,7 +1339,7 @@ class TestRunQueryHealth:
         with (
             patch("seerflow.config.load_config") as mock_cfg,
             patch(
-                "seerflow.storage.sqlite.SqliteBackend.connect",
+                "seerflow.query.connect_storage",
                 new_callable=AsyncMock,
             ) as mock_connect,
         ):
@@ -1385,7 +1385,7 @@ class TestRunQueryHealth:
         with (
             patch("seerflow.config.load_config") as mock_cfg,
             patch(
-                "seerflow.storage.sqlite.SqliteBackend.connect",
+                "seerflow.query.connect_storage",
                 new_callable=AsyncMock,
                 side_effect=OSError("no db"),
             ),
