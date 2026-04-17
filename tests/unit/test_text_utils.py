@@ -69,16 +69,23 @@ class TestSanitiseFeedbackNote:
         with pytest.raises(ValueError, match="max_length must be non-negative"):
             sanitise_feedback_note("abc", max_length=-1)
 
-    def test_preserves_unicode_line_separators_by_design(self) -> None:
-        """U+2028 / U+2029 / U+0085 are above 0x7F and are NOT stripped.
-
-        This is intentional — the helper strips only C0 + DEL so that CJK, Latin-1
-        accents, and other high-plane characters survive. Downstream consumers that
-        cannot tolerate these characters must strip them separately.
+    def test_strips_unicode_line_separators(self) -> None:
+        """U+0085 / U+2028 / U+2029 are newline-equivalent to many log parsers,
+        JSON readers, and terminal emulators. They are stripped to close a
+        log-injection bypass of the C0 + DEL strip.
         """
         from seerflow.utils.text import sanitise_feedback_note
 
-        assert sanitise_feedback_note("a\u2028b\u2029c\u0085d") == "a\u2028b\u2029c\u0085d"
+        assert sanitise_feedback_note("a\u2028b\u2029c\u0085d") == "abcd"
+
+    def test_strips_line_separator_injection_payload(self) -> None:
+        """A synthetic log-injection attempt via U+2028 is neutralised."""
+        from seerflow.utils.text import sanitise_feedback_note
+
+        payload = "legit note\u2028[SECURITY] admin password changed"
+        cleaned = sanitise_feedback_note(payload)
+        assert "\u2028" not in cleaned
+        assert cleaned == "legit note[SECURITY] admin password changed"
 
     def test_sanitise_is_idempotent(self) -> None:
         """Applying the sanitiser twice is a no-op — a persisted note round-trips cleanly."""

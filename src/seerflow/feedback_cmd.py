@@ -19,11 +19,15 @@ async def run_feedback(args: argparse.Namespace) -> None:
     from seerflow.alerting.feedback import process_feedback
     from seerflow.config import load_config
     from seerflow.detection.ensemble import DetectionEnsemble
-    from seerflow.utils.text import sanitise_feedback_note
+    from seerflow.utils.text import NOTE_MAX_LENGTH, sanitise_feedback_note
 
     safe_note = ""
     if args.note:
-        safe_note = sanitise_feedback_note(args.note)
+        # Pre-cap raw argv before str.translate to bound worst-case memory. After
+        # stripping control chars the result is truncated to NOTE_MAX_LENGTH; 4x
+        # that is an ample upper bound on pre-strip length for any legitimate note
+        # and keeps the translate cost linear on a known-small buffer.
+        safe_note = sanitise_feedback_note(args.note[: NOTE_MAX_LENGTH * 4])
         _log.info("Persisting feedback note (%d chars)", len(safe_note))
 
     config = load_config(args.config)

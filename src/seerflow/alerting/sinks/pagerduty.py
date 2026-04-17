@@ -170,7 +170,8 @@ class PagerDutySink:
         try:
             self._queue.put_nowait(_PagerDutyEvent(payload=payload))
         except asyncio.QueueFull:
-            _log.warning("PagerDuty queue full — dropping resolve for %s", dedup_key)
+            truncated = dedup_key[:8] + ("..." if len(dedup_key) > 8 else "")
+            _log.warning("PagerDuty queue full — dropping resolve for %s", truncated)
 
     async def run(self) -> None:
         """Background consumer loop. Runs until stopped and queue is empty."""

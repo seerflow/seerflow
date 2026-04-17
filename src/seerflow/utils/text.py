@@ -6,17 +6,32 @@ NOTE_MAX_LENGTH = 512
 """Shared cap for persisted feedback notes. Mirrored by ``FeedbackRequest.note``'s
 ``Field(max_length=...)``. Keep both in sync via this constant."""
 
-_CONTROL_CODEPOINTS: tuple[int, ...] = (*tuple(range(32)), 127)
+_CONTROL_CODEPOINTS: tuple[int, ...] = (
+    *tuple(range(32)),
+    0x7F,
+    0x85,
+    0x2028,
+    0x2029,
+)
 _TRANSLATE_TABLE: dict[int, None] = dict.fromkeys(_CONTROL_CODEPOINTS)
 
 
 def sanitise_feedback_note(raw: str, *, max_length: int = NOTE_MAX_LENGTH) -> str:
-    """Strip C0 controls and DEL from a user-supplied feedback note, then truncate.
+    """Strip C0 controls, DEL, and Unicode line separators from a feedback note.
 
     Used by both the CLI (``seerflow feedback --note``) and the REST API
     (``FeedbackRequest.note``) so the persisted representation is byte-identical
     regardless of the caller. Uses ``str.translate`` with a precomputed table
     (~20x faster than a generator-expression filter).
+
+    Stripped characters:
+      * ``U+0000..U+001F`` (C0 controls, including ``\\n``, ``\\r``, ``\\t``, ``\\x00``).
+      * ``U+007F`` (DEL).
+      * ``U+0085`` (NEL), ``U+2028`` (LINE SEP), ``U+2029`` (PARAGRAPH SEP) — these
+        are newline-equivalent to many log aggregators, JSON parsers, and terminal
+        emulators, so permitting them would expose a log-injection vector.
+
+    Other Unicode (Latin-1 accents, CJK, emoji, etc.) is preserved.
 
     Args:
         raw: Untrusted user input.
@@ -25,12 +40,8 @@ def sanitise_feedback_note(raw: str, *, max_length: int = NOTE_MAX_LENGTH) -> st
             ``FeedbackRequest.note``'s ``Field(max_length=...)``.
 
     Returns:
-        ``raw`` with every character in the range ``U+0000..U+001F`` and
-        ``U+007F`` (DEL) removed, truncated to at most ``max_length`` code
-        points. Characters above ``U+007F`` (including Latin-1 accents, CJK,
-        and Unicode line-separator code points such as U+2028 / U+2029) are
-        preserved by design; if downstream consumers need to strip them, that
-        is a separate concern.
+        ``raw`` with the stripped characters removed, truncated to at most
+        ``max_length`` code points.
 
     Raises:
         ValueError: If ``max_length`` is negative.
