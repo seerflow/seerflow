@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -15,6 +14,9 @@ from seerflow.alerting.formatters import format_json, format_slack, format_teams
 from seerflow.alerting.mask import mask_webhook_url
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from seerflow.alerting.router import NotificationRouter
     from seerflow.models.alert import Alert
 
 _log = logging.getLogger("seerflow")
@@ -46,7 +48,7 @@ class WebhookTarget:
             "use AlertDispatcher or NotificationRouter."
         )
 
-    async def deliver_digest(self, alerts: "Sequence[Alert]") -> None:
+    async def deliver_digest(self, alerts: Sequence[Alert]) -> None:
         raise NotImplementedError(
             "WebhookTarget.deliver_digest is not called directly; "
             "use AlertDispatcher or NotificationRouter."
@@ -82,12 +84,14 @@ class AlertDispatcher:
         session: aiohttp.ClientSession,
         queue_maxsize: int = 10_000,
         dashboard_url: str = "",
+        router: NotificationRouter | None = None,
     ) -> None:
         self._targets = targets
         self._session = session
         self._queue: asyncio.Queue[Alert] = asyncio.Queue(maxsize=queue_maxsize)
         self._running = True
         self._dashboard_url = dashboard_url
+        self._router = router
 
     def enqueue(self, alert: Alert) -> None:
         """Enqueue an alert for delivery. Drops silently if queue is full."""
@@ -111,6 +115,9 @@ class AlertDispatcher:
 
     async def _dispatch(self, alert: Alert) -> None:
         """Send the alert to all configured targets, respecting severity filters."""
+        if self._router is not None:
+            await self._router.route(alert)
+            return
         for target in self._targets:
             if int(alert.severity_id) < target.min_severity:
                 continue
@@ -184,3 +191,36 @@ class AlertDispatcher:
             self._MAX_RETRIES,
             alert_id,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _WebhookDeliveryAdapter:
+    """Adapts a WebhookTarget to DeliveryTarget by routing deliveries through
+    AlertDispatcher's existing post-with-retry pipeline."""
+
+    name: str
+    min_severity: int
+    _target: WebhookTarget
+    _dispatcher: AlertDispatcher
+
+    async def deliver(self, alert: Alert) -> None:
+        payload = _format(
+            alert, self._target.format, dashboard_url=self._dispatcher._dashboard_url
+        )
+        await self._dispatcher._post_with_retry(self._target, payload, alert.alert_id)
+
+    async def deliver_digest(self, alerts: Sequence[Alert]) -> None:
+        for alert in alerts:
+            await self.deliver(alert)
+
+
+def build_webhook_delivery_targets(
+    dispatcher: AlertDispatcher,
+) -> tuple[_WebhookDeliveryAdapter, ...]:
+    """Produce DeliveryTarget adapters wired to dispatcher's retry pipeline."""
+    return tuple(
+        _WebhookDeliveryAdapter(
+            name=t.name, min_severity=t.min_severity, _target=t, _dispatcher=dispatcher
+        )
+        for t in dispatcher._targets
+    )

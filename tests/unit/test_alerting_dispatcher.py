@@ -443,6 +443,46 @@ class TestDispatcherDashboardUrl:
         assert len(actions) == 0
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dispatcher_preserves_legacy_fanout_when_router_absent() -> None:
+    """No router ⇒ today's per-target min_severity fan-out runs unchanged."""
+    from tests.unit.alert_factory import make_alert
+
+    session = _mock_session(status=200)
+    t_low = WebhookTarget(name="low", url="https://a/x", format="json", min_severity=0)
+    t_high = WebhookTarget(name="high", url="https://b/x", format="json", min_severity=5)
+
+    d = AlertDispatcher(targets=(t_low, t_high), session=session)
+    d.enqueue(make_alert(severity_id=SeverityLevel.WARNING))
+    await d.stop()
+    await asyncio.wait_for(d.run(), timeout=5.0)
+
+    # Only t_low receives the WARNING alert (sev=3 < 5 for t_high)
+    assert session.post.call_count == 1
+    assert session.post.call_args[0][0] == "https://a/x"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dispatcher_delegates_when_router_present() -> None:
+    """Router wired ⇒ dispatcher calls router.route instead of per-target fan-out."""
+    from tests.unit.alert_factory import make_alert
+
+    session = _mock_session(status=200)
+    target = WebhookTarget(name="t1", url="https://a/x", format="json")
+    fake_router = AsyncMock()
+
+    d = AlertDispatcher(targets=(target,), session=session, router=fake_router)
+    alert = make_alert()
+    d.enqueue(alert)
+    await d.stop()
+    await asyncio.wait_for(d.run(), timeout=5.0)
+
+    fake_router.route.assert_awaited_once_with(alert)
+    session.post.assert_not_called()
+
+
 class TestResponseBodyLogging:
     @pytest.mark.asyncio
     async def test_4xx_reads_response_body(self) -> None:
