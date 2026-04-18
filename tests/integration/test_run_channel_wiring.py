@@ -91,12 +91,8 @@ async def test_webhook_adapter_injected_into_router_via_public_api() -> None:
     )
 
     cfg = AlertingConfig(
-        webhook_targets=(
-            WebhookTarget(name="wh", url="https://x.example", format="json"),
-        ),
-        telegram_targets=(
-            TelegramTarget(name="tg", bot_token="t:ABC", chat_id="-1"),
-        ),
+        webhook_targets=(WebhookTarget(name="wh", url="https://x.example", format="json"),),
+        telegram_targets=(TelegramTarget(name="tg", bot_token="t:ABC", chat_id="-1"),),
     )
     session, router = await _build_channel_session_and_router(cfg)
     assert router is not None

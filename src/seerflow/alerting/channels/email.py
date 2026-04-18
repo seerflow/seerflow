@@ -29,6 +29,8 @@ _SEVERITY_COLOUR: dict[int, str] = {
     5: "#c00",
     6: "#800",
 }
+
+
 def _sev(alert: Alert) -> str:
     return severity_name(int(alert.severity_id))
 
