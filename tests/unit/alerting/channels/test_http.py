@@ -97,3 +97,40 @@ async def test_post_with_retry_uses_data_when_provided() -> None:
             )
     assert "data" in captured
     assert "json" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_with_retry_scrubs_telegram_bot_token_from_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """aiohttp exception strings sometimes echo the request URL. The helper
+    must scrub credential-bearing path segments before logging.
+    """
+    import logging
+
+    url = "https://api.telegram.org/bot123456:SECRET/sendMessage"
+
+    class _RaisingSession:
+        async def __aenter__(self) -> _RaisingSession:
+            raise OSError(f"Cannot connect to {url}")
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    class _FakeSession:
+        def post(self, _url: str, **_kwargs: object) -> _RaisingSession:
+            return _RaisingSession()
+
+    caplog.set_level(logging.WARNING, logger="seerflow")
+    await post_with_retry(
+        _FakeSession(),  # type: ignore[arg-type]
+        url,
+        {"x": 1},
+        masked_for_log="telegram/-1",
+        attempts=1,
+        delays=(0.0,),
+    )
+    combined = " ".join(rec.getMessage() for rec in caplog.records)
+    assert "SECRET" not in combined
+    assert "/bot<redacted>/" in combined

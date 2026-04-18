@@ -15,11 +15,23 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+# Scrub credential-bearing URL prefixes from log strings. Currently matches
+# Telegram's ``/bot<token>/`` pattern — aiohttp exception messages frequently
+# echo the request URL, so scrubbing at the log boundary keeps bot tokens out
+# of operator log streams.
+_SECRET_URL_PATTERNS = (re.compile(r"/bot[^/\s]+/"),)
 
 
 def _sanitize_body(raw: str, max_len: int = 200) -> str:
     """Strip control characters and truncate for safe logging."""
     return _CONTROL_CHARS.sub(" ", raw)[:max_len]
+
+
+def _scrub_secrets(msg: str) -> str:
+    """Redact known-secret URL segments from a log string."""
+    for pat in _SECRET_URL_PATTERNS:
+        msg = pat.sub("/bot<redacted>/", msg)
+    return msg
 
 
 async def post_with_retry(
@@ -88,7 +100,7 @@ async def post_with_retry(
                 "Channel %s failed (attempt %d): %s",
                 masked_for_log,
                 attempt + 1,
-                exc,
+                _scrub_secrets(str(exc)),
             )
         if attempt < attempts - 1:
             sleep_for = delays[attempt] if attempt < len(delays) else delays[-1]
