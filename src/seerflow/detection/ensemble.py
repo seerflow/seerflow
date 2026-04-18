@@ -648,13 +648,36 @@ class DetectionEnsemble:
             _log.warning("Corrupt %s manifest — skipping", prefix, exc_info=True)
             return 0
         loaded = 0
+        idx = 0 if hw_dict is self._template_hw else 1
         # Reverse: manifest preserves LRU order (oldest first from OrderedDict),
         # so load MRU entries first to keep the hottest keys when capacity-limited.
-        for key, evt_count in list(manifest.items())[-max_items:]:
+        for raw_key, evt_count in list(manifest.items())[-max_items:]:
             if not isinstance(evt_count, int) or evt_count < 0:
-                _log.warning("Invalid event count %r for %s:%s — skipping", evt_count, prefix, key)
+                _log.warning(
+                    "Invalid event count %r for %s:%s — skipping",
+                    evt_count,
+                    prefix,
+                    raw_key,
+                )
                 continue
-            data = await storage.load_state(f"{prefix}:{key}")
+            # Re-apply sanitizer so legacy colon-laden sources collapse.
+            # Keys have format "{source}:{id}". Sanitize the source segment only
+            # (rsplit to isolate the rightmost colon as the separator).
+            if ":" in raw_key:
+                src_part, suffix = raw_key.rsplit(":", 1)
+                src_part = src_part.replace("\x00", "").replace(":", "_")
+                suffix = suffix.replace("\x00", "")
+                sanitized_key = f"{src_part}:{suffix}"
+            else:
+                sanitized_key = raw_key.replace("\x00", "")
+            if sanitized_key in hw_dict:
+                _log.warning(
+                    "Duplicate %s key %r after sanitization — keeping first",
+                    prefix,
+                    sanitized_key[:64],
+                )
+                continue
+            data = await storage.load_state(f"{prefix}:{raw_key}")
             if data is None:
                 continue
             try:
@@ -666,14 +689,18 @@ class DetectionEnsemble:
                     n_std=self._config.hw_n_std,
                 )
                 hw.deserialize(data)
-                hw_dict[key] = hw
-                counts_dict[key] = evt_count
+                hw_dict[sanitized_key] = hw
+                counts_dict[sanitized_key] = evt_count
+                owning_source = sanitized_key.split(":", 1)[0]
+                self._source_hw_keys.setdefault(
+                    owning_source, (set(), set())
+                )[idx].add(sanitized_key)
                 loaded += 1
             except Exception:
                 _log.warning(
                     "Corrupt %s state for %s — skipping",
                     prefix,
-                    key,
+                    sanitized_key,
                     exc_info=True,
                 )
         return loaded

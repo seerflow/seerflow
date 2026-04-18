@@ -1786,3 +1786,75 @@ class TestReverseHWIndex:
         )
         assert "s:e1" not in ensemble._entity_hw
         assert ensemble._source_hw_keys["s"][1] == {"s:e2", "s:e3"}
+
+
+class TestLoadStateReverseIndex:
+    """S-201: load_all_state re-sanitizes manifest keys and rebuilds reverse index."""
+
+    @pytest.mark.asyncio
+    async def test_load_populates_reverse_index_from_manifest(
+        self, tmp_path: object
+    ) -> None:
+        from seerflow.config import StorageConfig
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test.db"),  # type: ignore[operator]
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        src_ensemble = DetectionEnsemble(config)
+        src_ensemble.process_event(
+            _make_event(source_type="s", template_id=1, entity_refs=("e1",)),
+        )
+        src_ensemble.process_event(_make_event(source_type="s", template_id=2))
+        await src_ensemble.save_all_state(storage)
+        dst_ensemble = DetectionEnsemble(config)
+        await dst_ensemble.load_all_state(storage)
+        assert dst_ensemble._source_hw_keys["s"][0] == {"s:1", "s:2"}
+        assert dst_ensemble._source_hw_keys["s"][1] == {"s:e1"}
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_resanitizes_legacy_colon_keys(self, tmp_path: object) -> None:
+        """Manifest entries persisted before S-201 may contain colon-laden
+        source segments. Sanitize on load and WARN on collision."""
+        from seerflow.config import StorageConfig
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test2.db"),  # type: ignore[operator]
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Hand-craft a legacy manifest with a colon in the source segment.
+        import msgspec.json
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"legacy:src:1": 10, "legacy_src:1": 5}),
+        )
+        # Persist a minimal HW body for each so load_state returns non-None.
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        body = hw.serialize()
+        await storage.save_state("tmpl_hw:legacy:src:1", body)
+        await storage.save_state("tmpl_hw:legacy_src:1", body)
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(config)
+        await dst.load_all_state(storage)
+        # Both pre-existing keys collapse to "legacy_src:1".
+        assert list(dst._template_hw.keys()) == ["legacy_src:1"]
+        assert dst._source_hw_keys["legacy_src"][0] == {"legacy_src:1"}
+
+        await storage.close()
