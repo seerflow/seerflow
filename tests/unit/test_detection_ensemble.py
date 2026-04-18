@@ -1671,3 +1671,12 @@ class TestSourceColonSanitization:
         # And: the HW key suffix has no additional colons (source colon is the only one).
         suffixes = [k.split(":", 1)[1] for k in keys]
         assert all(":" not in s for s in suffixes)
+
+
+class TestReverseHWIndex:
+    """S-201: per-source reverse index for O(k) eviction cleanup."""
+
+    def test_source_hw_keys_initialized_empty(self) -> None:
+        config = _make_config(max_sources=2, max_template_hw=8, max_entity_hw=8)
+        ensemble = DetectionEnsemble(config)
+        assert ensemble._source_hw_keys == {}

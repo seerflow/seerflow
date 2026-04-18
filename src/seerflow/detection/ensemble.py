@@ -130,6 +130,7 @@ class DetectionEnsemble:
         "_min_events_for_scoring",
         "_score_interval",
         "_score_windows",
+        "_source_hw_keys",
         "_template_event_counts",
         "_template_hw",
         "_template_hw_eviction_count",
@@ -155,6 +156,7 @@ class DetectionEnsemble:
         self._entity_event_counts: dict[str, int] = {}
         self._template_hw_eviction_count: int = 0
         self._entity_hw_eviction_count: int = 0
+        self._source_hw_keys: dict[str, tuple[set[str], set[str]]] = {}
         self._weights: tuple[float, ...] = (
             config.weights_content,
             config.weights_volume,
