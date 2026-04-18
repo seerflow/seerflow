@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import aiosmtplib
 
+from seerflow.alerting.channels._ratelimit import TokenBucket
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -101,6 +103,16 @@ class EmailTarget:
     smtp_password: str = field(default="", repr=False)
     min_severity: int = 0
     max_per_minute: int | None = None
+    _bucket: TokenBucket | None = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        bucket: TokenBucket | None = None
+        if self.max_per_minute is not None:
+            bucket = TokenBucket(
+                rate_per_second=self.max_per_minute / 60.0,
+                burst=self.max_per_minute,
+            )
+        object.__setattr__(self, "_bucket", bucket)
 
     def _build_message(self, subject: str, html: str, text: str) -> EmailMessage:
         msg = EmailMessage()
@@ -112,6 +124,8 @@ class EmailTarget:
         return msg
 
     async def _send(self, msg: EmailMessage) -> None:
+        if self._bucket is not None:
+            await self._bucket.acquire()
         username = self.smtp_user or None
         password = self.smtp_password if self.smtp_user else None
         try:

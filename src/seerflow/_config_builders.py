@@ -761,6 +761,39 @@ def _collect_quiet_hours(
     return tuple(pairs)
 
 
+def _collect_channel_quiet_hours(
+    raw: tuple[dict[str, Any], ...],
+    targets: tuple[Any, ...],
+) -> tuple[tuple[str, QuietHours], ...]:
+    """Generic quiet_hours extractor for the new channel kinds (S-163).
+
+    Mirrors :func:`_collect_quiet_hours` but works against any typed
+    target tuple whose items expose a ``name`` attribute. Each raw YAML
+    dict may carry a ``quiet_hours`` stanza alongside its other fields.
+    """
+    pairs: list[tuple[str, QuietHours]] = []
+    for entry, target in zip(raw, targets, strict=True):
+        qh_raw = entry.get("quiet_hours")
+        if qh_raw:
+            pairs.append((target.name, _build_quiet_hours(qh_raw, target.name)))
+    return tuple(pairs)
+
+
+def _merge_unique_channel_names(
+    *named_target_tuples: tuple[Any, ...],
+) -> set[str]:
+    """Union channel names across every kind and raise on collisions."""
+    seen: set[str] = set()
+    for tup in named_target_tuples:
+        for t in tup:
+            if t.name in seen:
+                raise ConfigError(
+                    f"alerting: duplicate channel name {t.name!r} across target kinds"
+                )
+            seen.add(t.name)
+    return seen
+
+
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
@@ -769,22 +802,38 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     overrides = _parse_dedup_overrides(raw_overrides) if isinstance(raw_overrides, dict) else ()
     webhook_targets = _build_webhook_targets(webhooks)
 
-    email_targets = _build_email_targets(tuple(data.get("email_targets", ()) or ()))
-    sms_targets = _build_sms_targets(tuple(data.get("sms_targets", ()) or ()))
-    telegram_targets = _build_telegram_targets(tuple(data.get("telegram_targets", ()) or ()))
-    whatsapp_targets = _build_whatsapp_targets(tuple(data.get("whatsapp_targets", ()) or ()))
+    email_raw = tuple(data.get("email_targets", ()) or ())
+    sms_raw = tuple(data.get("sms_targets", ()) or ())
+    telegram_raw = tuple(data.get("telegram_targets", ()) or ())
+    whatsapp_raw = tuple(data.get("whatsapp_targets", ()) or ())
 
-    known_channels: set[str] = {t.name for t in webhook_targets}
-    known_channels.update(t.name for t in email_targets)
-    known_channels.update(t.name for t in sms_targets)
-    known_channels.update(t.name for t in telegram_targets)
-    known_channels.update(t.name for t in whatsapp_targets)
+    email_targets = _build_email_targets(email_raw)
+    sms_targets = _build_sms_targets(sms_raw)
+    telegram_targets = _build_telegram_targets(telegram_raw)
+    whatsapp_targets = _build_whatsapp_targets(whatsapp_raw)
+
+    known_channels = _merge_unique_channel_names(
+        webhook_targets,
+        email_targets,
+        sms_targets,
+        telegram_targets,
+        whatsapp_targets,
+    )
 
     routing_rules = _build_routing_rules(data.get("routing_rules", ()), known_channels)
     default_routing = _build_default_routing(
         data.get("default_routing"), known_channels, has_rules=bool(routing_rules)
     )
     otlp_endpoint, otlp_protocol, otlp_interval = _validate_otlp_settings(data)
+
+    quiet_hours: list[tuple[str, QuietHours]] = list(
+        _collect_quiet_hours(webhooks, webhook_targets)
+    )
+    quiet_hours.extend(_collect_channel_quiet_hours(email_raw, email_targets))
+    quiet_hours.extend(_collect_channel_quiet_hours(sms_raw, sms_targets))
+    quiet_hours.extend(_collect_channel_quiet_hours(telegram_raw, telegram_targets))
+    quiet_hours.extend(_collect_channel_quiet_hours(whatsapp_raw, whatsapp_targets))
+
     return AlertingConfig(
         dedup_window_seconds=_validate_dedup_window(data),
         dedup_window_overrides=overrides,
@@ -796,7 +845,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         whatsapp_targets=whatsapp_targets,
         routing_rules=routing_rules,
         default_routing=default_routing,
-        quiet_hours_by_channel=_collect_quiet_hours(webhooks, webhook_targets),
+        quiet_hours_by_channel=tuple(quiet_hours),
         pagerduty_routing_key=_validate_pagerduty_key(data),
         dashboard_url=_validate_dashboard_url_field(data),
         otlp_endpoint=otlp_endpoint,

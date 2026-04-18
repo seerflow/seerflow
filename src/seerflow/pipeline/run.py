@@ -316,7 +316,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         )
         if router is not None and webhook_targets:
             for adapter in build_webhook_delivery_targets(dispatcher):
-                router._targets[adapter.name] = adapter
+                router.register_target(adapter)
         _dispatcher_task = asyncio.create_task(dispatcher.run())
         _log.info(
             "Alert dispatcher: %d webhook target(s), router=%s",

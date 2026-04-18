@@ -254,3 +254,62 @@ def test_alerting_config_defaults_all_target_tuples_empty() -> None:
     assert cfg.sms_targets == ()
     assert cfg.telegram_targets == ()
     assert cfg.whatsapp_targets == ()
+
+
+@pytest.mark.unit
+def test_alerting_config_rejects_cross_kind_duplicate_name() -> None:
+    data = {
+        "webhooks": [
+            {"name": "oncall", "url": "https://x.example", "format": "json"},
+        ],
+        "email_targets": [
+            {
+                "name": "oncall",
+                "smtp_host": "smtp.x.io",
+                "smtp_port": 587,
+                "use_starttls": True,
+                "from_address": "a@x",
+                "to_addresses": ["b@x"],
+            },
+        ],
+    }
+    with pytest.raises(ConfigError, match="duplicate channel name"):
+        _build_alerting(data)
+
+
+@pytest.mark.unit
+def test_alerting_config_parses_quiet_hours_for_email_targets() -> None:
+    data = {
+        "email_targets": [
+            {
+                "name": "em",
+                "smtp_host": "smtp.x.io",
+                "smtp_port": 587,
+                "use_starttls": True,
+                "from_address": "a@x",
+                "to_addresses": ["b@x"],
+                "quiet_hours": {"start": "22:00", "end": "06:00", "min_severity": 5},
+            },
+        ],
+    }
+    cfg = _build_alerting(data)
+    by_name = dict(cfg.quiet_hours_by_channel)
+    assert "em" in by_name
+    assert by_name["em"].min_severity == 5
+
+
+@pytest.mark.unit
+def test_alerting_config_parses_quiet_hours_for_telegram_targets() -> None:
+    data = {
+        "telegram_targets": [
+            {
+                "name": "tg",
+                "bot_token": "t:ABC",
+                "chat_id": "-1",
+                "quiet_hours": {"start": "22:00", "end": "06:00", "min_severity": 5},
+            },
+        ],
+    }
+    cfg = _build_alerting(data)
+    by_name = dict(cfg.quiet_hours_by_channel)
+    assert "tg" in by_name
