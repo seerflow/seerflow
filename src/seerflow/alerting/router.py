@@ -10,11 +10,14 @@ configured HH:MM UTC window.
 
 from __future__ import annotations
 
+import fnmatch
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from datetime import time
+
+    from seerflow.models.alert import Alert
 
 Mode = Literal["immediate", "digest"]
 DefaultAction = Literal["drop", "notify"]
@@ -68,3 +71,32 @@ class DefaultRouting:
 
     action: DefaultAction = "drop"
     notify: tuple[RoutingRuleNotify, ...] = ()
+
+
+def _matches_str_or_tuple(
+    predicate: str | tuple[str, ...] | None, value: str
+) -> bool:
+    if predicate is None:
+        return True
+    if isinstance(predicate, str):
+        return predicate == value
+    return value in predicate
+
+
+def _rule_matches(rule: RoutingRule, alert: Alert) -> bool:
+    """Return True iff every non-None predicate on ``rule.match`` matches.
+
+    Severity comparisons use the integer value of ``SeverityLevel``.
+    ``rule_name`` is matched with ``fnmatch.fnmatchcase`` (case-sensitive glob).
+    """
+    m = rule.match
+    if not _matches_str_or_tuple(m.alert_type, alert.alert_type):
+        return False
+    if m.rule_name is not None and not fnmatch.fnmatchcase(alert.rule_name, m.rule_name):
+        return False
+    if not _matches_str_or_tuple(m.entity_type, alert.entity_type):
+        return False
+    sev = int(alert.severity_id)
+    if m.min_severity is not None and sev < m.min_severity:
+        return False
+    return not (m.max_severity is not None and sev > m.max_severity)
