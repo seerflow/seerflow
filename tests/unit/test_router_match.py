@@ -30,9 +30,7 @@ def test_empty_match_is_wildcard() -> None:
         (("sigma", "ml"), "correlation", False),
     ],
 )
-def test_alert_type_predicate(
-    predicate: object, alert_type: str, expected: bool
-) -> None:
+def test_alert_type_predicate(predicate: object, alert_type: str, expected: bool) -> None:
     alert = make_alert(alert_type=alert_type)
     rule = RoutingRule(match=RoutingRuleMatch(alert_type=predicate))  # type: ignore[arg-type]
     assert _rule_matches(rule, alert) is expected
@@ -65,10 +63,10 @@ def test_entity_type_list() -> None:
 @pytest.mark.parametrize(
     "severity,min_sev,max_sev,expected",
     [
-        (SeverityLevel.WARNING, 3, None, True),   # 3 >= 3
-        (SeverityLevel.NOTICE, 3, None, False),   # 2 < 3
-        (SeverityLevel.WARNING, None, 3, True),   # 3 <= 3
-        (SeverityLevel.ERROR, None, 3, False),    # 4 > 3
+        (SeverityLevel.WARNING, 3, None, True),  # 3 >= 3
+        (SeverityLevel.NOTICE, 3, None, False),  # 2 < 3
+        (SeverityLevel.WARNING, None, 3, True),  # 3 <= 3
+        (SeverityLevel.ERROR, None, 3, False),  # 4 > 3
         (SeverityLevel.WARNING, 3, 5, True),
         (SeverityLevel.FATAL, 3, 5, False),
     ],
@@ -85,15 +83,11 @@ def test_severity_bounds(
 def test_combined_predicates_anded() -> None:
     alert = make_alert(alert_type="sigma", rule_name="brute-force-ssh", entity_type="user")
     rule = RoutingRule(
-        match=RoutingRuleMatch(
-            alert_type="sigma", rule_name="brute-force*", entity_type="user"
-        )
+        match=RoutingRuleMatch(alert_type="sigma", rule_name="brute-force*", entity_type="user")
     )
     assert _rule_matches(rule, alert) is True
 
     rule_miss = RoutingRule(
-        match=RoutingRuleMatch(
-            alert_type="sigma", rule_name="brute-force*", entity_type="ip"
-        )
+        match=RoutingRuleMatch(alert_type="sigma", rule_name="brute-force*", entity_type="ip")
     )
     assert _rule_matches(rule_miss, alert) is False

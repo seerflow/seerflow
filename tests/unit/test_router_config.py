@@ -70,9 +70,7 @@ def test_unknown_channel_rejected() -> None:
 @pytest.mark.unit
 def test_default_routing_without_rules_rejected() -> None:
     with pytest.raises(ConfigError, match=r"default_routing.*requires routing_rules"):
-        _build_alerting(
-            _yaml_alerting(default_routing={"action": "drop", "notify": []})
-        )
+        _build_alerting(_yaml_alerting(default_routing={"action": "drop", "notify": []}))
 
 
 @pytest.mark.unit

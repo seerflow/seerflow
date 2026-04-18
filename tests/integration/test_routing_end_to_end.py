@@ -36,9 +36,7 @@ async def test_end_to_end_routes_and_digests() -> None:
             RoutingRule(
                 match=RoutingRuleMatch(),
                 notify=(
-                    RoutingRuleNotify(
-                        channel="email", mode="digest", digest_window_minutes=1
-                    ),
+                    RoutingRuleNotify(channel="email", mode="digest", digest_window_minutes=1),
                 ),
             ),
         ),
@@ -63,14 +61,10 @@ async def test_end_to_end_routes_and_digests() -> None:
         )
     )
     dispatcher.enqueue(
-        make_alert(
-            alert_type="ml", rule_name="m1", severity_id=SeverityLevel.WARNING
-        )
+        make_alert(alert_type="ml", rule_name="m1", severity_id=SeverityLevel.WARNING)
     )
     dispatcher.enqueue(
-        make_alert(
-            alert_type="ml", rule_name="m2", severity_id=SeverityLevel.WARNING
-        )
+        make_alert(alert_type="ml", rule_name="m2", severity_id=SeverityLevel.WARNING)
     )
 
     with patch("seerflow.alerting.router.asyncio.sleep", new=AsyncMock()):

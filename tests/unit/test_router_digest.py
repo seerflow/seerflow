@@ -24,11 +24,7 @@ async def test_digest_buffers_and_flushes_once_on_window() -> None:
     rules = (
         RoutingRule(
             match=RoutingRuleMatch(),
-            notify=(
-                RoutingRuleNotify(
-                    channel="email", mode="digest", digest_window_minutes=1
-                ),
-            ),
+            notify=(RoutingRuleNotify(channel="email", mode="digest", digest_window_minutes=1),),
         ),
     )
     router = NotificationRouter(targets=(email,), rules=rules)
@@ -58,11 +54,7 @@ async def test_stop_flushes_pending_buffers() -> None:
     rules = (
         RoutingRule(
             match=RoutingRuleMatch(),
-            notify=(
-                RoutingRuleNotify(
-                    channel="email", mode="digest", digest_window_minutes=60
-                ),
-            ),
+            notify=(RoutingRuleNotify(channel="email", mode="digest", digest_window_minutes=60),),
         ),
     )
     router = NotificationRouter(targets=(email,), rules=rules)
@@ -90,9 +82,7 @@ async def test_immediate_and_digest_are_isolated() -> None:
             match=RoutingRuleMatch(),
             notify=(
                 RoutingRuleNotify(channel="slack", mode="immediate"),
-                RoutingRuleNotify(
-                    channel="email", mode="digest", digest_window_minutes=5
-                ),
+                RoutingRuleNotify(channel="email", mode="digest", digest_window_minutes=5),
             ),
         ),
     )

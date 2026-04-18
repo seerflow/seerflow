@@ -70,6 +70,7 @@ async def test_per_target_min_severity_still_applies() -> None:
     router = NotificationRouter(targets=(slack,), rules=rules)
 
     from seerflow.models.event import SeverityLevel
+
     await router.route(make_alert(severity_id=SeverityLevel.WARNING))
     assert slack.delivered == []
 

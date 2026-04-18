@@ -81,9 +81,7 @@ class DefaultRouting:
     notify: tuple[RoutingRuleNotify, ...] = ()
 
 
-def _matches_str_or_tuple(
-    predicate: str | tuple[str, ...] | None, value: str
-) -> bool:
+def _matches_str_or_tuple(predicate: str | tuple[str, ...] | None, value: str) -> bool:
     if predicate is None:
         return True
     if isinstance(predicate, str):
@@ -191,17 +189,7 @@ class NotificationRouter:
             else:
                 self._buffer_for_digest(rule_idx, entry, target, alert)
 
-    def _select_notify(self, alert: Alert) -> tuple[RoutingRuleNotify, ...]:
-        for rule in self._rules:
-            if _rule_matches(rule, alert):
-                return rule.notify
-        if self._default.action == "notify":
-            return self._default.notify
-        return ()
-
-    def _select_notify_with_idx(
-        self, alert: Alert
-    ) -> tuple[int, tuple[RoutingRuleNotify, ...]]:
+    def _select_notify_with_idx(self, alert: Alert) -> tuple[int, tuple[RoutingRuleNotify, ...]]:
         for idx, rule in enumerate(self._rules):
             if _rule_matches(rule, alert):
                 return idx, rule.notify
@@ -239,9 +227,7 @@ class NotificationRouter:
             return
         await self._flush_key(key, target)
 
-    async def _flush_key(
-        self, key: tuple[int, str], target: DeliveryTarget
-    ) -> None:
+    async def _flush_key(self, key: tuple[int, str], target: DeliveryTarget) -> None:
         buf = self._digest_buffers.pop(key, [])
         self._digest_tasks.pop(key, None)
         if not buf:

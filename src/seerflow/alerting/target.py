@@ -21,14 +21,12 @@ class DeliveryTarget(Protocol):
     name: str
     min_severity: int
 
-    async def deliver(self, alert: Alert) -> None: ...
+    async def deliver(self, alert: Alert) -> None: ...  # pragma: no cover
 
-    async def deliver_digest(self, alerts: Sequence[Alert]) -> None: ...
+    async def deliver_digest(self, alerts: Sequence[Alert]) -> None: ...  # pragma: no cover
 
 
-async def loop_deliver_digest(
-    target: DeliveryTarget, alerts: Sequence[Alert]
-) -> None:
+async def loop_deliver_digest(target: DeliveryTarget, alerts: Sequence[Alert]) -> None:
     """Default ``deliver_digest`` implementation: loops ``deliver`` per alert.
 
     Concrete targets (WebhookTarget, future email/SMS channels) may override

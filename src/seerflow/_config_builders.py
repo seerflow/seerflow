@@ -338,15 +338,11 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
             )
         name = wh.get("name") or f"webhook-{idx}"
         if not isinstance(name, str) or not name:
-            raise ConfigError(
-                f"alerting.webhooks[{idx}].name must be a non-empty string"
-            )
+            raise ConfigError(f"alerting.webhooks[{idx}].name must be a non-empty string")
         if name in used_names:
             raise ConfigError(f"alerting.webhooks: duplicate name {name!r}")
         used_names.add(name)
-        targets.append(
-            WebhookTarget(name=name, url=url, format=fmt, min_severity=min_severity)
-        )
+        targets.append(WebhookTarget(name=name, url=url, format=fmt, min_severity=min_severity))
     return tuple(targets)
 
 
@@ -371,15 +367,11 @@ def _build_quiet_hours(raw: dict[str, Any], channel: str) -> QuietHours:
         )
     min_sev = raw.get("min_severity", 0)
     if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
-        raise ConfigError(
-            f"alerting.{channel}.quiet_hours.min_severity must be an int in [0,6]"
-        )
+        raise ConfigError(f"alerting.{channel}.quiet_hours.min_severity must be an int in [0,6]")
     return QuietHours(start=start, end=end, min_severity=min_sev)
 
 
-def _build_routing_rules(
-    raw: object, known_channels: set[str]
-) -> tuple[RoutingRule, ...]:
+def _build_routing_rules(raw: object, known_channels: set[str]) -> tuple[RoutingRule, ...]:
     from seerflow.alerting.router import (
         RoutingRule,
         RoutingRuleMatch,
@@ -398,9 +390,7 @@ def _build_routing_rules(
             return v
         if isinstance(v, list) and all(isinstance(x, str) for x in v):
             return tuple(v)
-        raise ConfigError(
-            f"routing_rules predicate must be str or list[str], got {v!r}"
-        )
+        raise ConfigError(f"routing_rules predicate must be str or list[str], got {v!r}")
 
     def _bounds(v: object, label: str) -> int | None:
         if v is None:
@@ -422,8 +412,7 @@ def _build_routing_rules(
         )
         if min_sev is not None and max_sev is not None and min_sev > max_sev:
             raise ConfigError(
-                f"routing_rules[{idx}]: min_severity ({min_sev}) > "
-                f"max_severity ({max_sev})"
+                f"routing_rules[{idx}]: min_severity ({min_sev}) > max_severity ({max_sev})"
             )
         match = RoutingRuleMatch(
             alert_type=_normalise_str_or_list(match_raw.get("alert_type")),
@@ -449,13 +438,10 @@ def _build_routing_rules(
             window = n.get("digest_window_minutes", 15)
             if not isinstance(window, int) or isinstance(window, bool) or window < 1:
                 raise ConfigError(
-                    f"routing_rules[{idx}].notify[{n_idx}].digest_window_minutes "
-                    "must be int >= 1"
+                    f"routing_rules[{idx}].notify[{n_idx}].digest_window_minutes must be int >= 1"
                 )
             notify_list.append(
-                RoutingRuleNotify(
-                    channel=channel, mode=mode, digest_window_minutes=window
-                )
+                RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
             )
         rules.append(RoutingRule(match=match, notify=tuple(notify_list)))
     return tuple(rules)
@@ -471,39 +457,30 @@ def _build_default_routing(
     if not isinstance(raw, dict):
         raise ConfigError("alerting.default_routing must be a mapping")
     if not has_rules:
-        raise ConfigError(
-            "alerting.default_routing requires routing_rules to also be configured"
-        )
+        raise ConfigError("alerting.default_routing requires routing_rules to also be configured")
     action = raw.get("action", "drop")
     if action not in ("drop", "notify"):
-        raise ConfigError(
-            f"alerting.default_routing.action must be drop|notify, got {action!r}"
-        )
+        raise ConfigError(f"alerting.default_routing.action must be drop|notify, got {action!r}")
     notify_raw = raw.get("notify", []) or []
     notify_list: list[RoutingRuleNotify] = []
     for n_idx, n in enumerate(notify_raw):
         channel = n.get("channel", "")
         if channel not in known_channels:
             raise ConfigError(
-                f"alerting.default_routing.notify[{n_idx}]: "
-                f"unknown channel {channel!r}"
+                f"alerting.default_routing.notify[{n_idx}]: unknown channel {channel!r}"
             )
         mode = n.get("mode", "immediate")
         if mode not in ("immediate", "digest"):
             raise ConfigError(
-                f"alerting.default_routing.notify[{n_idx}].mode must be "
-                "immediate|digest"
+                f"alerting.default_routing.notify[{n_idx}].mode must be immediate|digest"
             )
         window = n.get("digest_window_minutes", 15)
         if not isinstance(window, int) or isinstance(window, bool) or window < 1:
             raise ConfigError(
-                "alerting.default_routing.notify[*].digest_window_minutes "
-                "must be int >= 1"
+                "alerting.default_routing.notify[*].digest_window_minutes must be int >= 1"
             )
         notify_list.append(
-            RoutingRuleNotify(
-                channel=channel, mode=mode, digest_window_minutes=window
-            )
+            RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
         )
     if action == "notify" and not notify_list:
         raise ConfigError(
