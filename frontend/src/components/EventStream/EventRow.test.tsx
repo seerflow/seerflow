@@ -5,8 +5,8 @@ import type { LiveEvent } from "@/lib/types";
 
 const sample: LiveEvent = {
   event_id: "e1",
-  timestamp_ns: 1_700_000_000_000,
-  observed_ns: 1_700_000_000_001,
+  timestamp_ns: 1_700_000_000_000n,
+  observed_ns: 1_700_000_000_001n,
   severity_id: 4,
   severity_text: "WARN",
   source_type: "auth",
@@ -53,5 +53,25 @@ describe("EventRow", () => {
     };
     render(<EventRow event={many} expanded={false} onToggle={() => undefined} />);
     expect(screen.getByText("+2")).toBeInTheDocument();
+  });
+
+  it("renders boundary timestamp_ns above 2^53 without precision loss (S-199 AC-7)", () => {
+    const boundary: LiveEvent = {
+      ...sample,
+      timestamp_ns: 1_700_000_000_000_000_123n,
+      observed_ns:  1_700_000_000_000_000_456n,
+    };
+    render(<EventRow event={boundary} expanded={false} onToggle={() => undefined} />);
+    expect(screen.getByText(/\d{2}:\d{2}:\d{2}\.\d{3}/)).toBeInTheDocument();
+  });
+
+  it("renders expanded observed_ns via String coercion without crashing on bigint (S-199 AC-7)", () => {
+    const boundary: LiveEvent = {
+      ...sample,
+      timestamp_ns: 1_700_000_000_000_000_123n,
+      observed_ns:  1_700_000_000_000_000_456n,
+    };
+    render(<EventRow event={boundary} expanded={true} onToggle={() => undefined} />);
+    expect(screen.getByText("1700000000000000456")).toBeInTheDocument();
   });
 });

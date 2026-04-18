@@ -12,8 +12,8 @@ interface Props {
 const MAX_MSG = 240;
 const MAX_CHIPS = 3;
 
-function fmtTs(ns: number): string {
-  const d = new Date(Math.floor(ns / 1_000_000));
+function fmtTs(ns: bigint): string {
+  const d = new Date(Number(ns / 1_000_000n));
   const pad = (n: number, w = 2): string => n.toString().padStart(w, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
@@ -63,7 +63,7 @@ function EventRowImpl({ event, expanded, onToggle }: Props): JSX.Element {
         <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 px-2 py-2 text-[11px] bg-muted/30 rounded">
           <dt className="font-semibold">message</dt><dd className="font-mono">{event.message}</dd>
           <dt className="font-semibold">template_id</dt><dd>{event.template_id}</dd>
-          <dt className="font-semibold">observed_ns</dt><dd>{event.observed_ns}</dd>
+          <dt className="font-semibold">observed_ns</dt><dd>{String(event.observed_ns)}</dd>
           {Object.entries(event.entity_summary)
             .filter(([k]) => Object.hasOwn(event.entity_summary, k))
             .map(([k, vs]) => (

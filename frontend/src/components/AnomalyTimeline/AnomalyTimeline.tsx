@@ -22,8 +22,8 @@ import { useAnomalyTimeline } from "./useAnomalyTimeline";
 
 const MAX_DOTS = 50;
 
-function nsToMs(ns: number): number {
-  return Math.floor(ns / 1_000_000);
+function nsToMs(ns: bigint): number {
+  return Number(ns / 1_000_000n);
 }
 
 export function AnomalyTimeline(): JSX.Element {
@@ -48,8 +48,8 @@ export function AnomalyTimeline(): JSX.Element {
   useEffect(() => {
     const handle = setInterval(() => {
       // BigInt math: Date.now() * 1_000_000 overflows JS number precision
-      // for far-future timestamps. Stay in bigint then convert at the boundary.
-      const nowNs = Number(BigInt(Date.now()) * 1_000_000n);
+      // for far-future timestamps. Stay in bigint all the way to rolloverIfStale.
+      const nowNs = BigInt(Date.now()) * 1_000_000n;
       rolloverIfStale(nowNs);
     }, resolutionMs);
     return () => clearInterval(handle);
@@ -153,7 +153,7 @@ export function AnomalyTimeline(): JSX.Element {
                 connectNulls
               />
               {alertDots.map((b) => {
-                const resolutionNs = Number(RESOLUTION_NS[resolution]);
+                const resolutionNs = RESOLUTION_NS[resolution];
                 const alertInBucket = findAlertInBucket(
                   alerts,
                   b.bucket_start_ns,
@@ -161,7 +161,7 @@ export function AnomalyTimeline(): JSX.Element {
                 );
                 return (
                   <ReferenceDot
-                    key={b.bucket_start_ns}
+                    key={String(b.bucket_start_ns)}
                     x={nsToMs(b.bucket_start_ns)}
                     y={b.max_score ?? 0}
                     r={b.alert_count > 1 ? 6 : 4}

@@ -22,7 +22,7 @@ export interface Alert {
 }
 
 export interface AlertDetail extends Alert {
-  contributing_events?: Array<{ event_id: string; timestamp_ns: number; message: string }>;
+  contributing_events?: Array<{ event_id: string; timestamp_ns: bigint; message: string }>;
 }
 
 export interface AlertFilter {
@@ -51,12 +51,8 @@ export type TimelineRange = "1h" | "6h" | "24h" | "7d";
 export type TimelineResolution = "1m" | "5m" | "15m" | "1h";
 
 export interface TimelineBucket {
-  /**
-   * Bucket start as nanosecond epoch (float64).
-   * At 2026 epoch: ~256 ns precision — safe for >= 1-minute buckets.
-   * If bucket size ever drops below 1 ms, migrate to string + BigInt.
-   */
-  bucket_start_ns: number;
+  /** Bucket start as nanoseconds since epoch (bigint, wire JSON string — S-199). */
+  bucket_start_ns: bigint;
   max_score: number | null;
   avg_score: number | null;
   event_count: number;
@@ -77,7 +73,7 @@ export interface TimelineResponse {
 }
 
 export interface AnomalyEvent {
-  timestamp_ns: number;
+  timestamp_ns: bigint;
   score: number;
   upper_threshold: number | null;
   source_type: string;
@@ -109,7 +105,7 @@ export interface EntityRelation {
 
 export interface EntityEvent {
   event_id: string;
-  timestamp_ns: number;
+  timestamp_ns: bigint;
   source_type: string;
   severity_id: number;
   message: string;
@@ -137,8 +133,8 @@ export interface EntityViewState {
 
 export interface LiveEvent {
   event_id: string;
-  timestamp_ns: number;
-  observed_ns: number;
+  timestamp_ns: bigint;
+  observed_ns: bigint;
   severity_id: number;       // 0..6
   severity_text: string;
   source_type: string;

@@ -5,7 +5,7 @@ import type { EntityEvent } from "@/lib/types";
 
 const mk = (o: Partial<EntityEvent> = {}): EntityEvent => ({
   event_id: o.event_id ?? `e-${Math.random()}`,
-  timestamp_ns: o.timestamp_ns ?? Date.now() * 1_000_000,
+  timestamp_ns: o.timestamp_ns ?? BigInt(Date.now()) * 1_000_000n,
   source_type: o.source_type ?? "syslog",
   severity_id: o.severity_id ?? 3,
   message: o.message ?? "hello",
@@ -32,8 +32,8 @@ describe("EntityTimelineList", () => {
   });
 
   it("renders a sticky day header per distinct day", () => {
-    const day1 = new Date(2026, 0, 1, 12, 0, 0).getTime() * 1_000_000;
-    const day2 = new Date(2026, 0, 2, 12, 0, 0).getTime() * 1_000_000;
+    const day1 = BigInt(new Date(2026, 0, 1, 12, 0, 0).getTime()) * 1_000_000n;
+    const day2 = BigInt(new Date(2026, 0, 2, 12, 0, 0).getTime()) * 1_000_000n;
     const events = [
       mk({ event_id: "a", timestamp_ns: day1, message: "first" }),
       mk({ event_id: "b", timestamp_ns: day2, message: "second" }),
@@ -47,9 +47,9 @@ describe("EntityTimelineList", () => {
   });
 
   it("uses virtualized branch when rows > 200", () => {
-    const base = Date.now() * 1_000_000;
+    const base = BigInt(Date.now()) * 1_000_000n;
     const events = Array.from({ length: 250 }, (_, i) =>
-      mk({ event_id: `e${i}`, timestamp_ns: base + i * 1000 }),
+      mk({ event_id: `e${i}`, timestamp_ns: base + BigInt(i) * 1000n }),
     );
     const { container } = render(<EntityTimelineList events={events} total={250} limit={1000} />);
     // The virtualized branch wraps the rows in a relative container with explicit
@@ -57,5 +57,19 @@ describe("EntityTimelineList", () => {
     const virtContainer = container.querySelector('div[style*="position: relative"]');
     expect(virtContainer).not.toBeNull();
     expect((virtContainer as HTMLElement).style.height).toMatch(/\d+px/);
+  });
+
+  it("renders boundary timestamp_ns above 2^53 without precision loss (S-199 AC-7)", () => {
+    const events: EntityEvent[] = [{
+      event_id: "e-boundary",
+      timestamp_ns: 1_700_000_000_000_000_123n,
+      source_type: "syslog",
+      severity_id: 10,
+      message: "m",
+      related_ips: [], related_users: [], related_hosts: [], related_domains: [],
+    }];
+    render(<EntityTimelineList events={events} total={1} limit={50} />);
+    // Time is rendered via toLocaleTimeString — locale-tolerant regex to avoid CI tz surprises.
+    expect(screen.getByText(/\d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument();
   });
 });

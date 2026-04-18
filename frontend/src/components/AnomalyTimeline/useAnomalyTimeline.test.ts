@@ -16,7 +16,7 @@ vi.mock("@/lib/api", () => ({
 const okResponse = (): TimelineResponse => ({
   meta: { range: "1h", resolution: "1m", source: null },
   items: [
-    { bucket_start_ns: 0, max_score: 0.3, avg_score: 0.2, event_count: 2, upper_threshold: 0.9, alert_count: 0 },
+    { bucket_start_ns: 0n, max_score: 0.3, avg_score: 0.2, event_count: 2, upper_threshold: 0.9, alert_count: 0 },
   ],
 });
 

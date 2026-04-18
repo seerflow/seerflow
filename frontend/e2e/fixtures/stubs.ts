@@ -13,6 +13,18 @@ import {
 } from "./alerts";
 
 /**
+ * `JSON.stringify` refuses to serialise `bigint`. The fixtures use `bigint`
+ * for `*_ns` fields (S-194 / S-199) to match the frontend's runtime types,
+ * but the backend wire format is decimal-string on these keys. This replacer
+ * mirrors the real wire format so the frontend's REST walker
+ * (`reviveBigintTimestamps`) converts the strings back to `bigint` exactly
+ * as in production.
+ */
+function stringifyWire(value: unknown): string {
+  return JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+}
+
+/**
  * Stub `GET /api/v1/alerts` (list) and `GET /api/v1/alerts/{id}` (detail).
  * Feedback POSTs are routed separately via `stubFeedback` so per-test
  * success/500 behaviour can be scripted independently.
@@ -34,7 +46,7 @@ export async function stubRestAlerts(
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(listEnvelope(alerts)),
+        body: stringifyWire(listEnvelope(alerts)),
       });
       return;
     }
@@ -44,7 +56,7 @@ export async function stubRestAlerts(
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(detailFor(detailMatch[1])),
+        body: stringifyWire(detailFor(detailMatch[1])),
       });
       return;
     }
@@ -119,7 +131,7 @@ export async function stubWebSocket(page: Page): Promise<WsHandle> {
     sent,
     send: (msg: unknown) => {
       if (!route) throw new Error("ws not connected");
-      route.send(JSON.stringify(msg));
+      route.send(stringifyWire(msg));
     },
     close: () => {
       if (route) route.close();

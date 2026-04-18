@@ -23,7 +23,7 @@ describe("AlertDetailPanel", () => {
   beforeEach(() => fetchMock.mockReset());
 
   it("fetches detail on mount and renders fields", async () => {
-    const detail: AlertDetail = { ...base, contributing_events: [{event_id: "e1", timestamp_ns: 1, message: "ev"}] };
+    const detail: AlertDetail = { ...base, contributing_events: [{event_id: "e1", timestamp_ns: 1n, message: "ev"}] };
     fetchMock.mockResolvedValueOnce(detail);
     render(<AlertDetailPanel alert={base} onFeedback={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("ev")).toBeInTheDocument());

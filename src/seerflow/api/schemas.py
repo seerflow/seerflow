@@ -33,6 +33,16 @@ class EventResponse(BaseModel):
     template_id: int
     entity_refs: list[str] = Field(default_factory=list)
 
+    @field_serializer("timestamp_ns", when_used="json")
+    def _serialize_timestamp_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199)."""
+        return str(v)
+
+    @field_serializer("observed_ns", when_used="json")
+    def _serialize_observed_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199)."""
+        return str(v)
+
     @classmethod
     def from_event(cls, event: SeerflowEvent) -> EventResponse:
         """Convert a msgspec SeerflowEvent to a Pydantic response model."""
@@ -206,6 +216,11 @@ class TimelineBucketResponse(BaseModel):
     event_count: int = Field(ge=0)
     upper_threshold: float | None
     alert_count: int = Field(ge=0)
+
+    @field_serializer("bucket_start_ns", when_used="json")
+    def _serialize_bucket_start_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199)."""
+        return str(v)
 
 
 class TimelineMetaResponse(BaseModel):
