@@ -1756,3 +1756,33 @@ class TestReverseHWIndex:
         assert "srcA" not in ensemble._source_hw_keys
         # Fast-path invariant: bucket must have been popped, not left behind as empty.
         assert ensemble._source_hw_keys.get("srcA") is None
+
+    def test_lru_eviction_of_template_key_clears_reverse_index(self) -> None:
+        """When template-HW pool evicts a key, the owner's bucket must drop it."""
+        config = _make_config(max_sources=4, max_template_hw=2, max_entity_hw=8)
+        ensemble = DetectionEnsemble(config)
+        # Fill template pool to capacity under one source.
+        ensemble.process_event(_make_event(source_type="s", template_id=1))
+        ensemble.process_event(_make_event(source_type="s", template_id=2))
+        assert ensemble._source_hw_keys["s"][0] == {"s:1", "s:2"}
+        # Adding a third template under the same source evicts LRU "s:1".
+        ensemble.process_event(_make_event(source_type="s", template_id=3))
+        assert "s:1" not in ensemble._template_hw
+        assert ensemble._source_hw_keys["s"][0] == {"s:2", "s:3"}
+
+    def test_lru_eviction_of_entity_key_clears_reverse_index(self) -> None:
+        """Same invariant for entity HW pool."""
+        config = _make_config(max_sources=4, max_template_hw=8, max_entity_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(
+            _make_event(source_type="s", template_id=0, entity_refs=("e1",)),
+        )
+        ensemble.process_event(
+            _make_event(source_type="s", template_id=0, entity_refs=("e2",)),
+        )
+        assert ensemble._source_hw_keys["s"][1] == {"s:e1", "s:e2"}
+        ensemble.process_event(
+            _make_event(source_type="s", template_id=0, entity_refs=("e3",)),
+        )
+        assert "s:e1" not in ensemble._entity_hw
+        assert ensemble._source_hw_keys["s"][1] == {"s:e2", "s:e3"}

@@ -371,6 +371,11 @@ class DetectionEnsemble:
         if len(hw_dict) >= max_items:
             evicted_key, _ = hw_dict.popitem(last=False)
             counts_dict.pop(evicted_key, None)
+            evicted_owner = evicted_key.split(":", 1)[0]
+            owner_entry = self._source_hw_keys.get(evicted_owner)
+            if owner_entry is not None:
+                idx = 0 if hw_dict is self._template_hw else 1
+                owner_entry[idx].discard(evicted_key)
             evicted = True
         hw = HoltWintersDetector(
             seasonal_period=self._config.hw_seasonal_period,
