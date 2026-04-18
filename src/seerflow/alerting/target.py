@@ -14,12 +14,19 @@ if TYPE_CHECKING:
 class DeliveryTarget(Protocol):
     """Any alerting sink the NotificationRouter can address by name.
 
-    The ``name`` field must be unique across the configured targets.
+    The ``name`` attribute must be unique across the configured targets.
     ``min_severity`` uses the 0-6 SeverityLevel scale from event.py.
+
+    Attributes are declared as read-only properties so that both mutable
+    dataclasses (FakeDeliveryTarget) and frozen dataclasses
+    (_WebhookDeliveryAdapter) can satisfy the protocol structurally.
     """
 
-    name: str
-    min_severity: int
+    @property
+    def name(self) -> str: ...  # pragma: no cover
+
+    @property
+    def min_severity(self) -> int: ...  # pragma: no cover
 
     async def deliver(self, alert: Alert) -> None: ...  # pragma: no cover
 

@@ -12,6 +12,7 @@ import aiohttp
 
 from seerflow.alerting.formatters import format_json, format_slack, format_teams
 from seerflow.alerting.mask import mask_webhook_url
+from seerflow.alerting.target import loop_deliver_digest
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -115,23 +116,27 @@ class AlertDispatcher:
             _log.warning("Alert dispatch queue full — dropping alert %s", alert.alert_id)
 
     async def run(self) -> None:
-        """Background consumer loop. Runs until stopped and queue is empty."""
+        """Background consumer loop. Runs until stopped and queue is empty.
+
+        When a NotificationRouter is wired, its ``stop()`` runs after the
+        queue is drained so digest-mode buffers flush before shutdown.
+        """
         while self._running or not self._queue.empty():
             try:
                 alert = await asyncio.wait_for(self._queue.get(), timeout=1.0)
             except TimeoutError:
                 continue
             await self._dispatch(alert)
+        if self._router is not None:
+            await self._router.stop()
 
     async def stop(self) -> None:
         """Signal the consumer to stop after draining remaining items.
 
-        If a NotificationRouter is wired, its own ``stop()`` is awaited here so
+        ``run()`` completes the drain and then calls ``router.stop()`` so
         pending digest-mode buffers are flushed before the process exits.
         """
         self._running = False
-        if self._router is not None:
-            await self._router.stop()
 
     async def _dispatch(self, alert: Alert) -> None:
         """Send the alert to all configured targets, respecting severity filters."""
@@ -238,8 +243,7 @@ class _WebhookDeliveryAdapter:
         await self._dispatcher._post_with_retry(self._target, payload, alert.alert_id)
 
     async def deliver_digest(self, alerts: Sequence[Alert]) -> None:
-        for alert in alerts:
-            await self.deliver(alert)
+        await loop_deliver_digest(self, alerts)
 
 
 def build_webhook_delivery_targets(

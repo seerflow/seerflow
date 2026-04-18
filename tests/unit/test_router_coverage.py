@@ -235,3 +235,23 @@ async def test_flush_key_no_op_when_buffer_empty() -> None:
     router = NotificationRouter(targets=(email,))
     await router._flush_key((0, "email"), email)
     assert email.digests == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_route_after_stop_is_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    slack = FakeDeliveryTarget(name="slack")
+    router = NotificationRouter(
+        targets=(slack,),
+        rules=(
+            RoutingRule(
+                match=RoutingRuleMatch(),
+                notify=(RoutingRuleNotify(channel="slack", mode="immediate"),),
+            ),
+        ),
+    )
+    await router.stop()
+    with caplog.at_level("WARNING"):
+        await router.route(make_alert())
+    assert slack.delivered == []
+    assert any("after stop()" in rec.message for rec in caplog.records)

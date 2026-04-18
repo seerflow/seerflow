@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from datetime import time
 
     from seerflow.alerting.dispatcher import WebhookTarget
-    from seerflow.alerting.router import DefaultRouting, QuietHours, RoutingRule
+    from seerflow.alerting.router import DefaultRouting, QuietHours, RoutingRule, RoutingRuleNotify
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +352,7 @@ def _parse_hhmm(value: str, label: str) -> time:
     try:
         hh, mm = value.split(":", 1)
         return _time(int(hh), int(mm))
-    except Exception as exc:
+    except (ValueError, TypeError) as exc:
         raise ConfigError(f"{label} must be HH:MM, got {value!r}") from exc
 
 
@@ -389,7 +389,9 @@ def _severity_bound(v: object, label: str) -> int | None:
     return v
 
 
-def _build_notify_entry(n: dict[str, Any], known_channels: set[str], label: str) -> Any:
+def _build_notify_entry(
+    n: dict[str, Any], known_channels: set[str], label: str
+) -> RoutingRuleNotify:
     from seerflow.alerting.router import RoutingRuleNotify
 
     channel = n.get("channel", "")
@@ -404,7 +406,9 @@ def _build_notify_entry(n: dict[str, Any], known_channels: set[str], label: str)
     return RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
 
 
-def _build_routing_rule(idx: int, entry: dict[str, Any], known_channels: set[str]) -> Any:
+def _build_routing_rule(
+    idx: int, entry: dict[str, Any], known_channels: set[str]
+) -> RoutingRule:
     from seerflow.alerting.router import RoutingRule, RoutingRuleMatch
 
     match_raw = entry.get("match", {}) or {}
@@ -541,13 +545,19 @@ def _validate_otlp_settings(data: dict[str, Any]) -> tuple[str, Literal["grpc", 
 
 def _collect_quiet_hours(
     webhooks: tuple[dict[str, Any], ...],
+    targets: tuple[WebhookTarget, ...],
 ) -> tuple[tuple[str, QuietHours], ...]:
+    """Extract quiet_hours keyed by the built target's name.
+
+    Iterating in lockstep with ``targets`` rather than re-deriving the
+    webhook index → name mapping keeps the keys aligned with the objects
+    the NotificationRouter actually sees.
+    """
     pairs: list[tuple[str, QuietHours]] = []
-    for idx, wh in enumerate(webhooks):
+    for wh, target in zip(webhooks, targets, strict=True):
         qh_raw = wh.get("quiet_hours")
         if qh_raw:
-            name = wh.get("name") or f"webhook-{idx}"
-            pairs.append((name, _build_quiet_hours(qh_raw, name)))
+            pairs.append((target.name, _build_quiet_hours(qh_raw, target.name)))
     return tuple(pairs)
 
 
@@ -571,7 +581,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         webhook_targets=webhook_targets,
         routing_rules=routing_rules,
         default_routing=default_routing,
-        quiet_hours_by_channel=_collect_quiet_hours(webhooks),
+        quiet_hours_by_channel=_collect_quiet_hours(webhooks, webhook_targets),
         pagerduty_routing_key=_validate_pagerduty_key(data),
         dashboard_url=_validate_dashboard_url_field(data),
         otlp_endpoint=otlp_endpoint,

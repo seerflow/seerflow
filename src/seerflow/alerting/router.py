@@ -176,6 +176,12 @@ class NotificationRouter:
 
     async def route(self, alert: Alert) -> None:
         """Find the first matching rule (or default) and dispatch."""
+        if not self._running:
+            _log.warning(
+                "NotificationRouter: route() called after stop(), dropping alert %s",
+                alert.alert_id,
+            )
+            return
         rule_idx, notify = self._select_notify_with_idx(alert)
         _log.debug(
             "NotificationRouter: alert %s matched rule_idx=%d (alert_type=%s, rule_name=%s)",
@@ -251,10 +257,15 @@ class NotificationRouter:
             # Shutdown mid-flush: leave the buffer so stop()'s drain loop can retry.
             raise
         except Exception:
+            # Transient delivery error: log and drop. We explicitly log the count
+            # so operators can see how many alerts this failure shed; retrying
+            # indefinitely would let a pathological target block the pipeline.
             _log.exception(
-                "NotificationRouter: digest delivery failed for channel %r (rule %d)",
+                "NotificationRouter: digest delivery failed for channel %r (rule %d)"
+                " — dropping %d buffered alerts",
                 target.name,
                 key[0],
+                len(buf),
             )
         self._digest_buffers.pop(key, None)
 

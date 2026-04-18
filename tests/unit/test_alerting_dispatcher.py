@@ -499,14 +499,15 @@ async def test_dispatcher_delegates_when_router_present() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_dispatcher_stop_propagates_to_router() -> None:
-    """dispatcher.stop() must await router.stop() so digest buffers drain."""
+async def test_dispatcher_run_stops_router_after_queue_drains() -> None:
+    """run() must await router.stop() after draining so digest buffers flush."""
     session = _mock_session(status=200)
     target = WebhookTarget(name="t1", url="https://a/x", format="json")
     fake_router = AsyncMock()
 
     d = AlertDispatcher(targets=(target,), session=session, router=fake_router)
-    await d.stop()
+    await d.stop()  # signal only; router is still live so run() can route queued alerts
+    await asyncio.wait_for(d.run(), timeout=5.0)
 
     fake_router.stop.assert_awaited_once()
 
