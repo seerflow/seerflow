@@ -168,9 +168,7 @@ class DetectionEnsemble:
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
         """Score, learn, and threshold-check a single event."""
-        raw_source = (
-            (event.source_type or "default").replace("\x00", "").replace(":", "_")
-        )
+        raw_source = (event.source_type or "default").replace("\x00", "").replace(":", "_")
         source = raw_source[:_MAX_SOURCE_KEY_LEN] or "default"
 
         # Batch scoring: skip scoring for non-Nth events
@@ -266,9 +264,7 @@ class DetectionEnsemble:
             self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
             # O(k) cleanup via reverse index: k = HW keys owned by evicted source.
-            tmpl_keys, ent_keys = self._source_hw_keys.pop(
-                evicted_source, (set(), set())
-            )
+            tmpl_keys, ent_keys = self._source_hw_keys.pop(evicted_source, (set(), set()))
             for key in tmpl_keys:
                 self._template_hw.pop(key, None)
                 self._template_event_counts.pop(key, None)
@@ -692,9 +688,9 @@ class DetectionEnsemble:
                 hw_dict[sanitized_key] = hw
                 counts_dict[sanitized_key] = evt_count
                 owning_source = sanitized_key.split(":", 1)[0]
-                self._source_hw_keys.setdefault(
-                    owning_source, (set(), set())
-                )[idx].add(sanitized_key)
+                self._source_hw_keys.setdefault(owning_source, (set(), set()))[idx].add(
+                    sanitized_key
+                )
                 loaded += 1
             except Exception:
                 _log.warning(

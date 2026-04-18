@@ -1736,19 +1736,8 @@ class TestReverseHWIndex:
         ensemble = DetectionEnsemble(config)
         for tid in range(3):
             ensemble.process_event(_make_event(source_type="srcA", template_id=tid))
-        # Monkeypatch .startswith on a real HW key to detect any prefix scan.
-        # After swap, no prefix scan should run during eviction.
-        hit: list[str] = []
-        real_startswith = str.startswith
-
-        def spy(s: str, prefix: str) -> bool:
-            if prefix == "srcA:":
-                hit.append(s)
-            return real_startswith(s, prefix)
-
-        import builtins
-        # str.startswith cannot be monkeypatched; instead assert the reverse
-        # index bucket is removed with pop().
+        # Fast-path invariant: the reverse-index bucket is removed with pop(),
+        # not left as an empty set and not walked via prefix scan.
         assert "srcA" in ensemble._source_hw_keys
         for tid in range(3):
             ensemble.process_event(_make_event(source_type="srcB", template_id=tid))
@@ -1787,7 +1776,7 @@ class TestReverseHWIndex:
         assert "s:e1" not in ensemble._entity_hw
         assert ensemble._source_hw_keys["s"][1] == {"s:e2", "s:e3"}
 
-    def test_high_source_churn_eviction_is_O_k(self) -> None:
+    def test_high_source_churn_eviction_is_o_k(self) -> None:
         """Evicting under adversarial source diversity must not scan the full HW pool.
 
         Proxy for O(k): the reverse-index bucket for each evicted source is
@@ -1820,9 +1809,7 @@ class TestLoadStateReverseIndex:
     """S-201: load_all_state re-sanitizes manifest keys and rebuilds reverse index."""
 
     @pytest.mark.asyncio
-    async def test_load_populates_reverse_index_from_manifest(
-        self, tmp_path: object
-    ) -> None:
+    async def test_load_populates_reverse_index_from_manifest(self, tmp_path: object) -> None:
         from seerflow.config import StorageConfig
         from seerflow.storage.sqlite import SqliteBackend
 
@@ -1862,6 +1849,7 @@ class TestLoadStateReverseIndex:
         config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
         # Hand-craft a legacy manifest with a colon in the source segment.
         import msgspec.json
+
         await storage.save_state(
             "tmpl_hw:manifest",
             msgspec.json.encode({"legacy:src:1": 10, "legacy_src:1": 5}),
