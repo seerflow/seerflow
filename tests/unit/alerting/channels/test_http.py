@@ -95,5 +95,5 @@ async def test_post_with_retry_uses_data_when_provided() -> None:
                 data={"From": "+1", "To": "+2", "Body": "hi"},
                 delays=(0.0,),
             )
-    # aioresponses passes data through as `data` kwarg to its matcher.
-    assert "data" in captured or "json" not in captured
+    assert "data" in captured
+    assert "json" not in captured

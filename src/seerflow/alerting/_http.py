@@ -79,6 +79,11 @@ async def post_with_retry(
                     body,
                 )
         except Exception as exc:
+            # CancelledError is BaseException on Py3.8+ so it still propagates.
+            # Deliberately broad: any formatter/mock TypeError / OSError from
+            # lower transport layers should surface as a retryable attempt, not
+            # a pipeline crash (behaviour preserved from the original
+            # AlertDispatcher._post_with_retry).
             _log.warning(
                 "Channel %s failed (attempt %d): %s",
                 masked_for_log,
@@ -89,7 +94,7 @@ async def post_with_retry(
             sleep_for = delays[attempt] if attempt < len(delays) else delays[-1]
             await asyncio.sleep(sleep_for)
     _log.error(
-        "Channel %s: all %d retries exhausted",
+        "Channel %s: all %d attempts exhausted without success",
         masked_for_log,
         attempts,
     )
