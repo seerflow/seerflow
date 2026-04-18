@@ -166,7 +166,9 @@ class DetectionEnsemble:
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
         """Score, learn, and threshold-check a single event."""
-        raw_source = (event.source_type or "default").replace("\x00", "")
+        raw_source = (
+            (event.source_type or "default").replace("\x00", "").replace(":", "_")
+        )
         source = raw_source[:_MAX_SOURCE_KEY_LEN] or "default"
 
         # Batch scoring: skip scoring for non-Nth events

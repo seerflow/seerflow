@@ -34,6 +34,16 @@ def _make_event(*, source_type: str = "syslog", **kwargs):
     return SeerflowEvent(**defaults)
 
 
+def _make_config(**kwargs) -> DetectionConfig:
+    """Create a DetectionConfig with test-friendly defaults."""
+    defaults: dict = {
+        "hw_seasonal_period": 10,
+        "dspot_calibration_window": 200,
+    }
+    defaults.update(kwargs)
+    return DetectionConfig(**defaults)
+
+
 class TestDetectionResult:
     def test_fields(self) -> None:
         r = DetectionResult(
@@ -1617,3 +1627,30 @@ class TestAdjustUpperThresholdTriState:
         assert any(
             "capped" in rec.message.lower() and "noisy" in rec.message for rec in caplog.records
         )
+
+
+class TestSourceColonSanitization:
+    """S-201: source_type with colons collapses to underscores so the
+    eviction prefix cannot over-match sibling sources."""
+
+    def test_colon_in_source_type_collapses_to_underscore(self) -> None:
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(source_type="syslog:prod", template_id=5)
+        result = ensemble.process_event(event)
+        assert result.source_type == "syslog_prod"
+        assert all(":" not in s for s in ensemble._detectors)
+
+    def test_multiple_colons_all_stripped(self) -> None:
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(source_type="a:b:c:d", template_id=1)
+        result = ensemble.process_event(event)
+        assert result.source_type == "a_b_c_d"
+
+    def test_colon_and_null_both_stripped(self) -> None:
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(source_type="sys\x00log:prod", template_id=1)
+        result = ensemble.process_event(event)
+        assert result.source_type == "syslog_prod"
