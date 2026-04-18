@@ -10,6 +10,8 @@ configured HH:MM UTC window.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import fnmatch
 import logging
 from dataclasses import dataclass, field
@@ -137,18 +139,39 @@ class NotificationRouter:
         self._default = default_routing or DefaultRouting(action="drop")
         self._now = now_fn
         self._running = True
+        self._digest_buffers: dict[tuple[int, str], list[Alert]] = {}
+        self._digest_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
 
     async def start(self) -> None:
-        """Reserved for Task 8's digest flushers. No-op today."""
+        """Start the router. Digest flushers are lazily created per (rule, channel)."""
         self._running = True
 
     async def stop(self) -> None:
-        """Reserved for Task 8's digest flush-on-stop. No-op today."""
+        """Cancel pending flushers and drain remaining digest buffers."""
         self._running = False
+        for task in list(self._digest_tasks.values()):
+            task.cancel()
+        for task in list(self._digest_tasks.values()):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        self._digest_tasks.clear()
+        for key, buf in list(self._digest_buffers.items()):
+            target = self._targets.get(key[1])
+            if target is None or not buf:
+                self._digest_buffers.pop(key, None)
+                continue
+            try:
+                await target.deliver_digest(buf)
+            except Exception:
+                _log.exception(
+                    "NotificationRouter: drain digest failed for channel %r",
+                    target.name,
+                )
+            self._digest_buffers.pop(key, None)
 
     async def route(self, alert: Alert) -> None:
         """Find the first matching rule (or default) and dispatch."""
-        notify = self._select_notify(alert)
+        rule_idx, notify = self._select_notify_with_idx(alert)
         for entry in notify:
             target = self._targets.get(entry.channel)
             if target is None:
@@ -159,9 +182,10 @@ class NotificationRouter:
                 continue
             if int(alert.severity_id) < target.min_severity:
                 continue
-            # Digest handling lands in Task 8; for now every entry is treated
-            # as immediate.
-            await self._safe_deliver(target, alert)
+            if entry.mode == "immediate":
+                await self._safe_deliver(target, alert)
+            else:
+                self._buffer_for_digest(rule_idx, entry, target, alert)
 
     def _select_notify(self, alert: Alert) -> tuple[RoutingRuleNotify, ...]:
         for rule in self._rules:
@@ -170,6 +194,62 @@ class NotificationRouter:
         if self._default.action == "notify":
             return self._default.notify
         return ()
+
+    def _select_notify_with_idx(
+        self, alert: Alert
+    ) -> tuple[int, tuple[RoutingRuleNotify, ...]]:
+        for idx, rule in enumerate(self._rules):
+            if _rule_matches(rule, alert):
+                return idx, rule.notify
+        if self._default.action == "notify":
+            return -1, self._default.notify
+        return -1, ()
+
+    def _buffer_for_digest(
+        self,
+        rule_idx: int,
+        entry: RoutingRuleNotify,
+        target: DeliveryTarget,
+        alert: Alert,
+    ) -> None:
+        key = (rule_idx, entry.channel)
+        buf = self._digest_buffers.setdefault(key, [])
+        if len(buf) >= 1000:
+            _log.warning(
+                "NotificationRouter: digest buffer (%s, %s) exceeded 1000 entries",
+                rule_idx,
+                entry.channel,
+            )
+        buf.append(alert)
+        if key not in self._digest_tasks:
+            self._digest_tasks[key] = asyncio.create_task(
+                self._flush_after(key, target, entry.digest_window_minutes * 60)
+            )
+
+    async def _flush_after(
+        self, key: tuple[int, str], target: DeliveryTarget, delay_seconds: float
+    ) -> None:
+        try:
+            await asyncio.sleep(delay_seconds)
+        except asyncio.CancelledError:
+            return
+        await self._flush_key(key, target)
+
+    async def _flush_key(
+        self, key: tuple[int, str], target: DeliveryTarget
+    ) -> None:
+        buf = self._digest_buffers.pop(key, [])
+        self._digest_tasks.pop(key, None)
+        if not buf:
+            return
+        try:
+            await target.deliver_digest(buf)
+        except Exception:
+            _log.exception(
+                "NotificationRouter: digest delivery failed for channel %r (rule %d)",
+                target.name,
+                key[0],
+            )
 
     async def _safe_deliver(self, target: DeliveryTarget, alert: Alert) -> None:
         try:
