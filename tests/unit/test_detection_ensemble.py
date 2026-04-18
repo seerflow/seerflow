@@ -1864,9 +1864,13 @@ class TestLoadStateReverseIndex:
         await storage.close()
 
     @pytest.mark.asyncio
-    async def test_load_resanitizes_legacy_colon_keys(self, tmp_path: Path) -> None:
+    async def test_load_resanitizes_legacy_colon_keys(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Manifest entries persisted before S-201 may contain colon-laden
         source segments. Sanitize on load and WARN on collision."""
+        import logging
+
         storage_cfg = StorageConfig(
             backend="sqlite",
             sqlite_path=str(tmp_path / "test2.db"),
@@ -1893,9 +1897,16 @@ class TestLoadStateReverseIndex:
         await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
 
         dst = DetectionEnsemble(config)
-        await dst.load_all_state(storage)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(storage)
         # Both pre-existing keys collapse to "legacy_src:1".
         assert list(dst._template_hw.keys()) == ["legacy_src:1"]
         assert dst._source_hw_keys["legacy_src"][0] == {"legacy_src:1"}
+        # Collision WARNING fired exactly once and references both raw + sanitized.
+        warnings = [
+            r for r in caplog.records if r.levelno == logging.WARNING and "Duplicate" in r.message
+        ]
+        assert len(warnings) == 1
+        assert "legacy_src:1" in warnings[0].getMessage()
 
         await storage.close()

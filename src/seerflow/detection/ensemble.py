@@ -307,7 +307,9 @@ class DetectionEnsemble:
         hw, evicted = self._get_or_create_hw(
             key, self._template_hw, self._template_event_counts, self._max_template_hw
         )
-        self._source_hw_keys.setdefault(source, (set(), set()))[0].add(key)
+        # setdefault returns existing bucket on cache-hit; index 0 = template set.
+        tmpl_set, _ = self._source_hw_keys.setdefault(source, (set(), set()))
+        tmpl_set.add(key)
         if evicted:
             self._template_hw_eviction_count += 1
         if self._template_event_counts[key] >= self._min_events_for_scoring:
@@ -332,7 +334,9 @@ class DetectionEnsemble:
             hw, evicted = self._get_or_create_hw(
                 key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
             )
-            self._source_hw_keys.setdefault(source, (set(), set()))[1].add(key)
+            # setdefault returns existing bucket on cache-hit; index 1 = entity set.
+            _, ent_set = self._source_hw_keys.setdefault(source, (set(), set()))
+            ent_set.add(key)
             if evicted:
                 self._entity_hw_eviction_count += 1
             if self._entity_event_counts[key] >= self._min_events_for_scoring:
@@ -689,9 +693,8 @@ class DetectionEnsemble:
                 hw_dict[sanitized_key] = hw
                 counts_dict[sanitized_key] = evt_count
                 owning_source = sanitized_key.split(":", 1)[0]
-                self._source_hw_keys.setdefault(owning_source, (set(), set()))[idx].add(
-                    sanitized_key
-                )
+                bucket = self._source_hw_keys.setdefault(owning_source, (set(), set()))
+                bucket[idx].add(sanitized_key)
                 loaded += 1
             except Exception:
                 _log.warning(
