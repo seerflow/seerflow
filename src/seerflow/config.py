@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from seerflow.alerting.channels.email import EmailTarget
+    from seerflow.alerting.channels.sms import SmsTarget
+    from seerflow.alerting.channels.telegram import TelegramTarget
+    from seerflow.alerting.channels.whatsapp import WhatsAppTarget
     from seerflow.alerting.dispatcher import WebhookTarget
     from seerflow.alerting.router import DefaultRouting, QuietHours, RoutingRule
 
@@ -164,6 +168,10 @@ class AlertingConfig:
     dedup_window_overrides: tuple[tuple[str, int], ...] = ()
     webhooks: tuple[dict[str, Any], ...] = ()
     webhook_targets: tuple[WebhookTarget, ...] = ()
+    email_targets: tuple[EmailTarget, ...] = ()
+    sms_targets: tuple[SmsTarget, ...] = ()
+    telegram_targets: tuple[TelegramTarget, ...] = ()
+    whatsapp_targets: tuple[WhatsAppTarget, ...] = ()
     routing_rules: tuple[RoutingRule, ...] = ()
     default_routing: DefaultRouting = field(default_factory=_default_routing_drop)
     quiet_hours_by_channel: tuple[tuple[str, QuietHours], ...] = ()

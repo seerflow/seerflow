@@ -156,6 +156,18 @@ class NotificationRouter:
         """
         self._running = True
 
+    def register_target(self, target: DeliveryTarget) -> None:
+        """Add ``target`` to the router's named target map.
+
+        Exists so post-construction wiring (e.g. webhook adapters built
+        from an already-constructed ``AlertDispatcher``) can participate
+        without reaching into ``_targets``.
+        """
+        if target.name in self._targets:
+            msg = f"duplicate DeliveryTarget name: {target.name!r}"
+            raise ValueError(msg)
+        self._targets[target.name] = target
+
     async def stop(self) -> None:
         """Cancel pending flushers and drain remaining digest buffers."""
         self._running = False
