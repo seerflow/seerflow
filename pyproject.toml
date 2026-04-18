@@ -30,6 +30,7 @@ classifiers = [
 
 dependencies = [
     "aiohttp>=3.13.3",
+    "aiosmtplib>=5.1.0",
     "aiosqlite>=0.22.1",
     "drain3>=0.9.11",
     "fastapi>=0.115",
@@ -81,6 +82,7 @@ dev = [
     "types-grpcio>=1.0.0.20251009",
     "types-protobuf>=6.32.1.20260221",
     "pre-commit>=4.5.1",
+    "aiosmtpd>=1.4.6",
 ]
 
 [tool.ruff]
