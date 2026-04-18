@@ -74,6 +74,19 @@ def test_default_routing_without_rules_rejected() -> None:
 
 
 @pytest.mark.unit
+def test_default_routing_notify_requires_non_empty_list() -> None:
+    with pytest.raises(ConfigError, match=r"action=notify requires a non-empty notify list"):
+        _build_alerting(
+            _yaml_alerting(
+                routing_rules=[
+                    {"match": {}, "notify": [{"channel": "oncall-slack"}]},
+                ],
+                default_routing={"action": "notify", "notify": []},
+            )
+        )
+
+
+@pytest.mark.unit
 def test_quiet_hours_end_equal_start_rejected() -> None:
     with pytest.raises(ConfigError, match="end must differ from start"):
         _build_alerting(

@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, time
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from seerflow.alerting.router import (
     NotificationRouter,
@@ -18,7 +22,7 @@ from tests.support.fake_delivery_target import FakeDeliveryTarget
 from tests.unit.alert_factory import make_alert
 
 
-def _clock_at(hh: int, mm: int):
+def _clock_at(hh: int, mm: int) -> Callable[[], datetime]:
     return lambda: datetime(2026, 4, 17, hh, mm, tzinfo=UTC)
 
 

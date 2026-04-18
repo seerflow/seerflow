@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
@@ -69,13 +68,9 @@ async def test_end_to_end_routes_and_digests() -> None:
 
     with patch("seerflow.alerting.router.asyncio.sleep", new=AsyncMock()):
         await dispatcher.stop()
+        # dispatcher.run() drains the queue, then calls router.stop() which
+        # cancels any lazy flushers and flushes pending digest buffers.
         await dispatcher.run()
-        # Drive the flusher task(s) to completion. asyncio.wait does not
-        # go through asyncio.sleep, so it yields cleanly under the patch.
-        tasks = list(router._digest_tasks.values())
-        if tasks:
-            await asyncio.wait(tasks, timeout=1.0)
-        await router.stop()
 
     assert len(slack.delivered) == 1
     assert email.delivered == []

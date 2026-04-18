@@ -406,9 +406,7 @@ def _build_notify_entry(
     return RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
 
 
-def _build_routing_rule(
-    idx: int, entry: dict[str, Any], known_channels: set[str]
-) -> RoutingRule:
+def _build_routing_rule(idx: int, entry: dict[str, Any], known_channels: set[str]) -> RoutingRule:
     from seerflow.alerting.router import RoutingRule, RoutingRuleMatch
 
     match_raw = entry.get("match", {}) or {}
@@ -493,18 +491,14 @@ def _parse_dedup_overrides(raw: dict[str, Any]) -> tuple[tuple[str, int], ...]:
 def _validate_dedup_window(data: dict[str, Any]) -> int:
     value = data.get("dedup_window_seconds", 900)
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise ConfigError(
-            f"alerting.dedup_window_seconds must be an integer >= 1, got {value!r}"
-        )
+        raise ConfigError(f"alerting.dedup_window_seconds must be an integer >= 1, got {value!r}")
     return value
 
 
 def _validate_dashboard_url_field(data: dict[str, Any]) -> str:
     url = data.get("dashboard_url", "")
     if not isinstance(url, str):
-        raise ConfigError(
-            f"alerting.dashboard_url must be a string, got {type(url).__name__}"
-        )
+        raise ConfigError(f"alerting.dashboard_url must be a string, got {type(url).__name__}")
     if url:
         _validate_dashboard_url(url)
     return url
@@ -532,9 +526,7 @@ def _validate_otlp_settings(data: dict[str, Any]) -> tuple[str, Literal["grpc", 
             )
     protocol = data.get("otlp_protocol", "grpc")
     if protocol not in ("grpc", "http"):
-        raise ConfigError(
-            f"alerting.otlp_protocol must be 'grpc' or 'http', got {protocol!r}"
-        )
+        raise ConfigError(f"alerting.otlp_protocol must be 'grpc' or 'http', got {protocol!r}")
     interval = data.get("otlp_export_interval_seconds", 5)
     if not isinstance(interval, int) or isinstance(interval, bool) or interval < 1:
         raise ConfigError(

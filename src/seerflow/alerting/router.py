@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("seerflow")
 
+# Log a warning exactly once when a digest buffer crosses this length; operators
+# should narrow the matching rule or shorten the flush window in that case.
+_DIGEST_WARN_THRESHOLD = 1000
+
 Mode = Literal["immediate", "digest"]
 DefaultAction = Literal["drop", "notify"]
 
@@ -142,7 +146,13 @@ class NotificationRouter:
         self._digest_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
 
     async def start(self) -> None:
-        """Start the router. Digest flushers are lazily created per (rule, channel)."""
+        """Mark the router as ready (idempotent no-op unless ``stop()`` ran).
+
+        The router is usable immediately after construction — ``start()`` is
+        only required if you stopped and want to reuse the same instance. New
+        deployments typically construct a router once and let the dispatcher
+        drive its lifecycle via ``run()`` + ``stop()``.
+        """
         self._running = True
 
     async def stop(self) -> None:
@@ -224,11 +234,13 @@ class NotificationRouter:
     ) -> None:
         key = (rule_idx, entry.channel)
         buf = self._digest_buffers.setdefault(key, [])
-        if len(buf) >= 1000:
+        if len(buf) == _DIGEST_WARN_THRESHOLD:
             _log.warning(
-                "NotificationRouter: digest buffer (%s, %s) exceeded 1000 entries",
+                "NotificationRouter: digest buffer (%s, %s) exceeded %d entries"
+                " — consider narrowing the matching rule or shortening the window",
                 rule_idx,
                 entry.channel,
+                _DIGEST_WARN_THRESHOLD,
             )
         buf.append(alert)
         if key not in self._digest_tasks:

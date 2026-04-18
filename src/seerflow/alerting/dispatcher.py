@@ -39,18 +39,20 @@ class WebhookTarget:
     format: str  # "slack" | "teams" | "json"
     min_severity: int = 0
 
-    # NOTE(S-164): deliver/deliver_digest exist solely so WebhookTarget
-    # satisfies the DeliveryTarget protocol structurally. Real webhook sends
-    # go through _WebhookDeliveryAdapter (see build_webhook_delivery_targets)
-    # which calls AlertDispatcher._post_with_retry. S-163 channels will ship
-    # their own DeliveryTarget implementations and bypass these stubs.
     async def deliver(self, alert: Alert) -> None:
+        """Stub: real delivery goes through ``_WebhookDeliveryAdapter``.
+
+        Present only so ``WebhookTarget`` satisfies the ``DeliveryTarget``
+        protocol structurally. Use ``build_webhook_delivery_targets()`` to
+        obtain an adapter that routes through ``AlertDispatcher._post_with_retry``.
+        """
         raise NotImplementedError(
             "WebhookTarget.deliver is not called directly; "
             "use AlertDispatcher or NotificationRouter."
         )
 
     async def deliver_digest(self, alerts: Sequence[Alert]) -> None:
+        """Stub — see :meth:`deliver`."""
         raise NotImplementedError(
             "WebhookTarget.deliver_digest is not called directly; "
             "use AlertDispatcher or NotificationRouter."
@@ -221,18 +223,21 @@ class AlertDispatcher:
 @dataclass(frozen=True, slots=True)
 class _WebhookDeliveryAdapter:
     """Adapts a WebhookTarget to DeliveryTarget by routing deliveries through
-    AlertDispatcher's existing post-with-retry pipeline."""
+    AlertDispatcher's existing post-with-retry pipeline.
+
+    ``dashboard_url`` is captured at construction time so the adapter does not
+    reach into the dispatcher's private state on each delivery.
+    """
 
     name: str
     min_severity: int
     _target: WebhookTarget
     _dispatcher: AlertDispatcher
+    _dashboard_url: str
 
     async def deliver(self, alert: Alert) -> None:
         try:
-            payload = _format(
-                alert, self._target.format, dashboard_url=self._dispatcher._dashboard_url
-            )
+            payload = _format(alert, self._target.format, dashboard_url=self._dashboard_url)
         except Exception:
             _log.exception(
                 "Formatter failed for target %s, alert %s",
@@ -252,7 +257,11 @@ def build_webhook_delivery_targets(
     """Produce DeliveryTarget adapters wired to dispatcher's retry pipeline."""
     return tuple(
         _WebhookDeliveryAdapter(
-            name=t.name, min_severity=t.min_severity, _target=t, _dispatcher=dispatcher
+            name=t.name,
+            min_severity=t.min_severity,
+            _target=t,
+            _dispatcher=dispatcher,
+            _dashboard_url=dispatcher._dashboard_url,
         )
         for t in dispatcher._targets
     )
