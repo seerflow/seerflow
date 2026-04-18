@@ -42,6 +42,22 @@ def test_format_text_has_no_html_tags() -> None:
 
 
 @pytest.mark.unit
+def test_format_html_escapes_injected_script_tags() -> None:
+    alert = make_alert(rule_name="<script>alert(1)</script>")
+    body = format_html(alert)
+    assert "<script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+
+
+@pytest.mark.unit
+def test_format_digest_html_escapes_injected_rule_name() -> None:
+    alerts = [make_alert(rule_name='<img src=x onerror="alert(1)">')]
+    body = format_digest_html(alerts)
+    assert "<img" not in body
+    assert "&lt;img" in body
+
+
+@pytest.mark.unit
 def test_format_digest_html_orders_by_severity_descending() -> None:
     alerts = [
         make_alert(severity_id=SeverityLevel.WARNING, rule_name="warn-rule"),

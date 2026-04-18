@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as _html
 import logging
 from dataclasses import dataclass, field
 from email.message import EmailMessage
@@ -42,14 +43,18 @@ def _sev(alert: Alert) -> str:
 
 def format_html(alert: Alert) -> str:
     colour = _SEVERITY_COLOUR.get(int(alert.severity_id), "#888")
-    tactics = ", ".join(alert.mitre_tactics) or "—"
-    techniques = ", ".join(alert.mitre_techniques) or "—"
+    tactics = _html.escape(", ".join(alert.mitre_tactics)) or "—"
+    techniques = _html.escape(", ".join(alert.mitre_techniques)) or "—"
+    rule_name = _html.escape(alert.rule_name)
+    description = _html.escape(alert.description)
+    entity_value = _html.escape(alert.entity_value)
+    entity_type = _html.escape(alert.entity_type)
     return (
         f'<div style="font-family:sans-serif">'
-        f'<h2 style="color:{colour}">[{_sev(alert)}] {alert.rule_name}</h2>'
-        f"<p>{alert.description}</p>"
+        f'<h2 style="color:{colour}">[{_sev(alert)}] {rule_name}</h2>'
+        f"<p>{description}</p>"
         f"<ul>"
-        f"<li><b>Entity:</b> {alert.entity_value} ({alert.entity_type})</li>"
+        f"<li><b>Entity:</b> {entity_value} ({entity_type})</li>"
         f"<li><b>Risk score:</b> {alert.risk_score:.2f}</li>"
         f"<li><b>ATT&amp;CK tactics:</b> {tactics}</li>"
         f"<li><b>ATT&amp;CK techniques:</b> {techniques}</li>"
@@ -75,7 +80,9 @@ def format_digest_html(alerts: Sequence[Alert]) -> str:
     for sev in sorted(by_sev.keys(), reverse=True):
         rows.append(f"<h3>{_SEVERITY_NAME.get(sev, str(sev))}</h3><ul>")
         for a in by_sev[sev]:
-            rows.append(f"<li>{a.rule_name} — {a.entity_value} (risk={a.risk_score:.2f})</li>")
+            rule_name = _html.escape(a.rule_name)
+            entity_value = _html.escape(a.entity_value)
+            rows.append(f"<li>{rule_name} — {entity_value} (risk={a.risk_score:.2f})</li>")
         rows.append("</ul>")
     return "\n".join(rows)
 
@@ -90,7 +97,7 @@ class EmailTarget:
     use_starttls: bool
     from_address: str
     to_addresses: tuple[str, ...]
-    smtp_user: str = ""
+    smtp_user: str = field(default="", repr=False)
     smtp_password: str = field(default="", repr=False)
     min_severity: int = 0
     max_per_minute: int | None = None
