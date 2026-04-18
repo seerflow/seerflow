@@ -311,6 +311,7 @@ class DetectionEnsemble:
         hw, evicted = self._get_or_create_hw(
             key, self._template_hw, self._template_event_counts, self._max_template_hw
         )
+        self._source_hw_keys.setdefault(source, (set(), set()))[0].add(key)
         if evicted:
             self._template_hw_eviction_count += 1
         if self._template_event_counts[key] >= self._min_events_for_scoring:
