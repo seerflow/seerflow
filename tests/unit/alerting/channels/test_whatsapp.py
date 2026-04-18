@@ -1,0 +1,220 @@
+"""Tests for WhatsAppTarget — Business Cloud API template messages (S-163)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import aiohttp
+import pytest
+from aioresponses import CallbackResult, aioresponses
+
+from seerflow.alerting.channels.whatsapp import (
+    WhatsAppTarget,
+    build_template_params,
+)
+from seerflow.models.event import SeverityLevel
+from tests.unit.alert_factory import make_alert
+
+
+@pytest.mark.unit
+def test_template_params_three_text_entries() -> None:
+    alert = make_alert(
+        severity_id=SeverityLevel.CRITICAL, rule_name="brute-force"
+    )
+    params = build_template_params(alert)
+    assert len(params) == 3
+    texts = [p["text"] for p in params]
+    assert "CRITICAL" in texts
+    assert "brute-force" in texts
+
+
+@pytest.mark.unit
+def test_whatsapp_target_hides_access_token_in_repr() -> None:
+    t = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="secret-wa-token",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+    )
+    assert "secret-wa-token" not in repr(t)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_deliver_posts_template_message() -> None:
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+        rate_per_second=100.0,
+        burst=10,
+    )
+    captured: list[dict[str, Any]] = []
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url
+        captured.append(kwargs.get("json") or {})
+        return CallbackResult(status=200, payload={"messages": []})
+
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+        )
+        async with aiohttp.ClientSession() as session:
+            await target.deliver(make_alert(), session=session)
+
+    assert len(captured) == 1
+    body = captured[0]
+    assert body["messaging_product"] == "whatsapp"
+    assert body["to"] == "+15559876543"
+    assert body["template"]["name"] == "seerflow_alert"
+    assert body["template"]["language"] == {"code": "en"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_131026_opens_circuit_for_5_minutes() -> None:
+    now = [0.0]
+
+    def fake_mono() -> float:
+        return now[0]
+
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+        rate_per_second=1000.0,
+        burst=1000,
+        _monotonic=fake_mono,
+    )
+    call_count = 0
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        return CallbackResult(
+            status=400,
+            payload={"error": {"code": 131026, "message": "template not found"}},
+        )
+
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+            repeat=True,
+        )
+        async with aiohttp.ClientSession() as session:
+            # First call hits the API and opens the circuit.
+            await target.deliver(make_alert(), session=session)
+            assert call_count == 1
+            # Circuit-open window: no HTTP call.
+            now[0] = 60.0
+            await target.deliver(make_alert(), session=session)
+            assert call_count == 1
+            # After 5 minutes, circuit closes; next call hits again.
+            now[0] = 301.0
+            await target.deliver(make_alert(), session=session)
+            assert call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_non_131026_400_does_not_open_circuit() -> None:
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+1",),
+        rate_per_second=1000.0,
+        burst=1000,
+    )
+    count = 0
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal count
+        count += 1
+        return CallbackResult(
+            status=400,
+            payload={"error": {"code": 100, "message": "other"}},
+        )
+
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+            repeat=True,
+        )
+        async with aiohttp.ClientSession() as session:
+            await target.deliver(make_alert(), session=session)
+            await target.deliver(make_alert(), session=session)
+        assert count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_empty_digest_no_network_io() -> None:
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+1",),
+    )
+    with aioresponses() as mock:
+        async with aiohttp.ClientSession() as session:
+            await target.deliver_digest([], session=session)
+        assert not mock.requests
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_digest_sends_one_template_with_top_alert() -> None:
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+1",),
+        rate_per_second=1000.0,
+        burst=1000,
+    )
+    captured: list[dict[str, Any]] = []
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url
+        captured.append(kwargs.get("json") or {})
+        return CallbackResult(status=200, payload={"messages": []})
+
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+        )
+        async with aiohttp.ClientSession() as session:
+            alerts = [
+                make_alert(rule_name="warn", severity_id=SeverityLevel.WARNING),
+                make_alert(rule_name="top", severity_id=SeverityLevel.CRITICAL),
+                make_alert(rule_name="err", severity_id=SeverityLevel.ERROR),
+            ]
+            await target.deliver_digest(alerts, session=session)
+
+    assert len(captured) == 1
+    params = captured[0]["template"]["components"][0]["parameters"]
+    texts = [p["text"] for p in params]
+    assert "top" in texts
+    assert "CRITICAL" in texts
