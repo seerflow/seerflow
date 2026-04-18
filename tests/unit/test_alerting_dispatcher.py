@@ -76,6 +76,7 @@ class TestAlertDispatcher:
         """If the formatter raises, the dispatcher logs and skips that target."""
         session = _mock_session(status=200)
         target = WebhookTarget(
+            name="json",
             url="https://hooks.example.com/json",
             format="json",
             min_severity=0,
@@ -95,7 +96,7 @@ class TestAlertDispatcher:
     async def test_enqueue_and_dispatch(self) -> None:
         """Alert enqueued is dispatched to the configured target URL."""
         session = _mock_session(status=200)
-        target = WebhookTarget(url="https://hooks.example.com/json", format="json", min_severity=0)
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json", min_severity=0)
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
         dispatcher.enqueue(_make_alert())
@@ -111,7 +112,7 @@ class TestAlertDispatcher:
         from seerflow.alerting.formatters import format_json
 
         session = _mock_session(status=200)
-        target = WebhookTarget(url="https://hooks.example.com/json", format="json", min_severity=0)
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json", min_severity=0)
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
         alert = _make_alert()
@@ -128,6 +129,7 @@ class TestAlertDispatcher:
         """Alert below min_severity is not dispatched."""
         session = _mock_session(status=200)
         target = WebhookTarget(
+            name="json",
             url="https://hooks.example.com/json",
             format="json",
             min_severity=int(SeverityLevel.CRITICAL),
@@ -146,6 +148,7 @@ class TestAlertDispatcher:
         """Alert with severity == min_severity is dispatched."""
         session = _mock_session(status=200)
         target = WebhookTarget(
+            name="json",
             url="https://hooks.example.com/json",
             format="json",
             min_severity=int(SeverityLevel.ERROR),
@@ -162,7 +165,7 @@ class TestAlertDispatcher:
     async def test_queue_full_logs_warning(self) -> None:
         """When queue is full, enqueue logs a warning and drops the alert."""
         session = _mock_session(status=200)
-        target = WebhookTarget(url="https://hooks.example.com/json", format="json", min_severity=0)
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json", min_severity=0)
         dispatcher = AlertDispatcher(targets=(target,), session=session, queue_maxsize=2)
 
         # Fill the queue without starting the consumer
@@ -196,7 +199,7 @@ class TestAlertDispatcher:
         session = MagicMock()
         session.post = MagicMock(return_value=resp_cm)
 
-        target = WebhookTarget(url="https://hooks.example.com/json", format="json", min_severity=0)
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json", min_severity=0)
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
         dispatcher.enqueue(_make_alert())
@@ -233,7 +236,7 @@ class TestAlertDispatcher:
         session = MagicMock()
         session.post = MagicMock(return_value=resp_cm)
 
-        target = WebhookTarget(url="https://hooks.example.com/json", format="json", min_severity=0)
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json", min_severity=0)
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
         dispatcher.enqueue(_make_alert())
@@ -259,7 +262,7 @@ class TestAlertDispatcher:
         session = MagicMock()
         session.post = MagicMock(return_value=resp_cm)
 
-        target = WebhookTarget(url="https://hooks.example.com/json", format="json", min_severity=0)
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json", min_severity=0)
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
         dispatcher.enqueue(_make_alert())
@@ -292,10 +295,10 @@ class TestAlertDispatcher:
         session.post = MagicMock(side_effect=track_post)
 
         target1 = WebhookTarget(
-            url="https://hooks1.example.com/json", format="json", min_severity=0
+            name="t1", url="https://hooks1.example.com/json", format="json", min_severity=0
         )
         target2 = WebhookTarget(
-            url="https://hooks2.example.com/slack", format="slack", min_severity=0
+            name="t2", url="https://hooks2.example.com/slack", format="slack", min_severity=0
         )
         dispatcher = AlertDispatcher(targets=(target1, target2), session=session)
 
@@ -324,7 +327,7 @@ class TestAlertDispatcher:
 
         session.post = MagicMock(side_effect=track_post)
 
-        target = WebhookTarget(url="https://hooks.example.com/json", format="json", min_severity=0)
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json", min_severity=0)
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
         for i in range(3):
@@ -355,7 +358,7 @@ class TestAlertDispatcher:
         session.post = MagicMock(side_effect=capture_post)
 
         target = WebhookTarget(
-            url="https://hooks.example.com/slack", format="slack", min_severity=0
+            name="slack", url="https://hooks.example.com/slack", format="slack", min_severity=0
         )
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
@@ -387,7 +390,7 @@ class TestAlertDispatcher:
         session.post = MagicMock(side_effect=capture_post)
 
         target = WebhookTarget(
-            url="https://hooks.example.com/teams", format="teams", min_severity=0
+            name="teams", url="https://hooks.example.com/teams", format="teams", min_severity=0
         )
         dispatcher = AlertDispatcher(targets=(target,), session=session)
 
@@ -407,7 +410,7 @@ class TestDispatcherDashboardUrl:
         """Dashboard URL is forwarded from dispatcher to the formatter."""
         session = _mock_session(status=200)
         target = WebhookTarget(
-            url="https://hooks.example.com/slack", format="slack", min_severity=0
+            name="slack", url="https://hooks.example.com/slack", format="slack", min_severity=0
         )
         dispatcher = AlertDispatcher(
             targets=(target,),
@@ -428,7 +431,7 @@ class TestDispatcherDashboardUrl:
         """Without dashboard_url, Slack payload has no actions block."""
         session = _mock_session(status=200)
         target = WebhookTarget(
-            url="https://hooks.example.com/slack", format="slack", min_severity=0
+            name="slack", url="https://hooks.example.com/slack", format="slack", min_severity=0
         )
         dispatcher = AlertDispatcher(targets=(target,), session=session)
         alert = _make_alert()
@@ -455,6 +458,7 @@ class TestResponseBodyLogging:
         session.post = MagicMock(return_value=resp_cm)
 
         target = WebhookTarget(
+            name="json",
             url="https://hooks.example.com/json",
             format="json",
             min_severity=0,
@@ -481,6 +485,7 @@ class TestResponseBodyLogging:
         session.post = MagicMock(return_value=resp_cm)
 
         target = WebhookTarget(
+            name="json",
             url="https://hooks.example.com/json",
             format="json",
             min_severity=0,

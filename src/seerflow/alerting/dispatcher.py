@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -30,9 +31,26 @@ def _sanitize_body(raw: str, max_len: int = 200) -> str:
 class WebhookTarget:
     """A configured webhook delivery target."""
 
+    name: str
     url: str = field(repr=False)
     format: str  # "slack" | "teams" | "json"
     min_severity: int = 0
+
+    async def deliver(self, alert: Alert) -> None:
+        # Delivery is driven by AlertDispatcher; WebhookTarget is intentionally
+        # a passive config holder. NotificationRouter will call dispatcher-side
+        # helpers directly when routing. This stub exists so WebhookTarget
+        # satisfies the DeliveryTarget protocol at type-check time.
+        raise NotImplementedError(
+            "WebhookTarget.deliver is not called directly; "
+            "use AlertDispatcher or NotificationRouter."
+        )
+
+    async def deliver_digest(self, alerts: "Sequence[Alert]") -> None:
+        raise NotImplementedError(
+            "WebhookTarget.deliver_digest is not called directly; "
+            "use AlertDispatcher or NotificationRouter."
+        )
 
 
 def _format(alert: Alert, fmt: str, *, dashboard_url: str = "") -> dict:  # type: ignore[type-arg]
