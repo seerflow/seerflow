@@ -81,6 +81,24 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
         if isinstance(target, dict) and target.get("url"):
             target["url"] = mask_webhook_url(target["url"])
 
+    # alerting — multi-channel delivery targets (S-163). Each carries its
+    # own credential field that must be masked before leaving the process.
+    for target in data["alerting"].get("email_targets", ()):
+        if isinstance(target, dict):
+            if target.get("smtp_user"):
+                target["smtp_user"] = _MASK
+            if target.get("smtp_password"):
+                target["smtp_password"] = _MASK
+    for target in data["alerting"].get("sms_targets", ()):
+        if isinstance(target, dict) and target.get("auth_token"):
+            target["auth_token"] = _MASK
+    for target in data["alerting"].get("telegram_targets", ()):
+        if isinstance(target, dict) and target.get("bot_token"):
+            target["bot_token"] = _MASK
+    for target in data["alerting"].get("whatsapp_targets", ()):
+        if isinstance(target, dict) and target.get("access_token"):
+            target["access_token"] = _MASK
+
     # alerting.webhooks — raw YAML dict passthrough
     for wh in data["alerting"].get("webhooks", ()):
         if isinstance(wh, dict):

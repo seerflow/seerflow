@@ -346,6 +346,207 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
     return tuple(targets)
 
 
+def _build_email_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:
+    from seerflow.alerting.channels.email import EmailTarget
+
+    targets: list[EmailTarget] = []
+    used: set[str] = set()
+    for idx, e in enumerate(raw):
+        name = e.get("name") or f"email-{idx}"
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"alerting.email_targets[{idx}].name must be non-empty string")
+        if name in used:
+            raise ConfigError(f"alerting.email_targets: duplicate name {name!r}")
+        used.add(name)
+        host = e.get("smtp_host", "")
+        if not isinstance(host, str) or not host:
+            raise ConfigError(f"alerting.email_targets[{idx}].smtp_host required")
+        if _is_private_ip(host):
+            raise ConfigError(
+                f"alerting.email_targets[{idx}].smtp_host must not be private: {host}"
+            )
+        port = e.get("smtp_port", 587)
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            raise ConfigError(f"alerting.email_targets[{idx}].smtp_port must be 1..65535")
+        to_raw = e.get("to_addresses") or []
+        if (
+            not isinstance(to_raw, list)
+            or not to_raw
+            or not all(isinstance(a, str) and a for a in to_raw)
+        ):
+            raise ConfigError(
+                f"alerting.email_targets[{idx}].to_addresses must be non-empty list[str]"
+            )
+        to_addresses = tuple(to_raw)
+        max_per_minute = e.get("max_per_minute")
+        if max_per_minute is not None and (
+            not isinstance(max_per_minute, int)
+            or isinstance(max_per_minute, bool)
+            or max_per_minute < 1
+        ):
+            raise ConfigError(f"alerting.email_targets[{idx}].max_per_minute must be int >= 1")
+        min_sev = e.get("min_severity", 0)
+        if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
+            raise ConfigError(f"alerting.email_targets[{idx}].min_severity must be int in [0,6]")
+        targets.append(
+            EmailTarget(
+                name=name,
+                smtp_host=host,
+                smtp_port=port,
+                use_starttls=bool(e.get("use_starttls", True)),
+                from_address=str(e.get("from_address", "")),
+                to_addresses=to_addresses,
+                smtp_user=str(e.get("smtp_user", "")),
+                smtp_password=str(e.get("smtp_password", "")),
+                min_severity=min_sev,
+                max_per_minute=max_per_minute,
+            )
+        )
+    return tuple(targets)
+
+
+def _build_sms_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:
+    from seerflow.alerting.channels.sms import SmsTarget
+
+    targets: list[SmsTarget] = []
+    used: set[str] = set()
+    for idx, s in enumerate(raw):
+        provider = s.get("provider", "twilio")
+        if provider != "twilio":
+            raise ConfigError(
+                f"alerting.sms_targets[{idx}].provider: only 'twilio' supported, got {provider!r}"
+            )
+        name = s.get("name") or f"sms-{idx}"
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"alerting.sms_targets[{idx}].name must be non-empty string")
+        if name in used:
+            raise ConfigError(f"alerting.sms_targets: duplicate name {name!r}")
+        used.add(name)
+        to_raw = s.get("to_numbers") or []
+        if (
+            not isinstance(to_raw, list)
+            or not to_raw
+            or not all(isinstance(n, str) and n for n in to_raw)
+        ):
+            raise ConfigError(
+                f"alerting.sms_targets[{idx}].to_numbers must be non-empty list[str]"
+            )
+        min_sev = s.get("min_severity", 0)
+        if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
+            raise ConfigError(f"alerting.sms_targets[{idx}].min_severity must be int in [0,6]")
+        rate = s.get("rate_per_second", 1.0)
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+            raise ConfigError(
+                f"alerting.sms_targets[{idx}].rate_per_second must be positive number"
+            )
+        burst = s.get("burst", 3)
+        if not isinstance(burst, int) or isinstance(burst, bool) or burst < 1:
+            raise ConfigError(f"alerting.sms_targets[{idx}].burst must be int >= 1")
+        targets.append(
+            SmsTarget(
+                name=name,
+                account_sid=str(s.get("account_sid", "")),
+                auth_token=str(s.get("auth_token", "")),
+                from_number=str(s.get("from_number", "")),
+                to_numbers=tuple(to_raw),
+                min_severity=min_sev,
+                rate_per_second=float(rate),
+                burst=int(burst),
+            )
+        )
+    return tuple(targets)
+
+
+def _build_telegram_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:
+    from seerflow.alerting.channels.telegram import TelegramTarget
+
+    targets: list[TelegramTarget] = []
+    used: set[str] = set()
+    for idx, t in enumerate(raw):
+        name = t.get("name") or f"telegram-{idx}"
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"alerting.telegram_targets[{idx}].name must be non-empty string")
+        if name in used:
+            raise ConfigError(f"alerting.telegram_targets: duplicate name {name!r}")
+        used.add(name)
+        token = str(t.get("bot_token", ""))
+        if not token:
+            raise ConfigError(f"alerting.telegram_targets[{idx}].bot_token required")
+        chat_id = str(t.get("chat_id", ""))
+        if not chat_id:
+            raise ConfigError(f"alerting.telegram_targets[{idx}].chat_id required")
+        min_sev = t.get("min_severity", 0)
+        if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
+            raise ConfigError(
+                f"alerting.telegram_targets[{idx}].min_severity must be int in [0,6]"
+            )
+        rate = t.get("rate_per_second", 30.0)
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+            raise ConfigError(f"alerting.telegram_targets[{idx}].rate_per_second must be positive")
+        burst = t.get("burst", 30)
+        if not isinstance(burst, int) or isinstance(burst, bool) or burst < 1:
+            raise ConfigError(f"alerting.telegram_targets[{idx}].burst must be int >= 1")
+        targets.append(
+            TelegramTarget(
+                name=name,
+                bot_token=token,
+                chat_id=chat_id,
+                min_severity=min_sev,
+                rate_per_second=float(rate),
+                burst=int(burst),
+            )
+        )
+    return tuple(targets)
+
+
+def _build_whatsapp_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:
+    from seerflow.alerting.channels.whatsapp import WhatsAppTarget
+
+    targets: list[WhatsAppTarget] = []
+    used: set[str] = set()
+    for idx, w in enumerate(raw):
+        name = w.get("name") or f"whatsapp-{idx}"
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"alerting.whatsapp_targets[{idx}].name must be non-empty string")
+        if name in used:
+            raise ConfigError(f"alerting.whatsapp_targets: duplicate name {name!r}")
+        used.add(name)
+        to_raw = w.get("to_numbers") or []
+        if (
+            not isinstance(to_raw, list)
+            or not to_raw
+            or not all(isinstance(n, str) and n for n in to_raw)
+        ):
+            raise ConfigError(
+                f"alerting.whatsapp_targets[{idx}].to_numbers must be non-empty list[str]"
+            )
+        min_sev = w.get("min_severity", 0)
+        if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
+            raise ConfigError(
+                f"alerting.whatsapp_targets[{idx}].min_severity must be int in [0,6]"
+            )
+        rate = w.get("rate_per_second", 10.0)
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+            raise ConfigError(f"alerting.whatsapp_targets[{idx}].rate_per_second must be positive")
+        burst = w.get("burst", 20)
+        if not isinstance(burst, int) or isinstance(burst, bool) or burst < 1:
+            raise ConfigError(f"alerting.whatsapp_targets[{idx}].burst must be int >= 1")
+        targets.append(
+            WhatsAppTarget(
+                name=name,
+                phone_number_id=str(w.get("phone_number_id", "")),
+                access_token=str(w.get("access_token", "")),
+                template_name=str(w.get("template_name", "seerflow_alert")),
+                language_code=str(w.get("language_code", "en")),
+                to_numbers=tuple(to_raw),
+                min_severity=min_sev,
+                rate_per_second=float(rate),
+                burst=int(burst),
+            )
+        )
+    return tuple(targets)
+
+
 def _parse_hhmm(value: str, label: str) -> time:
     from datetime import time as _time
 
@@ -567,7 +768,18 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     raw_overrides = data.get("dedup_window_overrides", {})
     overrides = _parse_dedup_overrides(raw_overrides) if isinstance(raw_overrides, dict) else ()
     webhook_targets = _build_webhook_targets(webhooks)
-    known_channels = {t.name for t in webhook_targets}
+
+    email_targets = _build_email_targets(tuple(data.get("email_targets", ()) or ()))
+    sms_targets = _build_sms_targets(tuple(data.get("sms_targets", ()) or ()))
+    telegram_targets = _build_telegram_targets(tuple(data.get("telegram_targets", ()) or ()))
+    whatsapp_targets = _build_whatsapp_targets(tuple(data.get("whatsapp_targets", ()) or ()))
+
+    known_channels: set[str] = {t.name for t in webhook_targets}
+    known_channels.update(t.name for t in email_targets)
+    known_channels.update(t.name for t in sms_targets)
+    known_channels.update(t.name for t in telegram_targets)
+    known_channels.update(t.name for t in whatsapp_targets)
+
     routing_rules = _build_routing_rules(data.get("routing_rules", ()), known_channels)
     default_routing = _build_default_routing(
         data.get("default_routing"), known_channels, has_rules=bool(routing_rules)
@@ -578,6 +790,10 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         dedup_window_overrides=overrides,
         webhooks=webhooks,
         webhook_targets=webhook_targets,
+        email_targets=email_targets,
+        sms_targets=sms_targets,
+        telegram_targets=telegram_targets,
+        whatsapp_targets=whatsapp_targets,
         routing_rules=routing_rules,
         default_routing=default_routing,
         quiet_hours_by_channel=_collect_quiet_hours(webhooks, webhook_targets),

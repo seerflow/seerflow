@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -235,9 +235,22 @@ class TestSecretRegressionGuard:
         "receivers.webhooks[].auth_token",
         "alerting.pagerduty_routing_key",
         "alerting.webhook_targets[].url",
+        "alerting.email_targets[].smtp_user",
+        "alerting.email_targets[].smtp_password",
+        "alerting.sms_targets[].auth_token",
+        "alerting.telegram_targets[].bot_token",
+        "alerting.whatsapp_targets[].access_token",
         "api_rate_limit_redis_url",
     }
-    _KNOWN_PUBLIC_REPR_FALSE: ClassVar[set[str]] = set()
+    # Internal fields on channel targets (rate-limit buckets, circuit breakers,
+    # clock injectors) that are repr=False for noise reduction, not secrecy.
+    _KNOWN_PUBLIC_REPR_FALSE: ClassVar[set[str]] = {
+        "alerting.sms_targets[]._bucket",
+        "alerting.telegram_targets[]._bucket",
+        "alerting.whatsapp_targets[]._bucket",
+        "alerting.whatsapp_targets[]._circuit",
+        "alerting.whatsapp_targets[]._monotonic",
+    }
 
     def _collect_repr_false(
         self,
@@ -246,19 +259,36 @@ class TestSecretRegressionGuard:
     ) -> set[str]:
         import dataclasses
         import typing
+        from collections.abc import Callable
 
         from seerflow import config as config_mod
+        from seerflow.alerting.channels._ratelimit import TokenBucket
+        from seerflow.alerting.channels.email import EmailTarget
+        from seerflow.alerting.channels.sms import SmsTarget
+        from seerflow.alerting.channels.telegram import TelegramTarget
+        from seerflow.alerting.channels.whatsapp import WhatsAppTarget
+        from seerflow.alerting.channels.whatsapp import _CircuitState as _WaCircuitState
         from seerflow.alerting.dispatcher import WebhookTarget
         from seerflow.alerting.router import DefaultRouting, QuietHours, RoutingRule
 
         # Seed localns with every dataclass defined in seerflow.config so
         # forward refs resolve. WebhookTarget is imported explicitly because
         # it lives in alerting.dispatcher but is referenced from AlertingConfig.
-        localns: dict[str, type] = {
+        # Channel targets reference TokenBucket/Callable/_CircuitState in their
+        # forward refs (they are declared under ``from __future__ import
+        # annotations``), so those symbols must also be resolvable.
+        localns: dict[str, Any] = {
             "WebhookTarget": WebhookTarget,
             "RoutingRule": RoutingRule,
             "DefaultRouting": DefaultRouting,
             "QuietHours": QuietHours,
+            "EmailTarget": EmailTarget,
+            "SmsTarget": SmsTarget,
+            "TelegramTarget": TelegramTarget,
+            "WhatsAppTarget": WhatsAppTarget,
+            "TokenBucket": TokenBucket,
+            "Callable": Callable,
+            "_CircuitState": _WaCircuitState,
         }
         for name in dir(config_mod):
             attr = getattr(config_mod, name)
