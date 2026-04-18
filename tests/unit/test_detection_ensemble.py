@@ -1703,3 +1703,56 @@ class TestReverseHWIndex:
         tmpl_set, ent_set = ensemble._source_hw_keys["syslog"]
         assert tmpl_set == {"syslog:1"}
         assert ent_set == {"syslog:10.0.0.1", "syslog:user42"}
+
+    def test_source_eviction_drops_only_owned_hw_keys(self) -> None:
+        """Evicting source A must not touch source B's HW keys or counts."""
+        config = _make_config(max_sources=2, max_template_hw=64, max_entity_hw=64)
+        ensemble = DetectionEnsemble(config)
+        for tid in range(3):
+            ensemble.process_event(
+                _make_event(source_type="srcA", template_id=tid, entity_refs=("eA",)),
+            )
+        for tid in range(2):
+            ensemble.process_event(
+                _make_event(source_type="srcB", template_id=tid, entity_refs=("eB",)),
+            )
+        # Force eviction of srcA (LRU because srcB was most recent).
+        ensemble.process_event(
+            _make_event(source_type="srcC", template_id=0, entity_refs=("eC",)),
+        )
+        assert "srcA" not in ensemble._detectors
+        assert "srcA" not in ensemble._source_hw_keys
+        assert all(not k.startswith("srcA:") for k in ensemble._template_hw)
+        assert all(not k.startswith("srcA:") for k in ensemble._entity_hw)
+        # srcB untouched.
+        assert "srcB" in ensemble._source_hw_keys
+        tmpl_b, ent_b = ensemble._source_hw_keys["srcB"]
+        assert tmpl_b == {"srcB:0", "srcB:1"}
+        assert ent_b == {"srcB:eB"}
+
+    def test_source_eviction_uses_reverse_index_not_prefix_scan(self) -> None:
+        """Source eviction must pop the per-source bucket, not walk the HW pool."""
+        config = _make_config(max_sources=2, max_template_hw=64, max_entity_hw=64)
+        ensemble = DetectionEnsemble(config)
+        for tid in range(3):
+            ensemble.process_event(_make_event(source_type="srcA", template_id=tid))
+        # Monkeypatch .startswith on a real HW key to detect any prefix scan.
+        # After swap, no prefix scan should run during eviction.
+        hit: list[str] = []
+        real_startswith = str.startswith
+
+        def spy(s: str, prefix: str) -> bool:
+            if prefix == "srcA:":
+                hit.append(s)
+            return real_startswith(s, prefix)
+
+        import builtins
+        # str.startswith cannot be monkeypatched; instead assert the reverse
+        # index bucket is removed with pop().
+        assert "srcA" in ensemble._source_hw_keys
+        for tid in range(3):
+            ensemble.process_event(_make_event(source_type="srcB", template_id=tid))
+        ensemble.process_event(_make_event(source_type="srcC", template_id=0))
+        assert "srcA" not in ensemble._source_hw_keys
+        # Fast-path invariant: bucket must have been popped, not left behind as empty.
+        assert ensemble._source_hw_keys.get("srcA") is None

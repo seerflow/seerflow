@@ -265,15 +265,15 @@ class DetectionEnsemble:
             self._score_windows.pop(evicted_source, None)
             self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
-            # Clean up orphaned template/entity HW entries for the evicted source.
-            # O(max_template_hw + max_entity_hw) scan — acceptable because source
-            # eviction is rare and prevents unbounded HW pool growth.
-            prefix = f"{evicted_source}:"
-            for key in [k for k in self._template_hw if k.startswith(prefix)]:
-                del self._template_hw[key]
+            # O(k) cleanup via reverse index: k = HW keys owned by evicted source.
+            tmpl_keys, ent_keys = self._source_hw_keys.pop(
+                evicted_source, (set(), set())
+            )
+            for key in tmpl_keys:
+                self._template_hw.pop(key, None)
                 self._template_event_counts.pop(key, None)
-            for key in [k for k in self._entity_hw if k.startswith(prefix)]:
-                del self._entity_hw[key]
+            for key in ent_keys:
+                self._entity_hw.pop(key, None)
                 self._entity_event_counts.pop(key, None)
         self._detectors[source] = [
             HSTDetector(
