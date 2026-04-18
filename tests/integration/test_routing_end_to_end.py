@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
@@ -66,10 +67,17 @@ async def test_end_to_end_routes_and_digests() -> None:
         make_alert(alert_type="ml", rule_name="m2", severity_id=SeverityLevel.WARNING)
     )
 
-    with patch("seerflow.alerting.router.asyncio.sleep", new=AsyncMock()):
+    # Gate the flusher so both ml alerts land in the same buffer before any
+    # flush fires. router.stop() cancels the flusher and drains the buffer.
+    gate = asyncio.Event()
+
+    async def gated_sleep(_seconds: float) -> None:
+        await gate.wait()
+
+    with patch("seerflow.alerting.router.asyncio.sleep", new=gated_sleep):
         await dispatcher.stop()
         # dispatcher.run() drains the queue, then calls router.stop() which
-        # cancels any lazy flushers and flushes pending digest buffers.
+        # cancels the gated flusher and drains the accumulated buffer.
         await dispatcher.run()
 
     assert len(slack.delivered) == 1
