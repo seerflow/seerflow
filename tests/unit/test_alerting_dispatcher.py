@@ -497,6 +497,20 @@ async def test_dispatcher_delegates_when_router_present() -> None:
     session.post.assert_not_called()
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dispatcher_stop_propagates_to_router() -> None:
+    """dispatcher.stop() must await router.stop() so digest buffers drain."""
+    session = _mock_session(status=200)
+    target = WebhookTarget(name="t1", url="https://a/x", format="json")
+    fake_router = AsyncMock()
+
+    d = AlertDispatcher(targets=(target,), session=session, router=fake_router)
+    await d.stop()
+
+    fake_router.stop.assert_awaited_once()
+
+
 class TestResponseBodyLogging:
     @pytest.mark.asyncio
     async def test_4xx_reads_response_body(self) -> None:

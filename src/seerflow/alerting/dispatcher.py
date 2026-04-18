@@ -87,6 +87,19 @@ class AlertDispatcher:
         dashboard_url: str = "",
         router: NotificationRouter | None = None,
     ) -> None:
+        """Initialize dispatcher.
+
+        When ``router`` is None (default), ``_dispatch`` fans each alert out to
+        every entry in ``targets`` directly, respecting per-target
+        ``min_severity`` — preserving pre-S-164 behaviour exactly.
+
+        When ``router`` is provided, ``_dispatch`` delegates policy (matching,
+        digesting, quiet hours) to the router. ``targets`` is still meaningful
+        in that case: callers typically build router-facing delivery adapters
+        from it via :func:`build_webhook_delivery_targets`, so the tuple of
+        webhook configs stays the single source of truth for outbound URLs,
+        retry/masking behaviour, and ``min_severity`` defaults.
+        """
         self._targets = targets
         self._session = session
         self._queue: asyncio.Queue[Alert] = asyncio.Queue(maxsize=queue_maxsize)
@@ -111,8 +124,14 @@ class AlertDispatcher:
             await self._dispatch(alert)
 
     async def stop(self) -> None:
-        """Signal the consumer to stop after draining remaining items."""
+        """Signal the consumer to stop after draining remaining items.
+
+        If a NotificationRouter is wired, its own ``stop()`` is awaited here so
+        pending digest-mode buffers are flushed before the process exits.
+        """
         self._running = False
+        if self._router is not None:
+            await self._router.stop()
 
     async def _dispatch(self, alert: Alert) -> None:
         """Send the alert to all configured targets, respecting severity filters."""
@@ -205,9 +224,17 @@ class _WebhookDeliveryAdapter:
     _dispatcher: AlertDispatcher
 
     async def deliver(self, alert: Alert) -> None:
-        payload = _format(
-            alert, self._target.format, dashboard_url=self._dispatcher._dashboard_url
-        )
+        try:
+            payload = _format(
+                alert, self._target.format, dashboard_url=self._dispatcher._dashboard_url
+            )
+        except Exception:
+            _log.exception(
+                "Formatter failed for target %s, alert %s",
+                mask_webhook_url(self._target.url),
+                alert.alert_id,
+            )
+            return
         await self._dispatcher._post_with_retry(self._target, payload, alert.alert_id)
 
     async def deliver_digest(self, alerts: Sequence[Alert]) -> None:

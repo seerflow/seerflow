@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 from urllib.parse import urlparse
 
 import yaml
@@ -371,86 +371,83 @@ def _build_quiet_hours(raw: dict[str, Any], channel: str) -> QuietHours:
     return QuietHours(start=start, end=end, min_severity=min_sev)
 
 
-def _build_routing_rules(raw: object, known_channels: set[str]) -> tuple[RoutingRule, ...]:
-    from seerflow.alerting.router import (
-        RoutingRule,
-        RoutingRuleMatch,
-        RoutingRuleNotify,
-    )
+def _normalise_str_or_list(v: object, label: str) -> str | tuple[str, ...] | None:
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+        return tuple(v)
+    raise ConfigError(f"{label} must be str or list[str], got {v!r}")
 
+
+def _severity_bound(v: object, label: str) -> int | None:
+    if v is None:
+        return None
+    if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 6:
+        raise ConfigError(f"{label} must be int in [0,6], got {v!r}")
+    return v
+
+
+def _build_notify_entry(n: dict[str, Any], known_channels: set[str], label: str) -> Any:
+    from seerflow.alerting.router import RoutingRuleNotify
+
+    channel = n.get("channel", "")
+    if channel not in known_channels:
+        raise ConfigError(f"{label}: unknown channel {channel!r}")
+    mode = n.get("mode", "immediate")
+    if mode not in ("immediate", "digest"):
+        raise ConfigError(f"{label}.mode must be immediate|digest, got {mode!r}")
+    window = n.get("digest_window_minutes", 15)
+    if not isinstance(window, int) or isinstance(window, bool) or window < 1:
+        raise ConfigError(f"{label}.digest_window_minutes must be int >= 1")
+    return RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
+
+
+def _build_routing_rule(idx: int, entry: dict[str, Any], known_channels: set[str]) -> Any:
+    from seerflow.alerting.router import RoutingRule, RoutingRuleMatch
+
+    match_raw = entry.get("match", {}) or {}
+    min_sev = _severity_bound(
+        match_raw.get("min_severity"), f"routing_rules[{idx}].match.min_severity"
+    )
+    max_sev = _severity_bound(
+        match_raw.get("max_severity"), f"routing_rules[{idx}].match.max_severity"
+    )
+    if min_sev is not None and max_sev is not None and min_sev > max_sev:
+        raise ConfigError(
+            f"routing_rules[{idx}]: min_severity ({min_sev}) > max_severity ({max_sev})"
+        )
+    match = RoutingRuleMatch(
+        alert_type=_normalise_str_or_list(
+            match_raw.get("alert_type"), f"routing_rules[{idx}].match.alert_type"
+        ),
+        rule_name=match_raw.get("rule_name"),
+        entity_type=_normalise_str_or_list(
+            match_raw.get("entity_type"), f"routing_rules[{idx}].match.entity_type"
+        ),
+        min_severity=min_sev,
+        max_severity=max_sev,
+    )
+    notify_list = [
+        _build_notify_entry(n, known_channels, f"routing_rules[{idx}].notify[{n_idx}]")
+        for n_idx, n in enumerate(entry.get("notify", []) or [])
+    ]
+    return RoutingRule(match=match, notify=tuple(notify_list))
+
+
+def _build_routing_rules(raw: object, known_channels: set[str]) -> tuple[RoutingRule, ...]:
     if not raw:
         return ()
     if not isinstance(raw, list):
         raise ConfigError("alerting.routing_rules must be a list")
-
-    def _normalise_str_or_list(v: object) -> str | tuple[str, ...] | None:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            return v
-        if isinstance(v, list) and all(isinstance(x, str) for x in v):
-            return tuple(v)
-        raise ConfigError(f"routing_rules predicate must be str or list[str], got {v!r}")
-
-    def _bounds(v: object, label: str) -> int | None:
-        if v is None:
-            return None
-        if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 6:
-            raise ConfigError(f"{label} must be int in [0,6], got {v!r}")
-        return v
-
-    rules: list[RoutingRule] = []
-    for idx, entry in enumerate(raw):
-        match_raw = entry.get("match", {}) or {}
-        min_sev = _bounds(
-            match_raw.get("min_severity"),
-            f"routing_rules[{idx}].match.min_severity",
-        )
-        max_sev = _bounds(
-            match_raw.get("max_severity"),
-            f"routing_rules[{idx}].match.max_severity",
-        )
-        if min_sev is not None and max_sev is not None and min_sev > max_sev:
-            raise ConfigError(
-                f"routing_rules[{idx}]: min_severity ({min_sev}) > max_severity ({max_sev})"
-            )
-        match = RoutingRuleMatch(
-            alert_type=_normalise_str_or_list(match_raw.get("alert_type")),
-            rule_name=match_raw.get("rule_name"),
-            entity_type=_normalise_str_or_list(match_raw.get("entity_type")),
-            min_severity=min_sev,
-            max_severity=max_sev,
-        )
-        notify_raw = entry.get("notify", []) or []
-        notify_list: list[RoutingRuleNotify] = []
-        for n_idx, n in enumerate(notify_raw):
-            channel = n.get("channel", "")
-            if channel not in known_channels:
-                raise ConfigError(
-                    f"routing_rules[{idx}].notify[{n_idx}]: unknown channel {channel!r}"
-                )
-            mode = n.get("mode", "immediate")
-            if mode not in ("immediate", "digest"):
-                raise ConfigError(
-                    f"routing_rules[{idx}].notify[{n_idx}].mode must be "
-                    f"immediate|digest, got {mode!r}"
-                )
-            window = n.get("digest_window_minutes", 15)
-            if not isinstance(window, int) or isinstance(window, bool) or window < 1:
-                raise ConfigError(
-                    f"routing_rules[{idx}].notify[{n_idx}].digest_window_minutes must be int >= 1"
-                )
-            notify_list.append(
-                RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
-            )
-        rules.append(RoutingRule(match=match, notify=tuple(notify_list)))
-    return tuple(rules)
+    return tuple(_build_routing_rule(idx, entry, known_channels) for idx, entry in enumerate(raw))
 
 
 def _build_default_routing(
     raw: object, known_channels: set[str], has_rules: bool
 ) -> DefaultRouting:
-    from seerflow.alerting.router import DefaultRouting, RoutingRuleNotify
+    from seerflow.alerting.router import DefaultRouting
 
     if not raw:
         return DefaultRouting(action="drop")
@@ -461,27 +458,10 @@ def _build_default_routing(
     action = raw.get("action", "drop")
     if action not in ("drop", "notify"):
         raise ConfigError(f"alerting.default_routing.action must be drop|notify, got {action!r}")
-    notify_raw = raw.get("notify", []) or []
-    notify_list: list[RoutingRuleNotify] = []
-    for n_idx, n in enumerate(notify_raw):
-        channel = n.get("channel", "")
-        if channel not in known_channels:
-            raise ConfigError(
-                f"alerting.default_routing.notify[{n_idx}]: unknown channel {channel!r}"
-            )
-        mode = n.get("mode", "immediate")
-        if mode not in ("immediate", "digest"):
-            raise ConfigError(
-                f"alerting.default_routing.notify[{n_idx}].mode must be immediate|digest"
-            )
-        window = n.get("digest_window_minutes", 15)
-        if not isinstance(window, int) or isinstance(window, bool) or window < 1:
-            raise ConfigError(
-                "alerting.default_routing.notify[*].digest_window_minutes must be int >= 1"
-            )
-        notify_list.append(
-            RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
-        )
+    notify_list = [
+        _build_notify_entry(n, known_channels, f"alerting.default_routing.notify[{n_idx}]")
+        for n_idx, n in enumerate(raw.get("notify", []) or [])
+    ]
     if action == "notify" and not notify_list:
         raise ConfigError(
             "alerting.default_routing.action=notify requires a non-empty notify list"
@@ -506,80 +486,94 @@ def _parse_dedup_overrides(raw: dict[str, Any]) -> tuple[tuple[str, int], ...]:
     return tuple(parsed)
 
 
+def _validate_dedup_window(data: dict[str, Any]) -> int:
+    value = data.get("dedup_window_seconds", 900)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ConfigError(
+            f"alerting.dedup_window_seconds must be an integer >= 1, got {value!r}"
+        )
+    return value
+
+
+def _validate_dashboard_url_field(data: dict[str, Any]) -> str:
+    url = data.get("dashboard_url", "")
+    if not isinstance(url, str):
+        raise ConfigError(
+            f"alerting.dashboard_url must be a string, got {type(url).__name__}"
+        )
+    if url:
+        _validate_dashboard_url(url)
+    return url
+
+
+def _validate_pagerduty_key(data: dict[str, Any]) -> str:
+    key = data.get("pagerduty_routing_key", "")
+    if key and not re.fullmatch(r"[0-9a-fA-F]{32}", key):
+        raise ConfigError("alerting.pagerduty_routing_key must be a 32-character hex string")
+    return str(key)
+
+
+def _validate_otlp_settings(data: dict[str, Any]) -> tuple[str, Literal["grpc", "http"], int]:
+    endpoint = data.get("otlp_endpoint", "")
+    if not isinstance(endpoint, str):
+        raise ConfigError(
+            f"alerting.otlp_endpoint must be a string, got {type(endpoint).__name__}"
+        )
+    if endpoint and "://" in endpoint:
+        parsed_ep = urlparse(endpoint)
+        if parsed_ep.scheme not in {"http", "https"}:
+            raise ConfigError(
+                f"alerting.otlp_endpoint: unsupported scheme {parsed_ep.scheme!r},"
+                " expected http, https, or bare host:port"
+            )
+    protocol = data.get("otlp_protocol", "grpc")
+    if protocol not in ("grpc", "http"):
+        raise ConfigError(
+            f"alerting.otlp_protocol must be 'grpc' or 'http', got {protocol!r}"
+        )
+    interval = data.get("otlp_export_interval_seconds", 5)
+    if not isinstance(interval, int) or isinstance(interval, bool) or interval < 1:
+        raise ConfigError(
+            f"alerting.otlp_export_interval_seconds must be an integer >= 1, got {interval!r}"
+        )
+    return endpoint, protocol, interval
+
+
+def _collect_quiet_hours(
+    webhooks: tuple[dict[str, Any], ...],
+) -> tuple[tuple[str, QuietHours], ...]:
+    pairs: list[tuple[str, QuietHours]] = []
+    for idx, wh in enumerate(webhooks):
+        qh_raw = wh.get("quiet_hours")
+        if qh_raw:
+            name = wh.get("name") or f"webhook-{idx}"
+            pairs.append((name, _build_quiet_hours(qh_raw, name)))
+    return tuple(pairs)
+
+
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
         webhooks = tuple(webhooks)
     raw_overrides = data.get("dedup_window_overrides", {})
-    overrides: tuple[tuple[str, int], ...] = ()
-    if isinstance(raw_overrides, dict):
-        overrides = _parse_dedup_overrides(raw_overrides)
-    dedup_window_seconds = data.get("dedup_window_seconds", 900)
-    if (
-        not isinstance(dedup_window_seconds, int)
-        or isinstance(dedup_window_seconds, bool)
-        or dedup_window_seconds < 1
-    ):
-        raise ConfigError(
-            f"alerting.dedup_window_seconds must be an integer >= 1, got {dedup_window_seconds!r}"
-        )
+    overrides = _parse_dedup_overrides(raw_overrides) if isinstance(raw_overrides, dict) else ()
     webhook_targets = _build_webhook_targets(webhooks)
-    dashboard_url = data.get("dashboard_url", "")
-    if not isinstance(dashboard_url, str):
-        raise ConfigError(
-            f"alerting.dashboard_url must be a string, got {type(dashboard_url).__name__}"
-        )
-    if dashboard_url:
-        _validate_dashboard_url(dashboard_url)
-    routing_key = data.get("pagerduty_routing_key", "")
-    if routing_key and not re.fullmatch(r"[0-9a-fA-F]{32}", routing_key):
-        raise ConfigError("alerting.pagerduty_routing_key must be a 32-character hex string")
-    otlp_endpoint = data.get("otlp_endpoint", "")
-    if not isinstance(otlp_endpoint, str):
-        raise ConfigError(
-            f"alerting.otlp_endpoint must be a string, got {type(otlp_endpoint).__name__}"
-        )
-    if otlp_endpoint and "://" in otlp_endpoint:
-        _allowed_otlp_schemes = {"http", "https"}
-        parsed_ep = urlparse(otlp_endpoint)
-        if parsed_ep.scheme not in _allowed_otlp_schemes:
-            raise ConfigError(
-                f"alerting.otlp_endpoint: unsupported scheme {parsed_ep.scheme!r},"
-                " expected http, https, or bare host:port"
-            )
-    otlp_protocol = data.get("otlp_protocol", "grpc")
-    if otlp_protocol not in ("grpc", "http"):
-        raise ConfigError(
-            f"alerting.otlp_protocol must be 'grpc' or 'http', got {otlp_protocol!r}"
-        )
-    otlp_interval = data.get("otlp_export_interval_seconds", 5)
-    if not isinstance(otlp_interval, int) or isinstance(otlp_interval, bool) or otlp_interval < 1:
-        raise ConfigError(
-            f"alerting.otlp_export_interval_seconds must be an integer >= 1, got {otlp_interval!r}"
-        )
     known_channels = {t.name for t in webhook_targets}
-    raw_rules = data.get("routing_rules", ())
-    routing_rules = _build_routing_rules(raw_rules, known_channels)
-    raw_default = data.get("default_routing")
+    routing_rules = _build_routing_rules(data.get("routing_rules", ()), known_channels)
     default_routing = _build_default_routing(
-        raw_default, known_channels, has_rules=bool(routing_rules)
+        data.get("default_routing"), known_channels, has_rules=bool(routing_rules)
     )
-    quiet_pairs: list[tuple[str, QuietHours]] = []
-    for idx, wh in enumerate(webhooks):
-        qh_raw = wh.get("quiet_hours")
-        if qh_raw:
-            name = wh.get("name") or f"webhook-{idx}"
-            quiet_pairs.append((name, _build_quiet_hours(qh_raw, name)))
+    otlp_endpoint, otlp_protocol, otlp_interval = _validate_otlp_settings(data)
     return AlertingConfig(
-        dedup_window_seconds=dedup_window_seconds,
+        dedup_window_seconds=_validate_dedup_window(data),
         dedup_window_overrides=overrides,
         webhooks=webhooks,
         webhook_targets=webhook_targets,
         routing_rules=routing_rules,
         default_routing=default_routing,
-        quiet_hours_by_channel=tuple(quiet_pairs),
-        pagerduty_routing_key=routing_key,
-        dashboard_url=dashboard_url,
+        quiet_hours_by_channel=_collect_quiet_hours(webhooks),
+        pagerduty_routing_key=_validate_pagerduty_key(data),
+        dashboard_url=_validate_dashboard_url_field(data),
         otlp_endpoint=otlp_endpoint,
         otlp_protocol=otlp_protocol,
         otlp_export_interval_seconds=otlp_interval,

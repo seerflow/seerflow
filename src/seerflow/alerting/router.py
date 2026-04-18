@@ -240,18 +240,23 @@ class NotificationRouter:
         await self._flush_key(key, target)
 
     async def _flush_key(self, key: tuple[int, str], target: DeliveryTarget) -> None:
-        buf = self._digest_buffers.pop(key, [])
+        buf = self._digest_buffers.get(key, [])
         self._digest_tasks.pop(key, None)
         if not buf:
+            self._digest_buffers.pop(key, None)
             return
         try:
             await target.deliver_digest(buf)
+        except asyncio.CancelledError:
+            # Shutdown mid-flush: leave the buffer so stop()'s drain loop can retry.
+            raise
         except Exception:
             _log.exception(
                 "NotificationRouter: digest delivery failed for channel %r (rule %d)",
                 target.name,
                 key[0],
             )
+        self._digest_buffers.pop(key, None)
 
     def _in_quiet_window(self, qh: QuietHours, now: datetime) -> bool:
         t = now.time()
