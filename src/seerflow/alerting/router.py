@@ -127,6 +127,7 @@ class NotificationRouter:
         targets: Iterable[DeliveryTarget],
         rules: Sequence[RoutingRule] = (),
         default_routing: DefaultRouting | None = None,
+        quiet_hours_by_channel: dict[str, QuietHours] | None = None,
         now_fn: Callable[[], datetime] = _default_utc_now,
     ) -> None:
         self._targets: dict[str, DeliveryTarget] = {}
@@ -137,6 +138,7 @@ class NotificationRouter:
             self._targets[t.name] = t
         self._rules: tuple[RoutingRule, ...] = tuple(rules)
         self._default = default_routing or DefaultRouting(action="drop")
+        self._quiet: dict[str, QuietHours] = dict(quiet_hours_by_channel or {})
         self._now = now_fn
         self._running = True
         self._digest_buffers: dict[tuple[int, str], list[Alert]] = {}
@@ -181,6 +183,8 @@ class NotificationRouter:
                 )
                 continue
             if int(alert.severity_id) < target.min_severity:
+                continue
+            if self._is_quiet_suppressed(entry.channel, alert):
                 continue
             if entry.mode == "immediate":
                 await self._safe_deliver(target, alert)
@@ -250,6 +254,28 @@ class NotificationRouter:
                 target.name,
                 key[0],
             )
+
+    def _in_quiet_window(self, qh: QuietHours, now: datetime) -> bool:
+        t = now.time()
+        if qh.start <= qh.end:
+            return qh.start <= t < qh.end
+        return t >= qh.start or t < qh.end
+
+    def _is_quiet_suppressed(self, channel: str, alert: Alert) -> bool:
+        qh = self._quiet.get(channel)
+        if qh is None:
+            return False
+        now = self._now()
+        if not self._in_quiet_window(qh, now):
+            return False
+        if int(alert.severity_id) >= qh.min_severity:
+            return False
+        _log.info(
+            "NotificationRouter: quiet hours suppressed alert %s on channel %r",
+            alert.alert_id,
+            channel,
+        )
+        return True
 
     async def _safe_deliver(self, target: DeliveryTarget, alert: Alert) -> None:
         try:
