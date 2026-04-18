@@ -9,6 +9,7 @@ import ssl as _ssl
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiohttp
 import aiohttp.web
@@ -20,7 +21,66 @@ from seerflow.pipeline import build_pipeline
 from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
 
+if TYPE_CHECKING:
+    from seerflow.alerting.router import NotificationRouter
+    from seerflow.config import AlertingConfig
+
 _log = logging.getLogger("seerflow")
+
+
+async def _build_channel_session_and_router(
+    alerting: AlertingConfig,
+) -> tuple[aiohttp.ClientSession | None, NotificationRouter | None]:
+    """Construct an HTTP session + NotificationRouter for multi-channel delivery.
+
+    Returns ``(None, None)`` when no channel targets or routing rules are
+    configured, so ``run.py`` falls back to the legacy webhook-only
+    dispatcher fan-out path introduced in S-047.
+
+    An ``aiohttp.ClientSession`` is only allocated when at least one HTTP-using
+    channel (SMS, Telegram, WhatsApp) is configured. Email uses its own SMTP
+    connection and does not require the shared HTTP session.
+    """
+    from seerflow.alerting.channels import bind_http_channel
+    from seerflow.alerting.router import NotificationRouter
+
+    needs_router = bool(
+        alerting.email_targets
+        or alerting.sms_targets
+        or alerting.telegram_targets
+        or alerting.whatsapp_targets
+        or alerting.routing_rules
+    )
+    if not needs_router:
+        return None, None
+
+    session: aiohttp.ClientSession | None = None
+    if alerting.sms_targets or alerting.telegram_targets or alerting.whatsapp_targets:
+        connector = aiohttp.TCPConnector(
+            ssl=_ssl.create_default_context(),
+            limit_per_host=10,
+        )
+        session = aiohttp.ClientSession(connector=connector)
+
+    # mypy: _HttpChannel Protocol declares ``name``/``min_severity`` as
+    # settable but the channel dataclasses are frozen; this is a structural-
+    # vs-nominal mismatch in the existing Protocol, not a real issue here.
+    channel_targets: list[object] = list(alerting.email_targets)
+    if session is not None:
+        for sms in alerting.sms_targets:
+            channel_targets.append(bind_http_channel(sms, session=session))  # type: ignore[arg-type]
+        for tg in alerting.telegram_targets:
+            channel_targets.append(bind_http_channel(tg, session=session))  # type: ignore[arg-type]
+        for wa in alerting.whatsapp_targets:
+            channel_targets.append(bind_http_channel(wa, session=session))  # type: ignore[arg-type]
+
+    router = NotificationRouter(
+        targets=channel_targets,  # type: ignore[arg-type]
+        rules=alerting.routing_rules,
+        default_routing=alerting.default_routing,
+        quiet_hours_by_channel=dict(alerting.quiet_hours_by_channel),
+    )
+    return session, router
 
 
 async def _run_with_config(config: SeerflowConfig) -> None:
@@ -229,25 +289,40 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
 
-    from seerflow.alerting.dispatcher import AlertDispatcher
+    from seerflow.alerting.dispatcher import (
+        AlertDispatcher,
+        build_webhook_delivery_targets,
+    )
 
     webhook_session: aiohttp.ClientSession | None = None
     dispatcher: AlertDispatcher | None = None
     _dispatcher_task: asyncio.Task[None] | None = None
     webhook_targets = config.alerting.webhook_targets
-    if webhook_targets:
-        _webhook_connector = aiohttp.TCPConnector(
-            ssl=_ssl.create_default_context(),
-            limit_per_host=10,
-        )
-        webhook_session = aiohttp.ClientSession(connector=_webhook_connector)
+    channel_session, router = await _build_channel_session_and_router(config.alerting)
+    if webhook_targets or router is not None:
+        if channel_session is not None:
+            webhook_session = channel_session
+        else:
+            _webhook_connector = aiohttp.TCPConnector(
+                ssl=_ssl.create_default_context(),
+                limit_per_host=10,
+            )
+            webhook_session = aiohttp.ClientSession(connector=_webhook_connector)
         dispatcher = AlertDispatcher(
             webhook_targets,
             webhook_session,
             dashboard_url=config.alerting.dashboard_url,
+            router=router,
         )
+        if router is not None and webhook_targets:
+            for adapter in build_webhook_delivery_targets(dispatcher):
+                router._targets[adapter.name] = adapter
         _dispatcher_task = asyncio.create_task(dispatcher.run())
-        _log.info("Webhook dispatcher: %d targets", len(webhook_targets))
+        _log.info(
+            "Alert dispatcher: %d webhook target(s), router=%s",
+            len(webhook_targets),
+            "enabled" if router is not None else "disabled",
+        )
 
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
 
