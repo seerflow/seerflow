@@ -313,3 +313,75 @@ def test_alerting_config_parses_quiet_hours_for_telegram_targets() -> None:
     cfg = _build_alerting(data)
     by_name = dict(cfg.quiet_hours_by_channel)
     assert "tg" in by_name
+
+
+@pytest.mark.unit
+def test_build_email_targets_rejects_plaintext_password() -> None:
+    with pytest.raises(ConfigError, match="plaintext"):
+        _build_email_targets(
+            (
+                {
+                    "name": "x",
+                    "smtp_host": "smtp.x.io",
+                    "smtp_port": 25,
+                    "use_starttls": False,
+                    "smtp_user": "u",
+                    "smtp_password": "p",
+                    "from_address": "a@x",
+                    "to_addresses": ["b@x"],
+                },
+            )
+        )
+
+
+@pytest.mark.unit
+def test_build_email_targets_allows_plaintext_port_465() -> None:
+    cfg = _build_email_targets(
+        (
+            {
+                "name": "x",
+                "smtp_host": "smtp.x.io",
+                "smtp_port": 465,
+                "use_starttls": False,
+                "smtp_user": "u",
+                "smtp_password": "p",
+                "from_address": "a@x",
+                "to_addresses": ["b@x"],
+            },
+        )
+    )
+    assert cfg[0].smtp_port == 465
+
+
+@pytest.mark.unit
+def test_build_email_targets_rejects_crlf_in_from_address() -> None:
+    with pytest.raises(ConfigError, match="newline"):
+        _build_email_targets(
+            (
+                {
+                    "name": "x",
+                    "smtp_host": "smtp.x.io",
+                    "smtp_port": 587,
+                    "use_starttls": True,
+                    "from_address": "a@x\r\nBcc: leak@evil",
+                    "to_addresses": ["b@x"],
+                },
+            )
+        )
+
+
+@pytest.mark.unit
+def test_build_email_targets_rejects_crlf_in_to_address() -> None:
+    with pytest.raises(ConfigError, match="newline"):
+        _build_email_targets(
+            (
+                {
+                    "name": "x",
+                    "smtp_host": "smtp.x.io",
+                    "smtp_port": 587,
+                    "use_starttls": True,
+                    "from_address": "a@x",
+                    "to_addresses": ["b@x\nBcc: leak@evil"],
+                },
+            )
+        )

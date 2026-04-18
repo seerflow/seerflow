@@ -81,6 +81,11 @@ class WhatsAppTarget:
     async def _post_one(self, session: aiohttp.ClientSession, alert: Alert, to: str) -> None:
         now = self._monotonic()
         if now < self._circuit.open_until:
+            _log.info(
+                "WhatsApp %s: circuit open, dropping alert %s",
+                self.name,
+                alert.alert_id,
+            )
             return
         await self._bucket.acquire()
         headers = {"Authorization": f"Bearer {self.access_token}"}
@@ -115,7 +120,16 @@ class WhatsAppTarget:
                     code,
                 )
         except (aiohttp.ClientError, TimeoutError) as exc:
-            _log.warning("WhatsApp %s: transport error %s", self.name, exc)
+            # ``access_token`` sits in the Authorization header, so ``aiohttp``
+            # exception strings should not echo it. Scrub defensively through
+            # the shared helper in case a future aiohttp version changes that.
+            from seerflow.alerting._http import _scrub_secrets
+
+            _log.warning(
+                "WhatsApp %s: transport error %s",
+                self.name,
+                _scrub_secrets(str(exc)),
+            )
 
     async def deliver(self, alert: Alert, *, session: aiohttp.ClientSession) -> None:
         for to in self.to_numbers:

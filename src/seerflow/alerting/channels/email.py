@@ -133,7 +133,9 @@ class EmailTarget:
             _log.exception("EmailTarget %s: transport error", self.name)
 
     async def deliver(self, alert: Alert) -> None:
-        subject = f"[Seerflow/{_sev(alert)}] {alert.rule_name}"[:200]
+        # Strip CR/LF to block header injection via alert-provided rule names.
+        safe_rule = alert.rule_name.replace("\r", " ").replace("\n", " ")
+        subject = f"[Seerflow/{_sev(alert)}] {safe_rule}"[:200]
         msg = self._build_message(subject, format_html(alert), format_text(alert))
         await self._send(msg)
 

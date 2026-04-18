@@ -307,6 +307,11 @@ def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
 
 _VALID_WEBHOOK_FORMATS = frozenset({"slack", "teams", "json"})
 
+# Reject any header-like field (email From/To/Subject) containing CR/LF —
+# such characters can split SMTP headers on relays that do not enforce
+# Python 3 ``email.message.EmailMessage`` folding semantics.
+_HEADER_INJECTION_RE = re.compile(r"[\r\n]")
+
 
 def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[WebhookTarget, ...]:
     """Parse raw webhook dicts into a tuple of WebhookTarget objects."""
@@ -373,11 +378,18 @@ def _build_email_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:
             not isinstance(to_raw, list)
             or not to_raw
             or not all(isinstance(a, str) and a for a in to_raw)
+            or any(_HEADER_INJECTION_RE.search(a) for a in to_raw)
         ):
             raise ConfigError(
-                f"alerting.email_targets[{idx}].to_addresses must be non-empty list[str]"
+                f"alerting.email_targets[{idx}].to_addresses must be non-empty"
+                " list[str] with no newline characters"
             )
         to_addresses = tuple(to_raw)
+        from_address = str(e.get("from_address", ""))
+        if _HEADER_INJECTION_RE.search(from_address):
+            raise ConfigError(
+                f"alerting.email_targets[{idx}].from_address must not contain newline characters"
+            )
         max_per_minute = e.get("max_per_minute")
         if max_per_minute is not None and (
             not isinstance(max_per_minute, int)
@@ -388,16 +400,27 @@ def _build_email_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:
         min_sev = e.get("min_severity", 0)
         if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
             raise ConfigError(f"alerting.email_targets[{idx}].min_severity must be int in [0,6]")
+        smtp_password = str(e.get("smtp_password", ""))
+        use_starttls = bool(e.get("use_starttls", True))
+        # Reject any config that would send smtp_password over a plaintext
+        # connection. Port 465 is the implicit-TLS SMTP port — allow it as a
+        # future exception once the target is extended to honour use_tls.
+        if smtp_password and not use_starttls and port != 465:
+            raise ConfigError(
+                f"alerting.email_targets[{idx}]: smtp_password set with"
+                " use_starttls=false on non-implicit-TLS port — refusing to"
+                " send credentials over plaintext"
+            )
         targets.append(
             EmailTarget(
                 name=name,
                 smtp_host=host,
                 smtp_port=port,
-                use_starttls=bool(e.get("use_starttls", True)),
-                from_address=str(e.get("from_address", "")),
+                use_starttls=use_starttls,
+                from_address=from_address,
                 to_addresses=to_addresses,
                 smtp_user=str(e.get("smtp_user", "")),
-                smtp_password=str(e.get("smtp_password", "")),
+                smtp_password=smtp_password,
                 min_severity=min_sev,
                 max_per_minute=max_per_minute,
             )

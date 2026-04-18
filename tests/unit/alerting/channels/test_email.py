@@ -113,6 +113,37 @@ def smtp_controller() -> Iterator[tuple[Controller, _CapturingHandler]]:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_email_deliver_strips_crlf_from_subject(
+    smtp_controller: tuple[Controller, _CapturingHandler],
+) -> None:
+    controller, handler = smtp_controller
+    target = EmailTarget(
+        name="t",
+        smtp_host="127.0.0.1",
+        smtp_port=controller.port,
+        use_starttls=False,
+        from_address="a@x.io",
+        to_addresses=("b@x.io",),
+    )
+    import asyncio as _asyncio
+
+    await target.deliver(make_alert(rule_name="rule\r\nBcc: leak@evil"))
+    for _ in range(20):
+        if handler.messages:
+            break
+        await _asyncio.sleep(0.05)
+    assert len(handler.messages) == 1
+    msg = handler.messages[0]
+    subject = msg["Subject"]
+    assert "\r" not in subject
+    assert "\n" not in subject
+    # No injected header — "Bcc:" only appears inside the Subject body, not as
+    # a separate header recognised by the SMTP relay.
+    assert msg["Bcc"] is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_email_deliver_sends_html_multipart(
     smtp_controller: tuple[Controller, _CapturingHandler],
 ) -> None:
