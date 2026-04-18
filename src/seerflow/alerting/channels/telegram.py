@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from seerflow.alerting._http import post_with_retry
+from seerflow.alerting.channels._format import severity_name as _sev_name
 from seerflow.alerting.channels._ratelimit import TokenBucket
 
 if TYPE_CHECKING:
@@ -20,23 +21,9 @@ _TG_MAX = 4096
 
 _MD_V2_RESERVED = frozenset("_*[]()~`>#+-=|{}.!")
 
-_SEVERITY_NAME: dict[int, str] = {
-    5: "CRITICAL",
-    6: "FATAL",
-    4: "ERROR",
-    3: "WARNING",
-    2: "NOTICE",
-    1: "INFO",
-    0: "TRACE",
-}
-
 
 def escape_markdown_v2(text: str) -> str:
     return "".join(("\\" + c) if c in _MD_V2_RESERVED else c for c in text)
-
-
-def _sev_name(sev: int) -> str:
-    return _SEVERITY_NAME.get(sev, str(sev))
 
 
 def _truncate(raw: str) -> str:

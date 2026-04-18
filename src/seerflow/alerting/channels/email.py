@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import aiosmtplib
 
+from seerflow.alerting.channels._format import severity_name
 from seerflow.alerting.channels._ratelimit import TokenBucket
 
 if TYPE_CHECKING:
@@ -28,19 +29,8 @@ _SEVERITY_COLOUR: dict[int, str] = {
     5: "#c00",
     6: "#800",
 }
-_SEVERITY_NAME: dict[int, str] = {
-    0: "TRACE",
-    1: "INFORMATIONAL",
-    2: "NOTICE",
-    3: "WARNING",
-    4: "ERROR",
-    5: "CRITICAL",
-    6: "FATAL",
-}
-
-
 def _sev(alert: Alert) -> str:
-    return _SEVERITY_NAME.get(int(alert.severity_id), str(alert.severity_id))
+    return severity_name(int(alert.severity_id))
 
 
 def format_html(alert: Alert) -> str:
@@ -80,7 +70,7 @@ def format_digest_html(alerts: Sequence[Alert]) -> str:
         by_sev.setdefault(int(a.severity_id), []).append(a)
     rows: list[str] = [f"<h2>Seerflow digest — {len(alerts)} alerts</h2>"]
     for sev in sorted(by_sev.keys(), reverse=True):
-        rows.append(f"<h3>{_SEVERITY_NAME.get(sev, str(sev))}</h3><ul>")
+        rows.append(f"<h3>{severity_name(sev)}</h3><ul>")
         for a in by_sev[sev]:
             rule_name = _html.escape(a.rule_name)
             entity_value = _html.escape(a.entity_value)

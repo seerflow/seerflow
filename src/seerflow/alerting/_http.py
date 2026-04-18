@@ -22,9 +22,13 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
 _SECRET_URL_PATTERNS = (re.compile(r"/bot[^/\s]+/"),)
 
 
-def _sanitize_body(raw: str, max_len: int = 200) -> str:
+def sanitize_body(raw: str, max_len: int = 200) -> str:
     """Strip control characters and truncate for safe logging."""
     return _CONTROL_CHARS.sub(" ", raw)[:max_len]
+
+
+# Backwards-compatible private alias (removed in a future release).
+_sanitize_body = sanitize_body
 
 
 def _scrub_secrets(msg: str) -> str:
@@ -74,7 +78,7 @@ async def post_with_retry(
                 if resp.status < 400:
                     return
                 if resp.status < 500:
-                    body = _sanitize_body(await resp.text(errors="replace"))
+                    body = sanitize_body(await resp.text(errors="replace"))
                     _log.error(
                         "Channel %s returned client error %d - not retrying - response: %s",
                         masked_for_log,
@@ -82,7 +86,7 @@ async def post_with_retry(
                         body,
                     )
                     return
-                body = _sanitize_body(await resp.text(errors="replace"))
+                body = sanitize_body(await resp.text(errors="replace"))
                 _log.warning(
                     "Channel %s returned %d (attempt %d) - response: %s",
                     masked_for_log,

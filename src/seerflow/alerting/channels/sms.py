@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import aiohttp
 
 from seerflow.alerting._http import post_with_retry
+from seerflow.alerting.channels._format import severity_name as _sev_name
 from seerflow.alerting.channels._ratelimit import TokenBucket
 
 if TYPE_CHECKING:
@@ -17,20 +18,6 @@ if TYPE_CHECKING:
 
 _TWILIO_HOST = "api.twilio.com"
 _SMS_MAX = 1600
-
-_SEVERITY_NAME: dict[int, str] = {
-    0: "TRACE",
-    1: "INFO",
-    2: "NOTICE",
-    3: "WARNING",
-    4: "ERROR",
-    5: "CRITICAL",
-    6: "FATAL",
-}
-
-
-def _sev_name(sev: int) -> str:
-    return _SEVERITY_NAME.get(sev, str(sev))
 
 
 def _truncate(raw: str) -> str:

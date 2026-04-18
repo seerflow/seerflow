@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-from seerflow.alerting._http import _sanitize_body
+from seerflow.alerting._http import sanitize_body
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -199,14 +199,14 @@ class PagerDutySink:
                     if resp.status < 400:
                         return
                     if resp.status < 500:
-                        body = _sanitize_body(await resp.text(errors="replace"))
+                        body = sanitize_body(await resp.text(errors="replace"))
                         _log.error(
                             "PagerDuty returned client error %d — not retrying — response: %s",
                             resp.status,
                             body,
                         )
                         return
-                    body = _sanitize_body(await resp.text(errors="replace"))
+                    body = sanitize_body(await resp.text(errors="replace"))
                     _log.warning(
                         "PagerDuty returned %d (attempt %d) — response: %s",
                         resp.status,

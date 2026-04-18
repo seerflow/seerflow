@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
+from seerflow.alerting.channels._format import severity_name as _sev_name
 from seerflow.alerting.channels._ratelimit import TokenBucket
 
 if TYPE_CHECKING:
@@ -22,20 +23,6 @@ _WA_HOST = "graph.facebook.com"
 _WA_API_VERSION = "v18.0"
 _CIRCUIT_OPEN_SECONDS = 300.0
 _TEMPLATE_NOT_FOUND = 131026
-
-_SEVERITY_NAME: dict[int, str] = {
-    5: "CRITICAL",
-    6: "FATAL",
-    4: "ERROR",
-    3: "WARNING",
-    2: "NOTICE",
-    1: "INFO",
-    0: "TRACE",
-}
-
-
-def _sev_name(sev: int) -> str:
-    return _SEVERITY_NAME.get(sev, str(sev))
 
 
 def build_template_params(alert: Alert) -> list[dict[str, str]]:

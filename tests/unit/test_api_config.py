@@ -245,6 +245,7 @@ class TestSecretRegressionGuard:
     # Internal fields on channel targets (rate-limit buckets, circuit breakers,
     # clock injectors) that are repr=False for noise reduction, not secrecy.
     _KNOWN_PUBLIC_REPR_FALSE: ClassVar[set[str]] = {
+        "alerting.email_targets[]._bucket",
         "alerting.sms_targets[]._bucket",
         "alerting.telegram_targets[]._bucket",
         "alerting.whatsapp_targets[]._bucket",

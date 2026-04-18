@@ -105,8 +105,10 @@ def smtp_controller() -> Iterator[tuple[Controller, _CapturingHandler]]:
     handler = _CapturingHandler()
     controller = Controller(handler, hostname="127.0.0.1", port=_free_port())
     controller.start()
-    yield controller, handler
-    controller.stop()
+    try:
+        yield controller, handler
+    finally:
+        controller.stop()
 
 
 @pytest.mark.integration
