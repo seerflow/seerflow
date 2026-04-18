@@ -7,10 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from seerflow.alerting._http import (  # noqa: F401 -- _sanitize_body re-exported for sinks/pagerduty.py
-    _sanitize_body,
-    post_with_retry,
-)
+from seerflow.alerting._http import post_with_retry
 from seerflow.alerting.formatters import format_json, format_slack, format_teams
 from seerflow.alerting.mask import mask_webhook_url
 from seerflow.alerting.target import loop_deliver_digest
@@ -25,9 +22,6 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("seerflow")
 
-# _sanitize_body is imported above purely so ``sinks/pagerduty.py`` can keep
-# doing ``from seerflow.alerting.dispatcher import _sanitize_body``. It is not
-# re-exported in ``__all__`` because the underscore prefix marks it private.
 __all__ = [
     "AlertDispatcher",
     "WebhookTarget",

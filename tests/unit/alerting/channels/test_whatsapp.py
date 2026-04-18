@@ -18,9 +18,7 @@ from tests.unit.alert_factory import make_alert
 
 @pytest.mark.unit
 def test_template_params_three_text_entries() -> None:
-    alert = make_alert(
-        severity_id=SeverityLevel.CRITICAL, rule_name="brute-force"
-    )
+    alert = make_alert(severity_id=SeverityLevel.CRITICAL, rule_name="brute-force")
     params = build_template_params(alert)
     assert len(params) == 3
     texts = [p["text"] for p in params]

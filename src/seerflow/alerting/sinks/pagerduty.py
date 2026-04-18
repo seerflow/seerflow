@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-from seerflow.alerting.dispatcher import _sanitize_body
+from seerflow.alerting._http import _sanitize_body
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

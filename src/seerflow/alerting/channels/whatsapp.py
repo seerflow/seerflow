@@ -71,16 +71,11 @@ class WhatsAppTarget:
     _circuit: _CircuitState = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "_bucket", TokenBucket(self.rate_per_second, self.burst)
-        )
+        object.__setattr__(self, "_bucket", TokenBucket(self.rate_per_second, self.burst))
         object.__setattr__(self, "_circuit", _CircuitState())
 
     def _url(self) -> str:
-        return (
-            f"https://{_WA_HOST}/{_WA_API_VERSION}/"
-            f"{self.phone_number_id}/messages"
-        )
+        return f"https://{_WA_HOST}/{_WA_API_VERSION}/{self.phone_number_id}/messages"
 
     def _payload_for(self, alert: Alert, to: str) -> dict[str, object]:
         return {
@@ -96,9 +91,7 @@ class WhatsAppTarget:
             },
         }
 
-    async def _post_one(
-        self, session: aiohttp.ClientSession, alert: Alert, to: str
-    ) -> None:
+    async def _post_one(self, session: aiohttp.ClientSession, alert: Alert, to: str) -> None:
         now = self._monotonic()
         if now < self._circuit.open_until:
             return
@@ -122,8 +115,7 @@ class WhatsAppTarget:
                 if code == _TEMPLATE_NOT_FOUND:
                     self._circuit.open_until = now + _CIRCUIT_OPEN_SECONDS
                     _log.error(
-                        "WhatsApp %s: template %r not found (131026) —"
-                        " circuit open for %ds",
+                        "WhatsApp %s: template %r not found (131026) — circuit open for %ds",
                         self.name,
                         self.template_name,
                         int(_CIRCUIT_OPEN_SECONDS),
@@ -138,9 +130,7 @@ class WhatsAppTarget:
         except (aiohttp.ClientError, TimeoutError) as exc:
             _log.warning("WhatsApp %s: transport error %s", self.name, exc)
 
-    async def deliver(
-        self, alert: Alert, *, session: aiohttp.ClientSession
-    ) -> None:
+    async def deliver(self, alert: Alert, *, session: aiohttp.ClientSession) -> None:
         for to in self.to_numbers:
             await self._post_one(session, alert, to)
 
