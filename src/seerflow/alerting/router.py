@@ -11,7 +11,6 @@ configured HH:MM UTC window.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import fnmatch
 import logging
 from dataclasses import dataclass, field
@@ -152,8 +151,14 @@ class NotificationRouter:
         for task in list(self._digest_tasks.values()):
             task.cancel()
         for task in list(self._digest_tasks.values()):
-            with contextlib.suppress(asyncio.CancelledError, Exception):
+            try:
                 await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                _log.exception(
+                    "NotificationRouter: digest flusher task raised during stop",
+                )
         self._digest_tasks.clear()
         for key, buf in list(self._digest_buffers.items()):
             target = self._targets.get(key[1])
@@ -172,6 +177,13 @@ class NotificationRouter:
     async def route(self, alert: Alert) -> None:
         """Find the first matching rule (or default) and dispatch."""
         rule_idx, notify = self._select_notify_with_idx(alert)
+        _log.debug(
+            "NotificationRouter: alert %s matched rule_idx=%d (alert_type=%s, rule_name=%s)",
+            alert.alert_id,
+            rule_idx,
+            alert.alert_type,
+            alert.rule_name,
+        )
         for entry in notify:
             target = self._targets.get(entry.channel)
             if target is None:

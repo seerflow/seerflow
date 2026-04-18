@@ -38,11 +38,12 @@ class WebhookTarget:
     format: str  # "slack" | "teams" | "json"
     min_severity: int = 0
 
+    # NOTE(S-164): deliver/deliver_digest exist solely so WebhookTarget
+    # satisfies the DeliveryTarget protocol structurally. Real webhook sends
+    # go through _WebhookDeliveryAdapter (see build_webhook_delivery_targets)
+    # which calls AlertDispatcher._post_with_retry. S-163 channels will ship
+    # their own DeliveryTarget implementations and bypass these stubs.
     async def deliver(self, alert: Alert) -> None:
-        # Delivery is driven by AlertDispatcher; WebhookTarget is intentionally
-        # a passive config holder. NotificationRouter will call dispatcher-side
-        # helpers directly when routing. This stub exists so WebhookTarget
-        # satisfies the DeliveryTarget protocol at type-check time.
         raise NotImplementedError(
             "WebhookTarget.deliver is not called directly; "
             "use AlertDispatcher or NotificationRouter."

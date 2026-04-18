@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from seerflow.models.alert import Alert
 
 
@@ -25,7 +27,7 @@ class FakeDeliveryTarget:
             raise self.deliver_raises
         self.delivered.append(alert)
 
-    async def deliver_digest(self, alerts: list[Alert]) -> None:
+    async def deliver_digest(self, alerts: Sequence[Alert]) -> None:
         if self.digest_raises is not None:
             raise self.digest_raises
         self.digests.append(list(alerts))
