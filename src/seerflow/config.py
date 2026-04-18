@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from seerflow.alerting.dispatcher import WebhookTarget
+    from seerflow.alerting.router import DefaultRouting, QuietHours, RoutingRule
 
 # Re-exports from seerflow._config_validation — preserves `from seerflow.config
 # import ConfigError` for public callers (S-172 split). Explicit `X as X` form
@@ -148,6 +149,13 @@ class DetectionConfig:
     kill_chain: KillChainConfig = field(default_factory=KillChainConfig)
 
 
+def _default_routing_drop() -> DefaultRouting:
+    """Default-factory for AlertingConfig.default_routing (avoids import cycle)."""
+    from seerflow.alerting.router import DefaultRouting
+
+    return DefaultRouting(action="drop")
+
+
 @dataclass(frozen=True, kw_only=True, slots=True)
 class AlertingConfig:
     """Alert routing configuration."""
@@ -156,6 +164,9 @@ class AlertingConfig:
     dedup_window_overrides: tuple[tuple[str, int], ...] = ()
     webhooks: tuple[dict[str, Any], ...] = ()
     webhook_targets: tuple[WebhookTarget, ...] = ()
+    routing_rules: tuple[RoutingRule, ...] = ()
+    default_routing: DefaultRouting = field(default_factory=_default_routing_drop)
+    quiet_hours_by_channel: tuple[tuple[str, QuietHours], ...] = ()
     pagerduty_routing_key: str = field(default="", repr=False)
     dashboard_url: str = ""
     otlp_endpoint: str = ""

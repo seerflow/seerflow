@@ -1044,7 +1044,7 @@ class TestWebhookConfigParsing:
     def test_webhook_target_frozen(self, tmp_path: Path) -> None:
         from seerflow.alerting import WebhookTarget
 
-        target = WebhookTarget(url="https://example.com", format="json")
+        target = WebhookTarget(name="t", url="https://example.com", format="json")
         with pytest.raises((AttributeError, TypeError)):
             target.url = "https://other.com"  # type: ignore[misc]
 

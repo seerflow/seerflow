@@ -57,6 +57,7 @@ class TestRedactConfig:
 
     def test_webhook_target_url_masked(self) -> None:
         target = WebhookTarget(
+            name="slack",
             url="https://hooks.slack.com/services/T123/B456/SECRET",
             format="slack",
             min_severity=3,
@@ -248,11 +249,17 @@ class TestSecretRegressionGuard:
 
         from seerflow import config as config_mod
         from seerflow.alerting.dispatcher import WebhookTarget
+        from seerflow.alerting.router import DefaultRouting, QuietHours, RoutingRule
 
         # Seed localns with every dataclass defined in seerflow.config so
         # forward refs resolve. WebhookTarget is imported explicitly because
         # it lives in alerting.dispatcher but is referenced from AlertingConfig.
-        localns: dict[str, type] = {"WebhookTarget": WebhookTarget}
+        localns: dict[str, type] = {
+            "WebhookTarget": WebhookTarget,
+            "RoutingRule": RoutingRule,
+            "DefaultRouting": DefaultRouting,
+            "QuietHours": QuietHours,
+        }
         for name in dir(config_mod):
             attr = getattr(config_mod, name)
             if isinstance(attr, type) and dataclasses.is_dataclass(attr):
