@@ -38,6 +38,53 @@ def _scrub_secrets(msg: str) -> str:
     return msg
 
 
+def _build_post_kwargs(
+    timeout_seconds: float,
+    headers: dict[str, str] | None,
+    auth: aiohttp.BasicAuth | None,
+    payload: Any,
+    data: Any,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "timeout": aiohttp.ClientTimeout(total=timeout_seconds),
+        "allow_redirects": False,
+    }
+    if headers is not None:
+        kwargs["headers"] = headers
+    if auth is not None:
+        kwargs["auth"] = auth
+    if data is not None:
+        kwargs["data"] = data
+    else:
+        kwargs["json"] = payload
+    return kwargs
+
+
+async def _handle_response(
+    resp: aiohttp.ClientResponse, masked_for_log: str, attempt: int
+) -> bool:
+    """Return True when the caller should stop retrying (success or 4xx)."""
+    if resp.status < 400:
+        return True
+    body = sanitize_body(await resp.text(errors="replace"))
+    if resp.status < 500:
+        _log.error(
+            "Channel %s returned client error %d - not retrying - response: %s",
+            masked_for_log,
+            resp.status,
+            body,
+        )
+        return True
+    _log.warning(
+        "Channel %s returned %d (attempt %d) - response: %s",
+        masked_for_log,
+        resp.status,
+        attempt + 1,
+        body,
+    )
+    return False
+
+
 async def post_with_retry(
     session: aiohttp.ClientSession,
     url: str,
@@ -59,47 +106,17 @@ async def post_with_retry(
     When ``data`` is provided, it is sent as form-encoded body; otherwise
     ``payload`` is sent as JSON.
     """
-    post_kwargs: dict[str, Any] = {
-        "timeout": aiohttp.ClientTimeout(total=timeout_seconds),
-        "allow_redirects": False,
-    }
-    if headers is not None:
-        post_kwargs["headers"] = headers
-    if auth is not None:
-        post_kwargs["auth"] = auth
-    if data is not None:
-        post_kwargs["data"] = data
-    else:
-        post_kwargs["json"] = payload
-
+    post_kwargs = _build_post_kwargs(timeout_seconds, headers, auth, payload, data)
     for attempt in range(attempts):
         try:
             async with session.post(url, **post_kwargs) as resp:
-                if resp.status < 400:
+                if await _handle_response(resp, masked_for_log, attempt):
                     return
-                if resp.status < 500:
-                    body = sanitize_body(await resp.text(errors="replace"))
-                    _log.error(
-                        "Channel %s returned client error %d - not retrying - response: %s",
-                        masked_for_log,
-                        resp.status,
-                        body,
-                    )
-                    return
-                body = sanitize_body(await resp.text(errors="replace"))
-                _log.warning(
-                    "Channel %s returned %d (attempt %d) - response: %s",
-                    masked_for_log,
-                    resp.status,
-                    attempt + 1,
-                    body,
-                )
         except Exception as exc:
             # CancelledError is BaseException on Py3.8+ so it still propagates.
-            # Deliberately broad: any formatter/mock TypeError / OSError from
-            # lower transport layers should surface as a retryable attempt, not
-            # a pipeline crash (behaviour preserved from the original
-            # AlertDispatcher._post_with_retry).
+            # Broad catch preserves legacy AlertDispatcher._post_with_retry
+            # behaviour: any transport/formatter error becomes a retryable
+            # attempt rather than a pipeline crash.
             _log.warning(
                 "Channel %s failed (attempt %d): %s",
                 masked_for_log,

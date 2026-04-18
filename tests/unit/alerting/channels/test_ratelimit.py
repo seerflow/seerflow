@@ -13,11 +13,11 @@ from seerflow.alerting.channels._ratelimit import TokenBucket
 @pytest.mark.asyncio
 async def test_bucket_allows_burst_without_waiting() -> None:
     bucket = TokenBucket(rate_per_second=1.0, burst=3)
-    start = asyncio.get_event_loop().time()
+    start = asyncio.get_running_loop().time()
     await bucket.acquire()
     await bucket.acquire()
     await bucket.acquire()
-    elapsed = asyncio.get_event_loop().time() - start
+    elapsed = asyncio.get_running_loop().time() - start
     assert elapsed < 0.05
 
 
@@ -26,9 +26,9 @@ async def test_bucket_allows_burst_without_waiting() -> None:
 async def test_bucket_blocks_when_empty() -> None:
     bucket = TokenBucket(rate_per_second=20.0, burst=1)
     await bucket.acquire()  # drains bucket
-    start = asyncio.get_event_loop().time()
+    start = asyncio.get_running_loop().time()
     await bucket.acquire()  # must wait ~0.05s for one refill
-    elapsed = asyncio.get_event_loop().time() - start
+    elapsed = asyncio.get_running_loop().time() - start
     assert elapsed >= 0.03
 
 
@@ -39,10 +39,10 @@ async def test_bucket_refills_up_to_burst() -> None:
     for _ in range(5):
         await bucket.acquire()
     await asyncio.sleep(0.1)
-    start = asyncio.get_event_loop().time()
+    start = asyncio.get_running_loop().time()
     for _ in range(5):
         await bucket.acquire()
-    elapsed = asyncio.get_event_loop().time() - start
+    elapsed = asyncio.get_running_loop().time() - start
     assert elapsed < 0.05
 
 
