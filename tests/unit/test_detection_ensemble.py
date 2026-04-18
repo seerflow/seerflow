@@ -1787,6 +1787,34 @@ class TestReverseHWIndex:
         assert "s:e1" not in ensemble._entity_hw
         assert ensemble._source_hw_keys["s"][1] == {"s:e2", "s:e3"}
 
+    def test_high_source_churn_eviction_is_O_k(self) -> None:
+        """Evicting under adversarial source diversity must not scan the full HW pool.
+
+        Proxy for O(k): the reverse-index bucket for each evicted source is
+        popped; no key in _template_hw or _entity_hw survives for an evicted
+        source; and sources that were not evicted keep their buckets intact.
+        """
+        config = _make_config(max_sources=16, max_template_hw=256, max_entity_hw=256)
+        ensemble = DetectionEnsemble(config)
+        # 500 unique sources, each with 2 template and 1 entity HW key.
+        for i in range(500):
+            src = f"src{i}"
+            ensemble.process_event(
+                _make_event(source_type=src, template_id=1, entity_refs=(f"e{i}",)),
+            )
+            ensemble.process_event(_make_event(source_type=src, template_id=2))
+        # Only the last 16 sources should survive (max_sources=16).
+        assert len(ensemble._detectors) == 16
+        surviving = set(ensemble._detectors.keys())
+        assert set(ensemble._source_hw_keys.keys()) == surviving
+        # No HW key belongs to an evicted source.
+        for key in ensemble._template_hw:
+            assert key.split(":", 1)[0] in surviving
+        for key in ensemble._entity_hw:
+            assert key.split(":", 1)[0] in surviving
+        # Eviction counter reflects the 484 kicked-out sources.
+        assert ensemble._eviction_count == 484
+
 
 class TestLoadStateReverseIndex:
     """S-201: load_all_state re-sanitizes manifest keys and rebuilds reverse index."""
