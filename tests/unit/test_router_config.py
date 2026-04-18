@@ -74,6 +74,44 @@ def test_default_routing_without_rules_rejected() -> None:
 
 
 @pytest.mark.unit
+def test_rule_name_rejects_non_string() -> None:
+    """rule_name must be a string glob; non-strings would crash fnmatch at dispatch."""
+    with pytest.raises(ConfigError, match="rule_name must be a string glob"):
+        _build_alerting(
+            _yaml_alerting(
+                routing_rules=[
+                    {
+                        "match": {"rule_name": 123},
+                        "notify": [{"channel": "oncall-slack"}],
+                    },
+                ]
+            )
+        )
+
+
+@pytest.mark.unit
+def test_digest_window_minutes_capped_at_1440() -> None:
+    """digest_window_minutes over one day is rejected to bound buffer growth."""
+    with pytest.raises(ConfigError, match=r"digest_window_minutes must be int in \[1, 1440\]"):
+        _build_alerting(
+            _yaml_alerting(
+                routing_rules=[
+                    {
+                        "match": {},
+                        "notify": [
+                            {
+                                "channel": "oncall-slack",
+                                "mode": "digest",
+                                "digest_window_minutes": 1441,
+                            }
+                        ],
+                    },
+                ]
+            )
+        )
+
+
+@pytest.mark.unit
 def test_default_routing_notify_requires_non_empty_list() -> None:
     with pytest.raises(ConfigError, match=r"action=notify requires a non-empty notify list"):
         _build_alerting(

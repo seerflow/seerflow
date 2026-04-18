@@ -401,8 +401,9 @@ def _build_notify_entry(
     if mode not in ("immediate", "digest"):
         raise ConfigError(f"{label}.mode must be immediate|digest, got {mode!r}")
     window = n.get("digest_window_minutes", 15)
-    if not isinstance(window, int) or isinstance(window, bool) or window < 1:
-        raise ConfigError(f"{label}.digest_window_minutes must be int >= 1")
+    # Upper bound caps the flusher sleep + buffer growth window to a day.
+    if not isinstance(window, int) or isinstance(window, bool) or window < 1 or window > 1440:
+        raise ConfigError(f"{label}.digest_window_minutes must be int in [1, 1440]")
     return RoutingRuleNotify(channel=channel, mode=mode, digest_window_minutes=window)
 
 
@@ -420,11 +421,17 @@ def _build_routing_rule(idx: int, entry: dict[str, Any], known_channels: set[str
         raise ConfigError(
             f"routing_rules[{idx}]: min_severity ({min_sev}) > max_severity ({max_sev})"
         )
+    rule_name_raw = match_raw.get("rule_name")
+    if rule_name_raw is not None and not isinstance(rule_name_raw, str):
+        raise ConfigError(
+            f"routing_rules[{idx}].match.rule_name must be a string glob,"
+            f" got {type(rule_name_raw).__name__}"
+        )
     match = RoutingRuleMatch(
         alert_type=_normalise_str_or_list(
             match_raw.get("alert_type"), f"routing_rules[{idx}].match.alert_type"
         ),
-        rule_name=match_raw.get("rule_name"),
+        rule_name=rule_name_raw,
         entity_type=_normalise_str_or_list(
             match_raw.get("entity_type"), f"routing_rules[{idx}].match.entity_type"
         ),

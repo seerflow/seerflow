@@ -144,6 +144,7 @@ class NotificationRouter:
         self._running = True
         self._digest_buffers: dict[tuple[int, str], list[Alert]] = {}
         self._digest_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
+        self._digest_warned: set[tuple[int, str]] = set()
 
     async def start(self) -> None:
         """Mark the router as ready (idempotent no-op unless ``stop()`` ran).
@@ -234,7 +235,8 @@ class NotificationRouter:
     ) -> None:
         key = (rule_idx, entry.channel)
         buf = self._digest_buffers.setdefault(key, [])
-        if len(buf) == _DIGEST_WARN_THRESHOLD:
+        if len(buf) >= _DIGEST_WARN_THRESHOLD and key not in self._digest_warned:
+            self._digest_warned.add(key)
             _log.warning(
                 "NotificationRouter: digest buffer (%s, %s) exceeded %d entries"
                 " — consider narrowing the matching rule or shortening the window",
@@ -260,6 +262,7 @@ class NotificationRouter:
     async def _flush_key(self, key: tuple[int, str], target: DeliveryTarget) -> None:
         buf = self._digest_buffers.get(key, [])
         self._digest_tasks.pop(key, None)
+        self._digest_warned.discard(key)
         if not buf:
             self._digest_buffers.pop(key, None)
             return
