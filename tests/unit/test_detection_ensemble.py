@@ -5,12 +5,13 @@ from __future__ import annotations
 import math
 import statistics
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import msgspec.json
 import numpy as np
 import pytest
 
-from seerflow.config import DetectionConfig
+from seerflow.config import DetectionConfig, StorageConfig
 from seerflow.detection.ensemble import (
     DetectionEnsemble,
     DetectionResult,
@@ -18,6 +19,10 @@ from seerflow.detection.ensemble import (
 )
 from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.models import SeerflowEvent, SeverityLevel
+from seerflow.storage.sqlite import SqliteBackend
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_event(*, source_type: str = "syslog", **kwargs):
@@ -1672,6 +1677,34 @@ class TestSourceColonSanitization:
         suffixes = [k.split(":", 1)[1] for k in keys]
         assert all(":" not in s for s in suffixes)
 
+    def test_source_at_max_key_len_owner_parse_still_works(self) -> None:
+        """Regression guard for the ``_MAX_SOURCE_KEY_LEN`` truncation boundary.
+
+        When ``source`` is near or at the 248-char limit, ``f\"{source}:{tid}\"``
+        may be truncated to drop the separator or the suffix. The reverse-index
+        owner-parse (``key.split(\":\", 1)[0]``) must still recover the owning
+        source for every shape the truncator can produce.
+        """
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Three sources that exercise each truncation shape:
+        #   - 248 chars  → key collapses to the source (no separator)
+        #   - 247 chars  → key is "<source>:" (trailing separator, empty suffix)
+        #   - 245 chars  → key is "<source>:9" (suffix truncated to 1 char)
+        sources = {
+            248: "a" * 248,
+            247: "b" * 247,
+            245: "c" * 245,
+        }
+        for source in sources.values():
+            ensemble = DetectionEnsemble(config)
+            ensemble.process_event(_make_event(source_type=source, template_id=999))
+            assert source in ensemble._source_hw_keys
+            tmpl_keys, _ = ensemble._source_hw_keys[source]
+            assert tmpl_keys == set(ensemble._template_hw.keys())
+            # Owner parse recovers the source from every key, regardless of shape.
+            for key in tmpl_keys:
+                assert key.split(":", 1)[0] == source
+
 
 class TestReverseHWIndex:
     """S-201: per-source reverse index for O(k) eviction cleanup."""
@@ -1809,13 +1842,10 @@ class TestLoadStateReverseIndex:
     """S-201: load_all_state re-sanitizes manifest keys and rebuilds reverse index."""
 
     @pytest.mark.asyncio
-    async def test_load_populates_reverse_index_from_manifest(self, tmp_path: object) -> None:
-        from seerflow.config import StorageConfig
-        from seerflow.storage.sqlite import SqliteBackend
-
+    async def test_load_populates_reverse_index_from_manifest(self, tmp_path: Path) -> None:
         storage_cfg = StorageConfig(
             backend="sqlite",
-            sqlite_path=str(tmp_path / "test.db"),  # type: ignore[operator]
+            sqlite_path=str(tmp_path / "test.db"),
         )
         storage = await SqliteBackend.connect(storage_cfg)
 
@@ -1834,22 +1864,17 @@ class TestLoadStateReverseIndex:
         await storage.close()
 
     @pytest.mark.asyncio
-    async def test_load_resanitizes_legacy_colon_keys(self, tmp_path: object) -> None:
+    async def test_load_resanitizes_legacy_colon_keys(self, tmp_path: Path) -> None:
         """Manifest entries persisted before S-201 may contain colon-laden
         source segments. Sanitize on load and WARN on collision."""
-        from seerflow.config import StorageConfig
-        from seerflow.storage.sqlite import SqliteBackend
-
         storage_cfg = StorageConfig(
             backend="sqlite",
-            sqlite_path=str(tmp_path / "test2.db"),  # type: ignore[operator]
+            sqlite_path=str(tmp_path / "test2.db"),
         )
         storage = await SqliteBackend.connect(storage_cfg)
 
         config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
         # Hand-craft a legacy manifest with a colon in the source segment.
-        import msgspec.json
-
         await storage.save_state(
             "tmpl_hw:manifest",
             msgspec.json.encode({"legacy:src:1": 10, "legacy_src:1": 5}),

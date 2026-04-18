@@ -355,7 +355,7 @@ class DetectionEnsemble:
         """Return (or create) an HW detector in the given pool with LRU eviction.
 
         Pools are also eagerly cleaned on source eviction in ``_get_detectors``
-        (prefix-scan removes all keys for the evicted source).
+        via the per-source reverse index (``_source_hw_keys.pop(source)``).
 
         Returns a ``(detector, evicted)`` tuple where *evicted* is ``True``
         when adding the new key required evicting the LRU entry.
@@ -668,9 +668,10 @@ class DetectionEnsemble:
                 sanitized_key = raw_key.replace("\x00", "")
             if sanitized_key in hw_dict:
                 _log.warning(
-                    "Duplicate %s key %r after sanitization — keeping first",
+                    "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",
                     prefix,
                     sanitized_key[:64],
+                    raw_key[:64],
                 )
                 continue
             data = await storage.load_state(f"{prefix}:{raw_key}")
