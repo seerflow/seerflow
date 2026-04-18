@@ -1689,3 +1689,17 @@ class TestReverseHWIndex:
         tmpl_set, ent_set = ensemble._source_hw_keys["syslog"]
         assert tmpl_set == {"syslog:1", "syslog:2"}
         assert ent_set == set()
+
+    def test_entity_hw_insert_registers_in_reverse_index(self) -> None:
+        config = _make_config(max_sources=2, max_template_hw=8, max_entity_hw=8)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(
+            _make_event(
+                source_type="syslog",
+                template_id=1,
+                entity_refs=("10.0.0.1", "user42"),
+            ),
+        )
+        tmpl_set, ent_set = ensemble._source_hw_keys["syslog"]
+        assert tmpl_set == {"syslog:1"}
+        assert ent_set == {"syslog:10.0.0.1", "syslog:user42"}
