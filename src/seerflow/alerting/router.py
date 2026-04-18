@@ -11,13 +11,19 @@ configured HH:MM UTC window.
 from __future__ import annotations
 
 import fnmatch
+import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
     from datetime import time
 
+    from seerflow.alerting.target import DeliveryTarget
     from seerflow.models.alert import Alert
+
+_log = logging.getLogger("seerflow")
 
 Mode = Literal["immediate", "digest"]
 DefaultAction = Literal["drop", "notify"]
@@ -100,3 +106,77 @@ def _rule_matches(rule: RoutingRule, alert: Alert) -> bool:
     if m.min_severity is not None and sev < m.min_severity:
         return False
     return not (m.max_severity is not None and sev > m.max_severity)
+
+
+def _default_utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+class NotificationRouter:
+    """Evaluates routing rules and dispatches alerts to named targets.
+
+    Thread-safety: the router is single-coroutine; it must only be driven
+    from the AlertDispatcher worker loop.
+    """
+
+    def __init__(
+        self,
+        *,
+        targets: Iterable[DeliveryTarget],
+        rules: Sequence[RoutingRule] = (),
+        default_routing: DefaultRouting | None = None,
+        now_fn: Callable[[], datetime] = _default_utc_now,
+    ) -> None:
+        self._targets: dict[str, DeliveryTarget] = {}
+        for t in targets:
+            if t.name in self._targets:
+                msg = f"duplicate DeliveryTarget name: {t.name!r}"
+                raise ValueError(msg)
+            self._targets[t.name] = t
+        self._rules: tuple[RoutingRule, ...] = tuple(rules)
+        self._default = default_routing or DefaultRouting(action="drop")
+        self._now = now_fn
+        self._running = True
+
+    async def start(self) -> None:
+        """Reserved for Task 8's digest flushers. No-op today."""
+        self._running = True
+
+    async def stop(self) -> None:
+        """Reserved for Task 8's digest flush-on-stop. No-op today."""
+        self._running = False
+
+    async def route(self, alert: Alert) -> None:
+        """Find the first matching rule (or default) and dispatch."""
+        notify = self._select_notify(alert)
+        for entry in notify:
+            target = self._targets.get(entry.channel)
+            if target is None:
+                _log.error(
+                    "NotificationRouter: rule references unknown channel %r, dropping",
+                    entry.channel,
+                )
+                continue
+            if int(alert.severity_id) < target.min_severity:
+                continue
+            # Digest handling lands in Task 8; for now every entry is treated
+            # as immediate.
+            await self._safe_deliver(target, alert)
+
+    def _select_notify(self, alert: Alert) -> tuple[RoutingRuleNotify, ...]:
+        for rule in self._rules:
+            if _rule_matches(rule, alert):
+                return rule.notify
+        if self._default.action == "notify":
+            return self._default.notify
+        return ()
+
+    async def _safe_deliver(self, target: DeliveryTarget, alert: Alert) -> None:
+        try:
+            await target.deliver(alert)
+        except Exception:
+            _log.exception(
+                "NotificationRouter: delivery failed for channel %r alert %s",
+                target.name,
+                alert.alert_id,
+            )
