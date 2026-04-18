@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import aiohttp
-
+from seerflow.alerting._http import _sanitize_body, post_with_retry
 from seerflow.alerting.formatters import format_json, format_slack, format_teams
 from seerflow.alerting.mask import mask_webhook_url
 from seerflow.alerting.target import loop_deliver_digest
@@ -17,17 +15,20 @@ from seerflow.alerting.target import loop_deliver_digest
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import aiohttp
+
     from seerflow.alerting.router import NotificationRouter
     from seerflow.models.alert import Alert
 
 _log = logging.getLogger("seerflow")
 
-_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
-
-
-def _sanitize_body(raw: str, max_len: int = 200) -> str:
-    """Strip control characters and truncate for safe logging."""
-    return _CONTROL_CHARS.sub(" ", raw)[:max_len]
+# Re-export for backward compatibility (e.g. sinks/pagerduty.py imports this).
+__all__ = [
+    "AlertDispatcher",
+    "WebhookTarget",
+    "_sanitize_body",
+    "build_webhook_delivery_targets",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,51 +173,19 @@ class AlertDispatcher:
         payload: dict[str, object],
         alert_id: str,
     ) -> None:
-        """POST payload to target with exponential backoff retry."""
-        for attempt in range(self._MAX_RETRIES):
-            try:
-                async with self._session.post(
-                    target.url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    allow_redirects=False,
-                ) as resp:
-                    if resp.status < 400:
-                        return
-                    if resp.status < 500:
-                        body = _sanitize_body(await resp.text(errors="replace"))
-                        _log.error(
-                            "Webhook %s returned client error %d for alert %s"
-                            " — not retrying — response: %s",
-                            mask_webhook_url(target.url),
-                            resp.status,
-                            alert_id,
-                            body,
-                        )
-                        return
-                    body = _sanitize_body(await resp.text(errors="replace"))
-                    _log.warning(
-                        "Webhook %s returned %d (attempt %d) — response: %s",
-                        mask_webhook_url(target.url),
-                        resp.status,
-                        attempt + 1,
-                        body,
-                    )
-            except Exception as exc:
-                _log.warning(
-                    "Webhook %s failed (attempt %d): %s",
-                    mask_webhook_url(target.url),
-                    attempt + 1,
-                    exc,
-                )
-            if attempt < self._MAX_RETRIES - 1:
-                await asyncio.sleep(self._RETRY_DELAYS[attempt])
-        # All retries exhausted — log at ERROR level for monitoring
-        _log.error(
-            "Webhook %s: all %d retries exhausted for alert %s",
-            mask_webhook_url(target.url),
-            self._MAX_RETRIES,
-            alert_id,
+        """POST payload to target with exponential backoff retry.
+
+        Thin wrapper around :func:`seerflow.alerting._http.post_with_retry`
+        retained so the adapter in :func:`build_webhook_delivery_targets` and
+        existing tests keep calling ``self._post_with_retry(...)`` unchanged.
+        """
+        await post_with_retry(
+            self._session,
+            target.url,
+            payload,
+            masked_for_log=mask_webhook_url(target.url),
+            attempts=self._MAX_RETRIES,
+            delays=self._RETRY_DELAYS,
         )
 
 
