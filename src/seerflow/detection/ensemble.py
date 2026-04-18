@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
@@ -26,6 +27,17 @@ _log = logging.getLogger(__name__)
 
 _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
 _MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
+
+# Strip C0 control chars (\x00-\x1f) and DEL (\x7f) from values before logging.
+# Prevents log-injection when a SQLite-persisted manifest contains attacker-
+# crafted CR/LF/ANSI sequences that could spoof log lines.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _log_safe(value: str, *, max_len: int = 64) -> str:
+    """Redact control characters and cap length for safe inclusion in log fields."""
+    return _CONTROL_CHAR_RE.sub("_", value)[:max_len]
+
 
 # Memory estimation constants (bytes) — approximate per-instance footprint.
 _MEM_HST = 51_200  # ~50 KB: River HalfSpaceTrees, 25 trees
@@ -657,7 +669,7 @@ class DetectionEnsemble:
                     "Invalid event count %r for %s:%s — skipping",
                     evt_count,
                     prefix,
-                    raw_key,
+                    _log_safe(raw_key),
                 )
                 continue
             # Re-apply sanitizer so legacy colon-laden sources collapse.
@@ -674,8 +686,8 @@ class DetectionEnsemble:
                 _log.warning(
                     "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",
                     prefix,
-                    sanitized_key[:64],
-                    raw_key[:64],
+                    _log_safe(sanitized_key),
+                    _log_safe(raw_key),
                 )
                 continue
             data = await storage.load_state(f"{prefix}:{raw_key}")
