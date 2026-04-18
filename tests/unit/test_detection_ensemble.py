@@ -1654,3 +1654,20 @@ class TestSourceColonSanitization:
         event = _make_event(source_type="sys\x00log:prod", template_id=1)
         result = ensemble.process_event(event)
         assert result.source_type == "syslog_prod"
+
+    def test_entity_value_colon_stripped_from_hw_key(self) -> None:
+        """IPv6-style entity `fe80::1` must not break the source:entity key shape."""
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(
+            source_type="syslog",
+            template_id=1,
+            entity_refs=("fe80::1",),
+        )
+        ensemble.process_event(event)
+        # Exactly one entity-HW key, with sanitized form `syslog:fe80__1`.
+        keys = list(ensemble._entity_hw.keys())
+        assert keys == ["syslog:fe80__1"]
+        # And: the HW key suffix has no additional colons (source colon is the only one).
+        suffixes = [k.split(":", 1)[1] for k in keys]
+        assert all(":" not in s for s in suffixes)

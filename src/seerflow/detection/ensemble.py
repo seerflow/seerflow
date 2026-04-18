@@ -325,7 +325,7 @@ class DetectionEnsemble:
             return float("nan")
         max_score = float("nan")
         for entity_val in event.entity_refs[:_MAX_ENTITIES_PER_SCORE]:
-            safe_val = entity_val.replace("\x00", "")
+            safe_val = entity_val.replace("\x00", "").replace(":", "_")
             if not safe_val:
                 continue
             key = f"{source}:{safe_val}"[:_MAX_SOURCE_KEY_LEN]
