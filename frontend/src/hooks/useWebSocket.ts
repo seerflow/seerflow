@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import * as v from "valibot";
 import type { WsStatus, WsFilter, WsMessage } from "@/lib/types";
 import { logger } from "@/lib/logger";
-import { MAX_NS_STRING_LEN, toBigintNs } from "@/lib/api";
+import { MAX_NS_STRING_LEN, toBigintNs } from "@/lib/bigint-ns";
 
 // S-199 security: a 1-25 digit decimal bound caps the work BigInt(...) must do
 // on any single wire value. Larger strings are rejected by Valibot before they
