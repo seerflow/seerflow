@@ -117,7 +117,7 @@ describe("api boundary parsing", () => {
   });
 
   it("caps reviveBigintTimestamps recursion at depth 32 and warns once (S-203 AC-2)", async () => {
-    let payload: any = { timestamp_ns: "1700000000000000123" };
+    let payload: Record<string, unknown> = { timestamp_ns: "1700000000000000123" };
     for (let i = 0; i < 64; i++) payload = { nested: payload };
     // Wrap so the outermost key has its own timestamp_ns at depth 0 — proves the walker still works above the cap.
     payload = { ...payload, timestamp_ns: "1700000000000000999" };
@@ -125,15 +125,16 @@ describe("api boundary parsing", () => {
       new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }),
     );
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const res = await api.get<any>("/api/v1/deep");
+    const res = await api.get<Record<string, unknown>>("/api/v1/deep");
     // Depth-0 conversion must still happen — proves the walker is not silently broken.
-    expect((res as any).timestamp_ns).toBe(1700000000000000999n);
+    expect((res as Record<string, unknown>).timestamp_ns).toBe(1700000000000000999n);
     // Past the cap, the deepest timestamp_ns is left as the wire string (graceful degrade).
-    let cursor: any = res;
+    let cursor: unknown = res;
     let foundString = false;
     while (cursor && typeof cursor === "object") {
-      if (typeof cursor.timestamp_ns === "string") { foundString = true; break; }
-      cursor = cursor.nested;
+      const c = cursor as Record<string, unknown>;
+      if (typeof c.timestamp_ns === "string") { foundString = true; break; }
+      cursor = c.nested;
     }
     expect(foundString).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
