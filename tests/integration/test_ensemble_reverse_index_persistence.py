@@ -111,6 +111,7 @@ class TestEnsembleReverseIndexPersistence:
         and — if two raw keys collapse — the orphan row is GC'd so
         model_state settles at one row per surviving sanitized key."""
         import msgspec.json
+
         from seerflow.detection.holtwinters import HoltWintersDetector
 
         cfg = _config()
