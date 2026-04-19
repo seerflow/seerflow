@@ -1391,6 +1391,49 @@ class TestModelStore:
         finally:
             await backend.close()
 
+    async def test_delete_state_removes_existing_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("k", b"body")
+            await backend.delete_state("k")
+            assert await backend.load_state("k") is None
+        finally:
+            await backend.close()
+
+    async def test_delete_state_noop_on_missing_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.delete_state("never_saved")
+            assert await backend.load_state("never_saved") is None
+        finally:
+            await backend.close()
+
+    async def test_delete_state_idempotent(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("k", b"body")
+            await backend.delete_state("k")
+            await backend.delete_state("k")
+            assert await backend.load_state("k") is None
+        finally:
+            await backend.close()
+
+    async def test_delete_state_rejects_empty_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="empty"):
+                await backend.delete_state("")
+        finally:
+            await backend.close()
+
+    async def test_delete_state_rejects_long_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="exceeds"):
+                await backend.delete_state("a" * 257)
+        finally:
+            await backend.close()
+
 
 class TestProtocolConformance:
     async def test_isinstance_alert_store(self) -> None:
