@@ -101,6 +101,16 @@ class ModelStore(Protocol):  # pragma: no cover
         """
         ...
 
+    async def delete_state(self, key: str) -> None:
+        """Delete serialized model state for ``key`` if present.
+
+        No-op when the key does not exist. Intended for one-shot
+        migration GC (e.g. purging orphan rows after a sanitized-key
+        collision on load). Failures surface as exceptions; callers may
+        choose to treat cleanup failures as best-effort.
+        """
+        ...
+
 
 @runtime_checkable
 class EntityStore(Protocol):  # pragma: no cover

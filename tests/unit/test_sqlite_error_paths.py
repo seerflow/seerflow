@@ -153,6 +153,26 @@ class TestSqliteErrorPaths:
         finally:
             await backend.close()
 
+    async def test_delete_state_rollback_on_failure(self) -> None:
+        """If delete_state fails, rollback is called and exception propagates."""
+        from seerflow.storage.sqlite import SqliteBackend
+
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            await backend.save_state("key", b"data")
+            with (
+                patch.object(
+                    backend._conn,
+                    "execute",
+                    side_effect=sqlite3.OperationalError("disk full"),
+                ),
+                pytest.raises(sqlite3.OperationalError, match="disk full"),
+            ):
+                await backend.delete_state("key")
+        finally:
+            await backend.close()
+
     async def test_update_feedback_rollback_on_failure(self) -> None:
         """If update_feedback fails during UPDATE, rollback is called."""
         from seerflow.storage.sqlite import SqliteBackend

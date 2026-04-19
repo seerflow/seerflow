@@ -1910,3 +1910,311 @@ class TestLoadStateReverseIndex:
         assert "legacy_src:1" in warnings[0].getMessage()
 
         await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_migrates_legacy_colon_laden_entity(self, tmp_path: Path) -> None:
+        """Legacy ent_hw manifest with colon in entity (IPv6) sanitizes
+        to the runtime shape (ent:fe80::1 → ent:fe80__1) not the rsplit shape."""
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_migrate.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Seed a pre-S-201 ent_hw manifest with a colon-laden entity value.
+        await storage.save_state(
+            "ent_hw:manifest",
+            msgspec.json.encode({"syslog:fe80::1": 7}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        await storage.save_state("ent_hw:syslog:fe80::1", hw.serialize())
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(config)
+        await dst.load_all_state(storage)
+
+        # Runtime path produces "syslog:fe80__1" — the migration must match.
+        assert list(dst._entity_hw.keys()) == ["syslog:fe80__1"]
+        assert dst._source_hw_keys["syslog"][1] == {"syslog:fe80__1"}
+        assert dst._entity_event_counts["syslog:fe80__1"] == 7
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_rejects_no_colon_manifest_entry(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No-colon manifest entries cannot derive an owning source; reject
+        with WARNING and write zero state so the reverse index stays clean."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_malformed.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"malformed": 3}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        await storage.save_state("tmpl_hw:malformed", hw.serialize())
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(storage)
+
+        # Zero state written anywhere.
+        assert dict(dst._template_hw) == {}
+        assert dst._template_event_counts == {}
+        assert dst._source_hw_keys == {}
+        # One Malformed WARNING.
+        malformed = [
+            r for r in caplog.records if r.levelno == logging.WARNING and "Malformed" in r.message
+        ]
+        assert len(malformed) == 1
+        assert "tmpl_hw" in malformed[0].getMessage()
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_collision_gcs_losing_raw_key(self, tmp_path: Path) -> None:
+        """When two raw manifest keys collapse onto one sanitized key,
+        the losing raw_key's on-disk row is deleted so reload does not
+        repeat the collision WARNING forever."""
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_gc.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Two pre-existing keys that collapse onto the same sanitized form.
+        # First-in-manifest wins; second is the orphan to GC.
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"legacy_src:1": 5, "legacy:src:1": 10}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        body = hw.serialize()
+        await storage.save_state("tmpl_hw:legacy_src:1", body)
+        await storage.save_state("tmpl_hw:legacy:src:1", body)
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        # Spy on delete_state to capture the exact keys deleted. Wrap
+        # the SqliteBackend (slotted, so monkeypatch on the instance
+        # fails) in a passthrough proxy that records deletes before
+        # delegating.
+        deleted: list[str] = []
+
+        class _DeleteSpy:
+            def __init__(self, inner: SqliteBackend) -> None:
+                self._inner = inner
+
+            async def save_state(self, key: str, data: bytes) -> None:
+                await self._inner.save_state(key, data)
+
+            async def load_state(self, key: str) -> bytes | None:
+                return await self._inner.load_state(key)
+
+            async def delete_state(self, key: str) -> None:
+                deleted.append(key)
+                await self._inner.delete_state(key)
+
+        spy_storage = _DeleteSpy(storage)
+
+        dst = DetectionEnsemble(config)
+        await dst.load_all_state(spy_storage)
+
+        # Winner (first raw_key in manifest order) survives.
+        assert list(dst._template_hw.keys()) == ["legacy_src:1"]
+        # Loser's row was GC'd.
+        assert "tmpl_hw:legacy:src:1" in deleted
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_collision_gc_failure_logs_and_continues(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """If delete_state raises during collision GC, load completes —
+        the winner key is still populated and the failure is logged."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_gcfail.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"legacy_src:1": 5, "legacy:src:1": 10}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        body = hw.serialize()
+        await storage.save_state("tmpl_hw:legacy_src:1", body)
+        await storage.save_state("tmpl_hw:legacy:src:1", body)
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        # Wrap storage in a proxy whose delete_state always raises,
+        # simulating a cleanup hiccup. __slots__ on SqliteBackend blocks
+        # monkeypatch on the instance, so a thin proxy is the workaround
+        # (same pattern as test_load_collision_gcs_losing_raw_key).
+        class _BoomOnDelete:
+            def __init__(self, inner: SqliteBackend) -> None:
+                self._inner = inner
+
+            async def load_state(self, key: str) -> bytes | None:
+                return await self._inner.load_state(key)
+
+            async def save_state(self, key: str, data: bytes) -> None:
+                await self._inner.save_state(key, data)
+
+            async def delete_state(self, key: str) -> None:
+                raise RuntimeError(f"simulated storage failure for {key}")
+
+        proxy = _BoomOnDelete(storage)
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(proxy)  # type: ignore[arg-type]
+
+        # Load completed — winner key survived despite GC failure.
+        assert list(dst._template_hw.keys()) == ["legacy_src:1"]
+        # Failure WARNING logged exactly once.
+        failed = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Failed to GC orphan" in r.message
+        ]
+        assert len(failed) == 1
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_preserves_248_char_boundary_key(self, tmp_path: Path) -> None:
+        """S-201 regression guard: when source_type == _MAX_SOURCE_KEY_LEN, the
+        runtime produces a no-colon key (truncation drops the separator). That
+        shape must round-trip through save → load without being rejected as
+        malformed."""
+        from seerflow.detection.ensemble import _MAX_SOURCE_KEY_LEN
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_boundary.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        src = DetectionEnsemble(config)
+        long_source = "a" * _MAX_SOURCE_KEY_LEN  # 248 chars → truncation drops ":"
+        src.process_event(_make_event(source_type=long_source, template_id=999))
+        # Sanity: the persisted key is no-colon.
+        assert list(src._template_hw.keys()) == [long_source]
+        await src.save_all_state(storage)
+
+        dst = DetectionEnsemble(config)
+        await dst.load_all_state(storage)
+
+        # Boundary key survives reload — no cold-start.
+        assert list(dst._template_hw.keys()) == [long_source]
+        assert dst._source_hw_keys[long_source][0] == {long_source}
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_state_failure_logs_and_continues(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """If load_state raises for a specific row (e.g. validation failure
+        on a malformed composed key), load completes — the row is skipped
+        and the failure is logged."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_loadfail.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"src:1": 5}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        await storage.save_state("tmpl_hw:src:1", hw.serialize())
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        class _BoomOnLoad:
+            def __init__(self, inner: SqliteBackend) -> None:
+                self._inner = inner
+
+            async def load_state(self, key: str) -> bytes | None:
+                if key == "tmpl_hw:src:1":
+                    raise ValueError("simulated validation failure")
+                return await self._inner.load_state(key)
+
+            async def save_state(self, key: str, data: bytes) -> None:
+                await self._inner.save_state(key, data)
+
+            async def delete_state(self, key: str) -> None:
+                await self._inner.delete_state(key)
+
+        proxy = _BoomOnLoad(storage)
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(proxy)  # type: ignore[arg-type]
+
+        # Load completed; no state for the failing row.
+        assert dict(dst._template_hw) == {}
+        # Failure WARNING logged.
+        failed = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Failed to load" in r.message
+        ]
+        assert len(failed) == 1
+
+        await storage.close()

@@ -672,16 +672,45 @@ class DetectionEnsemble:
                     _log_safe(raw_key),
                 )
                 continue
-            # Re-apply sanitizer so legacy colon-laden sources collapse.
-            # Keys have format "{source}:{id}". Sanitize the source segment only
-            # (rsplit to isolate the rightmost colon as the separator).
-            if ":" in raw_key:
-                src_part, suffix = raw_key.rsplit(":", 1)
-                src_part = src_part.replace("\x00", "").replace(":", "_")
-                suffix = suffix.replace("\x00", "")
-                sanitized_key = f"{src_part}:{suffix}"
-            else:
+            # Per-prefix split strategy:
+            # - tmpl_hw: suffix is an int → rsplit isolates source (even if legacy
+            #   source had colons, rsplit always picks the final colon correctly).
+            # - ent_hw: suffix is an entity value that may contain colons
+            #   (IPv6, host:port, Kerberos principal) → split(":", 1) matches the
+            #   runtime sanitizer at _score_entity_hw (ensemble.py:341), which
+            #   strips \x00 and replaces ":" with "_" on the entity value.
+            # No-colon keys are rejected outright — they cannot participate in
+            # the reverse index (owning-source derivation returns the whole
+            # string, which can never match a real source).
+            if ":" not in raw_key:
+                # Boundary case: runtime keys are built as f"{source}:{tid_or_entity}"
+                # truncated to _MAX_SOURCE_KEY_LEN. When source is exactly
+                # _MAX_SOURCE_KEY_LEN chars, the truncation drops the separator
+                # and produces a no-colon key equal to the (truncated) source.
+                # S-201 regression-tests this shape; reverse-index owner-parse
+                # (split(":", 1)[0]) correctly recovers source from a no-colon
+                # key because split returns [whole_key]. Accept these.
+                # Shorter no-colon keys cannot be produced by the runtime —
+                # they are hand-crafted/corrupt, so reject.
+                if len(raw_key) < _MAX_SOURCE_KEY_LEN:
+                    _log.warning(
+                        "Malformed %s manifest key %r — skipping",
+                        prefix,
+                        _log_safe(raw_key),
+                    )
+                    continue
                 sanitized_key = raw_key.replace("\x00", "")
+            else:
+                if prefix == "tmpl_hw":
+                    src_part, suffix = raw_key.rsplit(":", 1)
+                    suffix = suffix.replace("\x00", "")
+                elif prefix == "ent_hw":
+                    src_part, suffix = raw_key.split(":", 1)
+                    suffix = suffix.replace("\x00", "").replace(":", "_")
+                else:  # pragma: no cover - defensive; call sites are constants
+                    raise ValueError(f"Unknown prefix: {prefix!r}")
+                src_part = src_part.replace("\x00", "").replace(":", "_")
+                sanitized_key = f"{src_part}:{suffix}"
             if sanitized_key in hw_dict:
                 _log.warning(
                     "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",
@@ -689,8 +718,30 @@ class DetectionEnsemble:
                     _log_safe(sanitized_key),
                     _log_safe(raw_key),
                 )
+                # One-shot migration GC: delete the losing raw_key's on-disk
+                # row so subsequent loads see the winner only and do not
+                # re-log this collision. Best-effort — never fail load on
+                # cleanup hiccup.
+                try:
+                    await storage.delete_state(f"{prefix}:{raw_key}")
+                except Exception:
+                    _log.warning(
+                        "Failed to GC orphan %s row for %r — skipping",
+                        prefix,
+                        _log_safe(raw_key),
+                        exc_info=True,
+                    )
                 continue
-            data = await storage.load_state(f"{prefix}:{raw_key}")
+            try:
+                data = await storage.load_state(f"{prefix}:{raw_key}")
+            except Exception:
+                _log.warning(
+                    "Failed to load %s row for %r — skipping",
+                    prefix,
+                    _log_safe(raw_key),
+                    exc_info=True,
+                )
+                continue
             if data is None:
                 continue
             try:
