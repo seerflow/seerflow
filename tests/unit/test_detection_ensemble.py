@@ -5,12 +5,13 @@ from __future__ import annotations
 import math
 import statistics
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import msgspec.json
 import numpy as np
 import pytest
 
-from seerflow.config import DetectionConfig
+from seerflow.config import DetectionConfig, StorageConfig
 from seerflow.detection.ensemble import (
     DetectionEnsemble,
     DetectionResult,
@@ -18,6 +19,10 @@ from seerflow.detection.ensemble import (
 )
 from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.models import SeerflowEvent, SeverityLevel
+from seerflow.storage.sqlite import SqliteBackend
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_event(*, source_type: str = "syslog", **kwargs):
@@ -32,6 +37,16 @@ def _make_event(*, source_type: str = "syslog", **kwargs):
     }
     defaults.update(kwargs)
     return SeerflowEvent(**defaults)
+
+
+def _make_config(**kwargs) -> DetectionConfig:
+    """Create a DetectionConfig with test-friendly defaults."""
+    defaults: dict = {
+        "hw_seasonal_period": 10,
+        "dspot_calibration_window": 200,
+    }
+    defaults.update(kwargs)
+    return DetectionConfig(**defaults)
 
 
 class TestDetectionResult:
@@ -1617,3 +1632,281 @@ class TestAdjustUpperThresholdTriState:
         assert any(
             "capped" in rec.message.lower() and "noisy" in rec.message for rec in caplog.records
         )
+
+
+class TestSourceColonSanitization:
+    """S-201: source_type with colons collapses to underscores so the
+    eviction prefix cannot over-match sibling sources."""
+
+    def test_colon_in_source_type_collapses_to_underscore(self) -> None:
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(source_type="syslog:prod", template_id=5)
+        result = ensemble.process_event(event)
+        assert result.source_type == "syslog_prod"
+        assert all(":" not in s for s in ensemble._detectors)
+
+    def test_multiple_colons_all_stripped(self) -> None:
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(source_type="a:b:c:d", template_id=1)
+        result = ensemble.process_event(event)
+        assert result.source_type == "a_b_c_d"
+
+    def test_colon_and_null_both_stripped(self) -> None:
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(source_type="sys\x00log:prod", template_id=1)
+        result = ensemble.process_event(event)
+        assert result.source_type == "syslog_prod"
+
+    def test_entity_value_colon_stripped_from_hw_key(self) -> None:
+        """IPv6-style entity `fe80::1` must not break the source:entity key shape."""
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        ensemble = DetectionEnsemble(config)
+        event = _make_event(
+            source_type="syslog",
+            template_id=1,
+            entity_refs=("fe80::1",),
+        )
+        ensemble.process_event(event)
+        # Exactly one entity-HW key, with sanitized form `syslog:fe80__1`.
+        keys = list(ensemble._entity_hw.keys())
+        assert keys == ["syslog:fe80__1"]
+        # And: the HW key suffix has no additional colons (source colon is the only one).
+        suffixes = [k.split(":", 1)[1] for k in keys]
+        assert all(":" not in s for s in suffixes)
+
+    def test_source_at_max_key_len_owner_parse_still_works(self) -> None:
+        """Regression guard for the ``_MAX_SOURCE_KEY_LEN`` truncation boundary.
+
+        When ``source`` is near or at the 248-char limit, ``f\"{source}:{tid}\"``
+        may be truncated to drop the separator or the suffix. The reverse-index
+        owner-parse (``key.split(\":\", 1)[0]``) must still recover the owning
+        source for every shape the truncator can produce.
+        """
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Three sources that exercise each truncation shape:
+        #   - 248 chars  → key collapses to the source (no separator)
+        #   - 247 chars  → key is "<source>:" (trailing separator, empty suffix)
+        #   - 245 chars  → key is "<source>:9" (suffix truncated to 1 char)
+        sources = {
+            248: "a" * 248,
+            247: "b" * 247,
+            245: "c" * 245,
+        }
+        for source in sources.values():
+            ensemble = DetectionEnsemble(config)
+            ensemble.process_event(_make_event(source_type=source, template_id=999))
+            assert source in ensemble._source_hw_keys
+            tmpl_keys, _ = ensemble._source_hw_keys[source]
+            assert tmpl_keys == set(ensemble._template_hw.keys())
+            # Owner parse recovers the source from every key, regardless of shape.
+            for key in tmpl_keys:
+                assert key.split(":", 1)[0] == source
+
+
+class TestReverseHWIndex:
+    """S-201: per-source reverse index for O(k) eviction cleanup."""
+
+    def test_source_hw_keys_initialized_empty(self) -> None:
+        config = _make_config(max_sources=2, max_template_hw=8, max_entity_hw=8)
+        ensemble = DetectionEnsemble(config)
+        assert ensemble._source_hw_keys == {}
+
+    def test_template_hw_insert_registers_in_reverse_index(self) -> None:
+        config = _make_config(max_sources=2, max_template_hw=8, max_entity_hw=8)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog", template_id=1))
+        ensemble.process_event(_make_event(source_type="syslog", template_id=2))
+        tmpl_set, ent_set = ensemble._source_hw_keys["syslog"]
+        assert tmpl_set == {"syslog:1", "syslog:2"}
+        assert ent_set == set()
+
+    def test_entity_hw_insert_registers_in_reverse_index(self) -> None:
+        config = _make_config(max_sources=2, max_template_hw=8, max_entity_hw=8)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(
+            _make_event(
+                source_type="syslog",
+                template_id=1,
+                entity_refs=("10.0.0.1", "user42"),
+            ),
+        )
+        tmpl_set, ent_set = ensemble._source_hw_keys["syslog"]
+        assert tmpl_set == {"syslog:1"}
+        assert ent_set == {"syslog:10.0.0.1", "syslog:user42"}
+
+    def test_source_eviction_drops_only_owned_hw_keys(self) -> None:
+        """Evicting source A must not touch source B's HW keys or counts."""
+        config = _make_config(max_sources=2, max_template_hw=64, max_entity_hw=64)
+        ensemble = DetectionEnsemble(config)
+        for tid in range(3):
+            ensemble.process_event(
+                _make_event(source_type="srcA", template_id=tid, entity_refs=("eA",)),
+            )
+        for tid in range(2):
+            ensemble.process_event(
+                _make_event(source_type="srcB", template_id=tid, entity_refs=("eB",)),
+            )
+        # Force eviction of srcA (LRU because srcB was most recent).
+        ensemble.process_event(
+            _make_event(source_type="srcC", template_id=0, entity_refs=("eC",)),
+        )
+        assert "srcA" not in ensemble._detectors
+        assert "srcA" not in ensemble._source_hw_keys
+        assert all(not k.startswith("srcA:") for k in ensemble._template_hw)
+        assert all(not k.startswith("srcA:") for k in ensemble._entity_hw)
+        # srcB untouched.
+        assert "srcB" in ensemble._source_hw_keys
+        tmpl_b, ent_b = ensemble._source_hw_keys["srcB"]
+        assert tmpl_b == {"srcB:0", "srcB:1"}
+        assert ent_b == {"srcB:eB"}
+
+    def test_source_eviction_uses_reverse_index_not_prefix_scan(self) -> None:
+        """Source eviction must pop the per-source bucket, not walk the HW pool."""
+        config = _make_config(max_sources=2, max_template_hw=64, max_entity_hw=64)
+        ensemble = DetectionEnsemble(config)
+        for tid in range(3):
+            ensemble.process_event(_make_event(source_type="srcA", template_id=tid))
+        # Fast-path invariant: the reverse-index bucket is removed with pop(),
+        # not left as an empty set and not walked via prefix scan.
+        assert "srcA" in ensemble._source_hw_keys
+        for tid in range(3):
+            ensemble.process_event(_make_event(source_type="srcB", template_id=tid))
+        ensemble.process_event(_make_event(source_type="srcC", template_id=0))
+        assert "srcA" not in ensemble._source_hw_keys
+        # Fast-path invariant: bucket must have been popped, not left behind as empty.
+        assert ensemble._source_hw_keys.get("srcA") is None
+
+    def test_lru_eviction_of_template_key_clears_reverse_index(self) -> None:
+        """When template-HW pool evicts a key, the owner's bucket must drop it."""
+        config = _make_config(max_sources=4, max_template_hw=2, max_entity_hw=8)
+        ensemble = DetectionEnsemble(config)
+        # Fill template pool to capacity under one source.
+        ensemble.process_event(_make_event(source_type="s", template_id=1))
+        ensemble.process_event(_make_event(source_type="s", template_id=2))
+        assert ensemble._source_hw_keys["s"][0] == {"s:1", "s:2"}
+        # Adding a third template under the same source evicts LRU "s:1".
+        ensemble.process_event(_make_event(source_type="s", template_id=3))
+        assert "s:1" not in ensemble._template_hw
+        assert ensemble._source_hw_keys["s"][0] == {"s:2", "s:3"}
+
+    def test_lru_eviction_of_entity_key_clears_reverse_index(self) -> None:
+        """Same invariant for entity HW pool."""
+        config = _make_config(max_sources=4, max_template_hw=8, max_entity_hw=2)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(
+            _make_event(source_type="s", template_id=0, entity_refs=("e1",)),
+        )
+        ensemble.process_event(
+            _make_event(source_type="s", template_id=0, entity_refs=("e2",)),
+        )
+        assert ensemble._source_hw_keys["s"][1] == {"s:e1", "s:e2"}
+        ensemble.process_event(
+            _make_event(source_type="s", template_id=0, entity_refs=("e3",)),
+        )
+        assert "s:e1" not in ensemble._entity_hw
+        assert ensemble._source_hw_keys["s"][1] == {"s:e2", "s:e3"}
+
+    def test_high_source_churn_eviction_is_o_k(self) -> None:
+        """Evicting under adversarial source diversity must not scan the full HW pool.
+
+        Proxy for O(k): the reverse-index bucket for each evicted source is
+        popped; no key in _template_hw or _entity_hw survives for an evicted
+        source; and sources that were not evicted keep their buckets intact.
+        """
+        config = _make_config(max_sources=16, max_template_hw=256, max_entity_hw=256)
+        ensemble = DetectionEnsemble(config)
+        # 500 unique sources, each with 2 template and 1 entity HW key.
+        for i in range(500):
+            src = f"src{i}"
+            ensemble.process_event(
+                _make_event(source_type=src, template_id=1, entity_refs=(f"e{i}",)),
+            )
+            ensemble.process_event(_make_event(source_type=src, template_id=2))
+        # Only the last 16 sources should survive (max_sources=16).
+        assert len(ensemble._detectors) == 16
+        surviving = set(ensemble._detectors.keys())
+        assert set(ensemble._source_hw_keys.keys()) == surviving
+        # No HW key belongs to an evicted source.
+        for key in ensemble._template_hw:
+            assert key.split(":", 1)[0] in surviving
+        for key in ensemble._entity_hw:
+            assert key.split(":", 1)[0] in surviving
+        # Eviction counter reflects the 484 kicked-out sources.
+        assert ensemble._eviction_count == 484
+
+
+class TestLoadStateReverseIndex:
+    """S-201: load_all_state re-sanitizes manifest keys and rebuilds reverse index."""
+
+    @pytest.mark.asyncio
+    async def test_load_populates_reverse_index_from_manifest(self, tmp_path: Path) -> None:
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        src_ensemble = DetectionEnsemble(config)
+        src_ensemble.process_event(
+            _make_event(source_type="s", template_id=1, entity_refs=("e1",)),
+        )
+        src_ensemble.process_event(_make_event(source_type="s", template_id=2))
+        await src_ensemble.save_all_state(storage)
+        dst_ensemble = DetectionEnsemble(config)
+        await dst_ensemble.load_all_state(storage)
+        assert dst_ensemble._source_hw_keys["s"][0] == {"s:1", "s:2"}
+        assert dst_ensemble._source_hw_keys["s"][1] == {"s:e1"}
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_resanitizes_legacy_colon_keys(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Manifest entries persisted before S-201 may contain colon-laden
+        source segments. Sanitize on load and WARN on collision."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test2.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Hand-craft a legacy manifest with a colon in the source segment.
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"legacy:src:1": 10, "legacy_src:1": 5}),
+        )
+        # Persist a minimal HW body for each so load_state returns non-None.
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        body = hw.serialize()
+        await storage.save_state("tmpl_hw:legacy:src:1", body)
+        await storage.save_state("tmpl_hw:legacy_src:1", body)
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(storage)
+        # Both pre-existing keys collapse to "legacy_src:1".
+        assert list(dst._template_hw.keys()) == ["legacy_src:1"]
+        assert dst._source_hw_keys["legacy_src"][0] == {"legacy_src:1"}
+        # Collision WARNING fired exactly once and references both raw + sanitized.
+        warnings = [
+            r for r in caplog.records if r.levelno == logging.WARNING and "Duplicate" in r.message
+        ]
+        assert len(warnings) == 1
+        assert "legacy_src:1" in warnings[0].getMessage()
+
+        await storage.close()

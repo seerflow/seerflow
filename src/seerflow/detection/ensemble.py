@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
@@ -26,6 +27,17 @@ _log = logging.getLogger(__name__)
 
 _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
 _MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
+
+# Strip C0 control chars (\x00-\x1f) and DEL (\x7f) from values before logging.
+# Prevents log-injection when a SQLite-persisted manifest contains attacker-
+# crafted CR/LF/ANSI sequences that could spoof log lines.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _log_safe(value: str, *, max_len: int = 64) -> str:
+    """Redact control characters and cap length for safe inclusion in log fields."""
+    return _CONTROL_CHAR_RE.sub("_", value)[:max_len]
+
 
 # Memory estimation constants (bytes) — approximate per-instance footprint.
 _MEM_HST = 51_200  # ~50 KB: River HalfSpaceTrees, 25 trees
@@ -130,6 +142,7 @@ class DetectionEnsemble:
         "_min_events_for_scoring",
         "_score_interval",
         "_score_windows",
+        "_source_hw_keys",
         "_template_event_counts",
         "_template_hw",
         "_template_hw_eviction_count",
@@ -155,6 +168,7 @@ class DetectionEnsemble:
         self._entity_event_counts: dict[str, int] = {}
         self._template_hw_eviction_count: int = 0
         self._entity_hw_eviction_count: int = 0
+        self._source_hw_keys: dict[str, tuple[set[str], set[str]]] = {}
         self._weights: tuple[float, ...] = (
             config.weights_content,
             config.weights_volume,
@@ -166,7 +180,7 @@ class DetectionEnsemble:
 
     def process_event(self, event: SeerflowEvent) -> DetectionResult:
         """Score, learn, and threshold-check a single event."""
-        raw_source = (event.source_type or "default").replace("\x00", "")
+        raw_source = (event.source_type or "default").replace("\x00", "").replace(":", "_")
         source = raw_source[:_MAX_SOURCE_KEY_LEN] or "default"
 
         # Batch scoring: skip scoring for non-Nth events
@@ -261,15 +275,13 @@ class DetectionEnsemble:
             self._score_windows.pop(evicted_source, None)
             self._event_counters.pop(evicted_source, None)
             self._eviction_count += 1
-            # Clean up orphaned template/entity HW entries for the evicted source.
-            # O(max_template_hw + max_entity_hw) scan — acceptable because source
-            # eviction is rare and prevents unbounded HW pool growth.
-            prefix = f"{evicted_source}:"
-            for key in [k for k in self._template_hw if k.startswith(prefix)]:
-                del self._template_hw[key]
+            # O(k) cleanup via reverse index: k = HW keys owned by evicted source.
+            tmpl_keys, ent_keys = self._source_hw_keys.pop(evicted_source, (set(), set()))
+            for key in tmpl_keys:
+                self._template_hw.pop(key, None)
                 self._template_event_counts.pop(key, None)
-            for key in [k for k in self._entity_hw if k.startswith(prefix)]:
-                del self._entity_hw[key]
+            for key in ent_keys:
+                self._entity_hw.pop(key, None)
                 self._entity_event_counts.pop(key, None)
         self._detectors[source] = [
             HSTDetector(
@@ -307,6 +319,9 @@ class DetectionEnsemble:
         hw, evicted = self._get_or_create_hw(
             key, self._template_hw, self._template_event_counts, self._max_template_hw
         )
+        # setdefault returns existing bucket on cache-hit; index 0 = template set.
+        tmpl_set, _ = self._source_hw_keys.setdefault(source, (set(), set()))
+        tmpl_set.add(key)
         if evicted:
             self._template_hw_eviction_count += 1
         if self._template_event_counts[key] >= self._min_events_for_scoring:
@@ -323,7 +338,7 @@ class DetectionEnsemble:
             return float("nan")
         max_score = float("nan")
         for entity_val in event.entity_refs[:_MAX_ENTITIES_PER_SCORE]:
-            safe_val = entity_val.replace("\x00", "")
+            safe_val = entity_val.replace("\x00", "").replace(":", "_")
             if not safe_val:
                 continue
             key = f"{source}:{safe_val}"[:_MAX_SOURCE_KEY_LEN]
@@ -331,6 +346,9 @@ class DetectionEnsemble:
             hw, evicted = self._get_or_create_hw(
                 key, self._entity_hw, self._entity_event_counts, self._max_entity_hw
             )
+            # setdefault returns existing bucket on cache-hit; index 1 = entity set.
+            _, ent_set = self._source_hw_keys.setdefault(source, (set(), set()))
+            ent_set.add(key)
             if evicted:
                 self._entity_hw_eviction_count += 1
             if self._entity_event_counts[key] >= self._min_events_for_scoring:
@@ -353,7 +371,7 @@ class DetectionEnsemble:
         """Return (or create) an HW detector in the given pool with LRU eviction.
 
         Pools are also eagerly cleaned on source eviction in ``_get_detectors``
-        (prefix-scan removes all keys for the evicted source).
+        via the per-source reverse index (``_source_hw_keys.pop(source)``).
 
         Returns a ``(detector, evicted)`` tuple where *evicted* is ``True``
         when adding the new key required evicting the LRU entry.
@@ -365,6 +383,11 @@ class DetectionEnsemble:
         if len(hw_dict) >= max_items:
             evicted_key, _ = hw_dict.popitem(last=False)
             counts_dict.pop(evicted_key, None)
+            evicted_owner = evicted_key.split(":", 1)[0]
+            owner_entry = self._source_hw_keys.get(evicted_owner)
+            if owner_entry is not None:
+                idx = 0 if hw_dict is self._template_hw else 1
+                owner_entry[idx].discard(evicted_key)
             evicted = True
         hw = HoltWintersDetector(
             seasonal_period=self._config.hw_seasonal_period,
@@ -637,13 +660,37 @@ class DetectionEnsemble:
             _log.warning("Corrupt %s manifest — skipping", prefix, exc_info=True)
             return 0
         loaded = 0
+        idx = 0 if hw_dict is self._template_hw else 1
         # Reverse: manifest preserves LRU order (oldest first from OrderedDict),
         # so load MRU entries first to keep the hottest keys when capacity-limited.
-        for key, evt_count in list(manifest.items())[-max_items:]:
+        for raw_key, evt_count in list(manifest.items())[-max_items:]:
             if not isinstance(evt_count, int) or evt_count < 0:
-                _log.warning("Invalid event count %r for %s:%s — skipping", evt_count, prefix, key)
+                _log.warning(
+                    "Invalid event count %r for %s:%s — skipping",
+                    evt_count,
+                    prefix,
+                    _log_safe(raw_key),
+                )
                 continue
-            data = await storage.load_state(f"{prefix}:{key}")
+            # Re-apply sanitizer so legacy colon-laden sources collapse.
+            # Keys have format "{source}:{id}". Sanitize the source segment only
+            # (rsplit to isolate the rightmost colon as the separator).
+            if ":" in raw_key:
+                src_part, suffix = raw_key.rsplit(":", 1)
+                src_part = src_part.replace("\x00", "").replace(":", "_")
+                suffix = suffix.replace("\x00", "")
+                sanitized_key = f"{src_part}:{suffix}"
+            else:
+                sanitized_key = raw_key.replace("\x00", "")
+            if sanitized_key in hw_dict:
+                _log.warning(
+                    "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",
+                    prefix,
+                    _log_safe(sanitized_key),
+                    _log_safe(raw_key),
+                )
+                continue
+            data = await storage.load_state(f"{prefix}:{raw_key}")
             if data is None:
                 continue
             try:
@@ -655,14 +702,17 @@ class DetectionEnsemble:
                     n_std=self._config.hw_n_std,
                 )
                 hw.deserialize(data)
-                hw_dict[key] = hw
-                counts_dict[key] = evt_count
+                hw_dict[sanitized_key] = hw
+                counts_dict[sanitized_key] = evt_count
+                owning_source = sanitized_key.split(":", 1)[0]
+                bucket = self._source_hw_keys.setdefault(owning_source, (set(), set()))
+                bucket[idx].add(sanitized_key)
                 loaded += 1
             except Exception:
                 _log.warning(
                     "Corrupt %s state for %s — skipping",
                     prefix,
-                    key,
+                    sanitized_key,
                     exc_info=True,
                 )
         return loaded
