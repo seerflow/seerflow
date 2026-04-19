@@ -90,8 +90,6 @@ describe("selectVisibleAndCounts (S-194 AC-5)", () => {
   it("selectVisibleAndCounts cache is scoped per store instance (S-203 AC-1)", () => {
     const s1 = createAlertStore(10);
     const s2 = createAlertStore(10);
-    const s1_state_before = s1.getState();
-    const s2_state_before = s2.getState();
     s1.getState().backfill([a({ alert_id: "a", severity: 18 })]);  // critical
     s2.getState().backfill([a({ alert_id: "b", severity: 6 })]);   // low
     const s1_state = s1.getState();
@@ -104,7 +102,7 @@ describe("selectVisibleAndCounts (S-194 AC-5)", () => {
     expect(r2.counts).toEqual({ total: 1, critical: 0, high: 0, medium: 0, low: 1 });
     // Re-entry against s1 must NOT return s2's value.
     const r1again = selectVisibleAndCounts(s1_state);
-    expect(r1again).toEqual(r1);
+    expect(r1again).toBe(r1);
     expect(r1again.counts.critical).toBe(1);
   });
 });
