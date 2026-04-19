@@ -24,6 +24,22 @@ describe("alertStore", () => {
     expect(s.getState().alerts[0]).toMatchObject({timestamp_ns: 10n, dedup_count: 3});
   });
 
+  it("dedup keeps newer fields when incoming has older timestamp_ns (S-204 AC-1, mergePrepend)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "x", timestamp_ns: 10n, message: "new", dedup_count: 1}));
+    s.getState().prepend(a({alert_id: "x", timestamp_ns: 5n,  message: "old", dedup_count: 5}));
+    expect(s.getState().alerts).toHaveLength(1);
+    expect(s.getState().alerts[0]).toMatchObject({timestamp_ns: 10n, message: "new", dedup_count: 5});
+  });
+
+  it("dedup keeps newer fields when backfill brings older timestamp_ns (S-204 AC-1, backfill)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "x", timestamp_ns: 10n, message: "new", dedup_count: 1}));
+    s.getState().backfill([a({alert_id: "x", timestamp_ns: 5n, message: "old", dedup_count: 5})]);
+    expect(s.getState().alerts).toHaveLength(1);
+    expect(s.getState().alerts[0]).toMatchObject({timestamp_ns: 10n, message: "new", dedup_count: 5});
+  });
+
   it("backfill preserves order newest first and bounds", () => {
     const s = createAlertStore(3);
     s.getState().backfill([a({alert_id: "1", timestamp_ns: 1n}), a({alert_id: "2", timestamp_ns: 2n}), a({alert_id: "3", timestamp_ns: 3n}), a({alert_id: "4", timestamp_ns: 4n})]);
