@@ -91,26 +91,6 @@ export function createAlertStore(max = MAX_ALERTS) {
 
 export const useAlertStore = createAlertStore();
 
-export function selectVisible(s: AlertsState): Alert[] {
-  const { severities, types, sources, tactics } = s.filter;
-  return s.alerts.filter(a => {
-    if (severities.size && !severities.has(severityBucket(a.severity) as SeverityBucket)) return false;
-    if (types.size && !types.has(a.alert_type)) return false;
-    if (sources.size && a.source_type && !sources.has(a.source_type)) return false;
-    if (tactics.size && !a.mitre_tactics.some(t => tactics.has(t))) return false;
-    return true;
-  });
-}
-
-export function selectCounts(s: AlertsState): { total: number; critical: number; high: number; medium: number; low: number } {
-  const out = { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
-  for (const a of selectVisible(s)) {
-    out.total++;
-    out[severityBucket(a.severity)]++;
-  }
-  return out;
-}
-
 // S-203 AC-1: scope cache per store via WeakMap keyed on AlertsState identity.
 // Module-level let bindings leaked between createAlertStore() instances in tests
 // and held the last-used alerts array strongly, preventing GC.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createAlertStore, selectVisible, selectCounts, selectVisibleAndCounts } from "./alerts";
+import { createAlertStore, selectVisibleAndCounts } from "./alerts";
 import type { Alert } from "@/lib/types";
 
 const a = (overrides: Partial<Alert> = {}): Alert => ({
@@ -30,20 +30,20 @@ describe("alertStore", () => {
     expect(s.getState().alerts.map(x => x.alert_id)).toEqual(["4","3","2"]);
   });
 
-  it("selectVisible applies severity filter", () => {
+  it("filters by severity (S-203, formerly selectVisible)", () => {
     const s = createAlertStore(10);
     s.getState().prepend(a({alert_id: "c", severity: 17}));
     s.getState().prepend(a({alert_id: "l", severity: 2}));
     s.getState().setFilter({severities: new Set(["critical"])});
-    expect(selectVisible(s.getState()).map(x => x.alert_id)).toEqual(["c"]);
+    expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["c"]);
   });
 
-  it("selectCounts returns per-bucket counts", () => {
+  it("returns per-bucket counts (S-203, formerly selectCounts)", () => {
     const s = createAlertStore(10);
     s.getState().prepend(a({alert_id: "1", severity: 17}));
     s.getState().prepend(a({alert_id: "2", severity: 13}));
     s.getState().prepend(a({alert_id: "3", severity: 5}));
-    expect(selectCounts(s.getState())).toEqual({total: 3, critical: 1, high: 1, medium: 0, low: 1});
+    expect(selectVisibleAndCounts(s.getState()).counts).toEqual({total: 3, critical: 1, high: 1, medium: 0, low: 1});
   });
 
   it("setFeedback updates in place", () => {
