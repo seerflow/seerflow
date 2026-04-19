@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, ApiError } from "./api";
+import { api, ApiError, __walker } from "./api";
 import { logger } from "./logger";
 
 const fetchMock = vi.fn();
@@ -135,5 +135,15 @@ describe("api boundary parsing", () => {
     expect(foundString).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+
+  it("walker does not enter the object branch when no bigint markers exist (S-203 AC-3)", async () => {
+    const payload = { ok: true, version: "1.2.3", nested: { extra: ["a", { deeper: 42 }] } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), { headers: { "content-type": "application/json" } }),
+    ));
+    __walker.reset();
+    await api.get("/api/v1/health");
+    expect(__walker.calls).toBe(0);
   });
 });

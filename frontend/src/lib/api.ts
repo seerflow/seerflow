@@ -17,6 +17,26 @@ const BIGINT_KEYS = new Set(["timestamp_ns", "observed_ns", "bucket_start_ns"]);
 // crafted nested payload (S-203 AC-2).
 const REVIVE_MAX_DEPTH = 32;
 
+function hasBigintMarker(value: unknown, depth: number = 0): boolean {
+  if (depth >= REVIVE_MAX_DEPTH) return false;
+  if (Array.isArray(value)) {
+    for (const v of value) if (hasBigintMarker(v, depth + 1)) return true;
+    return false;
+  }
+  if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      if (BIGINT_KEYS.has(k) && typeof v === "string") return true;
+      if (hasBigintMarker(v, depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
+// Test-only counter — Task 3 of S-203 uses it to assert the walker did not
+// allocate when no bigint marker exists in the payload. Production code
+// never reads it.
+export const __walker = { calls: 0, reset(): void { this.calls = 0; } };
+
 /**
  * Walk a parsed JSON value and convert any key in BIGINT_KEYS whose value is
  * a digits-only string into a bigint. The backend serialises these fields as
@@ -38,6 +58,7 @@ function reviveBigintTimestamps(value: unknown): unknown {
     }
     if (Array.isArray(v)) return v.map(x => walk(x, depth + 1));
     if (v && typeof v === "object") {
+      __walker.calls++;
       const obj = v as Record<string, unknown>;
       const out: Record<string, unknown> = {};
       for (const [k, vv] of Object.entries(obj)) {
@@ -60,7 +81,9 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     const text = await res.text();
     const parsed = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text;
     if (!res.ok) throw new ApiError(res.status, (parsed && typeof parsed === "object" && "detail" in parsed) ? String(parsed.detail) : text);
-    const body = typeof parsed === "object" && parsed !== null ? reviveBigintTimestamps(parsed) : parsed;
+    const body = (typeof parsed === "object" && parsed !== null && hasBigintMarker(parsed))
+      ? reviveBigintTimestamps(parsed)
+      : parsed;
     return body as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
