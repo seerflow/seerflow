@@ -277,3 +277,64 @@ describe("useWebSocket event arm (S-199)", () => {
     expect(payload.events[0].observed_ns).toBe(1700000000000000000n);
   });
 });
+
+describe("useWebSocket conversion safety (S-204)", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("warns and drops alert frame when BigInt() throws on validated digit string (S-204 AC-4a)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    const realBigInt = globalThis.BigInt;
+    vi.stubGlobal("BigInt", (() => { throw new TypeError("forced"); }) as unknown as typeof BigInt);
+    try {
+      // Prove the stub is effective from the hook's resolution site — guards
+      // against a silent false-green if BigInt ever gets inlined as a local
+      // binding by the bundler.
+      expect(() => globalThis.BigInt("1")).toThrow(TypeError);
+      renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+      const ws = MockWS.instances[0];
+      act(() => { ws._open(); });
+      act(() => { ws._msg({
+        type: "alert",
+        data: {
+          alert_id: "a1",
+          timestamp_ns: "1700000000000000123",
+          alert_type: "ml", rule_name: "r", severity: 10, risk_score: 0,
+          entity_uuid: "u", entity_type: "ip", entity_value: "x",
+          message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
+        },
+      }); });
+      expect(onMessage).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith("ws timestamp conversion failed", expect.any(TypeError));
+    } finally {
+      globalThis.BigInt = realBigInt;
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("useWebSocket send queue (S-204)", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("queues messages sent before the socket opens and flushes on open (S-204 AC-4b)", () => {
+    const { result } = renderHook(() => useWebSocket("ws://x", { onMessage: vi.fn(), onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0];
+    act(() => { result.current.send({ hello: 1 }); });
+    expect(ws.sent).toEqual([]);
+    act(() => { ws._open(); });
+    expect(ws.sent).toEqual([{ hello: 1 }]);
+  });
+
+  it("warns and drops frames with invalid JSON payload (S-204 AC-4 coverage closure)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0];
+    act(() => { ws._open(); });
+    act(() => { ws.onmessage?.({ data: "{not-json" }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("ws parse fail", expect.any(Error));
+  });
+});

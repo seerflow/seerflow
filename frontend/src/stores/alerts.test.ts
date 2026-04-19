@@ -24,6 +24,30 @@ describe("alertStore", () => {
     expect(s.getState().alerts[0]).toMatchObject({timestamp_ns: 10n, dedup_count: 3});
   });
 
+  it("dedup keeps newer fields when incoming has older timestamp_ns (S-204 AC-1, mergePrepend)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "x", timestamp_ns: 10n, message: "new", dedup_count: 1}));
+    s.getState().prepend(a({alert_id: "x", timestamp_ns: 5n,  message: "old", dedup_count: 5}));
+    expect(s.getState().alerts).toHaveLength(1);
+    expect(s.getState().alerts[0]).toMatchObject({timestamp_ns: 10n, message: "new", dedup_count: 5});
+  });
+
+  it("dedup keeps newer fields when backfill brings older timestamp_ns (S-204 AC-1, backfill)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "x", timestamp_ns: 10n, message: "new", dedup_count: 1}));
+    s.getState().backfill([a({alert_id: "x", timestamp_ns: 5n, message: "old", dedup_count: 5})]);
+    expect(s.getState().alerts).toHaveLength(1);
+    expect(s.getState().alerts[0]).toMatchObject({timestamp_ns: 10n, message: "new", dedup_count: 5});
+  });
+
+  it("dedup takes newer fields when backfill brings newer timestamp_ns (S-204 AC-1, backfill newer branch)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "x", timestamp_ns: 5n, message: "old", dedup_count: 1}));
+    s.getState().backfill([a({alert_id: "x", timestamp_ns: 10n, message: "new", dedup_count: 5})]);
+    expect(s.getState().alerts).toHaveLength(1);
+    expect(s.getState().alerts[0]).toMatchObject({timestamp_ns: 10n, message: "new", dedup_count: 5});
+  });
+
   it("backfill preserves order newest first and bounds", () => {
     const s = createAlertStore(3);
     s.getState().backfill([a({alert_id: "1", timestamp_ns: 1n}), a({alert_id: "2", timestamp_ns: 2n}), a({alert_id: "3", timestamp_ns: 3n}), a({alert_id: "4", timestamp_ns: 4n})]);
@@ -51,6 +75,43 @@ describe("alertStore", () => {
     s.getState().prepend(a({alert_id: "1"}));
     s.getState().setFeedback("1", "tp");
     expect(s.getState().alerts[0].feedback).toBe("tp");
+  });
+
+  it("setFeedback ignores unmatched alert_id (S-204 coverage closure)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "1", feedback: undefined}));
+    s.getState().setFeedback("other", "tp");
+    expect(s.getState().alerts[0].feedback).toBeUndefined();
+  });
+
+  it("backfill preserves insertion order for equal timestamp_ns alerts (S-204 coverage closure)", () => {
+    const s = createAlertStore(10);
+    s.getState().backfill([a({alert_id: "a", timestamp_ns: 5n}), a({alert_id: "b", timestamp_ns: 5n})]);
+    expect(s.getState().alerts.map(x => x.alert_id)).toEqual(["a", "b"]);
+  });
+
+  it("filters by alert_type and drops non-matching (S-204 coverage closure)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "m", alert_type: "ml"}));
+    s.getState().prepend(a({alert_id: "s", alert_type: "sigma"}));
+    s.getState().setFilter({types: new Set(["ml"])});
+    expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["m"]);
+  });
+
+  it("filters by source_type and drops non-matching (S-204 coverage closure)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "syslog", source_type: "syslog"}));
+    s.getState().prepend(a({alert_id: "cloudtrail", source_type: "cloudtrail"}));
+    s.getState().setFilter({sources: new Set(["syslog"])});
+    expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["syslog"]);
+  });
+
+  it("filters by mitre_tactic and drops non-matching (S-204 coverage closure)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "ta1", mitre_tactics: ["TA0001"]}));
+    s.getState().prepend(a({alert_id: "ta2", mitre_tactics: ["TA0002"]}));
+    s.getState().setFilter({tactics: new Set(["TA0001"])});
+    expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["ta1"]);
   });
 });
 

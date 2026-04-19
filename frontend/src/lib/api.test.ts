@@ -31,6 +31,23 @@ describe("api", () => {
     fetchMock.mockRejectedValueOnce(new TypeError("network"));
     await expect(api.get("/api/v1/alerts")).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("throws ApiError with raw text body when non-JSON error response (S-204 AC-2)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("boom", {status: 500, headers: {"content-type": "text/plain"}}));
+    await expect(api.get("/api/v1/thing")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 500,
+      detail: "boom",
+    });
+  });
+
+  it("re-throws existing ApiError unchanged rather than wrapping (S-204 AC-3)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{\"detail\":\"nope\"}", {status: 422, headers: {"content-type": "application/json"}}));
+    const err = await api.get("/api/v1/bad").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(422);
+    expect((err as ApiError).detail).toBe("nope");
+  });
 });
 
 describe("api boundary parsing", () => {
