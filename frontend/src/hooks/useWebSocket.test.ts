@@ -288,6 +288,10 @@ describe("useWebSocket conversion safety (S-204)", () => {
     const realBigInt = globalThis.BigInt;
     vi.stubGlobal("BigInt", (() => { throw new TypeError("forced"); }) as unknown as typeof BigInt);
     try {
+      // Prove the stub is effective from the hook's resolution site — guards
+      // against a silent false-green if BigInt ever gets inlined as a local
+      // binding by the bundler.
+      expect(() => globalThis.BigInt("1")).toThrow(TypeError);
       renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
       const ws = MockWS.instances[0];
       act(() => { ws._open(); });
@@ -305,6 +309,7 @@ describe("useWebSocket conversion safety (S-204)", () => {
       expect(warn).toHaveBeenCalledWith("ws timestamp conversion failed", expect.any(TypeError));
     } finally {
       globalThis.BigInt = realBigInt;
+      warn.mockRestore();
     }
   });
 });

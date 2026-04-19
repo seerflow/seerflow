@@ -84,11 +84,10 @@ describe("alertStore", () => {
     expect(s.getState().alerts[0].feedback).toBeUndefined();
   });
 
-  it("backfill keeps stable order when two alerts share a timestamp_ns (S-204 coverage closure)", () => {
+  it("backfill preserves insertion order for equal timestamp_ns alerts (S-204 coverage closure)", () => {
     const s = createAlertStore(10);
     s.getState().backfill([a({alert_id: "a", timestamp_ns: 5n}), a({alert_id: "b", timestamp_ns: 5n})]);
-    expect(s.getState().alerts).toHaveLength(2);
-    expect(s.getState().alerts.every(x => x.timestamp_ns === 5n)).toBe(true);
+    expect(s.getState().alerts.map(x => x.alert_id)).toEqual(["a", "b"]);
   });
 
   it("filters by alert_type and drops non-matching (S-204 coverage closure)", () => {
@@ -99,14 +98,20 @@ describe("alertStore", () => {
     expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["m"]);
   });
 
-  it("filters by source_type and by mitre_tactic (S-204 coverage closure)", () => {
+  it("filters by source_type and drops non-matching (S-204 coverage closure)", () => {
     const s = createAlertStore(10);
-    s.getState().prepend(a({alert_id: "syslog", source_type: "syslog", mitre_tactics: ["TA0001"]}));
-    s.getState().prepend(a({alert_id: "cloudtrail", source_type: "cloudtrail", mitre_tactics: ["TA0002"]}));
+    s.getState().prepend(a({alert_id: "syslog", source_type: "syslog"}));
+    s.getState().prepend(a({alert_id: "cloudtrail", source_type: "cloudtrail"}));
     s.getState().setFilter({sources: new Set(["syslog"])});
     expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["syslog"]);
-    s.getState().setFilter({sources: new Set(), tactics: new Set(["TA0001"])});
-    expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["syslog"]);
+  });
+
+  it("filters by mitre_tactic and drops non-matching (S-204 coverage closure)", () => {
+    const s = createAlertStore(10);
+    s.getState().prepend(a({alert_id: "ta1", mitre_tactics: ["TA0001"]}));
+    s.getState().prepend(a({alert_id: "ta2", mitre_tactics: ["TA0002"]}));
+    s.getState().setFilter({tactics: new Set(["TA0001"])});
+    expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["ta1"]);
   });
 });
 
