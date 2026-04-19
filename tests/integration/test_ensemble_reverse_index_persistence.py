@@ -101,3 +101,55 @@ class TestEnsembleReverseIndexPersistence:
         assert "srcA" not in dst._detectors
         assert "srcA" not in dst._source_hw_keys
         assert all(not k.startswith("srcA:") for k in dst._template_hw)
+
+    @pytest.mark.asyncio
+    async def test_legacy_colon_laden_entity_migrates_and_gcs_orphan(
+        self, backend: SqliteBackend
+    ) -> None:
+        """End-to-end: a pre-S-201 ent_hw row with a colon-laden entity
+        (IPv6-like fe80::1) migrates to the runtime-shaped key on load,
+        and — if two raw keys collapse — the orphan row is GC'd so
+        model_state settles at one row per surviving sanitized key."""
+        import msgspec.json
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        cfg = _config()
+        hw = HoltWintersDetector(
+            seasonal_period=cfg.hw_seasonal_period,
+            alpha=cfg.hw_alpha,
+            beta=cfg.hw_beta,
+            gamma=cfg.hw_gamma,
+            n_std=cfg.hw_n_std,
+        )
+        body = hw.serialize()
+
+        # Seed two ent_hw rows that collapse onto the same sanitized key:
+        # - "syslog:fe80__1" (already-sanitized shape — wins, first in manifest)
+        # - "syslog:fe80::1" (legacy raw with colon-laden entity — loser, GC'd)
+        # Both sanitize to "syslog:fe80__1"; first in manifest wins, second GC'd.
+        await backend.save_state(
+            "ent_hw:manifest",
+            msgspec.json.encode({"syslog:fe80__1": 3, "syslog:fe80::1": 7}),
+        )
+        await backend.save_state("ent_hw:syslog:fe80__1", body)
+        await backend.save_state("ent_hw:syslog:fe80::1", body)
+        await backend.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(cfg)
+        await dst.load_all_state(backend)
+
+        # Migrated key matches runtime shape.
+        assert list(dst._entity_hw.keys()) == ["syslog:fe80__1"]
+        assert dst._source_hw_keys["syslog"][1] == {"syslog:fe80__1"}
+
+        # Orphan row gone. Verify via direct load_state (None == deleted).
+        assert await backend.load_state("ent_hw:syslog:fe80::1") is None
+        # Winner row survived.
+        assert await backend.load_state("ent_hw:syslog:fe80__1") == body
+
+        # Subsequent process_event with fe80::1 reuses the migrated HW
+        # state — no cold-start (event count increments from the loaded value).
+        before = dst._entity_event_counts["syslog:fe80__1"]
+        dst.process_event(_event(source_type="syslog", entity_refs=("fe80::1",)))
+        after = dst._entity_event_counts["syslog:fe80__1"]
+        assert after == before + 1
