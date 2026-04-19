@@ -2054,3 +2054,71 @@ class TestLoadStateReverseIndex:
         assert "tmpl_hw:legacy:src:1" in deleted
 
         await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_collision_gc_failure_logs_and_continues(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """If delete_state raises during collision GC, load completes —
+        the winner key is still populated and the failure is logged."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_gcfail.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"legacy_src:1": 5, "legacy:src:1": 10}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        body = hw.serialize()
+        await storage.save_state("tmpl_hw:legacy_src:1", body)
+        await storage.save_state("tmpl_hw:legacy:src:1", body)
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        # Wrap storage in a proxy whose delete_state always raises,
+        # simulating a cleanup hiccup. __slots__ on SqliteBackend blocks
+        # monkeypatch on the instance, so a thin proxy is the workaround
+        # (same pattern as test_load_collision_gcs_losing_raw_key).
+        class _BoomOnDelete:
+            def __init__(self, inner: SqliteBackend) -> None:
+                self._inner = inner
+
+            async def load_state(self, key: str) -> bytes | None:
+                return await self._inner.load_state(key)
+
+            async def save_state(self, key: str, data: bytes) -> None:
+                await self._inner.save_state(key, data)
+
+            async def delete_state(self, key: str) -> None:
+                raise RuntimeError(f"simulated storage failure for {key}")
+
+        proxy = _BoomOnDelete(storage)
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(proxy)  # type: ignore[arg-type]
+
+        # Load completed — winner key survived despite GC failure.
+        assert list(dst._template_hw.keys()) == ["legacy_src:1"]
+        # Failure WARNING logged exactly once.
+        failed = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Failed to GC orphan" in r.message
+        ]
+        assert len(failed) == 1
+
+        await storage.close()
