@@ -308,3 +308,17 @@ describe("useWebSocket conversion safety (S-204)", () => {
     }
   });
 });
+
+describe("useWebSocket send queue (S-204)", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("queues messages sent before the socket opens and flushes on open (S-204 AC-4b)", () => {
+    const { result } = renderHook(() => useWebSocket("ws://x", { onMessage: vi.fn(), onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0];
+    act(() => { result.current.send({ hello: 1 }); });
+    expect(ws.sent).toEqual([]);
+    act(() => { ws._open(); });
+    expect(ws.sent).toEqual([{ hello: 1 }]);
+  });
+});
