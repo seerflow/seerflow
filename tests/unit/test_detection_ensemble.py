@@ -1910,3 +1910,39 @@ class TestLoadStateReverseIndex:
         assert "legacy_src:1" in warnings[0].getMessage()
 
         await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_migrates_legacy_colon_laden_entity(self, tmp_path: Path) -> None:
+        """Legacy ent_hw manifest with colon in entity (IPv6) sanitizes
+        to the runtime shape (ent:fe80::1 → ent:fe80__1) not the rsplit shape."""
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_migrate.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Seed a pre-S-201 ent_hw manifest with a colon-laden entity value.
+        await storage.save_state(
+            "ent_hw:manifest",
+            msgspec.json.encode({"syslog:fe80::1": 7}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        await storage.save_state("ent_hw:syslog:fe80::1", hw.serialize())
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(config)
+        await dst.load_all_state(storage)
+
+        # Runtime path produces "syslog:fe80__1" — the migration must match.
+        assert list(dst._entity_hw.keys()) == ["syslog:fe80__1"]
+        assert dst._source_hw_keys["syslog"][1] == {"syslog:fe80__1"}
+        assert dst._entity_event_counts["syslog:fe80__1"] == 7
+
+        await storage.close()

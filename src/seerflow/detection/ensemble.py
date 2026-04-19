@@ -672,16 +672,33 @@ class DetectionEnsemble:
                     _log_safe(raw_key),
                 )
                 continue
-            # Re-apply sanitizer so legacy colon-laden sources collapse.
-            # Keys have format "{source}:{id}". Sanitize the source segment only
-            # (rsplit to isolate the rightmost colon as the separator).
-            if ":" in raw_key:
+            # Per-prefix split strategy:
+            # - tmpl_hw: suffix is an int → rsplit isolates source (even if legacy
+            #   source had colons, rsplit always picks the final colon correctly).
+            # - ent_hw: suffix is an entity value that may contain colons
+            #   (IPv6, host:port, Kerberos principal) → split(":", 1) matches the
+            #   runtime sanitizer at _score_entity_hw (ensemble.py:341), which
+            #   strips \x00 and replaces ":" with "_" on the entity value.
+            # No-colon keys are rejected outright — they cannot participate in
+            # the reverse index (owning-source derivation returns the whole
+            # string, which can never match a real source).
+            if ":" not in raw_key:
+                _log.warning(
+                    "Malformed %s manifest key %r — skipping",
+                    prefix,
+                    _log_safe(raw_key),
+                )
+                continue
+            if prefix == "tmpl_hw":
                 src_part, suffix = raw_key.rsplit(":", 1)
-                src_part = src_part.replace("\x00", "").replace(":", "_")
                 suffix = suffix.replace("\x00", "")
-                sanitized_key = f"{src_part}:{suffix}"
-            else:
-                sanitized_key = raw_key.replace("\x00", "")
+            elif prefix == "ent_hw":
+                src_part, suffix = raw_key.split(":", 1)
+                suffix = suffix.replace("\x00", "").replace(":", "_")
+            else:  # pragma: no cover - defensive; call sites are constants
+                raise ValueError(f"Unknown prefix: {prefix!r}")
+            src_part = src_part.replace("\x00", "").replace(":", "_")
+            sanitized_key = f"{src_part}:{suffix}"
             if sanitized_key in hw_dict:
                 _log.warning(
                     "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",
