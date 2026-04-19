@@ -706,6 +706,19 @@ class DetectionEnsemble:
                     _log_safe(sanitized_key),
                     _log_safe(raw_key),
                 )
+                # One-shot migration GC: delete the losing raw_key's on-disk
+                # row so subsequent loads see the winner only and do not
+                # re-log this collision. Best-effort — never fail load on
+                # cleanup hiccup.
+                try:
+                    await storage.delete_state(f"{prefix}:{raw_key}")
+                except Exception:
+                    _log.warning(
+                        "Failed to GC orphan %s row for %r — skipping",
+                        prefix,
+                        _log_safe(raw_key),
+                        exc_info=True,
+                    )
                 continue
             data = await storage.load_state(f"{prefix}:{raw_key}")
             if data is None:

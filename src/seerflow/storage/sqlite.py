@@ -289,6 +289,7 @@ def _validate_state_key(key: str) -> None:
 
 _SAVE_STATE_SQL = "INSERT OR REPLACE INTO model_state (key, data, updated_at) VALUES (?, ?, ?)"
 _LOAD_STATE_SQL = "SELECT data FROM model_state WHERE key = ?"
+_DELETE_STATE_SQL = "DELETE FROM model_state WHERE key = ?"
 
 _UPSERT_EDGE_SQL = """\
 INSERT INTO graph_edges (source_id, target_id, rel_type, first_seen, last_seen, event_count)
@@ -600,6 +601,17 @@ class SqliteBackend(_SqliteAlertMixin):
         async with await self._conn.execute(_LOAD_STATE_SQL, [key]) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else None
+
+    async def delete_state(self, key: str) -> None:
+        """Delete serialized model state for ``key`` (no-op if absent)."""
+        _validate_state_key(key)
+        try:
+            await self._conn.execute(_DELETE_STATE_SQL, [key])
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("delete_state failed for key %s", key)
+            raise
 
     async def write_edge(
         self,

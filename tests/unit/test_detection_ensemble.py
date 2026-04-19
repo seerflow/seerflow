@@ -1986,10 +1986,71 @@ class TestLoadStateReverseIndex:
         assert dst._source_hw_keys == {}
         # One Malformed WARNING.
         malformed = [
-            r for r in caplog.records
-            if r.levelno == logging.WARNING and "Malformed" in r.message
+            r for r in caplog.records if r.levelno == logging.WARNING and "Malformed" in r.message
         ]
         assert len(malformed) == 1
         assert "tmpl_hw" in malformed[0].getMessage()
+
+        await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_collision_gcs_losing_raw_key(self, tmp_path: Path) -> None:
+        """When two raw manifest keys collapse onto one sanitized key,
+        the losing raw_key's on-disk row is deleted so reload does not
+        repeat the collision WARNING forever."""
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_gc.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        # Two pre-existing keys that collapse onto the same sanitized form.
+        # First-in-manifest wins; second is the orphan to GC.
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"legacy_src:1": 5, "legacy:src:1": 10}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        body = hw.serialize()
+        await storage.save_state("tmpl_hw:legacy_src:1", body)
+        await storage.save_state("tmpl_hw:legacy:src:1", body)
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        # Spy on delete_state to capture the exact keys deleted. Wrap
+        # the SqliteBackend (slotted, so monkeypatch on the instance
+        # fails) in a passthrough proxy that records deletes before
+        # delegating.
+        deleted: list[str] = []
+
+        class _DeleteSpy:
+            def __init__(self, inner: SqliteBackend) -> None:
+                self._inner = inner
+
+            async def save_state(self, key: str, data: bytes) -> None:
+                await self._inner.save_state(key, data)
+
+            async def load_state(self, key: str) -> bytes | None:
+                return await self._inner.load_state(key)
+
+            async def delete_state(self, key: str) -> None:
+                deleted.append(key)
+                await self._inner.delete_state(key)
+
+        spy_storage = _DeleteSpy(storage)
+
+        dst = DetectionEnsemble(config)
+        await dst.load_all_state(spy_storage)
+
+        # Winner (first raw_key in manifest order) survives.
+        assert list(dst._template_hw.keys()) == ["legacy_src:1"]
+        # Loser's row was GC'd.
+        assert "tmpl_hw:legacy:src:1" in deleted
 
         await storage.close()
