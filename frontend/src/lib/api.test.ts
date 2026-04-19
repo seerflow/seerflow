@@ -55,9 +55,12 @@ describe("api boundary parsing", () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       events: [{ event_id: "e1", timestamp_ns: 1234567890 }],
     }), { status: 200, headers: {"content-type":"application/json"} }));
+    __walker.reset();
     const res = await api.get<{ events: { timestamp_ns: number }[] }>("/api/v1/some-other");
     expect(res.events[0].timestamp_ns).toBe(1234567890);
     expect(typeof res.events[0].timestamp_ns).toBe("number");
+    // S-203 AC-3: numeric bigint-keyed values must short-circuit before the walker runs.
+    expect(__walker.calls).toBe(0);
   });
 
   it("leaves numeric observed_ns unchanged when wire still emits int (S-199 deploy window)", async () => {
@@ -139,9 +142,9 @@ describe("api boundary parsing", () => {
 
   it("walker does not enter the object branch when no bigint markers exist (S-203 AC-3)", async () => {
     const payload = { ok: true, version: "1.2.3", nested: { extra: ["a", { deeper: 42 }] } };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify(payload), { headers: { "content-type": "application/json" } }),
-    ));
+    );
     __walker.reset();
     await api.get("/api/v1/health");
     expect(__walker.calls).toBe(0);
