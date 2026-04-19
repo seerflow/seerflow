@@ -2122,3 +2122,34 @@ class TestLoadStateReverseIndex:
         assert len(failed) == 1
 
         await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_preserves_248_char_boundary_key(self, tmp_path: Path) -> None:
+        """S-201 regression guard: when source_type == _MAX_SOURCE_KEY_LEN, the
+        runtime produces a no-colon key (truncation drops the separator). That
+        shape must round-trip through save → load without being rejected as
+        malformed."""
+        from seerflow.detection.ensemble import _MAX_SOURCE_KEY_LEN
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_boundary.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        src = DetectionEnsemble(config)
+        long_source = "a" * _MAX_SOURCE_KEY_LEN  # 248 chars → truncation drops ":"
+        src.process_event(_make_event(source_type=long_source, template_id=999))
+        # Sanity: the persisted key is no-colon.
+        assert list(src._template_hw.keys()) == [long_source]
+        await src.save_all_state(storage)
+
+        dst = DetectionEnsemble(config)
+        await dst.load_all_state(storage)
+
+        # Boundary key survives reload — no cold-start.
+        assert list(dst._template_hw.keys()) == [long_source]
+        assert dst._source_hw_keys[long_source][0] == {long_source}
+
+        await storage.close()

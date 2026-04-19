@@ -683,22 +683,34 @@ class DetectionEnsemble:
             # the reverse index (owning-source derivation returns the whole
             # string, which can never match a real source).
             if ":" not in raw_key:
-                _log.warning(
-                    "Malformed %s manifest key %r — skipping",
-                    prefix,
-                    _log_safe(raw_key),
-                )
-                continue
-            if prefix == "tmpl_hw":
-                src_part, suffix = raw_key.rsplit(":", 1)
-                suffix = suffix.replace("\x00", "")
-            elif prefix == "ent_hw":
-                src_part, suffix = raw_key.split(":", 1)
-                suffix = suffix.replace("\x00", "").replace(":", "_")
-            else:  # pragma: no cover - defensive; call sites are constants
-                raise ValueError(f"Unknown prefix: {prefix!r}")
-            src_part = src_part.replace("\x00", "").replace(":", "_")
-            sanitized_key = f"{src_part}:{suffix}"
+                # Boundary case: runtime keys are built as f"{source}:{tid_or_entity}"
+                # truncated to _MAX_SOURCE_KEY_LEN. When source is exactly
+                # _MAX_SOURCE_KEY_LEN chars, the truncation drops the separator
+                # and produces a no-colon key equal to the (truncated) source.
+                # S-201 regression-tests this shape; reverse-index owner-parse
+                # (split(":", 1)[0]) correctly recovers source from a no-colon
+                # key because split returns [whole_key]. Accept these.
+                # Shorter no-colon keys cannot be produced by the runtime —
+                # they are hand-crafted/corrupt, so reject.
+                if len(raw_key) < _MAX_SOURCE_KEY_LEN:
+                    _log.warning(
+                        "Malformed %s manifest key %r — skipping",
+                        prefix,
+                        _log_safe(raw_key),
+                    )
+                    continue
+                sanitized_key = raw_key.replace("\x00", "")
+            else:
+                if prefix == "tmpl_hw":
+                    src_part, suffix = raw_key.rsplit(":", 1)
+                    suffix = suffix.replace("\x00", "")
+                elif prefix == "ent_hw":
+                    src_part, suffix = raw_key.split(":", 1)
+                    suffix = suffix.replace("\x00", "").replace(":", "_")
+                else:  # pragma: no cover - defensive; call sites are constants
+                    raise ValueError(f"Unknown prefix: {prefix!r}")
+                src_part = src_part.replace("\x00", "").replace(":", "_")
+                sanitized_key = f"{src_part}:{suffix}"
             if sanitized_key in hw_dict:
                 _log.warning(
                     "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",
