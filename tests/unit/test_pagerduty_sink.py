@@ -267,11 +267,15 @@ class TestPagerDutySinkAsync:
 
     @pytest.mark.asyncio
     async def test_retry_on_server_error(self) -> None:
+        resp_fail_inner = MagicMock(status=500)
+        resp_fail_inner.text = AsyncMock(return_value="")
         resp_fail = AsyncMock()
-        resp_fail.__aenter__ = AsyncMock(return_value=MagicMock(status=500))
+        resp_fail.__aenter__ = AsyncMock(return_value=resp_fail_inner)
         resp_fail.__aexit__ = AsyncMock(return_value=False)
+        resp_ok_inner = MagicMock(status=202)
+        resp_ok_inner.text = AsyncMock(return_value="")
         resp_ok = AsyncMock()
-        resp_ok.__aenter__ = AsyncMock(return_value=MagicMock(status=202))
+        resp_ok.__aenter__ = AsyncMock(return_value=resp_ok_inner)
         resp_ok.__aexit__ = AsyncMock(return_value=False)
 
         session = MagicMock()
@@ -415,6 +419,27 @@ class TestPagerDutySinkAsync:
         await asyncio.wait_for(sink.run(), timeout=5.0)
         call_args = session.post.call_args[0][0]
         assert call_args == _PD_ENDPOINT
+
+
+class TestSendProgrammerErrorPropagation:
+    """S-197 (M-2): `_send` must not swallow programmer errors (TypeError,
+    AttributeError). These indicate real bugs and must propagate instead of
+    being silently retried and then logged as 'retries exhausted'."""
+
+    @pytest.mark.asyncio
+    async def test_send_propagates_typeerror(self) -> None:
+        from seerflow.alerting.sinks.pagerduty import PagerDutySink
+
+        session = MagicMock()
+        session.post = MagicMock(side_effect=TypeError("boom"))
+
+        sink = PagerDutySink(routing_key="key", session=session)
+
+        with pytest.raises(TypeError, match="boom"):
+            await sink._send({"dedup_key": "x"})
+
+        # Must NOT retry: only one attempt before the exception unwinds.
+        assert session.post.call_count == 1
 
 
 class TestPDResponseBodyLogging:
