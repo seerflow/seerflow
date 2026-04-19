@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, ApiError } from "./api";
+import { api, ApiError, __walker } from "./api";
+import { logger } from "./logger";
 
 const fetchMock = vi.fn();
 
@@ -33,7 +34,7 @@ describe("api", () => {
 });
 
 describe("api boundary parsing", () => {
-  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); });
+  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); __walker.reset(); });
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it("parses timestamp_ns string into bigint without precision loss (S-194 AC-1)", async () => {
@@ -57,6 +58,8 @@ describe("api boundary parsing", () => {
     const res = await api.get<{ events: { timestamp_ns: number }[] }>("/api/v1/some-other");
     expect(res.events[0].timestamp_ns).toBe(1234567890);
     expect(typeof res.events[0].timestamp_ns).toBe("number");
+    // S-203 AC-3: numeric bigint-keyed values must short-circuit before the walker runs.
+    expect(__walker.calls).toBe(0);
   });
 
   it("leaves numeric observed_ns unchanged when wire still emits int (S-199 deploy window)", async () => {
@@ -110,5 +113,39 @@ describe("api boundary parsing", () => {
     }), { status: 200, headers: {"content-type":"application/json"} }));
     const res = await api.get<{ items: { bucket_start_ns: bigint }[] }>("/api/v1/anomaly/timeline");
     expect(res.items[0].bucket_start_ns).toBe(1700000000000000123n);
+  });
+
+  it("caps reviveBigintTimestamps recursion at depth 32 and warns once (S-203 AC-2)", async () => {
+    let payload: Record<string, unknown> = { timestamp_ns: "1700000000000000123" };
+    for (let i = 0; i < 64; i++) payload = { nested: payload };
+    // Wrap so the outermost key has its own timestamp_ns at depth 0 — proves the walker still works above the cap.
+    payload = { ...payload, timestamp_ns: "1700000000000000999" };
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const res = await api.get<Record<string, unknown>>("/api/v1/deep");
+    // Depth-0 conversion must still happen — proves the walker is not silently broken.
+    expect((res as Record<string, unknown>).timestamp_ns).toBe(1700000000000000999n);
+    // Past the cap, the deepest timestamp_ns is left as the wire string (graceful degrade).
+    let cursor: unknown = res;
+    let foundString = false;
+    while (cursor && typeof cursor === "object") {
+      const c = cursor as Record<string, unknown>;
+      if (typeof c.timestamp_ns === "string") { foundString = true; break; }
+      cursor = c.nested;
+    }
+    expect(foundString).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("walker does not enter the object branch when no bigint markers exist (S-203 AC-3)", async () => {
+    const payload = { ok: true, version: "1.2.3", nested: { extra: ["a", { deeper: 42 }] } };
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(payload), { headers: { "content-type": "application/json" } }),
+    );
+    await api.get("/api/v1/health");
+    expect(__walker.calls).toBe(0);
   });
 });

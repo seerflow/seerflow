@@ -46,9 +46,12 @@ const EventDataSchema = v.looseObject({
   observed_ns:  v.pipe(v.string(), v.regex(NS_WIRE_RE)),
 });
 
+// S-203 AC-4: cap alert_batch at 100 alerts. Backend caps batch_max_events=10
+// (src/seerflow/api/ws.py:213); 100 leaves 10x headroom while bounding worst-case
+// validation work to microseconds.
 const WsMessageSchema = v.union([
   v.object({ type: v.literal("alert"),       data: AlertDataSchema }),
-  v.object({ type: v.literal("alert_batch"), alerts: v.array(AlertDataSchema) }),
+  v.object({ type: v.literal("alert_batch"), alerts: v.pipe(v.array(AlertDataSchema), v.maxLength(100)) }),
   v.object({ type: v.literal("status"),      data: StatusDataSchema }),
   v.object({ type: v.literal("event"),       data: EventDataSchema }),
   v.object({ type: v.literal("batch"),       events: v.array(v.unknown()) }),

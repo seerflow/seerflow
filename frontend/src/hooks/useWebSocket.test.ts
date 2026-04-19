@@ -151,6 +151,45 @@ describe("useWebSocket schema validation (S-194)", () => {
     expect(onMessage).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
   });
+
+  it("drops alert_batch frames longer than 100 alerts (S-203 AC-4)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    const oversized = {
+      type: "alert_batch",
+      alerts: Array.from({ length: 101 }, (_, i) => ({
+        alert_id: `a${i}`,
+        timestamp_ns: "1700000000000000000",
+      })),
+    };
+    act(() => { ws._msg(oversized); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("accepts alert_batch frames at the 100-alert cap (S-203 AC-4)", () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0]; act(() => { ws._open(); });
+
+    const ok = {
+      type: "alert_batch",
+      alerts: Array.from({ length: 100 }, (_, i) => ({
+        alert_id: `a${i}`,
+        timestamp_ns: "1700000000000000000",
+      })),
+    };
+    act(() => { ws._msg(ok); });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    // Each alert's timestamp_ns should be a bigint after the existing conversion in useWebSocket.
+    const dispatched = onMessage.mock.calls[0][0];
+    expect(dispatched.type).toBe("alert_batch");
+    expect(typeof dispatched.alerts[0].timestamp_ns).toBe("bigint");
+    expect(dispatched.alerts).toHaveLength(100);
+  });
 });
 
 describe("useWebSocket event arm (S-199)", () => {
