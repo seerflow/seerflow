@@ -86,6 +86,27 @@ describe("selectVisibleAndCounts (S-194 AC-5)", () => {
     // Same store state -> same returned object reference (cache hit).
     expect(a1).toBe(a2);
   });
+
+  it("selectVisibleAndCounts cache is scoped per store instance (S-203 AC-1)", () => {
+    const s1 = createAlertStore(10);
+    const s2 = createAlertStore(10);
+    const s1_state_before = s1.getState();
+    const s2_state_before = s2.getState();
+    s1.getState().backfill([a({ alert_id: "a", severity: 18 })]);  // critical
+    s2.getState().backfill([a({ alert_id: "b", severity: 6 })]);   // low
+    const s1_state = s1.getState();
+    const s2_state = s2.getState();
+    // s1_state and s2_state are different objects (zustand creates new state obj on each set)
+    expect(s1_state).not.toBe(s2_state);
+    const r1 = selectVisibleAndCounts(s1_state);
+    const r2 = selectVisibleAndCounts(s2_state);
+    expect(r1.counts).toEqual({ total: 1, critical: 1, high: 0, medium: 0, low: 0 });
+    expect(r2.counts).toEqual({ total: 1, critical: 0, high: 0, medium: 0, low: 1 });
+    // Re-entry against s1 must NOT return s2's value.
+    const r1again = selectVisibleAndCounts(s1_state);
+    expect(r1again).toEqual(r1);
+    expect(r1again.counts.critical).toBe(1);
+  });
 });
 
 describe("alertStore bigint timestamp_ns (S-194 AC-1)", () => {
