@@ -321,4 +321,15 @@ describe("useWebSocket send queue (S-204)", () => {
     act(() => { ws._open(); });
     expect(ws.sent).toEqual([{ hello: 1 }]);
   });
+
+  it("warns and drops frames with invalid JSON payload (S-204 AC-4 coverage closure)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0];
+    act(() => { ws._open(); });
+    act(() => { ws.onmessage?.({ data: "{not-json" }); });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("ws parse fail", expect.any(Error));
+  });
 });
