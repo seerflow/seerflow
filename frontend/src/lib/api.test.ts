@@ -43,10 +43,10 @@ describe("api", () => {
 
   it("re-throws existing ApiError unchanged rather than wrapping (S-204 AC-3)", async () => {
     fetchMock.mockResolvedValueOnce(new Response("{\"detail\":\"nope\"}", {status: 422, headers: {"content-type": "application/json"}}));
-    const err = await api.get("/api/v1/bad").catch((e) => e);
+    const err = await api.get("/api/v1/bad").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect(err.status).toBe(422);
-    expect(err.detail).toBe("nope");
+    expect((err as ApiError).status).toBe(422);
+    expect((err as ApiError).detail).toBe("nope");
   });
 });
 

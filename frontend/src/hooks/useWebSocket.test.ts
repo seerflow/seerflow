@@ -286,7 +286,7 @@ describe("useWebSocket conversion safety (S-204)", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const onMessage = vi.fn();
     const realBigInt = globalThis.BigInt;
-    vi.stubGlobal("BigInt", ((_v: unknown) => { throw new TypeError("forced"); }) as unknown as typeof BigInt);
+    vi.stubGlobal("BigInt", (() => { throw new TypeError("forced"); }) as unknown as typeof BigInt);
     try {
       renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
       const ws = MockWS.instances[0];
