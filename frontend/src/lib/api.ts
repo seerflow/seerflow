@@ -18,6 +18,8 @@ const BIGINT_KEYS = new Set(["timestamp_ns", "observed_ns", "bucket_start_ns"]);
 const REVIVE_MAX_DEPTH = 32;
 
 function hasBigintMarker(value: unknown, depth: number = 0): boolean {
+  // Conservative: at the cap, assume no marker → skip revival entirely.
+  // Same graceful-degrade contract as reviveBigintTimestamps (S-203 AC-3).
   if (depth >= REVIVE_MAX_DEPTH) return false;
   if (Array.isArray(value)) {
     for (const v of value) if (hasBigintMarker(v, depth + 1)) return true;

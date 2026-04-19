@@ -34,7 +34,7 @@ describe("api", () => {
 });
 
 describe("api boundary parsing", () => {
-  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); });
+  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); __walker.reset(); });
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it("parses timestamp_ns string into bigint without precision loss (S-194 AC-1)", async () => {
@@ -55,7 +55,6 @@ describe("api boundary parsing", () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       events: [{ event_id: "e1", timestamp_ns: 1234567890 }],
     }), { status: 200, headers: {"content-type":"application/json"} }));
-    __walker.reset();
     const res = await api.get<{ events: { timestamp_ns: number }[] }>("/api/v1/some-other");
     expect(res.events[0].timestamp_ns).toBe(1234567890);
     expect(typeof res.events[0].timestamp_ns).toBe("number");
@@ -146,7 +145,6 @@ describe("api boundary parsing", () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify(payload), { headers: { "content-type": "application/json" } }),
     );
-    __walker.reset();
     await api.get("/api/v1/health");
     expect(__walker.calls).toBe(0);
   });
