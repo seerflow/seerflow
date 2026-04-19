@@ -8,8 +8,10 @@ export class ApiError extends Error {
 }
 
 import { toBigintNs } from "./bigint-ns";
+import { logger } from "./logger";
 
 const BIGINT_KEYS = new Set(["timestamp_ns", "observed_ns", "bucket_start_ns"]);
+const REVIVE_MAX_DEPTH = 32;
 
 /**
  * Walk a parsed JSON value and convert any key in BIGINT_KEYS whose value is
@@ -18,22 +20,34 @@ const BIGINT_KEYS = new Set(["timestamp_ns", "observed_ns", "bucket_start_ns"]);
  * every other *_ns field). Numeric values at those keys are left untouched
  * so this is a no-op on payloads that have not yet been migrated — required
  * for graceful two-sided deploys.
+ *
+ * Recursion is capped at depth 32 to prevent RangeError on deeply nested
+ * payloads (S-203). When the cap is hit, nested values are left unchanged
+ * (graceful degrade).
  */
 function reviveBigintTimestamps(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(reviveBigintTimestamps);
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      if (BIGINT_KEYS.has(k) && typeof v === "string") {
-        out[k] = toBigintNs(v);
-      } else {
-        out[k] = reviveBigintTimestamps(v);
-      }
+  let warnedDepth = false;
+  function walk(v: unknown, depth: number): unknown {
+    if (depth >= REVIVE_MAX_DEPTH) {
+      if (!warnedDepth) { logger.warn("revive depth cap"); warnedDepth = true; }
+      return v;
     }
-    return out;
+    if (Array.isArray(v)) return v.map(x => walk(x, depth + 1));
+    if (v && typeof v === "object") {
+      const obj = v as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const [k, vv] of Object.entries(obj)) {
+        if (BIGINT_KEYS.has(k) && typeof vv === "string") {
+          out[k] = toBigintNs(vv);
+        } else {
+          out[k] = walk(vv, depth + 1);
+        }
+      }
+      return out;
+    }
+    return v;
   }
-  return value;
+  return walk(value, 0);
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {

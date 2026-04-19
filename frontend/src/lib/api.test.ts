@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { api, ApiError } from "./api";
+import { logger } from "./logger";
 
 const fetchMock = vi.fn();
 
@@ -110,5 +111,24 @@ describe("api boundary parsing", () => {
     }), { status: 200, headers: {"content-type":"application/json"} }));
     const res = await api.get<{ items: { bucket_start_ns: bigint }[] }>("/api/v1/anomaly/timeline");
     expect(res.items[0].bucket_start_ns).toBe(1700000000000000123n);
+  });
+
+  it("caps reviveBigintTimestamps recursion at depth 32 and warns once (S-203 AC-2)", async () => {
+    let payload: any = { timestamp_ns: "1700000000000000123" };
+    for (let i = 0; i < 64; i++) payload = { nested: payload };
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const res = await api.get<any>("/api/v1/deep");
+    // Past the cap, the deepest timestamp_ns is left as the wire string (graceful degrade).
+    let cursor: any = res;
+    let foundString = false;
+    while (cursor && typeof cursor === "object") {
+      if (typeof cursor.timestamp_ns === "string") { foundString = true; break; }
+      cursor = cursor.nested;
+    }
+    expect(foundString).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
