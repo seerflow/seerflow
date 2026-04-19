@@ -1946,3 +1946,50 @@ class TestLoadStateReverseIndex:
         assert dst._entity_event_counts["syslog:fe80__1"] == 7
 
         await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_rejects_no_colon_manifest_entry(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No-colon manifest entries cannot derive an owning source; reject
+        with WARNING and write zero state so the reverse index stays clean."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_malformed.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"malformed": 3}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        await storage.save_state("tmpl_hw:malformed", hw.serialize())
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(storage)
+
+        # Zero state written anywhere.
+        assert dict(dst._template_hw) == {}
+        assert dst._template_event_counts == {}
+        assert dst._source_hw_keys == {}
+        # One Malformed WARNING.
+        malformed = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "Malformed" in r.message
+        ]
+        assert len(malformed) == 1
+        assert "tmpl_hw" in malformed[0].getMessage()
+
+        await storage.close()
