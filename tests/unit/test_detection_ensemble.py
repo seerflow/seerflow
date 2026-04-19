@@ -2153,3 +2153,68 @@ class TestLoadStateReverseIndex:
         assert dst._source_hw_keys[long_source][0] == {long_source}
 
         await storage.close()
+
+    @pytest.mark.asyncio
+    async def test_load_state_failure_logs_and_continues(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """If load_state raises for a specific row (e.g. validation failure
+        on a malformed composed key), load completes — the row is skipped
+        and the failure is logged."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s202_loadfail.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"src:1": 5}),
+        )
+        hw = HoltWintersDetector(
+            seasonal_period=config.hw_seasonal_period,
+            alpha=config.hw_alpha,
+            beta=config.hw_beta,
+            gamma=config.hw_gamma,
+            n_std=config.hw_n_std,
+        )
+        await storage.save_state("tmpl_hw:src:1", hw.serialize())
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        class _BoomOnLoad:
+            def __init__(self, inner: SqliteBackend) -> None:
+                self._inner = inner
+
+            async def load_state(self, key: str) -> bytes | None:
+                if key == "tmpl_hw:src:1":
+                    raise ValueError("simulated validation failure")
+                return await self._inner.load_state(key)
+
+            async def save_state(self, key: str, data: bytes) -> None:
+                await self._inner.save_state(key, data)
+
+            async def delete_state(self, key: str) -> None:
+                await self._inner.delete_state(key)
+
+        proxy = _BoomOnLoad(storage)
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(proxy)  # type: ignore[arg-type]
+
+        # Load completed; no state for the failing row.
+        assert dict(dst._template_hw) == {}
+        # Failure WARNING logged.
+        failed = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Failed to load" in r.message
+        ]
+        assert len(failed) == 1
+
+        await storage.close()

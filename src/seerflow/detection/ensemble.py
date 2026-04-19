@@ -732,7 +732,16 @@ class DetectionEnsemble:
                         exc_info=True,
                     )
                 continue
-            data = await storage.load_state(f"{prefix}:{raw_key}")
+            try:
+                data = await storage.load_state(f"{prefix}:{raw_key}")
+            except Exception:
+                _log.warning(
+                    "Failed to load %s row for %r — skipping",
+                    prefix,
+                    _log_safe(raw_key),
+                    exc_info=True,
+                )
+                continue
             if data is None:
                 continue
             try:
