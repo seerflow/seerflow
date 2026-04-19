@@ -126,3 +126,96 @@ class TestFeedbackNoteRoundTrip:
         note = detail.json()["feedback_note"]
         assert "\x00" not in note
         assert "\n" not in note
+
+
+class TestFeedbackAuditLogParity:
+    """S-197 (L-2): API feedback path must emit a length-only audit log that
+    matches the CLI path (`feedback_cmd.py:31`). Length only — never content."""
+
+    @pytest.fixture
+    def seeded_alert_id(self) -> str:
+        return "alert-001"
+
+    @pytest.fixture
+    def client(self, seeded_alert_id: str) -> TestClient:
+        stored: dict[str, tuple[str, str]] = {}
+        alert_store = AsyncMock()
+
+        async def _get_alert_by_id(alert_id: str) -> Alert | None:
+            if alert_id != seeded_alert_id:
+                return None
+            feedback, note = stored.get(alert_id, ("", ""))
+            return _make_alert(alert_id=alert_id, feedback=feedback, feedback_note=note)
+
+        async def _update_feedback(alert_id: str, feedback: str, note: str = "") -> None:
+            stored[alert_id] = (feedback, note)
+
+        alert_store.get_alert_by_id.side_effect = _get_alert_by_id
+        alert_store.update_feedback.side_effect = _update_feedback
+
+        app = FastAPI()
+        app.state.storage = StorageDeps(
+            log_store=AsyncMock(),
+            alert_store=alert_store,
+        )
+        app.include_router(router, prefix="/api/v1")
+        return TestClient(app)
+
+    def test_logs_note_length_when_note_present(
+        self, client: TestClient, seeded_alert_id: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="seerflow"):
+            resp = client.post(
+                f"/api/v1/alerts/{seeded_alert_id}/feedback",
+                json={"feedback": "tp", "note": "user note"},
+            )
+        assert resp.status_code == 204
+
+        matching = [
+            r
+            for r in caplog.records
+            if "Persisting feedback note" in r.getMessage() and r.name == "seerflow"
+        ]
+        assert matching, "expected one audit log line on the API path"
+        assert "(9 chars)" in matching[0].getMessage()
+        assert "user note" not in matching[0].getMessage()
+
+    def test_no_log_when_note_absent(
+        self, client: TestClient, seeded_alert_id: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="seerflow"):
+            resp_missing = client.post(
+                f"/api/v1/alerts/{seeded_alert_id}/feedback",
+                json={"feedback": "fp"},
+            )
+            resp_empty = client.post(
+                f"/api/v1/alerts/{seeded_alert_id}/feedback",
+                json={"feedback": "fp", "note": ""},
+            )
+        assert resp_missing.status_code == 204
+        assert resp_empty.status_code == 204
+
+        matching = [r for r in caplog.records if "Persisting feedback note" in r.getMessage()]
+        assert not matching, "no audit log should be emitted when note is empty/absent"
+
+    def test_log_reflects_sanitised_length(
+        self, client: TestClient, seeded_alert_id: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Control chars are stripped by `_clean_note` before the log fires,
+        so the length logged must match the length persisted."""
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="seerflow"):
+            resp = client.post(
+                f"/api/v1/alerts/{seeded_alert_id}/feedback",
+                json={"feedback": "fp", "note": "ab\x00cd"},
+            )
+        assert resp.status_code == 204
+
+        matching = [r for r in caplog.records if "Persisting feedback note" in r.getMessage()]
+        assert matching
+        assert "(4 chars)" in matching[0].getMessage()

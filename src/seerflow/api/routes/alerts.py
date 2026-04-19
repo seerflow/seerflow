@@ -7,6 +7,7 @@ POST /api/v1/alerts/{id}/feedback -- TP/FP feedback
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -18,6 +19,8 @@ from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 from seerflow.models.query import AlertQuery, TimeRange
 from seerflow.sigma.attack import is_valid_tactic, is_valid_technique
+
+_log = logging.getLogger("seerflow")
 
 router = APIRouter(tags=["alerts"])
 
@@ -132,5 +135,7 @@ async def submit_feedback(
     alert = await storage.alert_store.get_alert_by_id(alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
+    if body.note:
+        _log.info("Persisting feedback note (%d chars)", len(body.note))
     await storage.alert_store.update_feedback(alert_id, body.feedback, body.note or "")
     return Response(status_code=204)

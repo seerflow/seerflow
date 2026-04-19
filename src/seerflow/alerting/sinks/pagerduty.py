@@ -213,7 +213,7 @@ class PagerDutySink:
                         attempt + 1,
                         body,
                     )
-            except Exception as exc:
+            except (TimeoutError, aiohttp.ClientError, OSError) as exc:
                 _log.warning("PagerDuty request failed (attempt %d): %s", attempt + 1, exc)
             if attempt < self._MAX_RETRIES - 1:
                 await asyncio.sleep(self._RETRY_DELAYS[attempt])
