@@ -44,9 +44,7 @@ class TestMainDispatchImport:
         ):
             main()
 
-        mock_run_import.assert_awaited_once_with(
-            paths=["/tmp/events.jsonl"], db_path=db_path
-        )
+        mock_run_import.assert_awaited_once_with(paths=["/tmp/events.jsonl"], db_path=db_path)
 
     def test_import_without_db_resolves_from_config_sqlite_path(self, tmp_path) -> None:
         """``import`` with ``--db`` unset falls through to the config's ``sqlite_path``."""
@@ -71,9 +69,7 @@ class TestMainDispatchImport:
 
         mock_run_async.assert_called_once()
 
-    def test_import_without_db_or_sqlite_path_falls_back_to_data_dir(
-        self, tmp_path
-    ) -> None:
+    def test_import_without_db_or_sqlite_path_falls_back_to_data_dir(self, tmp_path) -> None:
         """When neither ``--db`` nor ``sqlite_path`` is set, derive from ``data_dir``."""
         from seerflow.__main__ import main
         from seerflow.config import SeerflowConfig
@@ -115,9 +111,9 @@ class TestMainDispatchRules:
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.rules_cmd.run_rules_list", return_value=0) as mock_run_rules,
+            pytest.raises(SystemExit) as exc,
         ):
-            with pytest.raises(SystemExit) as exc:
-                main()
+            main()
 
         assert exc.value.code == 0
         mock_run_rules.assert_called_once_with(mock_args)
@@ -136,9 +132,9 @@ class TestMainDispatchRules:
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.rules_cmd.run_rules_list", return_value=2),
+            pytest.raises(SystemExit) as exc,
         ):
-            with pytest.raises(SystemExit) as exc:
-                main()
+            main()
 
         assert exc.value.code == 2
 
@@ -151,6 +147,8 @@ class TestMainDispatchFallback:
         from seerflow.__main__ import main
 
         mock_args = argparse.Namespace(config=None, command="never-added-to-dispatch")
-        with patch("seerflow.__main__.parse_args", return_value=mock_args):
-            with pytest.raises(AssertionError, match="never-added-to-dispatch"):
-                main()
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            pytest.raises(AssertionError, match="never-added-to-dispatch"),
+        ):
+            main()

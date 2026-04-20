@@ -206,9 +206,7 @@ class TestRuleReloader:
 
     # --- S-207 coverage: correlation_holder=None branches ---
 
-    async def test_watch_skips_initial_reload_when_no_holder(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_watch_skips_initial_reload_when_no_holder(self, tmp_path: Path) -> None:
         """watch() with ``correlation_holder=None`` skips the initial reload call.
 
         Covers branch 59→62: the ``if self._correlation_holder is not None`` guard
@@ -234,9 +232,7 @@ class TestRuleReloader:
 
         mock_to_thread.assert_not_called()
 
-    async def test_watch_skips_inner_reload_when_no_holder(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_watch_skips_inner_reload_when_no_holder(self, tmp_path: Path) -> None:
         """watch() skips per-change reload when ``correlation_holder`` is None.
 
         Covers branch 67→62: inside the async-for body, the holder-is-not-None
@@ -261,9 +257,7 @@ class TestRuleReloader:
 
         mock_to_thread.assert_not_called()
 
-    def test_reload_correlation_skips_engine_swap_when_no_holder(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reload_correlation_skips_engine_swap_when_no_holder(self, tmp_path: Path) -> None:
         """_reload_correlation does not assign a new engine when holder is None.
 
         Covers branch 78→80: the ``if self._correlation_holder is not None``
