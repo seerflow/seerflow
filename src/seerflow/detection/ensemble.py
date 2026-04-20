@@ -693,6 +693,51 @@ class DetectionEnsemble:
                 exc_info=True,
             )
 
+    async def _load_and_deserialize_hw(
+        self,
+        storage: ModelStore,
+        prefix: str,
+        raw_key: str,
+    ) -> HoltWintersDetector | None:
+        """Load + deserialize a single granular HW row.
+
+        Returns a live HoltWintersDetector on success. Returns None on:
+        - load_state raising (logged)
+        - load_state returning None (missing row; not logged — expected)
+        - HoltWintersDetector.deserialize raising (logged as corrupt)
+        Never raises.
+        """
+        try:
+            data = await storage.load_state(f"{prefix}:{raw_key}")
+        except Exception:
+            _log.warning(
+                "Failed to load %s row for %r — skipping",
+                prefix,
+                _log_safe(raw_key),
+                exc_info=True,
+            )
+            return None
+        if data is None:
+            return None
+        try:
+            hw = HoltWintersDetector(
+                seasonal_period=self._config.hw_seasonal_period,
+                alpha=self._config.hw_alpha,
+                beta=self._config.hw_beta,
+                gamma=self._config.hw_gamma,
+                n_std=self._config.hw_n_std,
+            )
+            hw.deserialize(data)
+            return hw
+        except Exception:
+            _log.warning(
+                "Corrupt %s state for %s — skipping",
+                prefix,
+                _log_safe(raw_key),
+                exc_info=True,
+            )
+            return None
+
     async def _load_granular_hw(
         self,
         storage: ModelStore,
@@ -736,44 +781,15 @@ class DetectionEnsemble:
                     _log_safe(sanitized_key),
                     _log_safe(raw_key),
                 )
-                # One-shot migration GC: delete the losing raw_key's on-disk
-                # row so subsequent loads see the winner only and do not
-                # re-log this collision. Best-effort — never fail load on
-                # cleanup hiccup.
                 await self._gc_orphan_row(storage, prefix, raw_key)
                 continue
-            try:
-                data = await storage.load_state(f"{prefix}:{raw_key}")
-            except Exception:
-                _log.warning(
-                    "Failed to load %s row for %r — skipping",
-                    prefix,
-                    _log_safe(raw_key),
-                    exc_info=True,
-                )
+            hw = await self._load_and_deserialize_hw(storage, prefix, raw_key)
+            if hw is None:
                 continue
-            if data is None:
-                continue
-            try:
-                hw = HoltWintersDetector(
-                    seasonal_period=self._config.hw_seasonal_period,
-                    alpha=self._config.hw_alpha,
-                    beta=self._config.hw_beta,
-                    gamma=self._config.hw_gamma,
-                    n_std=self._config.hw_n_std,
-                )
-                hw.deserialize(data)
-                hw_dict[sanitized_key] = hw
-                counts_dict[sanitized_key] = evt_count
-                owning_source = sanitized_key.split(":", 1)[0]
-                bucket = self._source_hw_keys.setdefault(owning_source, (set(), set()))
-                bucket[idx].add(sanitized_key)
-                loaded += 1
-            except Exception:
-                _log.warning(
-                    "Corrupt %s state for %s — skipping",
-                    prefix,
-                    sanitized_key,
-                    exc_info=True,
-                )
+            hw_dict[sanitized_key] = hw
+            counts_dict[sanitized_key] = evt_count
+            owning_source = sanitized_key.split(":", 1)[0]
+            bucket = self._source_hw_keys.setdefault(owning_source, (set(), set()))
+            bucket[idx].add(sanitized_key)
+            loaded += 1
         return loaded

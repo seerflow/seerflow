@@ -2294,6 +2294,83 @@ class TestLoadGranularHelpers:
             await ens._gc_orphan_row(BoomStore(), "ent_hw", "some:key")
         assert any("Failed to GC orphan" in r.message for r in caplog.records)
 
+    # ---- _load_and_deserialize_hw ----
+
+    async def test_load_and_deserialize_returns_none_on_load_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ens = self._make_ensemble()
+
+        class BoomStore:
+            async def load_state(self, key: str) -> bytes | None:
+                raise RuntimeError("disk gone")
+
+        with caplog.at_level("WARNING"):
+            result = await ens._load_and_deserialize_hw(BoomStore(), "tmpl_hw", "src:1")
+        assert result is None
+        assert any("Failed to load" in r.message for r in caplog.records)
+
+    async def test_load_and_deserialize_returns_none_on_missing_row(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ens = self._make_ensemble()
+
+        class EmptyStore:
+            async def load_state(self, key: str) -> bytes | None:
+                return None
+
+        with caplog.at_level("WARNING"):
+            result = await ens._load_and_deserialize_hw(EmptyStore(), "tmpl_hw", "src:1")
+        assert result is None
+        # Missing row is expected — no warning should be emitted.
+        assert not any(
+            "Failed" in r.message or "Corrupt" in r.message for r in caplog.records
+        )
+
+    async def test_load_and_deserialize_returns_none_on_deserialize_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ens = self._make_ensemble()
+
+        class CorruptStore:
+            async def load_state(self, key: str) -> bytes | None:
+                return b"\x00\x01\x02garbage"
+
+        with caplog.at_level("WARNING"):
+            result = await ens._load_and_deserialize_hw(
+                CorruptStore(), "tmpl_hw", "src:1"
+            )
+        assert result is None
+        assert any("Corrupt" in r.message for r in caplog.records)
+
+    async def test_load_and_deserialize_happy_path_returns_detector(self) -> None:
+        from seerflow.detection.holtwinters import HoltWintersDetector
+
+        ens = self._make_ensemble()
+        # Produce a real serialized HW state so deserialize succeeds.
+        seed = HoltWintersDetector(
+            seasonal_period=ens._config.hw_seasonal_period,
+            alpha=ens._config.hw_alpha,
+            beta=ens._config.hw_beta,
+            gamma=ens._config.hw_gamma,
+            n_std=ens._config.hw_n_std,
+        )
+        payload = seed.serialize()
+
+        class RealStore:
+            def __init__(self, data: bytes) -> None:
+                self._data = data
+
+            async def load_state(self, key: str) -> bytes | None:
+                return self._data
+
+        result = await ens._load_and_deserialize_hw(
+            RealStore(payload), "tmpl_hw", "src:1"
+        )
+        assert result is not None
+        assert isinstance(result, HoltWintersDetector)
+        assert result._alpha == ens._config.hw_alpha
+
 
 class TestEnsembleFunctionLength:
     """S-206 AC-1: core loader stays under the project 50-line function cap."""
