@@ -2323,9 +2323,7 @@ class TestLoadGranularHelpers:
             result = await ens._load_and_deserialize_hw(EmptyStore(), "tmpl_hw", "src:1")
         assert result is None
         # Missing row is expected — no warning should be emitted.
-        assert not any(
-            "Failed" in r.message or "Corrupt" in r.message for r in caplog.records
-        )
+        assert not any("Failed" in r.message or "Corrupt" in r.message for r in caplog.records)
 
     async def test_load_and_deserialize_returns_none_on_deserialize_error(
         self, caplog: pytest.LogCaptureFixture
@@ -2337,9 +2335,7 @@ class TestLoadGranularHelpers:
                 return b"\x00\x01\x02garbage"
 
         with caplog.at_level("WARNING"):
-            result = await ens._load_and_deserialize_hw(
-                CorruptStore(), "tmpl_hw", "src:1"
-            )
+            result = await ens._load_and_deserialize_hw(CorruptStore(), "tmpl_hw", "src:1")
         assert result is None
         assert any("Corrupt" in r.message for r in caplog.records)
 
@@ -2364,9 +2360,7 @@ class TestLoadGranularHelpers:
             async def load_state(self, key: str) -> bytes | None:
                 return self._data
 
-        result = await ens._load_and_deserialize_hw(
-            RealStore(payload), "tmpl_hw", "src:1"
-        )
+        result = await ens._load_and_deserialize_hw(RealStore(payload), "tmpl_hw", "src:1")
         assert result is not None
         assert isinstance(result, HoltWintersDetector)
         assert result._alpha == ens._config.hw_alpha
