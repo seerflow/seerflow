@@ -28,6 +28,8 @@ _log = logging.getLogger(__name__)
 _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
 _MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
 
+_HWPrefix = Literal["tmpl_hw", "ent_hw"]
+
 # Strip C0 control chars (\x00-\x1f) and DEL (\x7f) from values before logging.
 # Prevents log-injection when a SQLite-persisted manifest contains attacker-
 # crafted CR/LF/ANSI sequences that could spoof log lines.
@@ -639,7 +641,7 @@ class DetectionEnsemble:
         )
         return count
 
-    def _sanitize_manifest_key(self, prefix: str, raw_key: str) -> str | None:
+    def _sanitize_manifest_key(self, prefix: _HWPrefix, raw_key: str) -> str | None:
         """Sanitize a raw manifest key to its runtime form, or None to skip.
 
         Per-prefix split strategy:
@@ -668,7 +670,7 @@ class DetectionEnsemble:
         elif prefix == "ent_hw":
             src_part, suffix = raw_key.split(":", 1)
             suffix = suffix.replace("\x00", "").replace(":", "_")
-        else:  # pragma: no cover - defensive; call sites are constants
+        else:
             raise ValueError(f"Unknown prefix: {prefix!r}")
         src_part = src_part.replace("\x00", "").replace(":", "_")
         return f"{src_part}:{suffix}"
@@ -676,7 +678,7 @@ class DetectionEnsemble:
     async def _gc_orphan_row(
         self,
         storage: ModelStore,
-        prefix: str,
+        prefix: _HWPrefix,
         raw_key: str,
     ) -> None:
         """Best-effort delete of a losing post-collision manifest row.
@@ -696,10 +698,15 @@ class DetectionEnsemble:
     async def _load_and_deserialize_hw(
         self,
         storage: ModelStore,
-        prefix: str,
+        prefix: _HWPrefix,
         raw_key: str,
+        sanitized_key: str,
     ) -> HoltWintersDetector | None:
         """Load + deserialize a single granular HW row.
+
+        `raw_key` is the storage lookup key; `sanitized_key` is the
+        runtime-normalized form used for operator-facing log correlation
+        (matches pre-refactor log-arg semantics).
 
         Returns a live HoltWintersDetector on success. Returns None on:
         - load_state raising (logged)
@@ -733,7 +740,7 @@ class DetectionEnsemble:
             _log.warning(
                 "Corrupt %s state for %s — skipping",
                 prefix,
-                _log_safe(raw_key),
+                _log_safe(sanitized_key),
                 exc_info=True,
             )
             return None
@@ -741,7 +748,7 @@ class DetectionEnsemble:
     async def _load_granular_hw(
         self,
         storage: ModelStore,
-        prefix: str,
+        prefix: _HWPrefix,
         hw_dict: OrderedDict[str, HoltWintersDetector],
         counts_dict: dict[str, int],
         max_items: int,
@@ -783,7 +790,7 @@ class DetectionEnsemble:
                 )
                 await self._gc_orphan_row(storage, prefix, raw_key)
                 continue
-            hw = await self._load_and_deserialize_hw(storage, prefix, raw_key)
+            hw = await self._load_and_deserialize_hw(storage, prefix, raw_key, sanitized_key)
             if hw is None:
                 continue
             hw_dict[sanitized_key] = hw

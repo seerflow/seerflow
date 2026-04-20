@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
+import logging
 import math
 import statistics
+import textwrap
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +27,23 @@ from seerflow.storage.sqlite import SqliteBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+class _StubModelStore:
+    """Minimal ModelStore-compatible stub for helper unit tests.
+
+    Inheriting classes override the method under test; the other two stay
+    as no-op stubs so mypy accepts the class as a structural ModelStore.
+    """
+
+    async def save_state(self, key: str, data: bytes) -> None:  # pragma: no cover
+        return None
+
+    async def load_state(self, key: str) -> bytes | None:  # pragma: no cover
+        return None
+
+    async def delete_state(self, key: str) -> None:  # pragma: no cover
+        return None
 
 
 def _make_event(*, source_type: str = "syslog", **kwargs):
@@ -2260,16 +2281,20 @@ class TestLoadGranularHelpers:
         assert ens._sanitize_manifest_key("ent_hw", key) == key
 
     def test_sanitize_unknown_prefix_raises(self) -> None:
+        """Defensive guard — callers are typed `Literal["tmpl_hw", "ent_hw"]`,
+        but a bogus string arriving at runtime (corrupt storage, future new
+        prefix without a dispatch branch) must still raise rather than fall
+        through silently. `# type: ignore` lets us exercise the branch."""
         ens = self._make_ensemble()
         with pytest.raises(ValueError, match="Unknown prefix"):
-            ens._sanitize_manifest_key("bogus", "a:b")
+            ens._sanitize_manifest_key("bogus", "a:b")  # type: ignore[arg-type]
 
     # ---- _gc_orphan_row ----
 
     async def test_gc_orphan_row_calls_delete_state(self) -> None:
         ens = self._make_ensemble()
 
-        class FakeStore:
+        class FakeStore(_StubModelStore):
             def __init__(self) -> None:
                 self.calls: list[str] = []
 
@@ -2285,7 +2310,7 @@ class TestLoadGranularHelpers:
     ) -> None:
         ens = self._make_ensemble()
 
-        class BoomStore:
+        class BoomStore(_StubModelStore):
             async def delete_state(self, key: str) -> None:
                 raise RuntimeError("boom")
 
@@ -2301,12 +2326,12 @@ class TestLoadGranularHelpers:
     ) -> None:
         ens = self._make_ensemble()
 
-        class BoomStore:
+        class BoomStore(_StubModelStore):
             async def load_state(self, key: str) -> bytes | None:
                 raise RuntimeError("disk gone")
 
         with caplog.at_level("WARNING"):
-            result = await ens._load_and_deserialize_hw(BoomStore(), "tmpl_hw", "src:1")
+            result = await ens._load_and_deserialize_hw(BoomStore(), "tmpl_hw", "src:1", "src:1")
         assert result is None
         assert any("Failed to load" in r.message for r in caplog.records)
 
@@ -2315,12 +2340,12 @@ class TestLoadGranularHelpers:
     ) -> None:
         ens = self._make_ensemble()
 
-        class EmptyStore:
+        class EmptyStore(_StubModelStore):
             async def load_state(self, key: str) -> bytes | None:
                 return None
 
         with caplog.at_level("WARNING"):
-            result = await ens._load_and_deserialize_hw(EmptyStore(), "tmpl_hw", "src:1")
+            result = await ens._load_and_deserialize_hw(EmptyStore(), "tmpl_hw", "src:1", "src:1")
         assert result is None
         # Missing row is expected — no warning should be emitted.
         assert not any("Failed" in r.message or "Corrupt" in r.message for r in caplog.records)
@@ -2330,18 +2355,18 @@ class TestLoadGranularHelpers:
     ) -> None:
         ens = self._make_ensemble()
 
-        class CorruptStore:
+        class CorruptStore(_StubModelStore):
             async def load_state(self, key: str) -> bytes | None:
                 return b"\x00\x01\x02garbage"
 
         with caplog.at_level("WARNING"):
-            result = await ens._load_and_deserialize_hw(CorruptStore(), "tmpl_hw", "src:1")
+            result = await ens._load_and_deserialize_hw(
+                CorruptStore(), "tmpl_hw", "src:1", "src:1"
+            )
         assert result is None
         assert any("Corrupt" in r.message for r in caplog.records)
 
     async def test_load_and_deserialize_happy_path_returns_detector(self) -> None:
-        from seerflow.detection.holtwinters import HoltWintersDetector
-
         ens = self._make_ensemble()
         # Produce a real serialized HW state so deserialize succeeds.
         seed = HoltWintersDetector(
@@ -2353,29 +2378,31 @@ class TestLoadGranularHelpers:
         )
         payload = seed.serialize()
 
-        class RealStore:
+        class RealStore(_StubModelStore):
             def __init__(self, data: bytes) -> None:
                 self._data = data
 
             async def load_state(self, key: str) -> bytes | None:
                 return self._data
 
-        result = await ens._load_and_deserialize_hw(RealStore(payload), "tmpl_hw", "src:1")
+        result = await ens._load_and_deserialize_hw(
+            RealStore(payload), "tmpl_hw", "src:1", "src:1"
+        )
         assert result is not None
         assert isinstance(result, HoltWintersDetector)
-        assert result._alpha == ens._config.hw_alpha
+        # Behavioral round-trip: serializing the loaded detector must
+        # reproduce the payload bytes the helper deserialized from. This
+        # proves the detector is alive without coupling to private attrs.
+        assert result.serialize() == payload
 
     # ---- main-body coverage: invalid evt_count skip ----
 
-    @pytest.mark.asyncio
     async def test_load_granular_hw_skips_negative_evt_count(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Main-body branch: manifest rows whose evt_count is a negative int
         pass msgspec's dict[str, int] decode but are logged + skipped by the
         post-decode validation. Pre-existing branch, previously uncovered."""
-        import logging
-
         storage_cfg = StorageConfig(
             backend="sqlite",
             sqlite_path=str(tmp_path / "test_s206_neg_evt.db"),
@@ -2408,19 +2435,18 @@ class TestEnsembleFunctionLength:
     """S-206 AC-1: core loader stays under the project 50-line function cap."""
 
     def test_load_granular_hw_under_fifty_lines(self) -> None:
-        import ast
-        import inspect
-        import textwrap
-
-        from seerflow.detection.ensemble import DetectionEnsemble
-
         src = textwrap.dedent(inspect.getsource(DetectionEnsemble._load_granular_hw))
         tree = ast.parse(src)
         fn = tree.body[0]
         assert isinstance(fn, ast.AsyncFunctionDef), (
             "Expected _load_granular_hw to be an async function."
         )
-        body_lines = fn.end_lineno - fn.body[0].lineno  # type: ignore[operator]
+        # Inclusive span from the first body statement (docstring when
+        # present; first executable statement otherwise) through the end
+        # of the function. Docstring removal would reduce the count, not
+        # inflate it — the guardrail stays honest under refactors.
+        assert fn.end_lineno is not None
+        body_lines = fn.end_lineno - fn.body[0].lineno + 1
         assert body_lines < 50, (
             f"_load_granular_hw body is {body_lines} lines, must be < 50 "
             "(CLAUDE.md function-length cap, S-206 AC-1)."
