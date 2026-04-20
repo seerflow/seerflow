@@ -2218,3 +2218,26 @@ class TestLoadStateReverseIndex:
         assert len(failed) == 1
 
         await storage.close()
+
+
+class TestEnsembleFunctionLength:
+    """S-206 AC-1: core loader stays under the project 50-line function cap."""
+
+    def test_load_granular_hw_under_fifty_lines(self) -> None:
+        import ast
+        import inspect
+        import textwrap
+
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        src = textwrap.dedent(inspect.getsource(DetectionEnsemble._load_granular_hw))
+        tree = ast.parse(src)
+        fn = tree.body[0]
+        assert isinstance(fn, ast.AsyncFunctionDef), (
+            "Expected _load_granular_hw to be an async function."
+        )
+        body_lines = fn.end_lineno - fn.body[0].lineno  # type: ignore[operator]
+        assert body_lines < 50, (
+            f"_load_granular_hw body is {body_lines} lines, must be < 50 "
+            "(CLAUDE.md function-length cap, S-206 AC-1)."
+        )
