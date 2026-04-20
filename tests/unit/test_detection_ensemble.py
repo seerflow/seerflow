@@ -2365,6 +2365,44 @@ class TestLoadGranularHelpers:
         assert isinstance(result, HoltWintersDetector)
         assert result._alpha == ens._config.hw_alpha
 
+    # ---- main-body coverage: invalid evt_count skip ----
+
+    @pytest.mark.asyncio
+    async def test_load_granular_hw_skips_negative_evt_count(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Main-body branch: manifest rows whose evt_count is a negative int
+        pass msgspec's dict[str, int] decode but are logged + skipped by the
+        post-decode validation. Pre-existing branch, previously uncovered."""
+        import logging
+
+        storage_cfg = StorageConfig(
+            backend="sqlite",
+            sqlite_path=str(tmp_path / "test_s206_neg_evt.db"),
+        )
+        storage = await SqliteBackend.connect(storage_cfg)
+        config = _make_config(max_sources=4, max_template_hw=16, max_entity_hw=16)
+        await storage.save_state(
+            "tmpl_hw:manifest",
+            msgspec.json.encode({"src:1": -5}),
+        )
+        await storage.save_state("ensemble:manifest", msgspec.json.encode([]))
+
+        dst = DetectionEnsemble(config)
+        with caplog.at_level(logging.WARNING, logger="seerflow.detection.ensemble"):
+            await dst.load_all_state(storage)
+
+        assert dict(dst._template_hw) == {}
+        assert dst._template_event_counts == {}
+        assert dst._source_hw_keys == {}
+        invalid = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "Invalid event count" in r.message
+        ]
+        assert len(invalid) == 1
+        await storage.close()
+
 
 class TestEnsembleFunctionLength:
     """S-206 AC-1: core loader stays under the project 50-line function cap."""
