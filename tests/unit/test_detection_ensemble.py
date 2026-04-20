@@ -2264,6 +2264,36 @@ class TestLoadGranularHelpers:
         with pytest.raises(ValueError, match="Unknown prefix"):
             ens._sanitize_manifest_key("bogus", "a:b")
 
+    # ---- _gc_orphan_row ----
+
+    async def test_gc_orphan_row_calls_delete_state(self) -> None:
+        ens = self._make_ensemble()
+
+        class FakeStore:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            async def delete_state(self, key: str) -> None:
+                self.calls.append(key)
+
+        store = FakeStore()
+        await ens._gc_orphan_row(store, "tmpl_hw", "raw:key:123")
+        assert store.calls == ["tmpl_hw:raw:key:123"]
+
+    async def test_gc_orphan_row_swallows_delete_errors(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ens = self._make_ensemble()
+
+        class BoomStore:
+            async def delete_state(self, key: str) -> None:
+                raise RuntimeError("boom")
+
+        with caplog.at_level("WARNING"):
+            # Must NOT raise.
+            await ens._gc_orphan_row(BoomStore(), "ent_hw", "some:key")
+        assert any("Failed to GC orphan" in r.message for r in caplog.records)
+
 
 class TestEnsembleFunctionLength:
     """S-206 AC-1: core loader stays under the project 50-line function cap."""

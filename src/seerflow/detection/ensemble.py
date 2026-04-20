@@ -673,6 +673,26 @@ class DetectionEnsemble:
         src_part = src_part.replace("\x00", "").replace(":", "_")
         return f"{src_part}:{suffix}"
 
+    async def _gc_orphan_row(
+        self,
+        storage: ModelStore,
+        prefix: str,
+        raw_key: str,
+    ) -> None:
+        """Best-effort delete of a losing post-collision manifest row.
+
+        Never raises. Logs a warning if delete_state fails.
+        """
+        try:
+            await storage.delete_state(f"{prefix}:{raw_key}")
+        except Exception:
+            _log.warning(
+                "Failed to GC orphan %s row for %r — skipping",
+                prefix,
+                _log_safe(raw_key),
+                exc_info=True,
+            )
+
     async def _load_granular_hw(
         self,
         storage: ModelStore,
@@ -720,15 +740,7 @@ class DetectionEnsemble:
                 # row so subsequent loads see the winner only and do not
                 # re-log this collision. Best-effort — never fail load on
                 # cleanup hiccup.
-                try:
-                    await storage.delete_state(f"{prefix}:{raw_key}")
-                except Exception:
-                    _log.warning(
-                        "Failed to GC orphan %s row for %r — skipping",
-                        prefix,
-                        _log_safe(raw_key),
-                        exc_info=True,
-                    )
+                await self._gc_orphan_row(storage, prefix, raw_key)
                 continue
             try:
                 data = await storage.load_state(f"{prefix}:{raw_key}")
