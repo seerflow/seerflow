@@ -10,13 +10,19 @@ from __future__ import annotations
 
 import argparse
 import inspect
-from unittest.mock import patch
+from dataclasses import replace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 
 def _close_if_coro(arg: object) -> None:
-    """Safely close a coroutine so mocking ``_run_async`` doesn't leak it."""
+    """Safely close a coroutine so mocking ``_run_async`` doesn't leak it.
+
+    Without this, patching ``_run_async`` to ``return_value=None`` leaves the
+    coroutine argument unawaited, which raises ``RuntimeWarning`` under the
+    project's ``-W error`` test policy.
+    """
     if inspect.iscoroutine(arg):
         arg.close()
 
@@ -26,8 +32,6 @@ class TestMainDispatchImport:
 
     def test_import_with_explicit_db(self, tmp_path) -> None:
         """``import`` with ``--db`` set forwards the path and awaits ``run_import``."""
-        from unittest.mock import AsyncMock
-
         from seerflow.__main__ import main
 
         db_path = str(tmp_path / "seerflow.db")
@@ -51,8 +55,10 @@ class TestMainDispatchImport:
         from seerflow.__main__ import main
         from seerflow.config import SeerflowConfig
 
-        cfg = SeerflowConfig()
-        object.__setattr__(cfg.storage, "sqlite_path", str(tmp_path / "from_cfg.db"))
+        base = SeerflowConfig()
+        cfg = replace(
+            base, storage=replace(base.storage, sqlite_path=str(tmp_path / "from_cfg.db"))
+        )
 
         mock_args = argparse.Namespace(
             config=None,
@@ -74,9 +80,10 @@ class TestMainDispatchImport:
         from seerflow.__main__ import main
         from seerflow.config import SeerflowConfig
 
-        cfg = SeerflowConfig()
-        object.__setattr__(cfg.storage, "sqlite_path", None)
-        object.__setattr__(cfg.storage, "data_dir", str(tmp_path))
+        base = SeerflowConfig()
+        cfg = replace(
+            base, storage=replace(base.storage, sqlite_path=None, data_dir=str(tmp_path))
+        )
 
         mock_args = argparse.Namespace(
             config=None,
