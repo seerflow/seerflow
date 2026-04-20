@@ -639,6 +639,40 @@ class DetectionEnsemble:
         )
         return count
 
+    def _sanitize_manifest_key(self, prefix: str, raw_key: str) -> str | None:
+        """Sanitize a raw manifest key to its runtime form, or None to skip.
+
+        Per-prefix split strategy:
+        - tmpl_hw: suffix is an int → rsplit isolates source even if legacy
+          source had colons.
+        - ent_hw: suffix is an entity value that may contain colons (IPv6,
+          host:port, Kerberos principal) → split(":", 1) matches the runtime
+          sanitizer at _score_entity_hw.
+
+        No-colon keys are accepted only at the _MAX_SOURCE_KEY_LEN boundary
+        (S-201 truncation shape); shorter no-colon keys are rejected as
+        malformed and the caller skips that manifest row.
+        """
+        if ":" not in raw_key:
+            if len(raw_key) < _MAX_SOURCE_KEY_LEN:
+                _log.warning(
+                    "Malformed %s manifest key %r — skipping",
+                    prefix,
+                    _log_safe(raw_key),
+                )
+                return None
+            return raw_key.replace("\x00", "")
+        if prefix == "tmpl_hw":
+            src_part, suffix = raw_key.rsplit(":", 1)
+            suffix = suffix.replace("\x00", "")
+        elif prefix == "ent_hw":
+            src_part, suffix = raw_key.split(":", 1)
+            suffix = suffix.replace("\x00", "").replace(":", "_")
+        else:  # pragma: no cover - defensive; call sites are constants
+            raise ValueError(f"Unknown prefix: {prefix!r}")
+        src_part = src_part.replace("\x00", "").replace(":", "_")
+        return f"{src_part}:{suffix}"
+
     async def _load_granular_hw(
         self,
         storage: ModelStore,
@@ -672,45 +706,9 @@ class DetectionEnsemble:
                     _log_safe(raw_key),
                 )
                 continue
-            # Per-prefix split strategy:
-            # - tmpl_hw: suffix is an int → rsplit isolates source (even if legacy
-            #   source had colons, rsplit always picks the final colon correctly).
-            # - ent_hw: suffix is an entity value that may contain colons
-            #   (IPv6, host:port, Kerberos principal) → split(":", 1) matches the
-            #   runtime sanitizer at _score_entity_hw (ensemble.py:341), which
-            #   strips \x00 and replaces ":" with "_" on the entity value.
-            # No-colon keys are rejected outright — they cannot participate in
-            # the reverse index (owning-source derivation returns the whole
-            # string, which can never match a real source).
-            if ":" not in raw_key:
-                # Boundary case: runtime keys are built as f"{source}:{tid_or_entity}"
-                # truncated to _MAX_SOURCE_KEY_LEN. When source is exactly
-                # _MAX_SOURCE_KEY_LEN chars, the truncation drops the separator
-                # and produces a no-colon key equal to the (truncated) source.
-                # S-201 regression-tests this shape; reverse-index owner-parse
-                # (split(":", 1)[0]) correctly recovers source from a no-colon
-                # key because split returns [whole_key]. Accept these.
-                # Shorter no-colon keys cannot be produced by the runtime —
-                # they are hand-crafted/corrupt, so reject.
-                if len(raw_key) < _MAX_SOURCE_KEY_LEN:
-                    _log.warning(
-                        "Malformed %s manifest key %r — skipping",
-                        prefix,
-                        _log_safe(raw_key),
-                    )
-                    continue
-                sanitized_key = raw_key.replace("\x00", "")
-            else:
-                if prefix == "tmpl_hw":
-                    src_part, suffix = raw_key.rsplit(":", 1)
-                    suffix = suffix.replace("\x00", "")
-                elif prefix == "ent_hw":
-                    src_part, suffix = raw_key.split(":", 1)
-                    suffix = suffix.replace("\x00", "").replace(":", "_")
-                else:  # pragma: no cover - defensive; call sites are constants
-                    raise ValueError(f"Unknown prefix: {prefix!r}")
-                src_part = src_part.replace("\x00", "").replace(":", "_")
-                sanitized_key = f"{src_part}:{suffix}"
+            sanitized_key = self._sanitize_manifest_key(prefix, raw_key)
+            if sanitized_key is None:
+                continue
             if sanitized_key in hw_dict:
                 _log.warning(
                     "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",

@@ -2220,6 +2220,51 @@ class TestLoadStateReverseIndex:
         await storage.close()
 
 
+class TestLoadGranularHelpers:
+    """S-206 AC-5: focused unit tests for the _load_granular_hw helpers."""
+
+    def _make_ensemble(self) -> DetectionEnsemble:
+        return DetectionEnsemble(_make_config())
+
+    # ---- _sanitize_manifest_key ----
+
+    def test_sanitize_tmpl_hw_rsplits_on_last_colon(self) -> None:
+        ens = self._make_ensemble()
+        # Legacy source with embedded colon + integer template id suffix.
+        assert ens._sanitize_manifest_key("tmpl_hw", "sys:tem:42") == "sys_tem:42"
+
+    def test_sanitize_tmpl_hw_strips_null_bytes_from_both_halves(self) -> None:
+        ens = self._make_ensemble()
+        assert ens._sanitize_manifest_key("tmpl_hw", "sys\x00:12\x003") == "sys:123"
+
+    def test_sanitize_ent_hw_splits_on_first_colon(self) -> None:
+        ens = self._make_ensemble()
+        # IPv6 entity with colons; split(":", 1) + inner colons collapsed to _.
+        assert ens._sanitize_manifest_key("ent_hw", "syslog:fe80::1") == "syslog:fe80__1"
+
+    def test_sanitize_ent_hw_strips_null_bytes(self) -> None:
+        ens = self._make_ensemble()
+        assert ens._sanitize_manifest_key("ent_hw", "syslog\x00:user\x00") == "syslog:user"
+
+    def test_sanitize_short_no_colon_returns_none(self) -> None:
+        ens = self._make_ensemble()
+        assert ens._sanitize_manifest_key("tmpl_hw", "short-no-colon") is None
+        assert ens._sanitize_manifest_key("ent_hw", "short-no-colon") is None
+
+    def test_sanitize_max_len_no_colon_is_accepted(self) -> None:
+        from seerflow.detection.ensemble import _MAX_SOURCE_KEY_LEN
+
+        ens = self._make_ensemble()
+        key = "a" * _MAX_SOURCE_KEY_LEN
+        assert ens._sanitize_manifest_key("tmpl_hw", key) == key
+        assert ens._sanitize_manifest_key("ent_hw", key) == key
+
+    def test_sanitize_unknown_prefix_raises(self) -> None:
+        ens = self._make_ensemble()
+        with pytest.raises(ValueError, match="Unknown prefix"):
+            ens._sanitize_manifest_key("bogus", "a:b")
+
+
 class TestEnsembleFunctionLength:
     """S-206 AC-1: core loader stays under the project 50-line function cap."""
 
