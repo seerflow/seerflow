@@ -28,6 +28,20 @@ _log = logging.getLogger(__name__)
 _MAX_SOURCE_KEY_LEN = 248  # 256 (storage limit) - 8 (longest prefix "windows:")
 _MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
 
+_HWPrefix = Literal["tmpl_hw", "ent_hw"]
+
+# Storage enforces a 256-char cap (see SqliteBackend._validate_state_key).
+# The helper rejects composed keys above this length rather than letting
+# delete_state raise, so the "row persists + log-noise on every restart"
+# failure mode has a single, visible log line.
+_MAX_STATE_KEY_LEN = 256
+
+# Suffix values reserved by the ensemble's own state namespace. A manifest
+# entry whose raw_key collides with one of these must never be passed to
+# delete_state: doing so would destroy the namespace row itself. Defence
+# in-depth against adversarial storage (S-206 sec review, finding 6).
+_RESERVED_KEY_SUFFIXES: frozenset[str] = frozenset({"manifest"})
+
 # Strip C0 control chars (\x00-\x1f) and DEL (\x7f) from values before logging.
 # Prevents log-injection when a SQLite-persisted manifest contains attacker-
 # crafted CR/LF/ANSI sequences that could spoof log lines.
@@ -639,10 +653,131 @@ class DetectionEnsemble:
         )
         return count
 
+    def _sanitize_manifest_key(self, prefix: _HWPrefix, raw_key: str) -> str | None:
+        """Sanitize a raw manifest key to its runtime form, or None to skip.
+
+        Per-prefix split strategy:
+        - tmpl_hw: suffix is an int → rsplit isolates source even if legacy
+          source had colons.
+        - ent_hw: suffix is an entity value that may contain colons (IPv6,
+          host:port, Kerberos principal) → split(":", 1) matches the runtime
+          sanitizer at _score_entity_hw.
+
+        No-colon keys are accepted only at the _MAX_SOURCE_KEY_LEN boundary
+        (S-201 truncation shape); shorter no-colon keys are rejected as
+        malformed and the caller skips that manifest row.
+        """
+        if ":" not in raw_key:
+            if len(raw_key) < _MAX_SOURCE_KEY_LEN:
+                _log.warning(
+                    "Malformed %s manifest key %r — skipping",
+                    prefix,
+                    _log_safe(raw_key),
+                )
+                return None
+            return raw_key.replace("\x00", "")
+        if prefix == "tmpl_hw":
+            src_part, suffix = raw_key.rsplit(":", 1)
+            suffix = suffix.replace("\x00", "")
+        elif prefix == "ent_hw":
+            src_part, suffix = raw_key.split(":", 1)
+            suffix = suffix.replace("\x00", "").replace(":", "_")
+        else:
+            raise ValueError(f"Unknown prefix: {prefix!r}")
+        src_part = src_part.replace("\x00", "").replace(":", "_")
+        return f"{src_part}:{suffix}"
+
+    async def _gc_orphan_row(
+        self,
+        storage: ModelStore,
+        prefix: _HWPrefix,
+        raw_key: str,
+    ) -> None:
+        """Best-effort delete of a losing post-collision manifest row.
+
+        Never raises. Logs a warning if delete_state fails, if the composed
+        key exceeds the storage-layer length cap, or if the raw_key would
+        collide with a reserved namespace suffix (e.g. `{prefix}:manifest`).
+        """
+        if raw_key in _RESERVED_KEY_SUFFIXES:
+            _log.warning(
+                "Refusing to GC reserved %s:%s — possible manifest poisoning",
+                prefix,
+                _log_safe(raw_key),
+            )
+            return
+        composed = f"{prefix}:{raw_key}"
+        if len(composed) > _MAX_STATE_KEY_LEN:
+            _log.warning(
+                "Skipping GC for oversized orphan %s key (len=%d) — cannot delete",
+                prefix,
+                len(composed),
+            )
+            return
+        try:
+            await storage.delete_state(composed)
+        except Exception:
+            _log.warning(
+                "Failed to GC orphan %s row for %r — skipping",
+                prefix,
+                _log_safe(raw_key),
+                exc_info=True,
+            )
+
+    async def _load_and_deserialize_hw(
+        self,
+        storage: ModelStore,
+        prefix: _HWPrefix,
+        raw_key: str,
+        sanitized_key: str,
+    ) -> HoltWintersDetector | None:
+        """Load + deserialize a single granular HW row.
+
+        `raw_key` is the storage lookup key; `sanitized_key` is the
+        runtime-normalized form used for operator-facing log correlation
+        (matches pre-refactor log-arg semantics).
+
+        Returns a live HoltWintersDetector on success. Returns None on:
+        - load_state raising (logged)
+        - load_state returning None (missing row; not logged — expected)
+        - HoltWintersDetector.deserialize raising (logged as corrupt)
+        Never raises.
+        """
+        try:
+            data = await storage.load_state(f"{prefix}:{raw_key}")
+        except Exception:
+            _log.warning(
+                "Failed to load %s row for %r — skipping",
+                prefix,
+                _log_safe(raw_key),
+                exc_info=True,
+            )
+            return None
+        if data is None:
+            return None
+        try:
+            hw = HoltWintersDetector(
+                seasonal_period=self._config.hw_seasonal_period,
+                alpha=self._config.hw_alpha,
+                beta=self._config.hw_beta,
+                gamma=self._config.hw_gamma,
+                n_std=self._config.hw_n_std,
+            )
+            hw.deserialize(data)
+            return hw
+        except Exception:
+            _log.warning(
+                "Corrupt %s state for %s — skipping",
+                prefix,
+                _log_safe(sanitized_key),
+                exc_info=True,
+            )
+            return None
+
     async def _load_granular_hw(
         self,
         storage: ModelStore,
-        prefix: str,
+        prefix: _HWPrefix,
         hw_dict: OrderedDict[str, HoltWintersDetector],
         counts_dict: dict[str, int],
         max_items: int,
@@ -672,45 +807,9 @@ class DetectionEnsemble:
                     _log_safe(raw_key),
                 )
                 continue
-            # Per-prefix split strategy:
-            # - tmpl_hw: suffix is an int → rsplit isolates source (even if legacy
-            #   source had colons, rsplit always picks the final colon correctly).
-            # - ent_hw: suffix is an entity value that may contain colons
-            #   (IPv6, host:port, Kerberos principal) → split(":", 1) matches the
-            #   runtime sanitizer at _score_entity_hw (ensemble.py:341), which
-            #   strips \x00 and replaces ":" with "_" on the entity value.
-            # No-colon keys are rejected outright — they cannot participate in
-            # the reverse index (owning-source derivation returns the whole
-            # string, which can never match a real source).
-            if ":" not in raw_key:
-                # Boundary case: runtime keys are built as f"{source}:{tid_or_entity}"
-                # truncated to _MAX_SOURCE_KEY_LEN. When source is exactly
-                # _MAX_SOURCE_KEY_LEN chars, the truncation drops the separator
-                # and produces a no-colon key equal to the (truncated) source.
-                # S-201 regression-tests this shape; reverse-index owner-parse
-                # (split(":", 1)[0]) correctly recovers source from a no-colon
-                # key because split returns [whole_key]. Accept these.
-                # Shorter no-colon keys cannot be produced by the runtime —
-                # they are hand-crafted/corrupt, so reject.
-                if len(raw_key) < _MAX_SOURCE_KEY_LEN:
-                    _log.warning(
-                        "Malformed %s manifest key %r — skipping",
-                        prefix,
-                        _log_safe(raw_key),
-                    )
-                    continue
-                sanitized_key = raw_key.replace("\x00", "")
-            else:
-                if prefix == "tmpl_hw":
-                    src_part, suffix = raw_key.rsplit(":", 1)
-                    suffix = suffix.replace("\x00", "")
-                elif prefix == "ent_hw":
-                    src_part, suffix = raw_key.split(":", 1)
-                    suffix = suffix.replace("\x00", "").replace(":", "_")
-                else:  # pragma: no cover - defensive; call sites are constants
-                    raise ValueError(f"Unknown prefix: {prefix!r}")
-                src_part = src_part.replace("\x00", "").replace(":", "_")
-                sanitized_key = f"{src_part}:{suffix}"
+            sanitized_key = self._sanitize_manifest_key(prefix, raw_key)
+            if sanitized_key is None:
+                continue
             if sanitized_key in hw_dict:
                 _log.warning(
                     "Duplicate %s key after sanitization — keeping first (sanitized=%r raw=%r)",
@@ -718,52 +817,15 @@ class DetectionEnsemble:
                     _log_safe(sanitized_key),
                     _log_safe(raw_key),
                 )
-                # One-shot migration GC: delete the losing raw_key's on-disk
-                # row so subsequent loads see the winner only and do not
-                # re-log this collision. Best-effort — never fail load on
-                # cleanup hiccup.
-                try:
-                    await storage.delete_state(f"{prefix}:{raw_key}")
-                except Exception:
-                    _log.warning(
-                        "Failed to GC orphan %s row for %r — skipping",
-                        prefix,
-                        _log_safe(raw_key),
-                        exc_info=True,
-                    )
+                await self._gc_orphan_row(storage, prefix, raw_key)
                 continue
-            try:
-                data = await storage.load_state(f"{prefix}:{raw_key}")
-            except Exception:
-                _log.warning(
-                    "Failed to load %s row for %r — skipping",
-                    prefix,
-                    _log_safe(raw_key),
-                    exc_info=True,
-                )
+            hw = await self._load_and_deserialize_hw(storage, prefix, raw_key, sanitized_key)
+            if hw is None:
                 continue
-            if data is None:
-                continue
-            try:
-                hw = HoltWintersDetector(
-                    seasonal_period=self._config.hw_seasonal_period,
-                    alpha=self._config.hw_alpha,
-                    beta=self._config.hw_beta,
-                    gamma=self._config.hw_gamma,
-                    n_std=self._config.hw_n_std,
-                )
-                hw.deserialize(data)
-                hw_dict[sanitized_key] = hw
-                counts_dict[sanitized_key] = evt_count
-                owning_source = sanitized_key.split(":", 1)[0]
-                bucket = self._source_hw_keys.setdefault(owning_source, (set(), set()))
-                bucket[idx].add(sanitized_key)
-                loaded += 1
-            except Exception:
-                _log.warning(
-                    "Corrupt %s state for %s — skipping",
-                    prefix,
-                    sanitized_key,
-                    exc_info=True,
-                )
+            hw_dict[sanitized_key] = hw
+            counts_dict[sanitized_key] = evt_count
+            owning_source = sanitized_key.split(":", 1)[0]
+            bucket = self._source_hw_keys.setdefault(owning_source, (set(), set()))
+            bucket[idx].add(sanitized_key)
+            loaded += 1
         return loaded
