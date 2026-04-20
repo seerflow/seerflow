@@ -101,6 +101,92 @@ class TestRedactConfig:
         assert cfg.alerting.pagerduty_routing_key == "actual-key"
         assert data["alerting"]["pagerduty_routing_key"] == "***"
 
+    # --- S-207 coverage: multi-channel delivery target secrets ---
+
+    def test_email_target_smtp_credentials_masked(self) -> None:
+        """SMTP user + password on email_targets are masked in the dict view."""
+        from seerflow.alerting.channels.email import EmailTarget
+
+        target = EmailTarget(
+            name="ops",
+            smtp_host="smtp.example.com",
+            smtp_port=587,
+            use_starttls=True,
+            from_address="alerts@example.com",
+            to_addresses=("oncall@example.com",),
+            smtp_user="ops-bot",
+            smtp_password="hunter2",
+        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(email_targets=(target,)))
+        data = redact_config(cfg)
+        assert data["alerting"]["email_targets"][0]["smtp_user"] == "***"
+        assert data["alerting"]["email_targets"][0]["smtp_password"] == "***"
+        assert data["alerting"]["email_targets"][0]["smtp_host"] == "smtp.example.com"
+
+    def test_email_target_empty_credentials_not_masked(self) -> None:
+        """Empty SMTP credentials stay empty rather than being replaced with ``***``."""
+        from seerflow.alerting.channels.email import EmailTarget
+
+        target = EmailTarget(
+            name="ops",
+            smtp_host="smtp.example.com",
+            smtp_port=25,
+            use_starttls=False,
+            from_address="alerts@example.com",
+            to_addresses=("oncall@example.com",),
+        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(email_targets=(target,)))
+        data = redact_config(cfg)
+        assert data["alerting"]["email_targets"][0]["smtp_user"] == ""
+        assert data["alerting"]["email_targets"][0]["smtp_password"] == ""
+
+    def test_sms_target_auth_token_masked(self) -> None:
+        """Twilio auth_token on sms_targets is masked in the dict view."""
+        from seerflow.alerting.channels.sms import SmsTarget
+
+        target = SmsTarget(
+            name="ops-sms",
+            account_sid="AC" + "1" * 32,
+            from_number="+15551234567",
+            to_numbers=("+15557654321",),
+            auth_token="secret-twilio-token",
+        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(sms_targets=(target,)))
+        data = redact_config(cfg)
+        assert data["alerting"]["sms_targets"][0]["auth_token"] == "***"
+        assert data["alerting"]["sms_targets"][0]["from_number"] == "+15551234567"
+
+    def test_telegram_target_bot_token_masked(self) -> None:
+        """Telegram bot_token on telegram_targets is masked in the dict view."""
+        from seerflow.alerting.channels.telegram import TelegramTarget
+
+        target = TelegramTarget(
+            name="ops-tg",
+            chat_id="-100123456",
+            bot_token="123456:ABCDEF",
+        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(telegram_targets=(target,)))
+        data = redact_config(cfg)
+        assert data["alerting"]["telegram_targets"][0]["bot_token"] == "***"
+        assert data["alerting"]["telegram_targets"][0]["chat_id"] == "-100123456"
+
+    def test_whatsapp_target_access_token_masked(self) -> None:
+        """WhatsApp access_token on whatsapp_targets is masked in the dict view."""
+        from seerflow.alerting.channels.whatsapp import WhatsAppTarget
+
+        target = WhatsAppTarget(
+            name="ops-wa",
+            phone_number_id="PHONE123",
+            template_name="seerflow_alert",
+            language_code="en",
+            to_numbers=("+15557654321",),
+            access_token="wa-secret-token",
+        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(whatsapp_targets=(target,)))
+        data = redact_config(cfg)
+        assert data["alerting"]["whatsapp_targets"][0]["access_token"] == "***"
+        assert data["alerting"]["whatsapp_targets"][0]["template_name"] == "seerflow_alert"
+
     def test_alerting_webhooks_raw_dict_url_and_token_masked(self) -> None:
         """Cover the raw-YAML passthrough branch for alerting.webhooks."""
         cfg = SeerflowConfig(
