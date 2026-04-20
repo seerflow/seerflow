@@ -2319,6 +2319,39 @@ class TestLoadGranularHelpers:
             await ens._gc_orphan_row(BoomStore(), "ent_hw", "some:key")
         assert any("Failed to GC orphan" in r.message for r in caplog.records)
 
+    async def test_gc_orphan_row_refuses_reserved_suffix(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """S-206 sec-review finding #6: GC must refuse to delete reserved
+        namespace rows (e.g. `tmpl_hw:manifest`) regardless of caller."""
+        ens = self._make_ensemble()
+
+        class ShouldNotBeCalledStore(_StubModelStore):
+            async def delete_state(self, key: str) -> None:
+                raise AssertionError(f"delete_state must not be called: {key!r}")
+
+        with caplog.at_level("WARNING"):
+            await ens._gc_orphan_row(ShouldNotBeCalledStore(), "tmpl_hw", "manifest")
+        assert any("Refusing to GC reserved" in r.message for r in caplog.records)
+
+    async def test_gc_orphan_row_skips_oversized_composed_key(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """S-206 sec-review finding #1: composed keys past the 256-char
+        storage cap are logged + skipped, not pushed into delete_state
+        where they would raise ValueError and produce log spam on every
+        reload."""
+        ens = self._make_ensemble()
+
+        class ShouldNotBeCalledStore(_StubModelStore):
+            async def delete_state(self, key: str) -> None:
+                raise AssertionError(f"delete_state must not be called: {key!r}")
+
+        oversized = "x" * 260  # `tmpl_hw:` + 260 > 256
+        with caplog.at_level("WARNING"):
+            await ens._gc_orphan_row(ShouldNotBeCalledStore(), "tmpl_hw", oversized)
+        assert any("oversized orphan" in r.message for r in caplog.records)
+
     # ---- _load_and_deserialize_hw ----
 
     async def test_load_and_deserialize_returns_none_on_load_error(

@@ -30,6 +30,18 @@ _MAX_ENTITIES_PER_SCORE = 32  # cap per-event entity work to prevent CPU spikes
 
 _HWPrefix = Literal["tmpl_hw", "ent_hw"]
 
+# Storage enforces a 256-char cap (see SqliteBackend._validate_state_key).
+# The helper rejects composed keys above this length rather than letting
+# delete_state raise, so the "row persists + log-noise on every restart"
+# failure mode has a single, visible log line.
+_MAX_STATE_KEY_LEN = 256
+
+# Suffix values reserved by the ensemble's own state namespace. A manifest
+# entry whose raw_key collides with one of these must never be passed to
+# delete_state: doing so would destroy the namespace row itself. Defence
+# in-depth against adversarial storage (S-206 sec review, finding 6).
+_RESERVED_KEY_SUFFIXES: frozenset[str] = frozenset({"manifest"})
+
 # Strip C0 control chars (\x00-\x1f) and DEL (\x7f) from values before logging.
 # Prevents log-injection when a SQLite-persisted manifest contains attacker-
 # crafted CR/LF/ANSI sequences that could spoof log lines.
@@ -683,10 +695,27 @@ class DetectionEnsemble:
     ) -> None:
         """Best-effort delete of a losing post-collision manifest row.
 
-        Never raises. Logs a warning if delete_state fails.
+        Never raises. Logs a warning if delete_state fails, if the composed
+        key exceeds the storage-layer length cap, or if the raw_key would
+        collide with a reserved namespace suffix (e.g. `{prefix}:manifest`).
         """
+        if raw_key in _RESERVED_KEY_SUFFIXES:
+            _log.warning(
+                "Refusing to GC reserved %s:%s — possible manifest poisoning",
+                prefix,
+                _log_safe(raw_key),
+            )
+            return
+        composed = f"{prefix}:{raw_key}"
+        if len(composed) > _MAX_STATE_KEY_LEN:
+            _log.warning(
+                "Skipping GC for oversized orphan %s key (len=%d) — cannot delete",
+                prefix,
+                len(composed),
+            )
+            return
         try:
-            await storage.delete_state(f"{prefix}:{raw_key}")
+            await storage.delete_state(composed)
         except Exception:
             _log.warning(
                 "Failed to GC orphan %s row for %r — skipping",
