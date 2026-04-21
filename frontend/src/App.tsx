@@ -11,6 +11,7 @@ import { EntityDetail } from "@/components/EntityExplorer/EntityDetail";
 import { EventStream } from "@/components/EventStream/EventStream";
 import { AttackHeatmap } from "@/components/AttackHeatmap/AttackHeatmap";
 import { WsProvider } from "@/components/WsProvider";
+import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { hashHasEntity, hashHasCoverage } from "@/lib/hash";
 import { useEntityStore } from "@/stores/entity";
 
@@ -60,6 +61,7 @@ export default function App() {
         <AttackHeatmap />
       ) : (
         <WsProvider>
+          <DisconnectedBanner />
           <div className="grid gap-3 lg:grid-cols-2">
             <AlertFeed />
             <AnomalyTimeline />

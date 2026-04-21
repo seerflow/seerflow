@@ -1,8 +1,9 @@
 // AC-10: closing the stubbed WebSocket triggers the 3s disconnect banner
-// (`AlertFeed.tsx:133-141`). Uses real timers rather than `page.clock`
-// because the `useWebSocket` reconnect backoff and the WS close-event
-// plumbing through `page.routeWebSocket` both tick on real wall time; a
-// mocked clock desynchronises the close signal from the banner setTimeout.
+// (`App.tsx` dashboard-branch header / `DisconnectedBanner.tsx`). Uses real
+// timers rather than `page.clock` because the `useWebSocket` reconnect
+// backoff and the WS close-event plumbing through `page.routeWebSocket`
+// both tick on real wall time; a mocked clock desynchronises the close
+// signal from the banner setTimeout.
 //
 // The banner shares `role="status"` with the summary-badges connection dot,
 // so every banner assertion must filter by the banner text.
@@ -24,12 +25,9 @@ test("disconnect banner appears 3s after WS close and hides on reconnect", async
 
   await expect(page.getByRole("button", { name: /^alert / })).toHaveCount(5);
 
-  // Scope to the AlertFeed section to avoid matching the AnomalyTimeline
-  // banner (both widgets render the shared DisconnectedBanner component).
-  const alertFeed = page.locator("section").filter({ has: page.getByRole("button", { name: /^alert /i }) });
-  const banner = alertFeed
-    .getByRole("status")
-    .filter({ hasText: "Live stream disconnected" });
+  // S-062 Phase A: DisconnectedBanner moved from inside AlertFeed/AnomalyTimeline
+  // to a single mount at the dashboard header, inside <WsProvider>.
+  const banner = page.getByRole("status").filter({ hasText: "Live stream disconnected" });
   await expect(banner).toBeHidden();
 
   // Block reconnects so the status stays "closed" for the full 3s the
