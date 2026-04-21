@@ -10,6 +10,8 @@ import { EntitySearch } from "@/components/EntityExplorer/EntitySearch";
 import { EntityDetail } from "@/components/EntityExplorer/EntityDetail";
 import { EventStream } from "@/components/EventStream/EventStream";
 import { AttackHeatmap } from "@/components/AttackHeatmap/AttackHeatmap";
+import { WsProvider } from "@/components/WsProvider";
+import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { hashHasEntity, hashHasCoverage } from "@/lib/hash";
 import { useEntityStore } from "@/stores/entity";
 
@@ -42,28 +44,31 @@ export default function App() {
   const showEntity = hashHasEntity(hash);
 
   return (
-    <main className="min-h-screen p-6">
-      <header className="mb-6 flex items-center justify-between gap-4">
-        <img src={wordmark} alt="Seerflow" className="h-8 w-auto select-none" />
-        <EntitySearch />
-        <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" onClick={() => { window.location.hash = "coverage"; }}>
-          <Shield className="h-5 w-5" />
-        </Button>
-        <Button variant="ghost" size="icon" aria-label="Toggle theme" onClick={toggle}>
-          <Icon className="h-5 w-5" />
-        </Button>
-      </header>
-      {showEntity ? (
-        <EntityDetail />
-      ) : hashHasCoverage(hash) ? (
-        <AttackHeatmap />
-      ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <AlertFeed />
-          <AnomalyTimeline />
-          <div className="lg:col-span-2"><EventStream /></div>
-        </div>
-      )}
-    </main>
+    <WsProvider>
+      <main className="min-h-screen p-6">
+        <header className="mb-6 flex items-center justify-between gap-4">
+          <img src={wordmark} alt="Seerflow" className="h-8 w-auto select-none" />
+          <EntitySearch />
+          <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" onClick={() => { window.location.hash = "coverage"; }}>
+            <Shield className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" aria-label="Toggle theme" onClick={toggle}>
+            <Icon className="h-5 w-5" />
+          </Button>
+        </header>
+        <DisconnectedBanner />
+        {showEntity ? (
+          <EntityDetail />
+        ) : hashHasCoverage(hash) ? (
+          <AttackHeatmap />
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-2">
+            <AlertFeed />
+            <AnomalyTimeline />
+            <div className="lg:col-span-2"><EventStream /></div>
+          </div>
+        )}
+      </main>
+    </WsProvider>
   );
 }

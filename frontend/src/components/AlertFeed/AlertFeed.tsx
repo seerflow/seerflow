@@ -1,17 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAlertStore, selectVisibleAndCounts } from "@/stores/alerts";
 import { useAnomalyStore } from "@/stores/anomaly";
 import { AlertRow } from "./AlertRow";
 import { AlertDetailPanel } from "./AlertDetailPanel";
 import { FilterBar } from "./FilterBar";
 import { SummaryBadges } from "./SummaryBadges";
-import { useWebSocket } from "@/hooks/useWebSocket";
 import { api, ApiError } from "@/lib/api";
-import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert, LiveEvent } from "@/lib/types";
+import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert } from "@/lib/types";
 import { logger } from "@/lib/logger";
-import { useEventStore } from "@/stores/events";
 import { setIntent as setWsIntent } from "@/lib/wsFilter";
-import { DisconnectedBanner } from "@/components/DisconnectedBanner";
+import * as wsBus from "@/lib/wsBus";
+import { useWsSend } from "@/components/WsProvider";
 
 const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
 const MAX_WS_BUFFER = 200;  // S-194: bound buffer to survive slow warm-up under high WS load
@@ -35,14 +34,7 @@ export function AlertFeed(): JSX.Element {
   const openId = useAlertStore(s => s.selectedAlertId);
   const backfill = useAlertStore(s => s.backfill);
   const { prepend, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
-  const [wsUrl] = useState(() => {
-    const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
-    const url = base.replace(/^http/, "ws") + "/api/v1/ws";
-    if (url.startsWith("ws:") && window.location.protocol === "https:") {
-      logger.warn("WebSocket URL is insecure (ws:) but page served over https:", url);
-    }
-    return url;
-  });
+  const send = useWsSend();
 
   const wsBufferRef = useRef<WsMessage[]>([]);
   const warmedUpRef = useRef(false);
@@ -51,10 +43,11 @@ export function AlertFeed(): JSX.Element {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "alert_batch") m.alerts.forEach(prepend);
     else if (m.type === "batch") {
+      // The batch envelope can also carry LiveEvent payloads — those are routed
+      // directly by EventStream's wsBus subscription (S-062 Phase A). AlertFeed
+      // only handles alert batches here.
       const first = m.events.length > 0 ? m.events[0] : null;
-      if (first && typeof first === "object" && "event_id" in first) {
-        useEventStore.getState().ingest(m.events as unknown as LiveEvent[]);
-      } else if (first) {
+      if (first && !("event_id" in (first as object))) {
         (m.events as Alert[]).forEach(prepend);
       }
     }
@@ -62,8 +55,10 @@ export function AlertFeed(): JSX.Element {
       // S-199: useWebSocket's `event` arm pre-validates (Valibot regex) and converts
       // `timestamp_ns` / `observed_ns` to `bigint` before dispatch. The narrowing below
       // relies on that contract — do not relax the `typeof === "bigint"` guard.
+      // S-062 Phase A: fan-out into useEventStore is removed; EventStream now
+      // subscribes to wsBus directly. The appendScore call below is retained
+      // because AnomalyTimeline has not migrated to the bus yet (Phase B).
       const d = m.data as unknown as {
-        event_id?: string;
         timestamp_ns?: bigint;
         score?: number | null;
         upper_threshold?: number | null;
@@ -76,9 +71,6 @@ export function AlertFeed(): JSX.Element {
           upper_threshold: d.upper_threshold ?? null,
           source_type: d.source_type,
         });
-      }
-      if (typeof d.event_id === "string") {
-        useEventStore.getState().ingest([m.data as LiveEvent]);
       }
     }
   }, [prepend]);
@@ -101,38 +93,30 @@ export function AlertFeed(): JSX.Element {
     };
   }, [backfill, handleMessage]);
 
-  const onMessage = useCallback((m: WsMessage): void => {
-    if (!warmedUpRef.current) {
-      if (wsBufferRef.current.length < MAX_WS_BUFFER) {
-        wsBufferRef.current.push(m);
-      } else {
-        logger.warn("ws buffer full during warm-up; dropping frame", { type: m.type });
+  useEffect(() => {
+    const onAny = (m: WsMessage): void => {
+      if (!warmedUpRef.current) {
+        if (wsBufferRef.current.length < MAX_WS_BUFFER) wsBufferRef.current.push(m);
+        else logger.warn("ws buffer full during warm-up; dropping frame", { type: m.type });
+        return;
       }
-      return;
-    }
-    handleMessage(m);
-  }, [handleMessage]);
-
-  const { send } = useWebSocket(wsUrl, {
-    onMessage,
-    onStatusChange: setStatus,
-    getFilterMessage: () => setWsIntent("alerts", toWsFilter(useAlertStore.getState().filter)),
-  });
+      handleMessage(m);
+    };
+    const offs = [
+      wsBus.on("alert",       onAny),
+      wsBus.on("alert_batch", onAny),
+      wsBus.on("event",       onAny),
+      wsBus.on("batch",       onAny),
+      wsBus.on("__status",    (m) => setStatus(m.status)),
+    ];
+    return () => { for (const off of offs) off(); };
+  }, [handleMessage, setStatus]);
 
   useEffect(() => {
     const merged = setWsIntent("alerts", toWsFilter(filter));
     const t = setTimeout(() => send(merged), 150);
     return () => clearTimeout(t);
   }, [filter, send]);
-
-  useEffect(() => {
-    const handler = (): void => {
-      const merged = setWsIntent("alerts", toWsFilter(useAlertStore.getState().filter));
-      send(merged);
-    };
-    window.addEventListener("seerflow:wsfilter-changed", handler);
-    return () => window.removeEventListener("seerflow:wsfilter-changed", handler);
-  }, [send]);
 
   const { visible, counts } = useAlertStore(selectVisibleAndCounts);
   const sources = useMemo(
@@ -143,11 +127,10 @@ export function AlertFeed(): JSX.Element {
   const open = openId ? alerts.find(a => a.alert_id === openId) ?? null : null;
 
   return (
-    <section className="flex h-[calc(100vh-8rem)] rounded border bg-card">
+    <section className="flex h-full min-h-0 rounded border bg-card">
       <div className="flex flex-col flex-1 min-w-0">
         <SummaryBadges counts={counts} status={status} />
         <FilterBar filter={filter} sources={sources} tactics={tactics} onChange={setFilter} />
-        <DisconnectedBanner status={status} />
         <div className="flex-1 overflow-y-auto">
           {visible.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">No alerts in the last hour.</div>

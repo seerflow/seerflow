@@ -5,6 +5,7 @@ import { useThemeStore } from "@/stores/theme";
 import { api } from "@/lib/api";
 import { useEntityStore } from "@/stores/entity";
 import { hashHasCoverage } from "@/lib/hash";
+import * as wsBus from "@/lib/wsBus";
 
 vi.mock("@/lib/api", () => ({
   api: { get: vi.fn().mockResolvedValue({ items: [] }), post: vi.fn() },
@@ -68,6 +69,57 @@ describe("App shell", () => {
   it("mounts AnomalyTimeline alongside AlertFeed", async () => {
     render(<App />);
     expect(await screen.findByText("Anomaly Timeline")).toBeInTheDocument();
+  });
+});
+
+describe("DisconnectedBanner dashboard mount", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
+    localStorage.clear();
+    window.history.replaceState(null, "", "/");
+    useThemeStore.setState({ theme: "light" });
+    useEntityStore.setState(useEntityStore.getInitialState());
+    wsBus.clearAll();
+    (globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
+      class { observe() {} disconnect() {} unobserve() {} } as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("mounts DisconnectedBanner on the dashboard branch (above the grid, inside <main>)", () => {
+    const { container } = render(<App />);
+    act(() => { wsBus.emit({ type: "__status", status: "closed" }); });
+    act(() => { vi.advanceTimersByTime(3000); });
+
+    // Multiple elements share role="status" (SummaryBadges connection dot).
+    // Filter by the banner's distinctive text to isolate the DisconnectedBanner.
+    const banner = screen.getByText(/live stream disconnected/i);
+    expect(banner).toBeInTheDocument();
+    expect(banner.getAttribute("role")).toBe("status");
+
+    // Must be inside <main>, confirming it is at the dashboard header,
+    // not orphaned off-tree.
+    const main = container.querySelector("main");
+    expect(main).not.toBeNull();
+    expect(main!.contains(banner)).toBe(true);
+  });
+
+  it("renders the banner OUTSIDE the AlertFeed <section>", () => {
+    const { container } = render(<App />);
+    act(() => { wsBus.emit({ type: "__status", status: "closed" }); });
+    act(() => { vi.advanceTimersByTime(3000); });
+
+    const banner = screen.getByText(/live stream disconnected/i);
+    // AlertFeed renders a <section>; the banner (post-S-062 Phase A) must
+    // not be nested inside it — it lives at the dashboard header above the
+    // grid, as a sibling of the section.
+    const sections = container.querySelectorAll("section");
+    for (const section of sections) {
+      expect(section.contains(banner)).toBe(false);
+    }
   });
 });
 

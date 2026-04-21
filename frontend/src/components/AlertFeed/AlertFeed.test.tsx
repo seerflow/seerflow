@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import { AlertFeed } from "./AlertFeed";
+import { WsProvider } from "@/components/WsProvider";
 import { useAlertStore } from "@/stores/alerts";
 import { logger } from "@/lib/logger";
+import * as wsBus from "@/lib/wsBus";
+import { _resetForTests as resetWsIntents } from "@/lib/wsFilter";
 
 const fetchMock = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -12,6 +15,7 @@ vi.mock("@/lib/api", () => ({
 
 class MockWS {
   static last: MockWS | null = null;
+  static OPEN = 1;
   readyState = 0;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
@@ -25,11 +29,17 @@ class MockWS {
   _msg(m: unknown) { this.onmessage?.({ data: JSON.stringify(m) }); }
 }
 
+function renderWithProvider(): ReturnType<typeof render> {
+  return render(<WsProvider><AlertFeed /></WsProvider>);
+}
+
 describe("AlertFeed integration", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
     fetchMock.mockReset();
     MockWS.last = null;
+    wsBus.clearAll();
+    resetWsIntents();
     useAlertStore.setState({ alerts: [], filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() }, status: "connecting", dropped: 0, selectedAlertId: null });
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -41,7 +51,7 @@ describe("AlertFeed integration", () => {
         entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
         dedup_count: 1, source_type: "syslog" },
     ] });
-    render(<AlertFeed />);
+    renderWithProvider();
     await waitFor(() => expect(screen.getByText("warmup-rule")).toBeInTheDocument());
     act(() => {
       MockWS.last!._open();
@@ -61,7 +71,7 @@ describe("AlertFeed integration", () => {
     const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
     fetchMock.mockReturnValueOnce(warmupPromise);
 
-    render(<AlertFeed />);
+    renderWithProvider();
 
     // WS frame arrives BEFORE warm-up resolves.
     await waitFor(() => expect(MockWS.last).not.toBeNull());
@@ -97,7 +107,7 @@ describe("AlertFeed integration", () => {
   it("resets warmedUp on unmount so a remount re-buffers WS frames (S-194 AC-3 regression)", async () => {
     // First mount: warm-up resolves, WS frame goes through immediately.
     fetchMock.mockResolvedValueOnce({ items: [] });
-    const { unmount } = render(<AlertFeed />);
+    const { unmount } = renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => { MockWS.last!._open(); });
     await new Promise(r => setTimeout(r, 0)); // let warm-up promise resolve
@@ -108,8 +118,9 @@ describe("AlertFeed integration", () => {
     const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
     fetchMock.mockReturnValueOnce(warmupPromise);
     useAlertStore.setState({ alerts: [], detail: {}, filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() }, dropped: 0, selectedAlertId: null });
+    wsBus.clearAll();
 
-    render(<AlertFeed />);
+    renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => {
       MockWS.last!._open();
@@ -132,7 +143,7 @@ describe("AlertFeed integration", () => {
     fetchMock.mockReturnValueOnce(warmupPromise);
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
-    render(<AlertFeed />);
+    renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => { MockWS.last!._open(); });
 
@@ -155,5 +166,91 @@ describe("AlertFeed integration", () => {
     await waitFor(() => {
       expect(useAlertStore.getState().alerts.length).toBeLessThanOrEqual(200);
     });
+  });
+
+  it("subscribes to wsBus __status so connection lifecycle updates the alert store status", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+
+    // Simulate WsProvider emitting a __status frame onto the bus via the open event.
+    act(() => { MockWS.last!._open(); });
+    await waitFor(() => expect(useAlertStore.getState().status).toBe("open"));
+
+    // Manually publish a closed __status to the bus — AlertFeed must mirror it.
+    act(() => { wsBus.emit({ type: "__status", status: "closed" }); });
+    expect(useAlertStore.getState().status).toBe("closed");
+  });
+
+  it("pushes merged filter payload through useWsSend when the filter changes", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+
+    // Switching the filter bucket schedules a 150 ms debounced filter push.
+    act(() => {
+      useAlertStore.setState({
+        filter: { severities: new Set(["critical"]), types: new Set(), sources: new Set(), tactics: new Set() },
+      });
+    });
+
+    await waitFor(() => {
+      const filterFrames = MockWS.last!.sent.filter(
+        (m): m is { type: string; min_severity?: number } =>
+          typeof m === "object" && m !== null && (m as { type?: unknown }).type === "filter",
+      );
+      expect(filterFrames.some(m => m.min_severity === 17)).toBe(true);
+    });
+  });
+
+  it("no longer listens for the legacy seerflow:wsfilter-changed CustomEvent", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+    MockWS.last!.sent.length = 0;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("seerflow:wsfilter-changed"));
+    });
+
+    expect(MockWS.last!.sent).toEqual([]);
+  });
+
+  it("handles alert_batch arrivals and 'batch' envelope carrying alerts", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+
+    const mkAlert = (id: string, rule: string) => ({
+      alert_id: id, timestamp_ns: "1", alert_type: "ml" as const, rule_name: rule,
+      severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+      entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
+      dedup_count: 1, source_type: "syslog",
+    });
+    act(() => {
+      MockWS.last!._msg({ type: "alert_batch", alerts: [mkAlert("b1", "batch-rule-1"), mkAlert("b2", "batch-rule-2")] });
+    });
+    expect(screen.getByText("batch-rule-1")).toBeInTheDocument();
+    expect(screen.getByText("batch-rule-2")).toBeInTheDocument();
+
+    act(() => {
+      MockWS.last!._msg({ type: "batch", events: [mkAlert("b3", "envelope-rule-3")] });
+    });
+    expect(screen.getByText("envelope-rule-3")).toBeInTheDocument();
+  });
+
+  it("uses h-full min-h-0 so the section fills its grid cell (no viewport calc)", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    const { container } = renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    const section = container.querySelector("section");
+    expect(section).not.toBeNull();
+    const cls = section!.className;
+    expect(cls).toContain("h-full");
+    expect(cls).toContain("min-h-0");
+    expect(cls).not.toMatch(/h-\[calc\(/);
   });
 });
