@@ -63,7 +63,7 @@ export function EntitySearch() {
   }
 
   return (
-    <div className="relative w-80" onBlur={(e) => {
+    <div className="relative w-80 h-full min-h-0 flex flex-col" onBlur={(e) => {
       if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false);
     }}>
       <input

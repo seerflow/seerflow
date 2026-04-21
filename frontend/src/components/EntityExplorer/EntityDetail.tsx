@@ -35,7 +35,7 @@ export function EntityDetail() {
   const focalType = selectedType ?? related[0]?.entity_type ?? "user";
 
   return (
-    <section className="flex flex-col gap-3" aria-label="Entity detail">
+    <section className="flex flex-col gap-3 h-full min-h-0" aria-label="Entity detail">
       <header className="flex items-baseline gap-3">
         <h2 className="font-mono text-lg">{focalLabel}</h2>
         <span className="text-xs text-muted-foreground">…{uuid.slice(-12)}</span>
