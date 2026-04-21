@@ -203,3 +203,75 @@ class TestRuleReloader:
             reloader._reload_correlation()
             mock_log.warning.assert_called_once()
         assert holder.engine is None
+
+    # --- S-207 coverage: correlation_holder=None branches ---
+
+    async def test_watch_skips_initial_reload_when_no_holder(self, tmp_path: Path) -> None:
+        """watch() with ``correlation_holder=None`` skips the initial reload call.
+
+        Covers branch 59→62: the ``if self._correlation_holder is not None`` guard
+        takes the falsy path and jumps straight to the watch loop.
+        """
+
+        async def _no_changes(*_args: object, **_kwargs: object):
+            # Yield nothing, then return — exits the ``async for`` loop immediately.
+            if False:
+                yield set()
+
+        reloader = RuleReloader(
+            correlation_holder=None,
+            correlation_dirs=[str(tmp_path)],
+            window_buffer=None,
+        )
+
+        with (
+            patch("seerflow.correlation.reloader.watchfiles.awatch", _no_changes),
+            patch("seerflow.correlation.reloader.asyncio.to_thread") as mock_to_thread,
+        ):
+            await asyncio.wait_for(reloader.watch(), timeout=1.0)
+
+        mock_to_thread.assert_not_called()
+
+    async def test_watch_skips_inner_reload_when_no_holder(self, tmp_path: Path) -> None:
+        """watch() skips per-change reload when ``correlation_holder`` is None.
+
+        Covers branch 67→62: inside the async-for body, the holder-is-not-None
+        check falls through and iterates back to the next change without
+        invoking ``_reload_correlation``.
+        """
+
+        async def _one_change(*_args: object, **_kwargs: object):
+            yield {("modified", str(tmp_path / "rule.yml"))}
+
+        reloader = RuleReloader(
+            correlation_holder=None,
+            correlation_dirs=[str(tmp_path)],
+            window_buffer=None,
+        )
+
+        with (
+            patch("seerflow.correlation.reloader.watchfiles.awatch", _one_change),
+            patch("seerflow.correlation.reloader.asyncio.to_thread") as mock_to_thread,
+        ):
+            await asyncio.wait_for(reloader.watch(), timeout=1.0)
+
+        mock_to_thread.assert_not_called()
+
+    def test_reload_correlation_skips_engine_swap_when_no_holder(self, tmp_path: Path) -> None:
+        """_reload_correlation does not assign a new engine when holder is None.
+
+        Covers branch 78→80: the ``if self._correlation_holder is not None``
+        guard falls through, leaving no holder to mutate. The subsequent
+        "0 rules" warning on line 81 still fires because ``rules`` is empty.
+        """
+        window = EntityWindowBuffer(window_ns=600_000_000_000)
+        reloader = RuleReloader(
+            correlation_holder=None,
+            correlation_dirs=[str(tmp_path)],
+            window_buffer=window,
+        )
+
+        with patch("seerflow.correlation.reloader._log") as mock_log:
+            reloader._reload_correlation()
+            # The 0-rules warning still fires even with no holder to update.
+            mock_log.warning.assert_called_once()
