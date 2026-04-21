@@ -26,9 +26,11 @@ export function SourceSelect({ value, options, onChange }: Props): JSX.Element {
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={ALL}>All sources</SelectItem>
+        <SelectItem value={ALL} aria-pressed={value === null}>
+          All sources
+        </SelectItem>
         {options.map((o) => (
-          <SelectItem key={o} value={o}>
+          <SelectItem key={o} value={o} aria-pressed={value === o}>
             {o}
           </SelectItem>
         ))}

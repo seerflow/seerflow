@@ -45,4 +45,40 @@ describe("SourceSelect", () => {
     await user.click(screen.getByRole("option", { name: "otlp" }));
     expect(onChange).toHaveBeenCalledWith("otlp");
   });
+
+  it("marks the selected chip with aria-pressed=true and others with false (value=null)", async () => {
+    const user = userEvent.setup();
+    render(<SourceSelect value={null} options={["syslog", "otlp"]} onChange={vi.fn()} />);
+    await user.click(screen.getByRole("combobox", { name: /source filter/i }));
+    expect(screen.getByRole("option", { name: "All sources" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("option", { name: "syslog" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("option", { name: "otlp" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("marks the selected chip with aria-pressed=true when a concrete source is selected", async () => {
+    const user = userEvent.setup();
+    render(<SourceSelect value={"syslog"} options={["syslog", "otlp"]} onChange={vi.fn()} />);
+    await user.click(screen.getByRole("combobox", { name: /source filter/i }));
+    expect(screen.getByRole("option", { name: "syslog" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("option", { name: "All sources" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("option", { name: "otlp" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
 });

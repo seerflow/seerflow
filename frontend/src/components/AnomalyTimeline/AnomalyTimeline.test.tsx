@@ -125,6 +125,15 @@ describe("AnomalyTimeline", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(screen.queryByText(/not shown/i)).not.toBeInTheDocument();
   });
+
+  it("outer container uses h-full min-h-0 flex flex-col (no fixed pixel height)", async () => {
+    render(<AnomalyTimeline />);
+    const section = await screen.findByRole("region", { name: /anomaly timeline/i });
+    expect(section.className).toMatch(/\bh-full\b/);
+    expect(section.className).toMatch(/\bmin-h-0\b/);
+    expect(section.className).toMatch(/\bflex\b/);
+    expect(section.className).toMatch(/\bflex-col\b/);
+  });
 });
 
 // ---- H1: alert-bucket window uses the current resolution -----------------
