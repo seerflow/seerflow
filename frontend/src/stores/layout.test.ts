@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import {
   useLayoutStore,
   DEFAULT_WIDGETS,
   DEFAULT_LAYOUTS,
   LAYOUT_STORAGE_KEY,
 } from "./layout";
+import { logger } from "@/lib/logger";
 
 beforeEach(() => {
   window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
@@ -30,12 +31,13 @@ describe("layout store", () => {
     ).toHaveLength(1);
   });
 
-  it("removeWidget removes the id and its layout entries", () => {
+  it("removeWidget removes the id and strips its layout entries from every breakpoint", () => {
     useLayoutStore.getState().removeWidget("alertFeed");
-    expect(useLayoutStore.getState().widgets).not.toContain("alertFeed");
-    expect(
-      useLayoutStore.getState().layouts.lg.find((l) => l.i === "alertFeed"),
-    ).toBeUndefined();
+    const state = useLayoutStore.getState();
+    expect(state.widgets).not.toContain("alertFeed");
+    expect(state.layouts.lg.find((l) => l.i === "alertFeed")).toBeUndefined();
+    expect(state.layouts.md.find((l) => l.i === "alertFeed")).toBeUndefined();
+    expect(state.layouts.sm.find((l) => l.i === "alertFeed")).toBeUndefined();
   });
 
   it("resetToDefault restores defaults", () => {
@@ -112,5 +114,47 @@ describe("layout store", () => {
     window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(persisted));
     await useLayoutStore.persist.rehydrate();
     expect(useLayoutStore.getState().widgets).toEqual(["alertFeed"]);
+  });
+
+  describe("rehydrate logger.warn assertions", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    });
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it("emits a single 'schema mismatch' warn on a malformed blob", async () => {
+      window.localStorage.setItem(
+        LAYOUT_STORAGE_KEY,
+        JSON.stringify({ state: { version: 999 } }),
+      );
+      await useLayoutStore.persist.rehydrate();
+      const matching = warnSpy.mock.calls.filter((c) =>
+        String(c[0]).includes("layout rehydrate: schema mismatch"),
+      );
+      expect(matching).toHaveLength(1);
+    });
+
+    it("emits a single 'dropping unknown widget ids' warn with the dropped payload", async () => {
+      const persisted = {
+        state: {
+          version: 1,
+          widgets: ["alertFeed", "ghostWidget", "phantomWidget"],
+          layouts: { lg: [], md: [], sm: [] },
+        },
+        version: 1,
+      };
+      window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(persisted));
+      await useLayoutStore.persist.rehydrate();
+      const matching = warnSpy.mock.calls.filter((c) =>
+        String(c[0]).includes("dropping unknown widget ids"),
+      );
+      expect(matching).toHaveLength(1);
+      expect(matching[0][1]).toEqual({
+        dropped: ["ghostWidget", "phantomWidget"],
+      });
+    });
   });
 });
