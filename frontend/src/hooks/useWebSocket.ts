@@ -54,7 +54,11 @@ const WsMessageSchema = v.union([
   v.object({ type: v.literal("alert_batch"), alerts: v.pipe(v.array(AlertDataSchema), v.maxLength(100)) }),
   v.object({ type: v.literal("status"),      data: StatusDataSchema }),
   v.object({ type: v.literal("event"),       data: EventDataSchema }),
-  v.object({ type: v.literal("batch"),       events: v.array(v.unknown()) }),
+  // Security: cap the batch event count to bound worst-case BigInt-conversion
+  // and widget-ingest work on a crafted frame. Backend caps batch_max_events=10
+  // (src/seerflow/api/ws.py); 500 leaves 50x headroom while still protecting
+  // the main thread.
+  v.object({ type: v.literal("batch"),       events: v.pipe(v.array(v.unknown()), v.maxLength(500)) }),
 ]);
 
 export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => void } {

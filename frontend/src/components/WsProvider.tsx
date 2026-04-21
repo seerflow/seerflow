@@ -11,8 +11,12 @@ const Ctx = createContext<SendFn | null>(null);
 function resolveUrl(): string {
   const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
   const url = base.replace(/^http/, "ws") + "/api/v1/ws";
+  // Security: if the page is served over HTTPS, never allow a plaintext `ws:`
+  // connection — auto-upgrade to `wss:`. The dev-only logger warn lands in the
+  // browser console for visibility; production builds silently upgrade.
   if (url.startsWith("ws:") && window.location.protocol === "https:") {
-    logger.warn("WebSocket URL is insecure (ws:) but page served over https:", url);
+    logger.warn("VITE_API_BASE resolved to ws: under https:; upgrading to wss:", url);
+    return "wss:" + url.slice(3);
   }
   return url;
 }

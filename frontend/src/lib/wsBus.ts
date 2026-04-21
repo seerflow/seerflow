@@ -27,7 +27,15 @@ export function emit(msg: WsMessage): void {
   if (!set) return;
   for (const h of set) {
     try { h(msg); }
-    catch (e) { logger.warn("wsBus handler threw", { type: msg.type, error: e }); }
+    catch (e) {
+      // Log a stringified message only — handler errors may embed message-data
+      // fields (event_id, entity_value, etc.) in their `message` or nested
+      // properties, which we do not want serialized verbatim into console logs.
+      logger.warn("wsBus handler threw", {
+        type: msg.type,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 }
 
