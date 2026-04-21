@@ -182,7 +182,7 @@ class PagerDutySink:
                 continue
             try:
                 await self._send(event.payload)
-            except Exception:  # noqa: BLE001 — intentional programmer-error guard; see S-205
+            except Exception:  # intentional programmer-error guard; see S-205
                 _log.exception(
                     "PagerDutySink: unexpected error in _send; dropping event and continuing"
                 )
