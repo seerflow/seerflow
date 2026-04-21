@@ -11,7 +11,6 @@ import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert, LiveEvent
 import { logger } from "@/lib/logger";
 import { useEventStore } from "@/stores/events";
 import { setIntent as setWsIntent } from "@/lib/wsFilter";
-import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 
 const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
 const MAX_WS_BUFFER = 200;  // S-194: bound buffer to survive slow warm-up under high WS load
@@ -147,7 +146,6 @@ export function AlertFeed(): JSX.Element {
       <div className="flex flex-col flex-1 min-w-0">
         <SummaryBadges counts={counts} status={status} />
         <FilterBar filter={filter} sources={sources} tactics={tactics} onChange={setFilter} />
-        <DisconnectedBanner status={status} />
         <div className="flex-1 overflow-y-auto">
           {visible.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">No alerts in the last hour.</div>

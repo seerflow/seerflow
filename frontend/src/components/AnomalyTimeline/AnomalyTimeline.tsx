@@ -14,7 +14,6 @@ import { RESOLUTION_NS } from "@/lib/buckets";
 import { useAlertStore } from "@/stores/alerts";
 import { selectKnownSources, useAnomalyStore } from "@/stores/anomaly";
 
-import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { findAlertInBucket } from "./alertMatch";
 import { SourceSelect } from "./SourceSelect";
 import { TimeRangeChips } from "./TimeRangeChips";
@@ -38,7 +37,6 @@ export function AnomalyTimeline(): JSX.Element {
   // Alert store — keep separate subscriptions (different store)
   const selectAlert = useAlertStore.getState().selectAlert;
   const alerts = useAlertStore((s) => s.alerts);
-  const status = useAlertStore((s) => s.status);
 
   const resolutionMs = useMemo(
     () => Number(RESOLUTION_NS[resolution] / 1_000_000n),
@@ -105,7 +103,6 @@ export function AnomalyTimeline(): JSX.Element {
           <TimeRangeChips value={range} onChange={setRange} />
         </div>
       </header>
-      <DisconnectedBanner status={status} />
       <div role="img" aria-label={ariaLabel} style={{ height: 320 }}>
         {loading && items.length === 0 ? (
           <div className="h-full flex items-center justify-center text-xs text-muted-foreground">

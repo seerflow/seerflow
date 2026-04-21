@@ -1,17 +1,33 @@
 import { useEffect, useState } from "react";
+import * as wsBus from "@/lib/wsBus";
 import type { WsStatus } from "@/lib/types";
 
-export function DisconnectedBanner({ status }: { status: WsStatus }): JSX.Element | null {
+interface Props {
+  /**
+   * Milliseconds the connection must stay in `"closed"` before the banner
+   * renders. Defaults to 3000. Exposed so tests and short-lived preview
+   * harnesses can tune it; production callers should use the default.
+   */
+  debounceMs?: number;
+}
+
+export function DisconnectedBanner({ debounceMs = 3000 }: Props = {}): JSX.Element | null {
+  const [status, setStatus] = useState<WsStatus>("connecting");
   const [show, setShow] = useState(false);
 
   useEffect(() => {
+    const off = wsBus.on("__status", (m) => setStatus(m.status));
+    return off;
+  }, []);
+
+  useEffect(() => {
     if (status === "closed") {
-      const t = setTimeout(() => setShow(true), 3000);
+      const t = setTimeout(() => setShow(true), debounceMs);
       return () => clearTimeout(t);
     }
     setShow(false);
     return undefined;
-  }, [status]);
+  }, [status, debounceMs]);
 
   if (!show) return null;
 
