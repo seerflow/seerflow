@@ -89,7 +89,7 @@ export function AnomalyTimeline(): JSX.Element {
   return (
     <section
       aria-labelledby="anomaly-timeline-title"
-      className="rounded-lg border bg-card p-3 h-[calc(100vh-8rem)]"
+      className="rounded-lg border bg-card p-3 h-full min-h-0"
     >
       <header className="flex items-center justify-between gap-2 mb-2">
         <h2 id="anomaly-timeline-title" className="text-sm font-medium">

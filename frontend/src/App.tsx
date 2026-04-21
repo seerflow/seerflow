@@ -44,31 +44,31 @@ export default function App() {
   const showEntity = hashHasEntity(hash);
 
   return (
-    <main className="min-h-screen p-6">
-      <header className="mb-6 flex items-center justify-between gap-4">
-        <img src={wordmark} alt="Seerflow" className="h-8 w-auto select-none" />
-        <EntitySearch />
-        <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" onClick={() => { window.location.hash = "coverage"; }}>
-          <Shield className="h-5 w-5" />
-        </Button>
-        <Button variant="ghost" size="icon" aria-label="Toggle theme" onClick={toggle}>
-          <Icon className="h-5 w-5" />
-        </Button>
-      </header>
-      {showEntity ? (
-        <EntityDetail />
-      ) : hashHasCoverage(hash) ? (
-        <AttackHeatmap />
-      ) : (
-        <WsProvider>
-          <DisconnectedBanner />
+    <WsProvider>
+      <main className="min-h-screen p-6">
+        <header className="mb-6 flex items-center justify-between gap-4">
+          <img src={wordmark} alt="Seerflow" className="h-8 w-auto select-none" />
+          <EntitySearch />
+          <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" onClick={() => { window.location.hash = "coverage"; }}>
+            <Shield className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" aria-label="Toggle theme" onClick={toggle}>
+            <Icon className="h-5 w-5" />
+          </Button>
+        </header>
+        <DisconnectedBanner />
+        {showEntity ? (
+          <EntityDetail />
+        ) : hashHasCoverage(hash) ? (
+          <AttackHeatmap />
+        ) : (
           <div className="grid gap-3 lg:grid-cols-2">
             <AlertFeed />
             <AnomalyTimeline />
             <div className="lg:col-span-2"><EventStream /></div>
           </div>
-        </WsProvider>
-      )}
-    </main>
+        )}
+      </main>
+    </WsProvider>
   );
 }
