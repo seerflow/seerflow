@@ -45,7 +45,11 @@ export type WsMessage =
   | { type: "alert_batch"; alerts: Alert[] }
   | { type: "status"; data: { events_ingested_per_sec: number; alerts_24h: number; connected_clients: number; dropped_events: number; dropped_alerts: number; dropped_total: number } }
   | { type: "event"; data: LiveEvent }
-  | { type: "batch"; events: LiveEvent[] | Alert[] };
+  | { type: "batch"; events: LiveEvent[] | Alert[] }
+  // S-062 internal: synthetic bus-only status frame emitted by WsProvider so
+  // the global DisconnectedBanner and per-widget pips can subscribe uniformly
+  // to connection-lifecycle changes. Never arrives from the network.
+  | { type: "__status"; status: WsStatus };
 
 export type TimelineRange = "1h" | "6h" | "24h" | "7d";
 export type TimelineResolution = "1m" | "5m" | "15m" | "1h";
