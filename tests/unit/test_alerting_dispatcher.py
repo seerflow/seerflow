@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,6 +14,9 @@ import pytest
 from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,7 +71,7 @@ async def _run_and_cancel(dispatcher: AlertDispatcher, delay: float = 0.05) -> N
 
 
 @contextlib.contextmanager
-def caplog_handler(logger_name: str):
+def caplog_handler(logger_name: str) -> Iterator[list[logging.LogRecord]]:
     """Capture log records emitted on `logger_name` during the block."""
     records: list[logging.LogRecord] = []
 
