@@ -556,8 +556,8 @@ async def test_run_survives_programmer_error_in_router_route() -> None:
     fake_router.stop = AsyncMock(return_value=None)
 
     d = AlertDispatcher(targets=(target,), session=session, router=fake_router)
-    alert_a = make_alert()
-    alert_b = make_alert()
+    alert_a = make_alert(alert_id="11111111-1111-1111-1111-111111111111")
+    alert_b = make_alert(alert_id="22222222-2222-2222-2222-222222222222")
     d.enqueue(alert_a)
     d.enqueue(alert_b)
     await d.stop()
@@ -581,6 +581,7 @@ async def test_run_survives_programmer_error_in_router_route() -> None:
     assert "alert_id" not in msg
     assert "entity_value" not in msg
     assert alert_a.alert_id not in msg, f"log message leaked the failing alert's UUID: {msg!r}"
+    assert alert_b.alert_id not in msg, f"log message leaked the subsequent alert's UUID: {msg!r}"
     session.post.assert_not_called()
 
 
