@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -67,7 +66,7 @@ async def _run_and_cancel(dispatcher: AlertDispatcher, delay: float = 0.05) -> N
         await task
 
 
-@contextmanager
+@contextlib.contextmanager
 def caplog_handler(logger_name: str):
     """Capture log records emitted on `logger_name` during the block."""
     records: list[logging.LogRecord] = []
@@ -557,8 +556,10 @@ async def test_run_survives_programmer_error_in_router_route() -> None:
     fake_router.stop = AsyncMock(return_value=None)
 
     d = AlertDispatcher(targets=(target,), session=session, router=fake_router)
-    d.enqueue(make_alert())
-    d.enqueue(make_alert())
+    alert_a = make_alert()
+    alert_b = make_alert()
+    d.enqueue(alert_a)
+    d.enqueue(alert_b)
     await d.stop()
 
     with caplog_handler("seerflow") as records:
@@ -568,18 +569,18 @@ async def test_run_survives_programmer_error_in_router_route() -> None:
         "second alert was never routed — consumer likely died on first TypeError"
     )
     matching = [
-        r
-        for r in records
-        if "AlertDispatcher: unexpected error in router.route" in r.getMessage()
+        r for r in records if "AlertDispatcher: unexpected error in router.route" in r.getMessage()
     ]
     assert len(matching) == 1, (
         f"expected exactly one guard log line, got {len(matching)}: "
         f"{[r.getMessage() for r in records]}"
     )
-    # AC-4: no alert content in the log message.
+    # AC-4: no alert content in the log message — neither the field names
+    # nor the concrete UUID of the alert that triggered the guard may appear.
     msg = matching[0].getMessage()
     assert "alert_id" not in msg
     assert "entity_value" not in msg
+    assert alert_a.alert_id not in msg, f"log message leaked the failing alert's UUID: {msg!r}"
     session.post.assert_not_called()
 
 
