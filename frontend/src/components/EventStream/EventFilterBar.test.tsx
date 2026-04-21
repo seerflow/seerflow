@@ -12,6 +12,19 @@ describe("EventFilterBar", () => {
     expect(screen.getByRole("button", { name: "syslog" })).toBeInTheDocument();
   });
 
+  it("source chips carry aria-pressed reflecting the filter selection state", () => {
+    const selected: EventFilter = {
+      sources: new Set(["auth"]),
+      minSeverity: 0,
+      templateIds: new Set(),
+    };
+    render(<EventFilterBar filter={selected} knownSources={["auth", "syslog"]} onChange={() => undefined} />);
+    const authChip = screen.getByRole("button", { name: "auth" });
+    const syslogChip = screen.getByRole("button", { name: "syslog" });
+    expect(authChip).toHaveAttribute("aria-pressed", "true");
+    expect(syslogChip).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("toggling a source chip emits onChange with updated set", () => {
     const onChange = vi.fn();
     render(<EventFilterBar filter={empty} knownSources={["auth"]} onChange={onChange} />);

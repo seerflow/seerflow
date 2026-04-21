@@ -40,6 +40,25 @@ describe("EventRow", () => {
     expect(onToggle).toHaveBeenCalledWith("e1");
   });
 
+  it("calls onToggle when Enter is pressed (regression guard)", () => {
+    const onToggle = vi.fn();
+    render(<EventRow event={sample} expanded={false} onToggle={onToggle} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: /event row/i }), { key: "Enter" });
+    expect(onToggle).toHaveBeenCalledWith("e1");
+  });
+
+  it("Space keypress calls preventDefault AND onToggle (S-061 R3 LOW — stop page scroll on role=button)", () => {
+    const onToggle = vi.fn();
+    render(<EventRow event={sample} expanded={false} onToggle={onToggle} />);
+    const row = screen.getByRole("button", { name: /event row/i });
+    // Fire a cancelable keydown. preventDefault() sets defaultPrevented=true.
+    const fired = fireEvent.keyDown(row, { key: " " });
+    // fireEvent.keyDown returns true when the event was NOT cancelled. If the
+    // component called preventDefault the return value is false.
+    expect(fired).toBe(false);
+    expect(onToggle).toHaveBeenCalledWith("e1");
+  });
+
   it("shows entity_summary as definition list when expanded", () => {
     render(<EventRow event={sample} expanded={true} onToggle={() => undefined} />);
     expect(screen.getByText(/template_id/i)).toBeInTheDocument();

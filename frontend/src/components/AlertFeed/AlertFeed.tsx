@@ -6,9 +6,8 @@ import { AlertDetailPanel } from "./AlertDetailPanel";
 import { FilterBar } from "./FilterBar";
 import { SummaryBadges } from "./SummaryBadges";
 import { api, ApiError } from "@/lib/api";
-import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert, LiveEvent } from "@/lib/types";
+import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert } from "@/lib/types";
 import { logger } from "@/lib/logger";
-import { useEventStore } from "@/stores/events";
 import { setIntent as setWsIntent } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
 import { useWsSend } from "@/components/WsProvider";
@@ -44,10 +43,11 @@ export function AlertFeed(): JSX.Element {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "alert_batch") m.alerts.forEach(prepend);
     else if (m.type === "batch") {
+      // The batch envelope can also carry LiveEvent payloads — those are routed
+      // directly by EventStream's wsBus subscription (S-062 Phase A). AlertFeed
+      // only handles alert batches here.
       const first = m.events.length > 0 ? m.events[0] : null;
-      if (first && typeof first === "object" && "event_id" in first) {
-        useEventStore.getState().ingest(m.events as unknown as LiveEvent[]);
-      } else if (first) {
+      if (first && !("event_id" in (first as object))) {
         (m.events as Alert[]).forEach(prepend);
       }
     }
@@ -55,8 +55,10 @@ export function AlertFeed(): JSX.Element {
       // S-199: useWebSocket's `event` arm pre-validates (Valibot regex) and converts
       // `timestamp_ns` / `observed_ns` to `bigint` before dispatch. The narrowing below
       // relies on that contract — do not relax the `typeof === "bigint"` guard.
+      // S-062 Phase A: fan-out into useEventStore is removed; EventStream now
+      // subscribes to wsBus directly. The appendScore call below is retained
+      // because AnomalyTimeline has not migrated to the bus yet (Phase B).
       const d = m.data as unknown as {
-        event_id?: string;
         timestamp_ns?: bigint;
         score?: number | null;
         upper_threshold?: number | null;
@@ -69,9 +71,6 @@ export function AlertFeed(): JSX.Element {
           upper_threshold: d.upper_threshold ?? null,
           source_type: d.source_type,
         });
-      }
-      if (typeof d.event_id === "string") {
-        useEventStore.getState().ingest([m.data as LiveEvent]);
       }
     }
   }, [prepend]);

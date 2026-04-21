@@ -44,6 +44,7 @@ export function EventFilterBar({ filter, knownSources, onChange }: Props): JSX.E
             key={s}
             type="button"
             onClick={() => toggleSource(s)}
+            aria-pressed={filter.sources.has(s)}
             className={`rounded px-1.5 py-0.5 ${filter.sources.has(s) ? "bg-primary text-primary-foreground" : "bg-secondary"}`}
           >
             {s}

@@ -7,7 +7,9 @@ import { EventFilterBar } from "./EventFilterBar";
 import { api, ApiError } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import { setIntent as setWsIntent, clearIntent as clearWsIntent } from "@/lib/wsFilter";
-import type { LiveEvent, EventFilter } from "@/lib/types";
+import * as wsBus from "@/lib/wsBus";
+import { useWsSend } from "@/components/WsProvider";
+import type { LiveEvent, EventFilter, WsStatus } from "@/lib/types";
 
 function intentFromFilter(f: EventFilter): Parameters<typeof setWsIntent>[1] {
   return {
@@ -20,11 +22,10 @@ function intentFromFilter(f: EventFilter): Parameters<typeof setWsIntent>[1] {
 export function EventStream(): JSX.Element {
   const filter = useEventStore((s) => s.filter);
   const paused = useEventStore((s) => s.paused);
-  const status = useEventStore((s) => s.status);
   const knownSources = useEventStore((s) => s.knownSources);
   // Subscribe to raw events ref + filter; memoize the filtered slice locally so
-  // unrelated store updates (status, paused, dropped counters) don't cascade
-  // into a re-filter of the entire ring buffer.
+  // unrelated store updates (paused, dropped counters) don't cascade into a
+  // re-filter of the entire ring buffer.
   const events = useEventStore((s) => s.events);
   const visible = useMemo<LiveEvent[]>(() => {
     if (filter.sources.size === 0 && filter.minSeverity === 0 && filter.templateIds.size === 0) {
@@ -40,8 +41,31 @@ export function EventStream(): JSX.Element {
   const bufferedCount = useEventStore(selectPausedCount);
   const { backfill, pause, resume, setFilter } = useEventStore.getState();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showDisconnected, setShowDisconnected] = useState(false);
   const [virtualizerReady, setVirtualizerReady] = useState(false);
+  const [status, setStatus] = useState<WsStatus>("connecting");
+  const send = useWsSend();
+
+  // wsBus subscriptions (S-062 Phase A): EventStream is the sole ingestor of
+  // LiveEvent frames into useEventStore. AlertFeed used to fan-out here as a
+  // transitional double-write; that path has been removed in this task to
+  // prevent duplicate rows.
+  useEffect(() => {
+    const offs = [
+      wsBus.on("event", (m) => {
+        // m.data was pre-validated + bigint-converted by useWebSocket.
+        useEventStore.getState().ingest([m.data]);
+      }),
+      wsBus.on("batch", (m) => {
+        // Heterogeneous envelope — only ingest LiveEvent-shaped batches.
+        const first = m.events[0];
+        if (first && typeof first === "object" && "event_id" in first) {
+          useEventStore.getState().ingest(m.events as unknown as LiveEvent[]);
+        }
+      }),
+      wsBus.on("__status", (m) => setStatus(m.status)),
+    ];
+    return () => { for (const off of offs) off(); };
+  }, []);
 
   // REST warm-up
   useEffect(() => {
@@ -56,26 +80,17 @@ export function EventStream(): JSX.Element {
   // so a remount of EventStream doesn't inherit the previous instance's intent.
   useEffect(() => {
     const t = setTimeout(() => {
-      setWsIntent("events", intentFromFilter(filter));
-      window.dispatchEvent(new CustomEvent("seerflow:wsfilter-changed"));
+      const merged = setWsIntent("events", intentFromFilter(filter));
+      send(merged);
     }, 150);
     return () => clearTimeout(t);
-  }, [filter]);
+  }, [filter, send]);
 
   useEffect(() => () => {
     clearWsIntent("events");
-    window.dispatchEvent(new CustomEvent("seerflow:wsfilter-changed"));
+    // No CustomEvent dispatch — AlertFeed no longer listens for the legacy
+    // "seerflow:wsfilter-changed" hop; filter merging happens via useWsSend().
   }, []);
-
-  // Disconnected banner after 3 s
-  useEffect(() => {
-    if (status === "closed") {
-      const t = setTimeout(() => setShowDisconnected(true), 3000);
-      return () => clearTimeout(t);
-    }
-    setShowDisconnected(false);
-    return undefined;
-  }, [status]);
 
   // Virtualizer — keep estimateSize closure fresh by re-creating it whenever
   // expandedId changes. useVirtualizer rebinds internally on instance change.
@@ -124,7 +139,7 @@ export function EventStream(): JSX.Element {
   const useFallback = !virtualizerReady || virtualItems.length === 0;
 
   return (
-    <section className="flex flex-col min-h-[320px] h-[420px] rounded border bg-card">
+    <section className="flex flex-col h-full min-h-0 rounded border bg-card">
       <header className="flex items-center justify-between gap-2 border-b px-3 py-2">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Live Event Stream</h2>
@@ -136,11 +151,7 @@ export function EventStream(): JSX.Element {
         <PauseControl paused={paused} bufferedCount={bufferedCount} onToggle={togglePause} />
       </header>
       <EventFilterBar filter={filter} knownSources={knownSourcesList} onChange={setFilter} />
-      {showDisconnected && (
-        <div role="status" aria-live="polite" className="bg-amber-500/10 px-3 py-1 text-xs text-amber-700">
-          Live stream disconnected — retrying…
-        </div>
-      )}
+      {/* Disconnected banner now lives at the dashboard header via <DisconnectedBanner />. */}
       <div ref={parentRef} className="flex-1 overflow-y-auto">
         {visible.length === 0 ? (
           <div className="p-6 text-center text-xs text-muted-foreground">No events yet — waiting for the pipeline to send some.</div>

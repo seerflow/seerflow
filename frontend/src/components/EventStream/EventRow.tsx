@@ -37,7 +37,16 @@ function EventRowImpl({ event, expanded, onToggle }: Props): JSX.Element {
       aria-label="event row"
       tabIndex={0}
       onClick={() => onToggle(event.event_id)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onToggle(event.event_id); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          onToggle(event.event_id);
+        } else if (e.key === " ") {
+          // Stop the browser from scrolling the page when Space is pressed on
+          // a focused role="button" element (S-061 R3 LOW).
+          e.preventDefault();
+          onToggle(event.event_id);
+        }
+      }}
       className="flex flex-col gap-1 border-b px-2 py-1 text-xs hover:bg-muted/40 cursor-pointer"
     >
       <div className="flex items-center gap-2">
