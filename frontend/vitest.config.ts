@@ -11,6 +11,18 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
-    coverage: { provider: "v8", reporter: ["text", "html"] },
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+      exclude: [
+        "src/components/ui/**",
+        "**/*.d.ts",
+        "**/*.config.*",
+        "e2e/**",
+        "playwright-report/**",
+        "test-results/**",
+        "src/test/**",
+      ],
+    },
   },
 });

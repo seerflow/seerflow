@@ -115,4 +115,13 @@ describe("EntitySearch", () => {
     await new Promise((r) => setTimeout(r, 350));
     expect(screen.getByText(/No entities match/i)).toBeInTheDocument();
   });
+
+  it("outer container uses h-full min-h-0 flex flex-col (no fixed pixel height)", () => {
+    const { container } = render(<EntitySearch />);
+    const outer = container.firstChild as HTMLElement;
+    expect(outer.className).toMatch(/\bh-full\b/);
+    expect(outer.className).toMatch(/\bmin-h-0\b/);
+    expect(outer.className).toMatch(/\bflex\b/);
+    expect(outer.className).toMatch(/\bflex-col\b/);
+  });
 });

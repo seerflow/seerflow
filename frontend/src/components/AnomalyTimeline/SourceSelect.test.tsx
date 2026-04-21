@@ -45,4 +45,38 @@ describe("SourceSelect", () => {
     await user.click(screen.getByRole("option", { name: "otlp" }));
     expect(onChange).toHaveBeenCalledWith("otlp");
   });
+
+  it("marks the selected option with aria-selected=true and others with false (value=null)", async () => {
+    const user = userEvent.setup();
+    render(<SourceSelect value={null} options={["syslog", "otlp"]} onChange={vi.fn()} />);
+    await user.click(screen.getByRole("combobox", { name: /source filter/i }));
+    // Radix SelectItem renders role="option" and owns aria-selected on the
+    // currently-selected item; we assert that contract directly.
+    expect(screen.getByRole("option", { name: "All sources" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.getByRole("option", { name: "syslog" }).getAttribute("aria-selected"),
+    ).not.toBe("true");
+    expect(
+      screen.getByRole("option", { name: "otlp" }).getAttribute("aria-selected"),
+    ).not.toBe("true");
+  });
+
+  it("marks the selected option with aria-selected=true when a concrete source is selected", async () => {
+    const user = userEvent.setup();
+    render(<SourceSelect value={"syslog"} options={["syslog", "otlp"]} onChange={vi.fn()} />);
+    await user.click(screen.getByRole("combobox", { name: /source filter/i }));
+    expect(screen.getByRole("option", { name: "syslog" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.getByRole("option", { name: "All sources" }).getAttribute("aria-selected"),
+    ).not.toBe("true");
+    expect(
+      screen.getByRole("option", { name: "otlp" }).getAttribute("aria-selected"),
+    ).not.toBe("true");
+  });
 });

@@ -40,4 +40,14 @@ describe("EntityDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: "1h" }));
     await waitFor(() => expect(useEntityStore.getState().range).toBe("1h"));
   });
+
+  it("outer container uses h-full min-h-0 flex flex-col (no fixed pixel height)", () => {
+    useEntityStore.setState({ selectedEntityUuid: UUID });
+    render(<EntityDetail />);
+    const section = screen.getByRole("region", { name: /entity detail/i });
+    expect(section.className).toMatch(/\bh-full\b/);
+    expect(section.className).toMatch(/\bmin-h-0\b/);
+    expect(section.className).toMatch(/\bflex\b/);
+    expect(section.className).toMatch(/\bflex-col\b/);
+  });
 });
