@@ -218,6 +218,30 @@ describe("AlertFeed integration", () => {
     expect(MockWS.last!.sent).toEqual([]);
   });
 
+  it("handles alert_batch arrivals and 'batch' envelope carrying alerts", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+
+    const mkAlert = (id: string, rule: string) => ({
+      alert_id: id, timestamp_ns: "1", alert_type: "ml" as const, rule_name: rule,
+      severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+      entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
+      dedup_count: 1, source_type: "syslog",
+    });
+    act(() => {
+      MockWS.last!._msg({ type: "alert_batch", alerts: [mkAlert("b1", "batch-rule-1"), mkAlert("b2", "batch-rule-2")] });
+    });
+    expect(screen.getByText("batch-rule-1")).toBeInTheDocument();
+    expect(screen.getByText("batch-rule-2")).toBeInTheDocument();
+
+    act(() => {
+      MockWS.last!._msg({ type: "batch", events: [mkAlert("b3", "envelope-rule-3")] });
+    });
+    expect(screen.getByText("envelope-rule-3")).toBeInTheDocument();
+  });
+
   it("uses h-full min-h-0 so the section fills its grid cell (no viewport calc)", async () => {
     fetchMock.mockResolvedValueOnce({ items: [] });
     const { container } = renderWithProvider();
