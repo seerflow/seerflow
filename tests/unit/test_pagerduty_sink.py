@@ -420,6 +420,58 @@ class TestPagerDutySinkAsync:
         call_args = session.post.call_args[0][0]
         assert call_args == _PD_ENDPOINT
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_run_survives_programmer_error_in_send(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-3(a): a programmer error inside `_send` must not kill the consumer.
+
+        After S-197 narrowed the `except` block in `_send`, unexpected exceptions
+        (TypeError, AttributeError, …) can now propagate out. Without a guard in
+        `run()` the consumer task would die silently on the first bad alert. This
+        test wires `_send` to raise `TypeError` on the first event and succeed on
+        the second, then asserts: (i) `run()` returns without raising; (ii) the
+        log line from the guard was captured on the `seerflow` logger at
+        EXCEPTION/ERROR level; (iii) the second event was still processed.
+        """
+        from seerflow.alerting.sinks.pagerduty import PagerDutySink
+
+        session = _mock_session(202)
+        sink = PagerDutySink(routing_key="test-key", session=session)
+
+        # Replace the real async `_send` with an AsyncMock that raises on the
+        # first await and succeeds on the second. This lets us observe that the
+        # consumer survived the first raise and kept processing.
+        fake_send = AsyncMock(side_effect=[TypeError("boom"), None])
+        sink._send = fake_send  # type: ignore[method-assign]
+
+        caplog.set_level("ERROR", logger="seerflow")
+
+        sink.enqueue_trigger(_make_alert())
+        sink.enqueue_trigger(_make_alert())
+        await sink.stop()
+        await asyncio.wait_for(sink.run(), timeout=5.0)
+
+        assert fake_send.await_count == 2, (
+            "second event was never dispatched — consumer likely died on first TypeError"
+        )
+        matching = [
+            rec
+            for rec in caplog.records
+            if rec.name == "seerflow"
+            and "PagerDutySink: unexpected error in _send" in rec.getMessage()
+        ]
+        assert len(matching) == 1, (
+            f"expected exactly one guard log line, got {len(matching)}: "
+            f"{[r.getMessage() for r in caplog.records]}"
+        )
+        # AC-4: log must not leak payload / dedup_key / alert content.
+        msg = matching[0].getMessage()
+        assert "routing_key" not in msg
+        assert "test-key" not in msg
+        assert "dedup_key" not in msg
+
 
 class TestSendProgrammerErrorPropagation:
     """S-197 (M-2): `_send` must not swallow programmer errors (TypeError,
