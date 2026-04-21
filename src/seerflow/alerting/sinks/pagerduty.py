@@ -180,7 +180,12 @@ class PagerDutySink:
                 event = await asyncio.wait_for(self._queue.get(), timeout=1.0)
             except TimeoutError:
                 continue
-            await self._send(event.payload)
+            try:
+                await self._send(event.payload)
+            except Exception:  # intentional programmer-error guard; see S-205
+                _log.exception(
+                    "PagerDutySink: unexpected error in _send; dropping event and continuing"
+                )
 
     async def stop(self) -> None:
         """Signal the consumer to stop after draining remaining items."""

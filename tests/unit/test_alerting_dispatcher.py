@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import uuid
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +14,9 @@ import pytest
 from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -63,6 +68,27 @@ async def _run_and_cancel(dispatcher: AlertDispatcher, delay: float = 0.05) -> N
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
+
+
+@contextlib.contextmanager
+def caplog_handler(logger_name: str) -> Iterator[list[logging.LogRecord]]:
+    """Capture log records emitted on `logger_name` during the block."""
+    records: list[logging.LogRecord] = []
+
+    class _ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    logger = logging.getLogger(logger_name)
+    handler = _ListHandler(level=logging.DEBUG)
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prior_level)
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +536,57 @@ async def test_dispatcher_run_stops_router_after_queue_drains() -> None:
     await asyncio.wait_for(d.run(), timeout=5.0)
 
     fake_router.stop.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_run_survives_programmer_error_in_router_route() -> None:
+    """AC-3(b): a programmer error inside router.route must not kill the consumer.
+
+    `AlertDispatcher._dispatch` guards the legacy per-target fan-out
+    (`_format` / `_post_with_retry`) but not the earlier
+    `await self._router.route(alert)` call. If `router.route` raises an
+    unexpected exception (e.g. TypeError from a refactor bug in rule
+    matching or quiet-hours logic), the consumer task dies silently.
+    """
+    from tests.unit.alert_factory import make_alert
+
+    session = _mock_session(status=200)
+    target = WebhookTarget(name="t1", url="https://a/x", format="json")
+
+    fake_router = AsyncMock()
+    fake_router.route.side_effect = [TypeError("boom"), None]
+    # Ensure router.stop() (called after queue drains) is awaitable and side-effect-free.
+    fake_router.stop = AsyncMock(return_value=None)
+
+    d = AlertDispatcher(targets=(target,), session=session, router=fake_router)
+    alert_a = make_alert(alert_id="11111111-1111-1111-1111-111111111111")
+    alert_b = make_alert(alert_id="22222222-2222-2222-2222-222222222222")
+    d.enqueue(alert_a)
+    d.enqueue(alert_b)
+    await d.stop()
+
+    with caplog_handler("seerflow") as records:
+        await asyncio.wait_for(d.run(), timeout=5.0)
+
+    assert fake_router.route.await_count == 2, (
+        "second alert was never routed — consumer likely died on first TypeError"
+    )
+    matching = [
+        r for r in records if "AlertDispatcher: unexpected error in router.route" in r.getMessage()
+    ]
+    assert len(matching) == 1, (
+        f"expected exactly one guard log line, got {len(matching)}: "
+        f"{[r.getMessage() for r in records]}"
+    )
+    # AC-4: no alert content in the log message — neither the field names
+    # nor the concrete UUID of the alert that triggered the guard may appear.
+    msg = matching[0].getMessage()
+    assert "alert_id" not in msg
+    assert "entity_value" not in msg
+    assert alert_a.alert_id not in msg, f"log message leaked the failing alert's UUID: {msg!r}"
+    assert alert_b.alert_id not in msg, f"log message leaked the subsequent alert's UUID: {msg!r}"
+    session.post.assert_not_called()
 
 
 class TestResponseBodyLogging:
