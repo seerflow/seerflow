@@ -2,6 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { logger } from "@/lib/logger";
 import * as wsBus from "@/lib/wsBus";
+import { merged as mergedWsFilter } from "@/lib/wsFilter";
 import type { WsMessage, WsStatus } from "@/lib/types";
 
 type SendFn = (msg: unknown) => void;
@@ -21,6 +22,10 @@ export function WsProvider({ children }: { children: ReactNode }): JSX.Element {
   const { send } = useWebSocket(url, {
     onMessage: (m: WsMessage) => wsBus.emit(m),
     onStatusChange: (s: WsStatus) => wsBus.emit({ type: "__status", status: s }),
+    // Replay the current merged filter on every (re)connect so the server
+    // resumes honoring widget filters without waiting for the 150 ms debounce
+    // in each widget's filter-push effect to re-fire.
+    getFilterMessage: () => mergedWsFilter(),
   });
   return <Ctx.Provider value={send}>{children}</Ctx.Provider>;
 }

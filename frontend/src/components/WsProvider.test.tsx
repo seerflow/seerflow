@@ -75,7 +75,21 @@ describe("WsProvider", () => {
     getByText("go").click();
     expect(FakeSocket.lastInstance!.sent).toHaveLength(0);
     act(() => { FakeSocket.lastInstance!.onopen?.(); });
-    expect(FakeSocket.lastInstance!.sent).toEqual([JSON.stringify({ type: "ping" })]);
+    // On open useWebSocket sends the merged filter first (empty → `{type:"filter"}`)
+    // and then flushes the queued ping.
+    expect(FakeSocket.lastInstance!.sent).toEqual([
+      JSON.stringify({ type: "filter" }),
+      JSON.stringify({ type: "ping" }),
+    ]);
+  });
+
+  it("replays the merged wsFilter on every (re)connect via getFilterMessage", async () => {
+    const { setIntent } = await import("@/lib/wsFilter");
+    setIntent("alerts", { sources: ["auth"] });
+    render(<WsProvider><div /></WsProvider>);
+    act(() => { FakeSocket.lastInstance!.onopen?.(); });
+    const first = JSON.parse(FakeSocket.lastInstance!.sent[0]!);
+    expect(first).toEqual({ type: "filter", sources: ["auth"] });
   });
 
   it("useWsSend() throws when called outside the provider", () => {

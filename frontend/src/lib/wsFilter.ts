@@ -23,7 +23,7 @@ function unionNum(a?: number[], b?: number[]): number[] | undefined {
   return set.size ? [...set] : undefined;
 }
 
-function merged(): WsFilter {
+export function merged(): WsFilter {
   const a = intents.alerts;
   const e = intents.events;
   const sources = unionStr(a.sources, e.sources);

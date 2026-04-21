@@ -49,6 +49,8 @@ export type WsMessage =
   // S-062 internal: synthetic bus-only status frame emitted by WsProvider so
   // the global DisconnectedBanner and per-widget pips can subscribe uniformly
   // to connection-lifecycle changes. Never arrives from the network.
+  // Any exhaustive `switch (msg.type)` over this union must handle or narrow
+  // `"__status"` away (e.g., `case "__status": return;`).
   | { type: "__status"; status: WsStatus };
 
 export type TimelineRange = "1h" | "6h" | "24h" | "7d";
