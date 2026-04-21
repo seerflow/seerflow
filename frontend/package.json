@@ -17,6 +17,7 @@
     "e2e": "if [ \"$RUN_E2E\" = \"1\" ]; then playwright test; else echo 'E2E skipped (set RUN_E2E=1)'; fi"
   },
   "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-select": "^2.2.6",
