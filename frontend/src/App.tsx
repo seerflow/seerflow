@@ -4,14 +4,14 @@ import { Button } from "@/components/ui/button";
 import { useThemeStore } from "@/stores/theme";
 import wordmarkLight from "@/assets/wordmark-light.svg";
 import wordmarkDark from "@/assets/wordmark-dark.svg";
-import { AlertFeed } from "@/components/AlertFeed/AlertFeed";
-import { AnomalyTimeline } from "@/components/AnomalyTimeline/AnomalyTimeline";
 import { EntitySearch } from "@/components/EntityExplorer/EntitySearch";
 import { EntityDetail } from "@/components/EntityExplorer/EntityDetail";
-import { EventStream } from "@/components/EventStream/EventStream";
 import { AttackHeatmap } from "@/components/AttackHeatmap/AttackHeatmap";
 import { WsProvider } from "@/components/WsProvider";
 import { DisconnectedBanner } from "@/components/DisconnectedBanner";
+import { DashboardGrid } from "@/components/DashboardGrid/DashboardGrid";
+import { AddWidgetMenu } from "@/components/DashboardGrid/AddWidgetMenu";
+import { ResetLayoutButton } from "@/components/DashboardGrid/ResetLayoutButton";
 import { hashHasEntity, hashHasCoverage } from "@/lib/hash";
 import { useEntityStore } from "@/stores/entity";
 
@@ -42,13 +42,16 @@ export default function App() {
   }, [restore, clearSelection]);
 
   const showEntity = hashHasEntity(hash);
+  const showCoverage = hashHasCoverage(hash);
 
   return (
     <WsProvider>
-      <main className="min-h-screen p-6">
+      <main className="flex flex-col min-h-screen p-6">
         <header className="mb-6 flex items-center justify-between gap-4">
           <img src={wordmark} alt="Seerflow" className="h-8 w-auto select-none" />
           <EntitySearch />
+          <AddWidgetMenu />
+          <ResetLayoutButton />
           <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" onClick={() => { window.location.hash = "coverage"; }}>
             <Shield className="h-5 w-5" />
           </Button>
@@ -57,17 +60,15 @@ export default function App() {
           </Button>
         </header>
         <DisconnectedBanner />
-        {showEntity ? (
-          <EntityDetail />
-        ) : hashHasCoverage(hash) ? (
-          <AttackHeatmap />
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            <AlertFeed />
-            <AnomalyTimeline />
-            <div className="lg:col-span-2"><EventStream /></div>
-          </div>
-        )}
+        <div className="flex-1 min-h-0">
+          {showEntity ? (
+            <EntityDetail />
+          ) : showCoverage ? (
+            <AttackHeatmap />
+          ) : (
+            <DashboardGrid />
+          )}
+        </div>
       </main>
     </WsProvider>
   );
