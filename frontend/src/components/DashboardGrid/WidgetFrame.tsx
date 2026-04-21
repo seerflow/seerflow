@@ -19,6 +19,12 @@ export function WidgetFrame({
           role="button"
           aria-label={`Drag ${title}`}
           tabIndex={0}
+          onKeyDown={(e) => {
+            // Keyboard drag is a known react-grid-layout gap (documented for
+            // S-062C); intercept Space here so focusing the handle and pressing
+            // Space does not page-scroll the dashboard.
+            if (e.key === " ") e.preventDefault();
+          }}
         >
           <GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           {title}
@@ -26,10 +32,10 @@ export function WidgetFrame({
         <button
           type="button"
           aria-label={`Remove ${title}`}
-          className="rounded p-1 text-muted-foreground hover:bg-muted focus:outline-none focus:ring-2"
+          className="rounded p-1 text-muted-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
           onClick={onRemove}
         >
-          <X className="h-4 w-4" />
+          <X className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
       <CardContent className="flex-1 min-h-0 overflow-hidden p-0">{children}</CardContent>

@@ -64,10 +64,20 @@ describe("layout store", () => {
     expect(useLayoutStore.getState().widgets).toEqual(DEFAULT_WIDGETS);
   });
 
-  it("mutations of the live layouts do not leak into DEFAULT_LAYOUTS", () => {
-    const s = useLayoutStore.getState();
-    s.layouts.lg[0].x = 999;
-    expect(DEFAULT_LAYOUTS.lg[0].x).not.toBe(999);
+  it("setLayouts does not alias the caller's array (deep-copies on commit)", () => {
+    const lg = DEFAULT_LAYOUTS.lg.map((l) => ({ ...l }));
+    useLayoutStore.getState().setLayouts({ ...DEFAULT_LAYOUTS, lg });
+    lg[0].x = 999;
+    expect(useLayoutStore.getState().layouts.lg[0].x).not.toBe(999);
+  });
+
+  it("resetToDefault rebuilds layouts from an unmutated DEFAULT_LAYOUTS", () => {
+    const before = DEFAULT_LAYOUTS.lg[0].x;
+    const live = useLayoutStore.getState().layouts;
+    live.lg[0].x = 999;
+    useLayoutStore.getState().resetToDefault();
+    expect(DEFAULT_LAYOUTS.lg[0].x).toBe(before);
+    expect(useLayoutStore.getState().layouts.lg[0].x).toBe(before);
   });
 
   it("rehydrate with a valid blob restores persisted widgets and layouts", async () => {

@@ -20,12 +20,12 @@ export const ALL_WIDGET_IDS: readonly WidgetId[] = [
   "sourceHealthPreview",
 ] as const;
 
-export const DEFAULT_WIDGETS: WidgetId[] = [
+export const DEFAULT_WIDGETS: readonly WidgetId[] = [
   "alertFeed",
   "anomalyTimeline",
   "entityExplorer",
   "eventStream",
-];
+] as const;
 
 export interface GridItem {
   i: string;
@@ -126,7 +126,11 @@ export const useLayoutStore = create<LayoutState>()(
           },
         })),
 
-      setLayouts: (layouts) => set((s) => ({ ...s, layouts })),
+      setLayouts: (layouts) =>
+        set((s) => ({
+          ...s,
+          layouts: JSON.parse(JSON.stringify(layouts)) as LayoutsByBreakpoint,
+        })),
 
       resetToDefault: () =>
         set(() => ({
@@ -156,7 +160,7 @@ export const useLayoutStore = create<LayoutState>()(
         return {
           ...current,
           version: 1,
-          widgets: cleaned as WidgetId[],
+          widgets: cleaned,
           layouts: result.output.layouts as LayoutsByBreakpoint,
         };
       },
