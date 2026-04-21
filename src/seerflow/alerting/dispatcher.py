@@ -142,7 +142,13 @@ class AlertDispatcher:
     async def _dispatch(self, alert: Alert) -> None:
         """Send the alert to all configured targets, respecting severity filters."""
         if self._router is not None:
-            await self._router.route(alert)
+            try:
+                await self._router.route(alert)
+            except Exception:  # intentional programmer-error guard; see S-205
+                _log.exception(
+                    "AlertDispatcher: unexpected error in router.route;"
+                    " dropping alert and continuing"
+                )
             return
         for target in self._targets:
             if int(alert.severity_id) < target.min_severity:
