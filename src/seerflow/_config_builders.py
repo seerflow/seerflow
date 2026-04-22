@@ -935,12 +935,6 @@ def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
         template_top_k=_require_pos_int(
             data, "template_top_k", defaults.template_top_k, "ueba.template_top_k"
         ),
-        flush_interval_s=_require_pos_int(
-            data,
-            "flush_interval_s",
-            defaults.flush_interval_s,
-            "ueba.flush_interval_s",
-        ),
     )
 
 

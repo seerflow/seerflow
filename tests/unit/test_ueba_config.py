@@ -22,7 +22,6 @@ def test_ueba_config_defaults() -> None:
     assert cfg.ema_alpha == pytest.approx(0.05)
     assert cfg.source_ip_cap == 64
     assert cfg.template_top_k == 32
-    assert cfg.flush_interval_s == 300
 
 
 @pytest.mark.unit
@@ -44,7 +43,6 @@ def test_load_config_roundtrips_ueba_block(tmp_path: Path) -> None:
         "  ema_alpha: 0.1\n"
         "  source_ip_cap: 16\n"
         "  template_top_k: 8\n"
-        "  flush_interval_s: 60\n"
     )
     cfg = load_config(str(config_path))
     assert cfg.ueba.enabled is False
@@ -54,7 +52,6 @@ def test_load_config_roundtrips_ueba_block(tmp_path: Path) -> None:
     assert cfg.ueba.ema_alpha == pytest.approx(0.1)
     assert cfg.ueba.source_ip_cap == 16
     assert cfg.ueba.template_top_k == 8
-    assert cfg.ueba.flush_interval_s == 60
 
 
 @pytest.mark.unit

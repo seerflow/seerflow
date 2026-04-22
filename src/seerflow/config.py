@@ -213,7 +213,6 @@ class UEBAConfig:
     ema_alpha: float = 0.05
     source_ip_cap: int = 64
     template_top_k: int = 32
-    flush_interval_s: int = 300
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
