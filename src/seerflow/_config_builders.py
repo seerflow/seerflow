@@ -39,6 +39,7 @@ from seerflow.config import (
     LLMConfig,
     ReceiverConfig,
     StorageConfig,
+    UEBAConfig,
     WebhookEndpointConfig,
 )
 
@@ -882,6 +883,64 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
         backend=data.get("backend", ""),
         model_path=data.get("model_path", ""),
         ollama_url=data.get("ollama_url", "http://localhost:11434"),
+    )
+
+
+def _require_bool(data: dict[str, Any], key: str, default: bool, label: str) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{label} must be a boolean, got {type(value).__name__}")
+    return value
+
+
+def _require_pos_int(data: dict[str, Any], key: str, default: int, label: str) -> int:
+    value = data.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ConfigError(f"{label} must be an integer >= 1, got {value!r}")
+    return value
+
+
+def _require_number(data: dict[str, Any], key: str, default: float, label: str) -> float:
+    value = data.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{label} must be a number, got {type(value).__name__}")
+    return float(value)
+
+
+def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
+    """Build UEBAConfig from a YAML ``ueba:`` section.
+
+    All fields are optional — omitted keys fall back to UEBAConfig defaults.
+    Type mismatches raise ConfigError with the offending key labelled.
+    """
+    defaults = UEBAConfig()
+    return UEBAConfig(
+        enabled=_require_bool(data, "enabled", defaults.enabled, "ueba.enabled"),
+        warmup_days=_require_pos_int(
+            data, "warmup_days", defaults.warmup_days, "ueba.warmup_days"
+        ),
+        warmup_min_events=_require_pos_int(
+            data,
+            "warmup_min_events",
+            defaults.warmup_min_events,
+            "ueba.warmup_min_events",
+        ),
+        max_entities=_require_pos_int(
+            data, "max_entities", defaults.max_entities, "ueba.max_entities"
+        ),
+        ema_alpha=_require_number(data, "ema_alpha", defaults.ema_alpha, "ueba.ema_alpha"),
+        source_ip_cap=_require_pos_int(
+            data, "source_ip_cap", defaults.source_ip_cap, "ueba.source_ip_cap"
+        ),
+        template_top_k=_require_pos_int(
+            data, "template_top_k", defaults.template_top_k, "ueba.template_top_k"
+        ),
+        flush_interval_s=_require_pos_int(
+            data,
+            "flush_interval_s",
+            defaults.flush_interval_s,
+            "ueba.flush_interval_s",
+        ),
     )
 
 

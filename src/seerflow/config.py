@@ -283,6 +283,9 @@ from seerflow._config_builders import (  # noqa: E402
     _build_storage as _build_storage,
 )
 from seerflow._config_builders import (  # noqa: E402
+    _build_ueba as _build_ueba,
+)
+from seerflow._config_builders import (  # noqa: E402
     _build_webhook_configs as _build_webhook_configs,
 )
 from seerflow._config_builders import (  # noqa: E402
@@ -376,6 +379,7 @@ def load_config(
         correlation=_build_correlation(raw.get("correlation", {})),
         alerting=_build_alerting(raw.get("alerting", {})),
         llm=_build_llm(raw.get("llm", {})),
+        ueba=_build_ueba(raw.get("ueba", {})),
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
