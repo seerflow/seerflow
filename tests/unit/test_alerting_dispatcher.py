@@ -650,3 +650,48 @@ class TestResponseBodyLogging:
             await asyncio.wait_for(dispatcher.run(), timeout=5.0)
 
         assert resp_mock.text.call_count == 3  # 3 retries
+
+
+# ---------------------------------------------------------------------------
+# S-171: dashboard_url masking (defensive)
+# ---------------------------------------------------------------------------
+
+_SENSITIVE_DASHBOARD_URL = "https://dashboard.example.com/auth/secret-token-abc123"
+
+
+@pytest.mark.unit
+def test_dispatcher_repr_does_not_expose_dashboard_url() -> None:
+    """S-171 AC-1: AlertDispatcher.__repr__ must never interpolate the raw
+    ``_dashboard_url`` — protects against accidental ``logger.info("%s", self)``.
+    """
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    text = repr(dispatcher)
+    assert "secret-token-abc123" not in text
+    assert "/auth/" not in text
+
+
+@pytest.mark.unit
+def test_dispatcher_masked_dashboard_url_strips_path() -> None:
+    """S-171 AC-2: the masked accessor returns host-only form."""
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    masked = dispatcher.masked_dashboard_url()
+    assert "secret-token-abc123" not in masked
+    assert masked == "https://dashboard.example.com/***"
+
+
+@pytest.mark.unit
+def test_dispatcher_masked_dashboard_url_handles_empty() -> None:
+    """Empty ``dashboard_url`` (default) must return empty string, not a placeholder."""
+    session = _mock_session()
+    dispatcher = AlertDispatcher(targets=(), session=session)
+    assert dispatcher.masked_dashboard_url() == ""

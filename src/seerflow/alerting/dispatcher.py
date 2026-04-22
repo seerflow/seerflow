@@ -109,6 +109,29 @@ class AlertDispatcher:
         self._dashboard_url = dashboard_url
         self._router = router
 
+    def masked_dashboard_url(self) -> str:
+        """Return a host-only form of ``dashboard_url`` safe for log output.
+
+        Empty ``dashboard_url`` (the default) returns ``""`` so log sites
+        can skip the field entirely rather than printing a placeholder.
+        """
+        if not self._dashboard_url:
+            return ""
+        return mask_webhook_url(self._dashboard_url)
+
+    def __repr__(self) -> str:
+        """Explicit repr that never interpolates the raw ``_dashboard_url``.
+
+        Guards against ``logger.info("dispatcher=%s", self)`` ever leaking
+        embedded tokens if the class is later converted to a dataclass
+        (whose default ``__repr__`` would dump every attribute).
+        """
+        masked = self.masked_dashboard_url() or "<unset>"
+        return (
+            f"AlertDispatcher(targets={len(self._targets)}, "
+            f"running={self._running}, dashboard_url={masked})"
+        )
+
     def enqueue(self, alert: Alert) -> None:
         """Enqueue an alert for delivery. Drops silently if queue is full."""
         try:
