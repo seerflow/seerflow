@@ -227,3 +227,33 @@ class TestWebhookPipeline:
             await asyncio.wait_for(task, timeout=5.0)
 
         assert len(received) == 0, f"Expected 0 POSTs with min_severity=99, got {len(received)}"
+
+    async def test_dispatcher_lifecycle_drain(
+        self,
+        webhook_server: tuple[str, list[dict[str, object]]],
+    ) -> None:
+        """Dispatcher drains all enqueued alerts before the consumer task exits.
+
+        Verifies shutdown ordering: ``stop()`` flips the running flag, but
+        ``run()`` must continue pulling from the queue until it is empty so no
+        alert is dropped on shutdown.
+        """
+        url, received = webhook_server
+        target = WebhookTarget(name="webhook-drain", url=url, format="json", min_severity=0)
+
+        async with aiohttp.ClientSession() as session:
+            dispatcher = AlertDispatcher(targets=(target,), session=session)
+            task = asyncio.create_task(dispatcher.run())
+
+            # Enqueue 5 alerts directly (bypass handler).
+            for i in range(5):
+                dispatcher.enqueue(_make_alert(rule_name=f"rule-{i}"))
+
+            # Stop and wait for drain.
+            await dispatcher.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+        assert len(received) == 5, f"Expected 5 POSTs after drain, got {len(received)}"
+        # Verify each payload is distinct.
+        rule_names = {p["rule_name"] for p in received}
+        assert rule_names == {f"rule-{i}" for i in range(5)}
