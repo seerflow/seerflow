@@ -650,3 +650,93 @@ class TestResponseBodyLogging:
             await asyncio.wait_for(dispatcher.run(), timeout=5.0)
 
         assert resp_mock.text.call_count == 3  # 3 retries
+
+
+# ---------------------------------------------------------------------------
+# S-171: dashboard_url masking (defensive)
+# ---------------------------------------------------------------------------
+
+_SENSITIVE_DASHBOARD_URL = "https://dashboard.example.com/auth/secret-token-abc123"
+
+
+@pytest.mark.unit
+def test_dispatcher_repr_does_not_expose_dashboard_url() -> None:
+    """S-171 AC-1: AlertDispatcher.__repr__ must never interpolate the raw
+    ``_dashboard_url`` — protects against accidental ``logger.info("%s", self)``.
+    """
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    text = repr(dispatcher)
+    assert "secret-token-abc123" not in text
+    assert "/auth/" not in text
+
+
+@pytest.mark.unit
+def test_dispatcher_masked_dashboard_url_strips_path() -> None:
+    """S-171 AC-2: the masked accessor returns host-only form."""
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    masked = dispatcher.masked_dashboard_url()
+    assert "secret-token-abc123" not in masked
+    assert masked == "https://dashboard.example.com/***"
+
+
+@pytest.mark.unit
+def test_dispatcher_masked_dashboard_url_handles_empty() -> None:
+    """Empty ``dashboard_url`` (default) must return empty string, not a placeholder."""
+    session = _mock_session()
+    dispatcher = AlertDispatcher(targets=(), session=session)
+    assert dispatcher.masked_dashboard_url() == ""
+
+
+@pytest.mark.unit
+def test_dispatcher_masked_dashboard_url_handles_malformed() -> None:
+    """Malformed ``dashboard_url`` routes through ``mask_webhook_url`` and
+    returns the helper's sentinel rather than echoing the raw string.
+    """
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url="not-a-url-with-secret-xyz",
+    )
+    assert dispatcher.masked_dashboard_url() == "<invalid-url>"
+
+
+@pytest.mark.unit
+def test_webhook_delivery_adapter_repr_does_not_expose_dashboard_url() -> None:
+    """S-171 parity: _WebhookDeliveryAdapter's generated repr must never leak
+    the raw dashboard_url either — ``field(repr=False)`` enforces it.
+    """
+    from seerflow.alerting.dispatcher import _WebhookDeliveryAdapter
+
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    target = WebhookTarget(
+        name="t1",
+        url="https://hooks.slack.test/services/T/B/secret",
+        format="slack",
+        min_severity=int(SeverityLevel.WARNING),
+    )
+    adapter = _WebhookDeliveryAdapter(
+        name=target.name,
+        min_severity=target.min_severity,
+        _target=target,
+        _dispatcher=dispatcher,
+        _dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    text = repr(adapter)
+    assert "secret-token-abc123" not in text
+    assert "/auth/" not in text
