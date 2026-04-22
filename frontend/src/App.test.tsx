@@ -1,9 +1,11 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { ReactNode } from "react";
 import App from "./App";
 import { useThemeStore } from "@/stores/theme";
 import { api } from "@/lib/api";
 import { useEntityStore } from "@/stores/entity";
+import { useLayoutStore } from "@/stores/layout";
 import { hashHasCoverage } from "@/lib/hash";
 import * as wsBus from "@/lib/wsBus";
 
@@ -11,6 +13,28 @@ vi.mock("@/lib/api", () => ({
   api: { get: vi.fn().mockResolvedValue({ items: [] }), post: vi.fn() },
   ApiError: class ApiError extends Error {},
 }));
+
+// jsdom does not measure, so react-grid-layout's WidthProvider cannot compute
+// columns and would skip rendering its children. Replace Responsive /
+// WidthProvider with passthrough components so the real WidgetCatalog widgets
+// mount and can be asserted against directly.
+vi.mock("react-grid-layout", () => {
+  type ResponsiveProps = { children: ReactNode };
+  return {
+    Responsive: ({ children }: ResponsiveProps) => (
+      <div data-testid="rgl">{children}</div>
+    ),
+    WidthProvider:
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (Cmp: any) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (props: any) => <Cmp {...props} width={1200} />,
+  };
+});
+
+// CSS imports are side-effect only; jsdom does not need them.
+vi.mock("react-grid-layout/css/styles.css", () => ({}));
+vi.mock("react-resizable/css/styles.css", () => ({}));
 
 class NoopWS {
   readyState = 0;
@@ -27,9 +51,10 @@ describe("App shell", () => {
     vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
-    // Zustand store is a module-level singleton; reset to the same
-    // initial state each test sees.
+    // Zustand stores are module-level singletons; reset each test so the
+    // layout-grid + theme start from defaults.
     useThemeStore.setState({ theme: "light" });
+    useLayoutStore.getState().resetToDefault();
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -80,6 +105,7 @@ describe("DisconnectedBanner dashboard mount", () => {
     window.history.replaceState(null, "", "/");
     useThemeStore.setState({ theme: "light" });
     useEntityStore.setState(useEntityStore.getInitialState());
+    useLayoutStore.getState().resetToDefault();
     wsBus.clearAll();
     (globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
       class { observe() {} disconnect() {} unobserve() {} } as unknown as typeof ResizeObserver;
@@ -140,9 +166,11 @@ describe("hashHasCoverage", () => {
 describe("App hash routing", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
+    localStorage.clear();
     window.history.replaceState(null, "", "/");
     useEntityStore.setState(useEntityStore.getInitialState());
     useThemeStore.setState({ theme: "light" });
+    useLayoutStore.getState().resetToDefault();
     (globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
       class { observe() {} disconnect() {} unobserve() {} } as unknown as typeof ResizeObserver;
   });
@@ -150,7 +178,12 @@ describe("App hash routing", () => {
 
   it("renders dashboard when hash empty", () => {
     render(<App />);
-    expect(screen.getByRole("combobox", { name: /search entities/i })).toBeInTheDocument();
+    // The header hosts an EntitySearch combobox; the EntityExplorer widget
+    // inside DashboardGrid also mounts one, so at least one must exist and
+    // the EntityDetail branch must NOT be active.
+    expect(
+      screen.getAllByRole("combobox", { name: /search entities/i }).length,
+    ).toBeGreaterThanOrEqual(1);
     expect(screen.queryByRole("region", { name: /entity detail/i })).toBeNull();
   });
 
@@ -162,5 +195,82 @@ describe("App hash routing", () => {
     render(<App />);
     await act(async () => { window.dispatchEvent(new HashChangeEvent("hashchange")); });
     expect(await screen.findByLabelText(/entity detail/i)).toBeInTheDocument();
+  });
+
+  it("renders AttackHeatmap when hash is #coverage", async () => {
+    (api.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      tactics: [],
+      summary: { total_rules_with_attack_tags: 0, total_alerts_matched: 0 },
+      window_since: "2026-01-01T00:00:00Z",
+      window_until: "2026-01-02T00:00:00Z",
+    });
+    window.history.replaceState(null, "", "/#coverage");
+    render(<App />);
+    await act(async () => { window.dispatchEvent(new HashChangeEvent("hashchange")); });
+    expect(await screen.findByText(/ATT&CK Coverage Matrix/i)).toBeInTheDocument();
+  });
+});
+
+describe("S-062C App shell", () => {
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
+    localStorage.clear();
+    window.history.replaceState(null, "", "/");
+    useThemeStore.setState({ theme: "light" });
+    useEntityStore.setState(useEntityStore.getInitialState());
+    useLayoutStore.getState().resetToDefault();
+    wsBus.clearAll();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("renders all four default widget titles via DashboardGrid", async () => {
+    render(<App />);
+    // WidgetFrame titles (exact case) from the WidgetCatalog.
+    expect(await screen.findByText("Alert feed")).toBeInTheDocument();
+    expect(screen.getByText("Anomaly timeline")).toBeInTheDocument();
+    expect(screen.getByText("Entity explorer")).toBeInTheDocument();
+    expect(screen.getByText("Event stream")).toBeInTheDocument();
+  });
+
+  it("exposes Add widget + Reset layout controls in the header", () => {
+    render(<App />);
+    expect(screen.getByRole("button", { name: /add widget/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reset layout/i })).toBeInTheDocument();
+  });
+
+  it("mounts exactly one WebSocket via WsProvider", () => {
+    const ctor = vi.fn(() => new NoopWS());
+    vi.stubGlobal("WebSocket", ctor as unknown as typeof WebSocket);
+    render(<App />);
+    expect(ctor).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("S-062C banner placement", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
+    localStorage.clear();
+    window.history.replaceState(null, "", "/");
+    useThemeStore.setState({ theme: "light" });
+    useEntityStore.setState(useEntityStore.getInitialState());
+    useLayoutStore.getState().resetToDefault();
+    wsBus.clearAll();
+    (globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
+      class { observe() {} disconnect() {} unobserve() {} } as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("DisconnectedBanner is a sibling (not descendant) of the body wrapper", () => {
+    const { container } = render(<App />);
+    act(() => { wsBus.emit({ type: "__status", status: "closed" }); });
+    act(() => { vi.advanceTimersByTime(3000); });
+    const banner = screen.getByText(/live stream disconnected/i);
+    const body = container.querySelector(".flex-1.min-h-0");
+    expect(body).not.toBeNull();
+    expect(body!.contains(banner)).toBe(false);
   });
 });

@@ -63,4 +63,24 @@ describe("AttackHeatmap", () => {
     render(<AttackHeatmap />);
     expect(mockFetch).toHaveBeenCalledOnce();
   });
+
+  it("renders the outermost container with flex h-full min-h-0 flex-col on the happy path", () => {
+    mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
+    const { container } = render(<AttackHeatmap />);
+    const outer = container.firstElementChild as HTMLElement;
+    expect(outer).not.toBeNull();
+    expect(outer.className).toMatch(/\bflex\b/);
+    expect(outer.className).toMatch(/\bh-full\b/);
+    expect(outer.className).toMatch(/\bmin-h-0\b/);
+    expect(outer.className).toMatch(/\bflex-col\b/);
+  });
+
+  it("loading state also fills its parent (h-full min-h-0)", () => {
+    mockStore({ data: null, loading: true, error: null, fetch: mockFetch });
+    const { container } = render(<AttackHeatmap />);
+    const outer = container.firstElementChild as HTMLElement;
+    expect(outer.className).toMatch(/\bh-full\b/);
+    expect(outer.className).toMatch(/\bmin-h-0\b/);
+    expect(outer.className).not.toMatch(/min-h-\[/);
+  });
 });

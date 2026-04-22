@@ -84,7 +84,7 @@ export function AttackHeatmap() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center text-zinc-500">
+      <div className="flex h-full min-h-0 items-center justify-center text-zinc-500">
         Loading coverage data…
       </div>
     );
@@ -92,7 +92,7 @@ export function AttackHeatmap() {
 
   if (error) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center text-red-500">
+      <div className="flex h-full min-h-0 items-center justify-center text-red-500">
         {error}
       </div>
     );
@@ -100,7 +100,7 @@ export function AttackHeatmap() {
 
   if (!data) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center text-zinc-500">
+      <div className="flex h-full min-h-0 items-center justify-center text-zinc-500">
         No coverage data available.
       </div>
     );
@@ -118,7 +118,7 @@ export function AttackHeatmap() {
   );
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-4 flex items-center gap-3">
         <a
           href="#"
@@ -137,7 +137,7 @@ export function AttackHeatmap() {
         windowSince={data.window_since}
         windowUntil={data.window_until}
       />
-      <div className="flex gap-1 overflow-x-auto pb-4">
+      <div className="flex min-h-0 flex-1 gap-1 overflow-x-auto pb-4">
         {merged.map((tactic) => (
           <TacticColumn
             key={tactic.id}

@@ -137,6 +137,71 @@ cd frontend && npm run dev
 # → http://localhost:5173 (Vite proxies /api → :8080)
 ```
 
+## Widget Grid
+
+Configurable dashboard grid (S-062, FR-038 + FR-068) driven by
+`react-grid-layout`. Four core widgets mount by default — **Alert feed**,
+**Anomaly timeline**, **Entity explorer**, **Event stream** — and two
+optional widgets (**ATT&CK coverage**, **Source health**) can be added
+from the header menu.
+
+### Controls
+
+- **Drag** — grab a widget by its title bar (handle shown on hover). Neighbours
+  auto-pack on drop.
+- **Resize** — drag the corner grip.
+- **Add widget** — header `+ Add widget` dropdown lists unmounted widgets.
+  Clicking one appends at the next free slot.
+- **Remove widget** — the `×` button in each widget's title bar. Removed
+  widgets re-appear in the Add menu.
+- **Reset layout** — header `Reset layout` button (opens a confirm dialog;
+  confirming restores the default 4-widget layout).
+
+### Persistence
+
+Layout state (widgets + per-breakpoint positions) persists to `localStorage`
+under the key `seerflow.dashboard.layout.v1`. A Valibot schema guards
+rehydrate — any mismatch falls back to the default layout and logs a
+warning. Tab-to-tab live sync is not implemented; both tabs hydrate from
+the same key on initial load.
+
+### Breakpoints
+
+`react-grid-layout` responsive breakpoints:
+
+| Breakpoint | Min width | Columns |
+|------------|-----------|---------|
+| `lg`       | 1280 px   | 12      |
+| `md`       | 768 px    | 10      |
+| `sm`       | 0 px      | 6       |
+
+Row height is 64 px; margin is 12 px.
+
+### Empty-state recovery
+
+Removing every widget renders a recovery card ("Your dashboard is empty…")
+with a focus-forwarded `Reset layout` button, so the user is never stuck.
+
+### Known gap: keyboard drag
+
+`react-grid-layout` does not ship a keyboard-drag implementation. Add /
+remove / reset are fully keyboard-accessible (dropdown + `×` button +
+confirm dialog), so operators can still reach any layout indirectly;
+true keyboard reordering is a follow-up story.
+
+### End-to-end tests
+
+Playwright smoke at `frontend/e2e/widget-grid.spec.ts` exercises add /
+remove / reset / empty-state / persistence. Gated with `RUN_E2E=1` to
+stay out of the fast Vitest lane:
+
+```sh
+cd frontend && RUN_E2E=1 npx playwright test e2e/widget-grid.spec.ts
+```
+
+The spec uses `stubRestAlerts` + `stubWebSocket` from
+`e2e/fixtures/stubs.ts`; no live backend needed.
+
 ## Deferred dependencies (YAGNI)
 
 These libraries are reserved for downstream sprint stories and are
@@ -144,7 +209,6 @@ intentionally NOT installed by this scaffold story:
 
 | Library | Lands in | Purpose |
 |---------|----------|---------|
-| `react-grid-layout` | S-062 | widget grid |
 | `@tanstack/react-table` | S-058 / S-061 | alert / event tables |
 
 Installing them now would risk a stale lockfile by the time those
