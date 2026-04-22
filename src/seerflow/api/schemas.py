@@ -170,6 +170,7 @@ class FeedbackRequest(BaseModel):
 class FeedbackEventResponse(BaseModel):
     """JSON representation of a single feedback audit-log entry."""
 
+    id: int
     feedback: Literal["tp", "fp"]
     note: str
     origin: Literal["dashboard", "cli", "api"]
@@ -183,6 +184,7 @@ class FeedbackEventResponse(BaseModel):
     @classmethod
     def from_event(cls, ev: FeedbackEvent) -> FeedbackEventResponse:
         return cls(
+            id=ev.id,
             feedback=ev.feedback,
             note=ev.note,
             origin=ev.origin,

@@ -108,3 +108,58 @@ async def test_update_feedback_also_appends_log_row(sqlite_storage: SqliteBacken
     assert ev.feedback == "fp"
     assert ev.origin == "dashboard"
     assert ev.note == "too noisy"
+
+
+@pytest.mark.asyncio
+async def test_list_feedback_events_includes_monotonic_id(
+    sqlite_storage: SqliteBackend,
+) -> None:
+    """Rows carry a positive, monotonically-increasing autoincrement ``id``."""
+    for ts in (10, 20, 30):
+        await sqlite_storage.append_feedback_event("a-1", "tp", "", "dashboard", ts)
+    page = await sqlite_storage.list_feedback_events("a-1")
+    assert all(ev.id > 0 for ev in page.items)
+    # newest-first, so ids should be strictly decreasing
+    ids = [ev.id for ev in page.items]
+    assert ids == sorted(ids, reverse=True)
+    assert len(set(ids)) == len(ids)
+
+
+@pytest.mark.asyncio
+async def test_update_feedback_rolls_back_on_insert_failure(
+    sqlite_storage: SqliteBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Insert failure must roll back the alert UPDATE — no half-written state."""
+    alert = make_alert(alert_id="a-1", feedback="")
+    await sqlite_storage.write_alert(alert)
+
+    real_execute = sqlite_storage._conn.execute
+
+    async def failing_execute(sql: str, *args: object, **kwargs: object) -> object:
+        if isinstance(sql, str) and sql.startswith("INSERT INTO alert_feedback_events"):
+            raise RuntimeError("boom")
+        return await real_execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite_storage._conn, "execute", failing_execute)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await sqlite_storage.update_feedback("a-1", "tp", "", origin="dashboard")
+
+    monkeypatch.setattr(sqlite_storage._conn, "execute", real_execute)
+    stored = await sqlite_storage.get_alert_by_id("a-1")
+    assert stored is not None
+    assert stored.feedback == ""
+    page = await sqlite_storage.list_feedback_events("a-1")
+    assert page.total == 0
+
+
+@pytest.mark.asyncio
+async def test_update_feedback_missing_alert_does_not_write_log(
+    sqlite_storage: SqliteBackend,
+) -> None:
+    """Missing alert is a silent no-op; no audit-log row is written."""
+    await sqlite_storage.update_feedback("does-not-exist", "tp", "", origin="api")
+    page = await sqlite_storage.list_feedback_events("does-not-exist")
+    assert page.total == 0
+    assert page.items == ()

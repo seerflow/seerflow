@@ -26,6 +26,7 @@ def test_feedback_request_rejects_unknown_origin() -> None:
 
 def test_feedback_event_response_round_trip_json() -> None:
     ev = FeedbackEventResponse(
+        id=1,
         feedback="fp",
         note="",
         origin="dashboard",
@@ -33,3 +34,4 @@ def test_feedback_event_response_round_trip_json() -> None:
     )
     payload = ev.model_dump(mode="json")
     assert payload["submitted_at_ns"] == "1700000000000000000"
+    assert payload["id"] == 1

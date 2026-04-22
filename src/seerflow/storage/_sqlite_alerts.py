@@ -12,6 +12,7 @@ by the enclosing backend.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import msgspec
@@ -220,6 +221,27 @@ class _SqliteAlertMixin:
         )
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
+    async def _insert_feedback_event_row(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str,
+        origin: FeedbackOrigin,
+        submitted_at_ns: int,
+    ) -> None:
+        """Emit the feedback-event INSERT. The caller owns the transaction.
+
+        Shared by :meth:`update_feedback` (which wraps it in a
+        ``BEGIN IMMEDIATE`` so the SELECT→UPDATE→INSERT run atomically) and
+        :meth:`append_feedback_event` (which commits on its own).
+        """
+        await self._conn.execute(
+            "INSERT INTO alert_feedback_events "
+            "(alert_id, feedback, note, origin, submitted_at_ns) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [alert_id, feedback, note, origin, submitted_at_ns],
+        )
+
     async def update_feedback(
         self,
         alert_id: str,
@@ -227,14 +249,22 @@ class _SqliteAlertMixin:
         note: str = "",
         origin: FeedbackOrigin = "api",
     ) -> None:
-        """Update alert feedback and append an audit-log row in one transaction.
+        """Update alert feedback and append an audit-log row atomically.
 
-        Implementation note: on the SQLite backend a single aiosqlite connection
-        serialises all operations. A PostgreSQL backend MUST use
-        ``SELECT ... FOR UPDATE`` inside a transaction to prevent lost updates.
+        The ``BEGIN IMMEDIATE`` wrapper ensures the SELECT → UPDATE → INSERT
+        sequence is atomic even if this aiosqlite connection is later shared
+        across async context switches (another task cannot sneak in between
+        the alert UPDATE and the audit-log INSERT).
+
+        The msgpack decode/encode happens outside the transaction because it
+        is CPU-only — holding the write lock during serialisation would
+        needlessly block other writers.
+
+        Implementation note: on the SQLite backend a single aiosqlite
+        connection serialises all operations. A PostgreSQL backend MUST use
+        ``SELECT ... FOR UPDATE`` inside a transaction to prevent lost
+        updates.
         """
-        import time
-
         async with await self._conn.execute(
             "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]
         ) as cursor:
@@ -251,11 +281,8 @@ class _SqliteAlertMixin:
                 "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
                 [feedback, data, alert_id],
             )
-            await self._conn.execute(
-                "INSERT INTO alert_feedback_events "
-                "(alert_id, feedback, note, origin, submitted_at_ns) "
-                "VALUES (?, ?, ?, ?, ?)",
-                [alert_id, feedback, note, origin, submitted_at_ns],
+            await self._insert_feedback_event_row(
+                alert_id, feedback, note, origin, submitted_at_ns
             )
             await self._conn.commit()
         except Exception:
@@ -297,11 +324,8 @@ class _SqliteAlertMixin:
     ) -> None:
         """Append an immutable row to the feedback audit log."""
         try:
-            await self._conn.execute(
-                "INSERT INTO alert_feedback_events "
-                "(alert_id, feedback, note, origin, submitted_at_ns) "
-                "VALUES (?, ?, ?, ?, ?)",
-                [alert_id, feedback, note, origin, submitted_at_ns],
+            await self._insert_feedback_event_row(
+                alert_id, feedback, note, origin, submitted_at_ns
             )
             await self._conn.commit()
         except Exception:
@@ -325,7 +349,7 @@ class _SqliteAlertMixin:
             total = row[0] if row else 0
 
         async with await self._conn.execute(
-            "SELECT feedback, note, origin, submitted_at_ns "
+            "SELECT id, feedback, note, origin, submitted_at_ns "
             "FROM alert_feedback_events WHERE alert_id = ? "
             "ORDER BY submitted_at_ns DESC, id DESC LIMIT ? OFFSET ?",
             [alert_id, limit, offset],
@@ -335,10 +359,11 @@ class _SqliteAlertMixin:
         items = tuple(
             FeedbackEvent(
                 alert_id=alert_id,
-                feedback=r[0],
-                note=r[1],
-                origin=r[2],
-                submitted_at_ns=r[3],
+                feedback=r[1],
+                note=r[2],
+                origin=r[3],
+                submitted_at_ns=r[4],
+                id=r[0],
             )
             for r in rows
         )

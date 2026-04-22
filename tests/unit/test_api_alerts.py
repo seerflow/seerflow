@@ -187,6 +187,21 @@ class TestAlertFeedback:
         assert resp.status_code == 204
         alert_store.update_feedback.assert_called_once_with("alert-001", "tp", "", origin="api")
 
+    def test_submit_tp_feedback_with_dashboard_origin(self) -> None:
+        """``origin`` from the request body passes through to the store call."""
+        alert_store = AsyncMock()
+        alert_store.get_alert_by_id.return_value = _make_alert()
+        alert_store.update_feedback.return_value = None
+        client = TestClient(_make_app(alert_store))
+        resp = client.post(
+            "/api/v1/alerts/alert-001/feedback",
+            json={"feedback": "tp", "origin": "dashboard"},
+        )
+        assert resp.status_code == 204
+        alert_store.update_feedback.assert_called_once_with(
+            "alert-001", "tp", "", origin="dashboard"
+        )
+
     def test_feedback_alert_not_found(self) -> None:
         alert_store = AsyncMock()
         alert_store.get_alert_by_id.return_value = None

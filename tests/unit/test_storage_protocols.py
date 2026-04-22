@@ -36,6 +36,20 @@ class _MockAlertStore(AlertStore):
         note: str = "",
         origin: str = "api",
     ) -> None: ...
+    async def append_feedback_event(self, *args: object, **kwargs: object) -> None: ...
+    async def list_feedback_events(self, *args: object, **kwargs: object) -> Page[object]:
+        from seerflow.models.query import Page
+
+        return Page(items=(), total=0, page=1, limit=50)
+
+    async def get_alert_by_id(self, alert_id: str) -> Alert | None:
+        return None
+
+    async def get_feedback_stats(self) -> dict[str, int]:
+        return {"tp": 0, "fp": 0, "total": 0}
+
+    async def count_by_severity(self) -> dict[str, int]:
+        return {}
 
 
 class _MockModelStore(ModelStore):
