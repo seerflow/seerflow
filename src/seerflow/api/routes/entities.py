@@ -214,6 +214,7 @@ async def get_entity_timeline(
         404: {"description": "Unknown entity or warming up"},
         422: {"description": "Invalid UUID"},
         429: {"description": "Rate limit exceeded"},
+        503: {"description": "UEBA disabled"},
     },
 )
 @limiter.limit(list_limit)
@@ -223,14 +224,17 @@ async def get_entity_baseline(
 ) -> JSONResponse:
     """Return the current UEBA baseline for ``entity_uuid``.
 
-    404 payloads:
+    Response contract:
 
-    - ``{"detail": "unknown entity"}`` — never seen.
-    - ``{"status": "warming_up", ...}`` — seen but not past warmup gates.
+    - 503 ``{"detail": "UEBA disabled"}`` — baseline store not configured
+      (mirrors ``require_entity_store`` for missing backends).
+    - 404 ``{"detail": "unknown entity"}`` — store configured, entity never seen.
+    - 404 ``{"status": "warming_up", ...}`` — seen but not past warmup gates.
+    - 200 — warm baseline payload.
     """
     store = getattr(request.app.state, "baseline_store", None)
     if store is None:
-        raise HTTPException(status_code=404, detail="UEBA disabled")
+        raise HTTPException(status_code=503, detail="UEBA disabled")
     baseline = store.get(str(entity_uuid))
     if baseline is None:
         raise HTTPException(status_code=404, detail="unknown entity")

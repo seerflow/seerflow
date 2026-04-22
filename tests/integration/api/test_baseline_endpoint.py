@@ -122,3 +122,18 @@ def test_baseline_warm_returns_payload(client_warm: TestClient) -> None:
 def test_baseline_invalid_uuid_returns_422(client_empty: TestClient) -> None:
     r = client_empty.get(f"/api/v1/entities/{UUID_BAD}/baseline")
     assert r.status_code == 422
+
+
+def test_baseline_503_when_ueba_disabled(backend: SqliteBackend) -> None:
+    """No baseline_store attached => UEBA disabled => 503, not 404.
+
+    404 conflates "entity not found" with "feature disabled". The
+    require_entity_store dep (api.deps) already uses 503 for missing
+    backends; this route follows the same contract for consistency.
+    """
+    app = create_api_app(log_store=backend, alert_store=backend)
+    app.state.baseline_store = None
+    client = TestClient(app)
+    r = client.get(f"/api/v1/entities/{UUID_OK}/baseline")
+    assert r.status_code == 503
+    assert r.json()["detail"] == "UEBA disabled"
