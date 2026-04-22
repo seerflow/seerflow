@@ -162,7 +162,7 @@ def test_load_config_rejects_weights_not_summing_to_one(tmp_path: Path) -> None:
         "    volume: 0.5\n"
         "    pattern_novelty: 0.5\n"
     )
-    with pytest.raises(ConfigError, match="sub_score_weights must sum to 1.0"):
+    with pytest.raises(ConfigError, match=r"sub_score_weights must sum to 1\.0"):
         load_config(str(yaml))
 
 

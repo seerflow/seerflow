@@ -921,9 +921,7 @@ def _build_sub_score_weights(data: dict[str, Any]) -> UEBASubScoreWeights:
             defaults.source_novelty,
             "ueba.sub_score_weights.source_novelty",
         ),
-        volume=_require_number(
-            data, "volume", defaults.volume, "ueba.sub_score_weights.volume"
-        ),
+        volume=_require_number(data, "volume", defaults.volume, "ueba.sub_score_weights.volume"),
         pattern_novelty=_require_number(
             data,
             "pattern_novelty",
@@ -938,19 +936,10 @@ def _build_sub_score_weights(data: dict[str, Any]) -> UEBASubScoreWeights:
         ("pattern_novelty", weights.pattern_novelty),
     ):
         if not (0.0 < val <= 1.0):
-            raise ConfigError(
-                f"ueba.sub_score_weights.{name} must be in (0.0, 1.0], got {val!r}"
-            )
-    total = (
-        weights.time_of_day
-        + weights.source_novelty
-        + weights.volume
-        + weights.pattern_novelty
-    )
+            raise ConfigError(f"ueba.sub_score_weights.{name} must be in (0.0, 1.0], got {val!r}")
+    total = weights.time_of_day + weights.source_novelty + weights.volume + weights.pattern_novelty
     if abs(total - 1.0) > 1e-6:
-        raise ConfigError(
-            f"ueba.sub_score_weights must sum to 1.0 (got {total})"
-        )
+        raise ConfigError(f"ueba.sub_score_weights must sum to 1.0 (got {total})")
     return weights
 
 
@@ -969,9 +958,7 @@ def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
         data, "score_threshold", defaults.score_threshold, "ueba.score_threshold"
     )
     if not (0.0 <= score_threshold <= 1.0):
-        raise ConfigError(
-            f"ueba.score_threshold must be in [0.0, 1.0], got {score_threshold!r}"
-        )
+        raise ConfigError(f"ueba.score_threshold must be in [0.0, 1.0], got {score_threshold!r}")
 
     weights_raw = data.get("sub_score_weights", {})
     if not isinstance(weights_raw, dict):

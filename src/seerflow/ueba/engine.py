@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING
 import msgspec
 
 from seerflow.detection.threshold import DSpotThreshold
-from seerflow.models._types import EntityType
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.ueba.baseline import bucket_hour_utc
 
 if TYPE_CHECKING:
     from seerflow.config import UEBAConfig
+    from seerflow.models._types import EntityType
     from seerflow.models.event import SeerflowEvent
     from seerflow.ueba.baseline import EntityBaseline
 
@@ -44,9 +44,7 @@ def score_time_of_day(*, ts_ns: int, hours: tuple[int, ...]) -> float:
     return max(0.0, 1.0 - hours[hour] / max_count)
 
 
-def score_source_novelty(
-    *, event_ips: tuple[str, ...], known: frozenset[str]
-) -> float:
+def score_source_novelty(*, event_ips: tuple[str, ...], known: frozenset[str]) -> float:
     """Return the source-IP novelty score.
 
     1.0 when every event IP is new; 0.0 when every event IP is already
@@ -64,7 +62,7 @@ def score_volume(*, volume_ema_min: float) -> float:
 
     Uses the single-event observation rate of 1.0 per minute against the
     baseline EMA. ``z = (1 - lam) / sqrt(lam)``, then ``z/3`` clipped
-    to ``[0, 1]`` — 3σ maps to 1.0.
+    to ``[0, 1]`` — 3-sigma maps to 1.0.
 
     Zero EMA returns 0.0 (brand-new entity / post-eviction guard).
     """
@@ -75,9 +73,7 @@ def score_volume(*, volume_ema_min: float) -> float:
     return min(1.0, max(0.0, z / 3.0))
 
 
-def score_pattern_novelty(
-    *, template_id: int, templates: tuple[tuple[str, float], ...]
-) -> float:
+def score_pattern_novelty(*, template_id: int, templates: tuple[tuple[str, float], ...]) -> float:
     """Return the template-pattern novelty score.
 
     ``template_id == -1`` (no-template sentinel) → 0.0. A template absent
@@ -140,13 +136,9 @@ class UEBAEngine:
         if baseline is None or not baseline.warmup_complete:
             return _zero_breakdown()
 
-        time_of_day = score_time_of_day(
-            ts_ns=event.timestamp_ns, hours=baseline.hours
-        )
+        time_of_day = score_time_of_day(ts_ns=event.timestamp_ns, hours=baseline.hours)
         known_ips = frozenset(ip for ip, _ in baseline.source_ips)
-        source_novelty = score_source_novelty(
-            event_ips=event.related_ips, known=known_ips
-        )
+        source_novelty = score_source_novelty(event_ips=event.related_ips, known=known_ips)
         volume = score_volume(volume_ema_min=baseline.volume_ema_min)
         pattern_novelty = score_pattern_novelty(
             template_id=event.template_id, templates=baseline.templates
@@ -289,7 +281,4 @@ def _encode_breakdown_description(breakdown: UEBAScoreBreakdown) -> str:
     """
     payload = msgspec.to_builtins(breakdown)
     encoded = msgspec.json.encode(payload).decode("utf-8")
-    return (
-        f"UEBA deviation composite={breakdown.composite:.4f} "
-        f"ueba_breakdown={encoded}"
-    )
+    return f"UEBA deviation composite={breakdown.composite:.4f} ueba_breakdown={encoded}"

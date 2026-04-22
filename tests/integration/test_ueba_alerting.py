@@ -42,7 +42,7 @@ def _seed_warm_baseline(
     The baseline is deliberately low-volume (``volume_ema_min=0.0001``)
     and lacks the event's IP/template so every sub-score spikes.
     """
-    store._baselines[entity_uuid] = EntityBaseline(  # noqa: SLF001
+    store._baselines[entity_uuid] = EntityBaseline(
         entity_uuid=entity_uuid,
         entity_type=entity_type,  # type: ignore[arg-type]
         first_seen_ns=0,
@@ -65,9 +65,7 @@ class TestUebaAlertingIntegration:
         self,
         tmp_path: Path,
     ) -> None:
-        storage_cfg = StorageConfig(
-            backend="sqlite", sqlite_path=str(tmp_path / "test.db")
-        )
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
             config = SeerflowConfig(ueba=UEBAConfig(score_threshold=0.1))
@@ -132,9 +130,7 @@ class TestUebaAlertingIntegration:
         self,
         tmp_path: Path,
     ) -> None:
-        storage_cfg = StorageConfig(
-            backend="sqlite", sqlite_path=str(tmp_path / "test.db")
-        )
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
             config = SeerflowConfig(ueba=UEBAConfig(score_threshold=0.1))
@@ -199,9 +195,7 @@ class TestUebaAlertingIntegration:
         tmp_path: Path,
     ) -> None:
         """Without a ueba_engine, no UEBA alerts are produced — zero cost."""
-        storage_cfg = StorageConfig(
-            backend="sqlite", sqlite_path=str(tmp_path / "test.db")
-        )
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         try:
             config = SeerflowConfig()

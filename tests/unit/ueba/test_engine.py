@@ -163,6 +163,14 @@ def test_pattern_novelty_empty_templates_scores_one() -> None:
 
 
 @pytest.mark.unit
+def test_pattern_novelty_known_template_with_zero_max_weight_scores_zero() -> None:
+    # All-zero weights would yield division-by-zero — the defensive branch
+    # returns 0.0 instead (mirrors the warmup path semantic).
+    templates = (("1", 0.0),)
+    assert score_pattern_novelty(template_id=1, templates=templates) == 0.0
+
+
+@pytest.mark.unit
 def test_warm_baseline_helper_smoke() -> None:
     # Ensure the fixture builder produces a warm baseline usable in later tests.
     b = _warm_baseline(volume_ema_min=0.5)
@@ -242,9 +250,7 @@ def test_engine_last_score_none_before_first_score() -> None:
 def test_engine_last_score_updates_after_scoring() -> None:
     engine = UEBAEngine(config=UEBAConfig())
     baseline = _warm_baseline(volume_ema_min=0.0001)
-    engine.score_and_maybe_alert(
-        _mk_event(), baseline=baseline, entity_type="user"
-    )
+    engine.score_and_maybe_alert(_mk_event(), baseline=baseline, entity_type="user")
     bkd = engine.last_score("u1")
     assert bkd is not None
     assert bkd.composite > 0.0
@@ -254,9 +260,7 @@ def test_engine_last_score_updates_after_scoring() -> None:
 def test_engine_last_score_none_when_baseline_missing() -> None:
     # No baseline -> zero breakdown -> last_score stays untouched.
     engine = UEBAEngine(config=UEBAConfig())
-    bkd, alert = engine.score_and_maybe_alert(
-        _mk_event(), baseline=None, entity_type="user"
-    )
+    bkd, alert = engine.score_and_maybe_alert(_mk_event(), baseline=None, entity_type="user")
     assert bkd.composite == 0.0
     assert alert is None
     # Last score still recorded so the API can render "no deviation".
@@ -269,9 +273,7 @@ def test_engine_emits_alert_when_composite_crosses_threshold() -> None:
     cfg = UEBAConfig(score_threshold=0.1)  # low threshold → easy to cross
     engine = UEBAEngine(config=cfg)
     baseline = _warm_baseline(volume_ema_min=0.0001)
-    bkd, alert = engine.score_and_maybe_alert(
-        _mk_event(), baseline=baseline, entity_type="user"
-    )
+    bkd, alert = engine.score_and_maybe_alert(_mk_event(), baseline=baseline, entity_type="user")
     assert bkd.composite >= 0.1
     assert alert is not None
     assert alert.rule_name == "ueba.deviation"
@@ -293,9 +295,27 @@ def test_engine_no_alert_when_below_threshold() -> None:
         volume_ema_min=1.0,
         templates=(("99", 1.0),),
     )
-    _, alert = engine.score_and_maybe_alert(
-        _mk_event(), baseline=baseline, entity_type="user"
+    _, alert = engine.score_and_maybe_alert(_mk_event(), baseline=baseline, entity_type="user")
+    assert alert is None
+
+
+@pytest.mark.unit
+def test_engine_no_alert_when_positive_composite_below_threshold() -> None:
+    # Composite > 0 but still under score_threshold → alert suppressed at
+    # the DSPOT cut-off branch (design decision #2 guards against noise).
+    cfg = UEBAConfig(score_threshold=0.95)
+    engine = UEBAEngine(config=cfg)
+    # Partial-match baseline: source+template match, time & volume deviate.
+    hours = tuple(100 if i == 5 else 0 for i in range(24))
+    baseline = _warm_baseline(
+        hours=hours,
+        source_ips=(("10.0.0.99", 0),),  # matches event's IP
+        volume_ema_min=0.5,  # yields modest volume score
+        templates=(("99", 1.0),),  # matches event's template
     )
+    bkd, alert = engine.score_and_maybe_alert(_mk_event(), baseline=baseline, entity_type="user")
+    # Composite is > 0 but < 0.95.
+    assert 0.0 < bkd.composite < 0.95
     assert alert is None
 
 
@@ -317,9 +337,7 @@ def test_engine_no_alert_during_warmup() -> None:
         volume_last_ns=1_000_000_000,
         templates=(),
     )
-    bkd, alert = engine.score_and_maybe_alert(
-        _mk_event(), baseline=cold, entity_type="user"
-    )
+    bkd, alert = engine.score_and_maybe_alert(_mk_event(), baseline=cold, entity_type="user")
     assert bkd.composite == 0.0
     assert alert is None
 
@@ -341,9 +359,7 @@ def test_engine_no_alert_when_event_has_no_entity_refs() -> None:
         entity_refs=(),
         template_id=99,
     )
-    bkd, alert = engine.score_and_maybe_alert(
-        event, baseline=baseline, entity_type="user"
-    )
+    bkd, alert = engine.score_and_maybe_alert(event, baseline=baseline, entity_type="user")
     # Breakdown is still computed, but no alert and no last_score entry.
     assert alert is None
     assert engine.last_score("") is None
@@ -357,12 +373,8 @@ def test_engine_per_entity_type_dspot_independent() -> None:
     # 'user' tracker must not consume the 'ip' tracker's state.
     engine = UEBAEngine(config=UEBAConfig(score_threshold=0.1))
     baseline = _warm_baseline(volume_ema_min=0.0001)
-    _, a_user = engine.score_and_maybe_alert(
-        _mk_event(), baseline=baseline, entity_type="user"
-    )
-    _, a_ip = engine.score_and_maybe_alert(
-        _mk_event(), baseline=baseline, entity_type="ip"
-    )
+    _, a_user = engine.score_and_maybe_alert(_mk_event(), baseline=baseline, entity_type="user")
+    _, a_ip = engine.score_and_maybe_alert(_mk_event(), baseline=baseline, entity_type="ip")
     assert a_user is not None
     assert a_ip is not None
     # Engine maintains a distinct threshold per entity-type.
@@ -375,9 +387,7 @@ def test_engine_alert_breakdown_roundtrips() -> None:
     cfg = UEBAConfig(score_threshold=0.05)
     engine = UEBAEngine(config=cfg)
     baseline = _warm_baseline(volume_ema_min=0.0001)
-    bkd, alert = engine.score_and_maybe_alert(
-        _mk_event(), baseline=baseline, entity_type="user"
-    )
+    bkd, alert = engine.score_and_maybe_alert(_mk_event(), baseline=baseline, entity_type="user")
     assert alert is not None
     # risk_score on the alert must equal the composite score.
     assert alert.risk_score == pytest.approx(bkd.composite)

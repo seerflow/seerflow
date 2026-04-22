@@ -201,11 +201,7 @@ def make_handler(
         # fold the composite into risk_score. Emit a ueba.deviation alert
         # on threshold crossing, dispatching through the same path as
         # every other alert source.
-        if (
-            ueba_engine is not None
-            and entity_refs
-            and ueba_entity_types
-        ):
+        if ueba_engine is not None and entity_refs and ueba_entity_types:
             ueba_breakdown, ueba_alert = ueba_engine.score_and_maybe_alert(
                 seerflow_event,
                 baseline=ueba_snapshot,
@@ -220,9 +216,7 @@ def make_handler(
                 try:
                     is_new = await storage.write_alert(
                         ueba_alert,
-                        dedup_window_ns=_dedup_window_ns(
-                            ueba_alert.rule_name, _alerting
-                        ),
+                        dedup_window_ns=_dedup_window_ns(ueba_alert.rule_name, _alerting),
                     )
                     if is_new:
                         if alert_dispatcher is not None:
