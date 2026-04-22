@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import msgspec
 
 from seerflow.ueba.baseline import bucket_hour_utc
+
+if TYPE_CHECKING:
+    from seerflow.config import UEBAConfig
+    from seerflow.models.event import SeerflowEvent
+    from seerflow.ueba.baseline import EntityBaseline
 
 
 class UEBAScoreBreakdown(msgspec.Struct, frozen=True, gc=False):
@@ -83,3 +89,67 @@ def score_pattern_novelty(
     if max_w <= 0.0:
         return 0.0
     return 1.0 - tmpl[key] / max_w
+
+
+def _zero_breakdown() -> UEBAScoreBreakdown:
+    return UEBAScoreBreakdown(
+        time_of_day=0.0,
+        source_novelty=0.0,
+        volume=0.0,
+        pattern_novelty=0.0,
+        composite=0.0,
+    )
+
+
+class UEBAEngine:
+    """Stateful wrapper that turns per-event sub-scores into a composite.
+
+    The engine holds configuration plus two ephemeral caches (populated
+    in Task 5): a per-entity-type DSPOT threshold map and a per-entity
+    ``last_score`` map. It does not own the ``BaselineStore`` — callers
+    supply the pre-update baseline on every ``score`` call.
+    """
+
+    def __init__(self, *, config: UEBAConfig) -> None:
+        self._config = config
+        # Task 5 populates these.
+        self._last_score: dict[str, UEBAScoreBreakdown] = {}
+
+    def score(
+        self,
+        event: SeerflowEvent,
+        baseline: EntityBaseline | None,
+    ) -> UEBAScoreBreakdown:
+        """Return a four-dimension breakdown + composite for ``event``.
+
+        Returns a zero-filled breakdown when ``baseline`` is ``None`` or
+        has not yet completed warm-up (design decision #4).
+        """
+        if baseline is None or not baseline.warmup_complete:
+            return _zero_breakdown()
+
+        time_of_day = score_time_of_day(
+            ts_ns=event.timestamp_ns, hours=baseline.hours
+        )
+        known_ips = frozenset(ip for ip, _ in baseline.source_ips)
+        source_novelty = score_source_novelty(
+            event_ips=event.related_ips, known=known_ips
+        )
+        volume = score_volume(volume_ema_min=baseline.volume_ema_min)
+        pattern_novelty = score_pattern_novelty(
+            template_id=event.template_id, templates=baseline.templates
+        )
+        weights = self._config.sub_score_weights
+        composite = (
+            weights.time_of_day * time_of_day
+            + weights.source_novelty * source_novelty
+            + weights.volume * volume
+            + weights.pattern_novelty * pattern_novelty
+        )
+        return UEBAScoreBreakdown(
+            time_of_day=time_of_day,
+            source_novelty=source_novelty,
+            volume=volume,
+            pattern_novelty=pattern_novelty,
+            composite=composite,
+        )

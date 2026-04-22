@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import uuid
+
 import msgspec
 import pytest
 
+from seerflow.config import UEBAConfig
+from seerflow.models.event import SeerflowEvent
 from seerflow.ueba.baseline import EntityBaseline
 from seerflow.ueba.engine import (
+    UEBAEngine,
     UEBAScoreBreakdown,
     score_pattern_novelty,
     score_source_novelty,
@@ -163,3 +168,90 @@ def test_warm_baseline_helper_smoke() -> None:
     b = _warm_baseline(volume_ema_min=0.5)
     assert b.warmup_complete is True
     assert b.volume_ema_min == pytest.approx(0.5)
+
+
+def _mk_event(ts_ns: int = 3_600 * 5 * 1_000_000_000, entity_uuid: str = "u1") -> SeerflowEvent:
+    return SeerflowEvent(
+        event_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        timestamp_ns=ts_ns,
+        observed_ns=ts_ns,
+        otel_severity=9,
+        related_ips=("10.0.0.99",),
+        entity_refs=(entity_uuid,),
+        template_id=99,
+    )
+
+
+@pytest.mark.unit
+def test_engine_score_returns_zero_when_baseline_none() -> None:
+    engine = UEBAEngine(config=UEBAConfig())
+    bkd = engine.score(_mk_event(), baseline=None)
+    assert bkd.composite == 0.0
+    assert bkd.time_of_day == 0.0
+    assert bkd.source_novelty == 0.0
+    assert bkd.volume == 0.0
+    assert bkd.pattern_novelty == 0.0
+
+
+@pytest.mark.unit
+def test_engine_score_returns_zero_when_baseline_not_warm() -> None:
+    engine = UEBAEngine(config=UEBAConfig())
+    cold = EntityBaseline(
+        entity_uuid="u1",
+        entity_type="user",
+        first_seen_ns=0,
+        last_seen_ns=1_000_000_000,
+        event_count=5,
+        warmup_complete=False,
+        hours=(0,) * 24,
+        source_ips=(),
+        volume_ema_min=0.0,
+        volume_ema_hour=0.0,
+        volume_last_ns=1_000_000_000,
+        templates=(),
+    )
+    bkd = engine.score(_mk_event(), baseline=cold)
+    assert bkd.composite == 0.0
+
+
+@pytest.mark.unit
+def test_engine_score_composite_is_weighted_sum() -> None:
+    cfg = UEBAConfig()
+    engine = UEBAEngine(config=cfg)
+    # Warm baseline where we control each sub-score deterministically.
+    hours = tuple(100 if i == 0 else 10 for i in range(24))
+    baseline = _warm_baseline(hours=hours, volume_ema_min=0.0001)
+    bkd = engine.score(_mk_event(), baseline=baseline)
+    w = cfg.sub_score_weights
+    expected = (
+        w.time_of_day * bkd.time_of_day
+        + w.source_novelty * bkd.source_novelty
+        + w.volume * bkd.volume
+        + w.pattern_novelty * bkd.pattern_novelty
+    )
+    assert bkd.composite == pytest.approx(expected)
+
+
+@pytest.mark.unit
+def test_engine_score_composite_with_custom_weights() -> None:
+    # Different weight profile produces a different composite.
+    from seerflow.config import UEBASubScoreWeights
+
+    weights = UEBASubScoreWeights(
+        time_of_day=0.1,
+        source_novelty=0.6,
+        volume=0.1,
+        pattern_novelty=0.2,
+    )
+    cfg = UEBAConfig(sub_score_weights=weights)
+    engine = UEBAEngine(config=cfg)
+    hours = tuple(100 if i == 0 else 10 for i in range(24))
+    baseline = _warm_baseline(hours=hours, volume_ema_min=0.0001)
+    bkd = engine.score(_mk_event(), baseline=baseline)
+    expected = (
+        0.1 * bkd.time_of_day
+        + 0.6 * bkd.source_novelty
+        + 0.1 * bkd.volume
+        + 0.2 * bkd.pattern_novelty
+    )
+    assert bkd.composite == pytest.approx(expected)
