@@ -14,7 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from seerflow.api.deps import StorageDeps, get_storage, parse_timestamp_ns
 from seerflow.api.limits import detail_limit, limiter, list_limit
-from seerflow.api.schemas import AlertResponse, FeedbackRequest, PaginatedResponse
+from seerflow.api.schemas import (
+    AlertResponse,
+    FeedbackEventResponse,
+    FeedbackRequest,
+    PaginatedResponse,
+)
 from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 from seerflow.models.query import AlertQuery, TimeRange
@@ -137,5 +142,37 @@ async def submit_feedback(
         raise HTTPException(status_code=404, detail="Alert not found")
     if body.note:
         _log.info("Persisting feedback note (%d chars)", len(body.note))
-    await storage.alert_store.update_feedback(alert_id, body.feedback, body.note or "")
+    await storage.alert_store.update_feedback(
+        alert_id, body.feedback, body.note or "", origin=body.origin
+    )
     return Response(status_code=204)
+
+
+@router.get(
+    "/alerts/{alert_id}/feedback",
+    response_model=PaginatedResponse[FeedbackEventResponse],
+    responses={429: {"description": "Rate limit exceeded"}},
+)
+@limiter.limit(detail_limit)
+async def list_feedback(
+    request: Request,
+    alert_id: str,
+    storage: Storage,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    limit: Annotated[int, Query(ge=1, description="Results per page")] = 50,
+) -> PaginatedResponse[FeedbackEventResponse]:
+    """Return the feedback audit log for an alert, newest-first."""
+    limit = min(limit, 200)
+    alert = await storage.alert_store.get_alert_by_id(alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    result = await storage.alert_store.list_feedback_events(alert_id, page=page, limit=limit)
+    items = [FeedbackEventResponse.from_event(e) for e in result.items]
+    has_next = (result.page * result.limit) < result.total
+    return PaginatedResponse(
+        items=items,
+        total=result.total,
+        page=result.page,
+        limit=result.limit,
+        has_next=has_next,
+    )

@@ -328,8 +328,7 @@ async def test_migration_v4_creates_feedback_events_table(tmp_path: Path) -> Non
             assert await cur.fetchone() is not None
 
         async with conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='index' AND name='idx_feedback_alert_time'"
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_feedback_alert_time'"
         ) as cur:
             assert await cur.fetchone() is not None
 

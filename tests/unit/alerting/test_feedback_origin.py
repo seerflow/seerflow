@@ -32,9 +32,7 @@ async def test_process_feedback_threads_origin_to_storage() -> None:
 @pytest.mark.asyncio
 async def test_process_feedback_defaults_origin_to_api() -> None:
     storage = MagicMock()
-    storage.get_alert_by_id = AsyncMock(
-        return_value=MagicMock(dedup_key="x", alert_type="ml")
-    )
+    storage.get_alert_by_id = AsyncMock(return_value=MagicMock(dedup_key="x", alert_type="ml"))
     storage.update_feedback = AsyncMock()
 
     await process_feedback(alert_id="a-1", feedback="tp", storage=storage)
