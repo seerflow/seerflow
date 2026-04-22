@@ -29,7 +29,13 @@ class _MockLogStore(LogStore):
 class _MockAlertStore(AlertStore):
     async def write_alert(self, alert: Alert, dedup_window_ns: int = 900_000_000_000) -> bool: ...
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]: ...
-    async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None: ...
+    async def update_feedback(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str = "",
+        origin: str = "api",
+    ) -> None: ...
 
 
 class _MockModelStore(ModelStore):

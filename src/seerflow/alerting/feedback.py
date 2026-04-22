@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.models._types import FeedbackType
     from seerflow.models.alert import Alert
+    from seerflow.models.feedback import FeedbackOrigin
     from seerflow.storage.protocols import AlertStore
 
 _log = logging.getLogger("seerflow")
@@ -36,13 +37,14 @@ async def process_feedback(
     ensemble: DetectionEnsemble | None = None,
     pagerduty_routing_key: str = "",
     note: str = "",
+    origin: FeedbackOrigin = "api",
 ) -> str:
     """Process feedback for an alert. Returns status message."""
     alert = await storage.get_alert_by_id(alert_id)
     if alert is None:
         raise ValueError(f"Alert {alert_id} not found")
 
-    await storage.update_feedback(alert_id, feedback, note)
+    await storage.update_feedback(alert_id, feedback, note, origin=origin)
 
     msg = f"Alert {alert_id[:8]}... marked as {feedback.upper()}"
 

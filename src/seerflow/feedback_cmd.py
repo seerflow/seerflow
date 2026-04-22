@@ -45,6 +45,7 @@ async def run_feedback(args: argparse.Namespace) -> None:
                 ensemble=ensemble,
                 pagerduty_routing_key=config.alerting.pagerduty_routing_key,
                 note=safe_note,
+                origin="cli",
             )
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
