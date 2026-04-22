@@ -93,3 +93,41 @@ def test_learn_promotes_lru() -> None:
     assert store.get("u1") is not None
     assert store.get("u2") is None
     assert store.get("u3") is not None
+
+
+from pathlib import Path  # noqa: E402
+
+from seerflow.config import StorageConfig  # noqa: E402
+from seerflow.storage.sqlite import SqliteBackend  # noqa: E402
+
+
+async def test_store_flush_and_restore_round_trip(tmp_path: Path) -> None:
+    cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "t.db"))
+    backend = await SqliteBackend.connect(cfg)
+    try:
+        a = BaselineStore(params=_params(), max_entities=4)
+        a.snapshot_and_learn(_mk_event("u1", 1), entity_types=("user",))
+        a.snapshot_and_learn(_mk_event("u2", 2), entity_types=("user",))
+        await a.flush(backend)
+
+        b = BaselineStore(params=_params(), max_entities=4)
+        restored = await b.restore(backend)
+        assert restored == 2
+        assert b.get("u1") is not None
+        assert b.get("u2") is not None
+        # LRU order preserved: u1 older than u2.
+        assert list(b._baselines.keys()) == ["u1", "u2"]
+    finally:
+        await backend.close()
+
+
+async def test_restore_missing_key_is_noop(tmp_path: Path) -> None:
+    cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "t.db"))
+    backend = await SqliteBackend.connect(cfg)
+    try:
+        store = BaselineStore(params=_params(), max_entities=4)
+        restored = await store.restore(backend)
+        assert restored == 0
+        assert len(store) == 0
+    finally:
+        await backend.close()

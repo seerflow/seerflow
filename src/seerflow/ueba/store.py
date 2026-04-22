@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from typing import TYPE_CHECKING
+
+import msgspec
 
 from seerflow.ueba.baseline import EntityBaseline, EntityType, UEBAParams, apply_event
 
 if TYPE_CHECKING:
     from seerflow.models.event import SeerflowEvent
+    from seerflow.storage.protocols import ModelStore
+
+_log = logging.getLogger("seerflow")
+
+_STATE_KEY = "ueba.baselines"
 
 
 class BaselineStore:
@@ -62,4 +70,37 @@ class BaselineStore:
             self._baselines.popitem(last=False)
 
     def __len__(self) -> int:
+        return len(self._baselines)
+
+    async def flush(self, model_store: ModelStore) -> None:
+        """Persist the entire LRU as one msgpack blob.
+
+        Swallows per-call failures (logs them) to match the ensemble's
+        flush contract — pipeline lifecycle should not depend on a single
+        persist attempt.
+        """
+        try:
+            blob = msgspec.msgpack.encode(tuple(self._baselines.items()))
+            await model_store.save_state(_STATE_KEY, blob)
+        except Exception:
+            _log.exception("UEBA baseline flush failed")
+
+    async def restore(self, model_store: ModelStore) -> int:
+        """Populate the LRU from persisted state. Returns count restored."""
+        try:
+            blob = await model_store.load_state(_STATE_KEY)
+        except Exception:
+            _log.exception("UEBA baseline load_state failed")
+            return 0
+        if not blob:
+            return 0
+        try:
+            items = msgspec.msgpack.decode(
+                blob,
+                type=tuple[tuple[str, EntityBaseline], ...],
+            )
+        except Exception:
+            _log.exception("UEBA baseline decode failed; starting empty")
+            return 0
+        self._baselines = OrderedDict(items)
         return len(self._baselines)
