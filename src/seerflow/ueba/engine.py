@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import math
+import uuid
 from typing import TYPE_CHECKING
 
 import msgspec
 
+from seerflow.detection.threshold import DSpotThreshold
+from seerflow.models._types import EntityType
+from seerflow.models.alert import Alert
+from seerflow.models.event import SeverityLevel
 from seerflow.ueba.baseline import bucket_hour_utc
 
 if TYPE_CHECKING:
@@ -104,16 +109,23 @@ def _zero_breakdown() -> UEBAScoreBreakdown:
 class UEBAEngine:
     """Stateful wrapper that turns per-event sub-scores into a composite.
 
-    The engine holds configuration plus two ephemeral caches (populated
-    in Task 5): a per-entity-type DSPOT threshold map and a per-entity
-    ``last_score`` map. It does not own the ``BaselineStore`` — callers
-    supply the pre-update baseline on every ``score`` call.
+    The engine holds configuration plus two ephemeral caches:
+
+    - ``_thresholds``: per-entity-type :class:`DSpotThreshold` instances
+      (design decision #2). Cold-start threshold comes from
+      ``config.score_threshold``; DSPOT takes over after its calibration
+      window fills.
+    - ``_last_score``: per-entity ``UEBAScoreBreakdown`` cache (design
+      decision #3). Ephemeral — dropped on restart.
+
+    The engine does not own the :class:`BaselineStore` — callers supply
+    the pre-update baseline on every ``score`` call.
     """
 
     def __init__(self, *, config: UEBAConfig) -> None:
         self._config = config
-        # Task 5 populates these.
         self._last_score: dict[str, UEBAScoreBreakdown] = {}
+        self._thresholds: dict[str, DSpotThreshold] = {}
 
     def score(
         self,
@@ -153,3 +165,131 @@ class UEBAEngine:
             pattern_novelty=pattern_novelty,
             composite=composite,
         )
+
+    def last_score(self, entity_uuid: str) -> UEBAScoreBreakdown | None:
+        """Return the most recent breakdown scored for ``entity_uuid``.
+
+        Returns ``None`` before the engine has scored any event for this
+        entity or after a process restart (cache is ephemeral by design).
+        """
+        return self._last_score.get(entity_uuid)
+
+    def _thresholds_for_test(self) -> dict[str, DSpotThreshold]:
+        """Expose the internal threshold map for unit tests only."""
+        return self._thresholds
+
+    def _threshold_for(self, entity_type: str) -> DSpotThreshold:
+        t = self._thresholds.get(entity_type)
+        if t is None:
+            t = DSpotThreshold(
+                calibration_window=1000,
+                risk_level=0.0001,
+                initial_percentile=98,
+            )
+            self._thresholds[entity_type] = t
+        return t
+
+    def _current_threshold(self, dspot: DSpotThreshold) -> float:
+        """Return the effective alert cut-off score.
+
+        Pre-calibration → config cold-start value. Post-calibration →
+        DSPOT's adaptive upper quantile (bounded below by the config
+        value so a low-volatility channel can't fire on noise).
+        """
+        if not dspot.is_calibrated:
+            return self._config.score_threshold
+        return max(self._config.score_threshold, dspot.threshold)
+
+    def score_and_maybe_alert(
+        self,
+        event: SeerflowEvent,
+        baseline: EntityBaseline | None,
+        *,
+        entity_type: EntityType,
+    ) -> tuple[UEBAScoreBreakdown, Alert | None]:
+        """Score ``event``, cache the breakdown, emit an Alert on crossing.
+
+        Returns ``(breakdown, None)`` when there is no entity to key on,
+        when the baseline is absent/warming up, or when the composite is
+        below the per-entity-type threshold. Returns ``(breakdown, alert)``
+        otherwise. The breakdown is also recorded in ``last_score`` keyed
+        by the first entity UUID.
+        """
+        breakdown = self.score(event, baseline)
+        if not event.entity_refs:
+            return breakdown, None
+        entity_uuid = event.entity_refs[0]
+        self._last_score[entity_uuid] = breakdown
+        # No alerts during warm-up / when baseline is missing.
+        if breakdown.composite <= 0.0:
+            return breakdown, None
+        threshold = self._threshold_for(entity_type)
+        # Feed into DSPOT for future calibration. We DO NOT consult
+        # threshold.update()'s is_anomaly flag — our trigger is the
+        # config cold-start value until DSPOT finishes calibrating.
+        threshold.update(breakdown.composite)
+        cutoff = self._current_threshold(threshold)
+        if breakdown.composite < cutoff:
+            return breakdown, None
+        alert = _build_alert(
+            event=event,
+            entity_uuid=entity_uuid,
+            entity_type=entity_type,
+            breakdown=breakdown,
+        )
+        return breakdown, alert
+
+
+def _build_alert(
+    *,
+    event: SeerflowEvent,
+    entity_uuid: str,
+    entity_type: EntityType,
+    breakdown: UEBAScoreBreakdown,
+) -> Alert:
+    """Construct a ``ueba.deviation`` Alert with the breakdown encoded in place.
+
+    The Alert struct does not carry a ``context`` dict (S-064 era), so
+    the breakdown is serialised into ``description`` as an msgpack-json
+    blob. Downstream consumers decode via :func:`_breakdown_from_description`
+    if they need the structured payload.
+    """
+    description = _encode_breakdown_description(breakdown)
+    # Map composite [0, 1] → severity 1..6 (INFORMATIONAL..FATAL).
+    sev_value = min(6, max(1, 1 + int(breakdown.composite * 6)))
+    severity = SeverityLevel(sev_value)
+    return Alert(
+        alert_id=str(
+            uuid.uuid5(
+                uuid.NAMESPACE_DNS,
+                f"ueba:{entity_uuid}:{event.timestamp_ns}",
+            )
+        ),
+        alert_type="ueba",
+        timestamp_ns=event.timestamp_ns,
+        severity_id=severity,
+        rule_name="ueba.deviation",
+        description=description,
+        entity_uuid=entity_uuid,
+        entity_value="",
+        entity_type=entity_type,
+        contributing_events=(event.event_id,),
+        risk_score=breakdown.composite,
+        dedup_key=f"ueba:{entity_uuid}",
+    )
+
+
+def _encode_breakdown_description(breakdown: UEBAScoreBreakdown) -> str:
+    """Serialise a breakdown into the Alert description.
+
+    Format: ``"UEBA deviation composite=0.68 ueba_breakdown={...json...}"``.
+    The ``ueba_breakdown=`` prefix gives dashboards + log-scrapers a
+    stable parse key without adding an Alert struct field (avoids the
+    msgpack compatibility break flagged in the design spec).
+    """
+    payload = msgspec.to_builtins(breakdown)
+    encoded = msgspec.json.encode(payload).decode("utf-8")
+    return (
+        f"UEBA deviation composite={breakdown.composite:.4f} "
+        f"ueba_breakdown={encoded}"
+    )
