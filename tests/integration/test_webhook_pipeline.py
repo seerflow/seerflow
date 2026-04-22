@@ -114,12 +114,6 @@ async def storage(tmp_path: Path) -> AsyncIterator[SqliteBackend]:
 # ---------------------------------------------------------------------------
 
 
-_NORMAL_MESSAGES = [
-    f"<134>1 2026-03-28T{10 + i // 60:02d}:{i % 60:02d}:00Z web nginx {i} - - "
-    f"GET /api/v1/health 200 {10 + i}ms"
-    for i in range(50)
-]
-
 _ATTACK_MESSAGES = [
     "<134>1 2026-03-28T11:00:00Z server1 bash 1001 - - bash -c whoami",
     "<134>1 2026-03-28T11:00:01Z server1 sshd 1002 - - "
@@ -135,14 +129,27 @@ _ATTACK_MESSAGES = [
 # ---------------------------------------------------------------------------
 
 
-_FORCED_ANOMALY = DetectionResult(
-    score=0.92,
-    upper_threshold=0.65,
-    lower_threshold=0.10,
-    is_anomaly=True,
-    anomaly_direction="upper",
-    source_type="syslog",
-)
+# Sentinel severity above every real SeverityLevel. Referencing the live
+# enum ceiling keeps the filter boundary self-documenting and regression-proof
+# if the enum ever gains a higher value.
+_IMPOSSIBLY_HIGH_SEVERITY = int(SeverityLevel.FATAL) + 1
+
+
+def _forced_anomaly() -> DetectionResult:
+    """Return a fresh DetectionResult stubbing an anomaly hit.
+
+    Returned per-call (instead of a shared module-level constant) so that
+    any accidental mutation in one test cannot bleed into another — aligns
+    with the project's immutability convention for shared test data.
+    """
+    return DetectionResult(
+        score=0.92,
+        upper_threshold=0.65,
+        lower_threshold=0.10,
+        is_anomaly=True,
+        anomaly_direction="upper",
+        source_type="syslog",
+    )
 
 
 class TestWebhookPipeline:
@@ -175,15 +182,16 @@ class TestWebhookPipeline:
                 alert_dispatcher=dispatcher,
             )
 
-            with patch.object(type(ensemble), "process_event", return_value=_FORCED_ANOMALY):
+            with patch.object(type(ensemble), "process_event", return_value=_forced_anomaly()):
                 for msg in _ATTACK_MESSAGES:
                     await handler(_raw(msg))
 
-            # Give dispatcher time to process queue
-            await asyncio.sleep(0.1)
             await dispatcher.stop()
             await asyncio.wait_for(task, timeout=5.0)
 
+        # dispatcher.run() drains the queue before exit — the wait_for above
+        # guarantees every enqueued alert has been POSTed by the time we reach
+        # this assertion, so no time-based sleep is needed.
         assert len(received) > 0, "Expected at least one webhook POST after forced anomaly events"
         payload = received[0]
         assert "alert_id" in payload
@@ -199,11 +207,17 @@ class TestWebhookPipeline:
     ) -> None:
         """Target with min_severity=99 receives no alerts from forced anomalies.
 
-        ``min_severity=99`` is strictly greater than ``SeverityLevel.FATAL`` (6),
-        so every alert produced must be filtered out by AlertDispatcher._dispatch.
+        `_IMPOSSIBLY_HIGH_SEVERITY` is one above the live enum ceiling
+        (`SeverityLevel.FATAL`), so every alert produced must be filtered
+        out by `AlertDispatcher._dispatch`.
         """
         url, received = webhook_server
-        target = WebhookTarget(name="webhook-high-only", url=url, format="json", min_severity=99)
+        target = WebhookTarget(
+            name="webhook-high-only",
+            url=url,
+            format="json",
+            min_severity=_IMPOSSIBLY_HIGH_SEVERITY,
+        )
 
         async with aiohttp.ClientSession() as session:
             dispatcher = AlertDispatcher(targets=(target,), session=session)
@@ -218,15 +232,16 @@ class TestWebhookPipeline:
                 alert_dispatcher=dispatcher,
             )
 
-            with patch.object(type(ensemble), "process_event", return_value=_FORCED_ANOMALY):
+            with patch.object(type(ensemble), "process_event", return_value=_forced_anomaly()):
                 for msg in _ATTACK_MESSAGES:
                     await handler(_raw(msg))
 
-            await asyncio.sleep(0.1)
             await dispatcher.stop()
             await asyncio.wait_for(task, timeout=5.0)
 
-        assert len(received) == 0, f"Expected 0 POSTs with min_severity=99, got {len(received)}"
+        assert len(received) == 0, (
+            f"Expected 0 POSTs with min_severity={_IMPOSSIBLY_HIGH_SEVERITY}, got {len(received)}"
+        )
 
     async def test_dispatcher_lifecycle_drain(
         self,
