@@ -108,6 +108,63 @@ class UEBAParams(msgspec.Struct, frozen=True):
 _NS_PER_DAY = 86_400 * 1_000_000_000
 
 
+class _PriorState(msgspec.Struct, frozen=True, gc=False):
+    """Snapshot of prior-baseline fields used by :func:`apply_event`."""
+
+    is_first: bool
+    hours: tuple[int, ...]
+    ips: tuple[tuple[str, int], ...]
+    templates: tuple[tuple[str, float], ...]
+    ema_min: float
+    ema_hour: float
+    first_seen_ns: int
+    last_seen_ns: int
+    event_count: int
+    warmup_latched: bool
+
+
+def _prior_state(baseline: EntityBaseline | None, ts_ns: int) -> _PriorState:
+    """Extract starting values from ``baseline`` (or defaults when absent)."""
+    if baseline is None:
+        return _PriorState(
+            is_first=True,
+            hours=tuple([0] * 24),
+            ips=(),
+            templates=(),
+            ema_min=0.0,
+            ema_hour=0.0,
+            first_seen_ns=ts_ns,
+            last_seen_ns=ts_ns,
+            event_count=0,
+            warmup_latched=False,
+        )
+    return _PriorState(
+        is_first=False,
+        hours=baseline.hours,
+        ips=baseline.source_ips,
+        templates=baseline.templates,
+        ema_min=baseline.volume_ema_min,
+        ema_hour=baseline.volume_ema_hour,
+        first_seen_ns=baseline.first_seen_ns,
+        last_seen_ns=baseline.last_seen_ns,
+        event_count=baseline.event_count,
+        warmup_latched=baseline.warmup_complete,
+    )
+
+
+def _compute_warmup(
+    *,
+    prev_latched: bool,
+    span_ns: int,
+    event_count: int,
+    params: UEBAParams,
+) -> bool:
+    """Return the latched warmup flag, honouring the once-true rule."""
+    if prev_latched:
+        return True
+    return span_ns >= params.warmup_days * _NS_PER_DAY and event_count >= params.warmup_min_events
+
+
 def apply_event(
     *,
     baseline: EntityBaseline | None,
@@ -118,64 +175,44 @@ def apply_event(
 ) -> EntityBaseline:
     """Return a new EntityBaseline reflecting ``event``."""
     ts_ns = event.timestamp_ns
-    is_first = baseline is None
-    prev_hours = baseline.hours if baseline else tuple([0] * 24)
-    prev_ips = baseline.source_ips if baseline else ()
-    prev_templates = baseline.templates if baseline else ()
-    prev_ema_min = baseline.volume_ema_min if baseline else 0.0
-    prev_ema_hour = baseline.volume_ema_hour if baseline else 0.0
+    prev = _prior_state(baseline, ts_ns)
 
-    hours = update_hours(prev_hours, bucket_hour_utc(ts_ns))
-
-    ips = prev_ips
+    hours = update_hours(prev.hours, bucket_hour_utc(ts_ns))
+    ips = prev.ips
     for ip in event.related_ips:
-        ips = update_source_ips(
-            ips=ips,
-            new_ip=ip,
-            now_ns=ts_ns,
-            cap=params.source_ip_cap,
-        )
-
-    templates = prev_templates
+        ips = update_source_ips(ips=ips, new_ip=ip, now_ns=ts_ns, cap=params.source_ip_cap)
     # SeerflowEvent.template_id is int; -1 is the no-template sentinel.
-    if event.template_id != -1:
-        templates = update_templates(
-            templates=templates,
+    templates = (
+        update_templates(
+            templates=prev.templates,
             template_id=str(event.template_id),
             alpha=params.alpha,
             top_k=params.template_top_k,
         )
-
+        if event.template_id != -1
+        else prev.templates
+    )
     # EMAs: observe "1 event in the last minute/hour" whenever an event arrives.
     ema_min = update_ema(
-        prev=prev_ema_min,
-        observed=1.0,
-        alpha=params.alpha,
-        is_first=is_first,
+        prev=prev.ema_min, observed=1.0, alpha=params.alpha, is_first=prev.is_first
     )
     ema_hour = update_ema(
-        prev=prev_ema_hour,
-        observed=1.0,
-        alpha=params.alpha,
-        is_first=is_first,
+        prev=prev.ema_hour, observed=1.0, alpha=params.alpha, is_first=prev.is_first
     )
 
-    first_seen_ns = baseline.first_seen_ns if baseline else ts_ns
-    last_seen_ns = max(baseline.last_seen_ns if baseline else ts_ns, ts_ns)
-    event_count = (baseline.event_count if baseline else 0) + 1
-
-    span_ns = last_seen_ns - first_seen_ns
-    warmup_complete = (
-        span_ns >= params.warmup_days * _NS_PER_DAY and event_count >= params.warmup_min_events
+    last_seen_ns = max(prev.last_seen_ns, ts_ns)
+    event_count = prev.event_count + 1
+    warmup_complete = _compute_warmup(
+        prev_latched=prev.warmup_latched,
+        span_ns=last_seen_ns - prev.first_seen_ns,
+        event_count=event_count,
+        params=params,
     )
-    # Latch once true.
-    if baseline and baseline.warmup_complete:
-        warmup_complete = True
 
     return EntityBaseline(
         entity_uuid=entity_uuid,
         entity_type=entity_type,
-        first_seen_ns=first_seen_ns,
+        first_seen_ns=prev.first_seen_ns,
         last_seen_ns=last_seen_ns,
         event_count=event_count,
         warmup_complete=warmup_complete,
