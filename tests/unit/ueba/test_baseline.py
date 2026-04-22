@@ -248,6 +248,40 @@ def test_apply_event_skips_template_update_when_no_template() -> None:
 
 
 @pytest.mark.unit
+def test_entity_baseline_encoded_size_under_ac6_budget() -> None:
+    """AC-6: a fully-saturated baseline encodes to <= 2 KB.
+
+    Exercises the hard cap — 24 hour buckets, ``source_ip_cap=64``
+    populated IPs, ``template_top_k=32`` templates. Template IDs are
+    ``str(int)`` (Drain3 sequential integers); IPv4 strings use the
+    RFC-1918 10.0.x.x range for realistic length.
+    """
+    baseline = EntityBaseline(
+        entity_uuid="11111111-1111-5111-8111-111111111111",
+        entity_type="user",
+        first_seen_ns=1_700_000_000_000_000_000,
+        last_seen_ns=1_700_100_000_000_000_000,
+        event_count=9_999,
+        warmup_complete=True,
+        hours=tuple(range(24)),
+        source_ips=tuple(
+            (f"10.0.{(i // 256) % 256}.{i % 256}", 1_700_000_000_000_000_000 + i)
+            for i in range(64)
+        ),
+        volume_ema_min=12.5,
+        volume_ema_hour=750.0,
+        volume_last_ns=1_700_100_000_000_000_000,
+        # template_id in SeerflowEvent is ``int`` (Drain3 sequential id);
+        # apply_event stringifies it, so ``str(i)`` is the production shape.
+        templates=tuple((str(i), 0.5 + i * 0.01) for i in range(32)),
+    )
+    encoded = msgspec.msgpack.encode(baseline)
+    assert len(encoded) <= 2048, (
+        f"Encoded EntityBaseline size {len(encoded)} exceeds 2 KB AC-6 budget"
+    )
+
+
+@pytest.mark.unit
 def test_apply_event_out_of_order_does_not_move_last_seen_backward() -> None:
     params = UEBAParams(
         alpha=0.5,
