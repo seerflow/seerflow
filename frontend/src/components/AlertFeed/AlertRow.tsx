@@ -1,4 +1,4 @@
-import { memo, type MouseEvent } from "react";
+import { memo, type MouseEvent, type KeyboardEvent } from "react";
 import type { Alert, Feedback } from "@/lib/types";
 import { severityBucket, SEVERITY_CLASS, SEVERITY_LABEL } from "@/lib/severity";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,9 @@ function FeedbackIconButton(
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
         void submitFeedback(alertId, verdict);
+      }}
+      onKeyDown={(e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
       }}
       className={cn(
         "rounded border px-1.5 py-0.5 text-xs hover:bg-muted/40",

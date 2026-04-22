@@ -249,21 +249,17 @@ class _SqliteAlertMixin:
         note: str = "",
         origin: FeedbackOrigin = "api",
     ) -> None:
-        """Update alert feedback and append an audit-log row atomically.
+        """Update alert feedback and append an audit-log row.
 
-        The ``BEGIN IMMEDIATE`` wrapper ensures the SELECT → UPDATE → INSERT
-        sequence is atomic even if this aiosqlite connection is later shared
-        across async context switches (another task cannot sneak in between
-        the alert UPDATE and the audit-log INSERT).
+        The initial SELECT (to load the msgpack-encoded alert for decode)
+        runs outside the transaction: it is read-only and idempotent, so
+        repeating it is safe. ``BEGIN IMMEDIATE`` then guards UPDATE +
+        INSERT as a single write unit — they both commit or both roll back.
 
-        The msgpack decode/encode happens outside the transaction because it
-        is CPU-only — holding the write lock during serialisation would
-        needlessly block other writers.
-
-        Implementation note: on the SQLite backend a single aiosqlite
-        connection serialises all operations. A PostgreSQL backend MUST use
-        ``SELECT ... FOR UPDATE`` inside a transaction to prevent lost
-        updates.
+        On the SQLite backend concurrent writes are serialised by the single
+        aiosqlite connection. A future Postgres backend MUST either use
+        ``SELECT ... FOR UPDATE`` inside the transaction or accept the same
+        lost-update window the SQLite impl has (rate-limiter caps exposure).
         """
         async with await self._conn.execute(
             "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]

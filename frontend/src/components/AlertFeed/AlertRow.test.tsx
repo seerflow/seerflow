@@ -48,4 +48,13 @@ describe("AlertRow", () => {
     expect(onClick).not.toHaveBeenCalled();
     expect(submitFeedback).toHaveBeenCalledWith("a1", "tp");
   });
+
+  it("Enter keydown on TP button does not toggle expand (S-066)", () => {
+    const onClick = vi.fn();
+    render(<AlertRow alert={alert} onClick={onClick} />);
+    const tpButton = screen.getByRole("button", { name: /mark true positive/i });
+    tpButton.focus();
+    fireEvent.keyDown(tpButton, { key: "Enter" });
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });
