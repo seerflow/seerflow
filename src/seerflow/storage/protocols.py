@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from seerflow.models._types import FeedbackType
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
+    from seerflow.models.feedback import FeedbackEvent, FeedbackOrigin
     from seerflow.models.query import AlertQuery, EntityRelation, EventQuery, Page, TimeRange
 
 
@@ -67,6 +68,23 @@ class AlertStore(Protocol):  # pragma: no cover
     async def get_alert_by_id(self, alert_id: str) -> Alert | None: ...
 
     async def get_feedback_stats(self) -> dict[str, int]: ...
+
+    async def append_feedback_event(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str,
+        origin: FeedbackOrigin,
+        submitted_at_ns: int,
+    ) -> None:
+        """Append an immutable row to the feedback audit log."""
+        ...
+
+    async def list_feedback_events(
+        self, alert_id: str, page: int = 1, limit: int = 50
+    ) -> Page[FeedbackEvent]:
+        """Return feedback audit-log entries newest-first, paginated."""
+        ...
 
     async def count_by_severity(self) -> dict[str, int]:
         """Return alert counts grouped by severity name.
