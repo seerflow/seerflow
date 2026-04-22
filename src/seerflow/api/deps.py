@@ -113,3 +113,11 @@ def get_pipeline_metrics_provider(request: Request) -> MetricsProvider | None:
         request.app.state, "pipeline_metrics_provider", None
     )
     return provider
+
+
+# UEBA warm-up thresholds surfaced so route handlers can report them in
+# the ``warming_up`` 404 payload without importing the full config object.
+# These mirror the ``UEBAConfig`` defaults; a follow-up will read the live
+# config via app.state.
+UEBA_WARMUP_DAYS = 7
+UEBA_WARMUP_MIN_EVENTS = 50

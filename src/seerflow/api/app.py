@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
+    from seerflow.ueba.store import BaselineStore
 
 _API_PREFIX = "/api/v1"
 
@@ -182,6 +183,7 @@ def create_api_app(
     ws_manager: ConnectionManager | None = None,
     sigma_engine: SigmaEngine | None = None,
     correlation_rules: Sequence[CorrelationRule] = (),
+    baseline_store: BaselineStore | None = None,
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -221,6 +223,7 @@ def create_api_app(
     )
     app.state.config = config
     app.state.pipeline_metrics_provider = None
+    app.state.baseline_store = baseline_store
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
     app.state.anomaly_timeline_ring = AnomalyTimelineRing()
     app.state.ws_manager = ws_manager or _build_ws_manager(
