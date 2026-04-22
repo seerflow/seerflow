@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import msgspec
+
+if TYPE_CHECKING:
+    from seerflow.models.event import SeerflowEvent
 
 EntityType = Literal["user", "ip", "host", "process", "file", "domain"]
 
@@ -90,3 +93,97 @@ def update_templates(
         ordered = sorted(decayed.items(), key=lambda kv: kv[1], reverse=True)
         decayed = dict(ordered[:top_k])
     return tuple(decayed.items())
+
+
+class UEBAParams(msgspec.Struct, frozen=True):
+    """Tunable knobs for :func:`apply_event`."""
+
+    alpha: float
+    source_ip_cap: int
+    template_top_k: int
+    warmup_days: int
+    warmup_min_events: int
+
+
+_NS_PER_DAY = 86_400 * 1_000_000_000
+
+
+def apply_event(
+    *,
+    baseline: EntityBaseline | None,
+    entity_uuid: str,
+    entity_type: EntityType,
+    event: SeerflowEvent,
+    params: UEBAParams,
+) -> EntityBaseline:
+    """Return a new EntityBaseline reflecting ``event``."""
+    ts_ns = event.timestamp_ns
+    is_first = baseline is None
+    prev_hours = baseline.hours if baseline else tuple([0] * 24)
+    prev_ips = baseline.source_ips if baseline else ()
+    prev_templates = baseline.templates if baseline else ()
+    prev_ema_min = baseline.volume_ema_min if baseline else 0.0
+    prev_ema_hour = baseline.volume_ema_hour if baseline else 0.0
+
+    hours = update_hours(prev_hours, bucket_hour_utc(ts_ns))
+
+    ips = prev_ips
+    for ip in event.related_ips:
+        ips = update_source_ips(
+            ips=ips,
+            new_ip=ip,
+            now_ns=ts_ns,
+            cap=params.source_ip_cap,
+        )
+
+    templates = prev_templates
+    # SeerflowEvent.template_id is int; -1 is the no-template sentinel.
+    if event.template_id != -1:
+        templates = update_templates(
+            templates=templates,
+            template_id=str(event.template_id),
+            alpha=params.alpha,
+            top_k=params.template_top_k,
+        )
+
+    # EMAs: observe "1 event in the last minute/hour" whenever an event arrives.
+    ema_min = update_ema(
+        prev=prev_ema_min,
+        observed=1.0,
+        alpha=params.alpha,
+        is_first=is_first,
+    )
+    ema_hour = update_ema(
+        prev=prev_ema_hour,
+        observed=1.0,
+        alpha=params.alpha,
+        is_first=is_first,
+    )
+
+    first_seen_ns = baseline.first_seen_ns if baseline else ts_ns
+    last_seen_ns = max(baseline.last_seen_ns if baseline else ts_ns, ts_ns)
+    event_count = (baseline.event_count if baseline else 0) + 1
+
+    span_ns = last_seen_ns - first_seen_ns
+    warmup_complete = (
+        span_ns >= params.warmup_days * _NS_PER_DAY
+        and event_count >= params.warmup_min_events
+    )
+    # Latch once true.
+    if baseline and baseline.warmup_complete:
+        warmup_complete = True
+
+    return EntityBaseline(
+        entity_uuid=entity_uuid,
+        entity_type=entity_type,
+        first_seen_ns=first_seen_ns,
+        last_seen_ns=last_seen_ns,
+        event_count=event_count,
+        warmup_complete=warmup_complete,
+        hours=hours,
+        source_ips=ips,
+        volume_ema_min=ema_min,
+        volume_ema_hour=ema_hour,
+        volume_last_ns=ts_ns,
+        templates=templates,
+    )

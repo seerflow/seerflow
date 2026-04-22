@@ -154,3 +154,103 @@ def test_update_templates_evicts_smallest_at_top_k() -> None:
     assert "t3" not in as_dict  # weakest evicted to make room for t4
     assert "t4" in as_dict
     assert len(out) == 3
+
+
+import uuid as _uuid  # noqa: E402
+
+from seerflow.models.event import SeerflowEvent  # noqa: E402
+from seerflow.ueba.baseline import UEBAParams, apply_event  # noqa: E402
+
+
+def _mk_event(
+    ts_ns: int, ip: str = "10.0.0.1", template_id: int = 42
+) -> SeerflowEvent:
+    return SeerflowEvent(
+        event_id=_uuid.uuid4(),
+        timestamp_ns=ts_ns,
+        observed_ns=ts_ns,
+        otel_severity=9,
+        related_ips=(ip,),
+        entity_refs=("11111111-1111-5111-8111-111111111111",),
+        template_id=template_id,
+    )
+
+
+@pytest.mark.unit
+def test_apply_event_from_scratch() -> None:
+    params = UEBAParams(
+        alpha=0.5,
+        source_ip_cap=8,
+        template_top_k=8,
+        warmup_days=7,
+        warmup_min_events=50,
+    )
+    b = apply_event(
+        baseline=None,
+        entity_uuid="11111111-1111-5111-8111-111111111111",
+        entity_type="user",
+        event=_mk_event(ts_ns=3_600 * 5 * 1_000_000_000),
+        params=params,
+    )
+    assert b.event_count == 1
+    assert b.hours[5] == 1
+    assert b.source_ips == (("10.0.0.1", 3_600 * 5 * 1_000_000_000),)
+    assert dict(b.templates)["42"] == pytest.approx(0.5)
+    assert b.warmup_complete is False  # 1 event, 0 days
+
+
+@pytest.mark.unit
+def test_apply_event_latches_warmup_after_both_gates() -> None:
+    params = UEBAParams(
+        alpha=0.5,
+        source_ip_cap=8,
+        template_top_k=8,
+        warmup_days=1,
+        warmup_min_events=3,
+    )
+    b: "EntityBaseline | None" = None
+    for i in range(3):
+        b = apply_event(
+            baseline=b,
+            entity_uuid="u1",
+            entity_type="user",
+            event=_mk_event(ts_ns=i * 3_600 * 1_000_000_000),
+            params=params,
+        )
+    assert b is not None
+    assert b.warmup_complete is False  # days not yet crossed (only ~2h span)
+    b = apply_event(
+        baseline=b,
+        entity_uuid="u1",
+        entity_type="user",
+        event=_mk_event(ts_ns=2 * 86_400 * 1_000_000_000),
+        params=params,
+    )
+    assert b.warmup_complete is True
+
+
+@pytest.mark.unit
+def test_apply_event_out_of_order_does_not_move_last_seen_backward() -> None:
+    params = UEBAParams(
+        alpha=0.5,
+        source_ip_cap=8,
+        template_top_k=8,
+        warmup_days=7,
+        warmup_min_events=50,
+    )
+    b1 = apply_event(
+        baseline=None,
+        entity_uuid="u1",
+        entity_type="user",
+        event=_mk_event(ts_ns=1_000),
+        params=params,
+    )
+    b2 = apply_event(
+        baseline=b1,
+        entity_uuid="u1",
+        entity_type="user",
+        event=_mk_event(ts_ns=500),
+        params=params,
+    )
+    assert b2.last_seen_ns == 1_000  # not moved backward
+    assert b2.event_count == 2
