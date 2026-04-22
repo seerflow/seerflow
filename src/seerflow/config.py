@@ -203,6 +203,20 @@ class LLMConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class UEBAConfig:
+    """UEBA engine configuration (FR-052, S-064)."""
+
+    enabled: bool = True
+    warmup_days: int = 7
+    warmup_min_events: int = 50
+    max_entities: int = 100_000
+    ema_alpha: float = 0.05
+    source_ip_cap: int = 64
+    template_top_k: int = 32
+    flush_interval_s: int = 300
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class SeerflowConfig:
     """Top-level Seerflow configuration."""
 
@@ -212,6 +226,7 @@ class SeerflowConfig:
     correlation: CorrelationConfig = field(default_factory=CorrelationConfig)
     alerting: AlertingConfig = field(default_factory=AlertingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    ueba: UEBAConfig = field(default_factory=UEBAConfig)
     dashboard_port: int = 8080
     health_bind_address: str = "127.0.0.1"
     log_level: str = "INFO"
