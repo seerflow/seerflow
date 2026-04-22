@@ -15,6 +15,7 @@ from seerflow.utils.text import NOTE_MAX_LENGTH, sanitise_feedback_note
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
+    from seerflow.models.feedback import FeedbackEvent
     from seerflow.models.query import EntityRelation
 
 _T = TypeVar("_T")
@@ -155,6 +156,7 @@ class FeedbackRequest(BaseModel):
 
     feedback: Literal["tp", "fp"]
     note: str | None = Field(default=None, max_length=NOTE_MAX_LENGTH)
+    origin: Literal["dashboard", "cli", "api"] = "api"
 
     @field_validator("note")
     @classmethod
@@ -163,6 +165,29 @@ class FeedbackRequest(BaseModel):
         if v is None:
             return None
         return sanitise_feedback_note(v)
+
+
+class FeedbackEventResponse(BaseModel):
+    """JSON representation of a single feedback audit-log entry."""
+
+    feedback: Literal["tp", "fp"]
+    note: str
+    origin: Literal["dashboard", "cli", "api"]
+    submitted_at_ns: int
+
+    @field_serializer("submitted_at_ns", when_used="json")
+    def _serialize_submitted_at_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety."""
+        return str(v)
+
+    @classmethod
+    def from_event(cls, ev: FeedbackEvent) -> FeedbackEventResponse:
+        return cls(
+            feedback=ev.feedback,
+            note=ev.note,
+            origin=ev.origin,
+            submitted_at_ns=ev.submitted_at_ns,
+        )
 
 
 class EntitySearchResult(BaseModel):
