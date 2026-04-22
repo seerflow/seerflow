@@ -191,3 +191,39 @@ class TestWebhookPipeline:
         assert "rule_name" in payload
         assert "timestamp" in payload
         assert payload["rule_name"] == "hst-anomaly"
+
+    async def test_severity_filter_skips_low_severity(
+        self,
+        webhook_server: tuple[str, list[dict[str, object]]],
+        storage: SqliteBackend,
+    ) -> None:
+        """Target with min_severity=99 receives no alerts from forced anomalies.
+
+        ``min_severity=99`` is strictly greater than ``SeverityLevel.FATAL`` (6),
+        so every alert produced must be filtered out by AlertDispatcher._dispatch.
+        """
+        url, received = webhook_server
+        target = WebhookTarget(name="webhook-high-only", url=url, format="json", min_severity=99)
+
+        async with aiohttp.ClientSession() as session:
+            dispatcher = AlertDispatcher(targets=(target,), session=session)
+            task = asyncio.create_task(dispatcher.run())
+
+            config = SeerflowConfig()
+            ensemble = DetectionEnsemble(config.detection)
+            handler = make_handler(
+                ensemble,
+                storage,
+                save_interval_ns=999_999_999_999,
+                alert_dispatcher=dispatcher,
+            )
+
+            with patch.object(type(ensemble), "process_event", return_value=_FORCED_ANOMALY):
+                for msg in _ATTACK_MESSAGES:
+                    await handler(_raw(msg))
+
+            await asyncio.sleep(0.1)
+            await dispatcher.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+        assert len(received) == 0, f"Expected 0 POSTs with min_severity=99, got {len(received)}"
