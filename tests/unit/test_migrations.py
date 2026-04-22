@@ -309,3 +309,39 @@ async def test_migration_v3_skips_corrupt_blob(tmp_path: Path) -> None:
         await conn.commit()
         await run_migrations(conn)
         assert await get_schema_version(conn) >= 3
+
+
+@pytest.mark.asyncio
+async def test_migration_v4_creates_feedback_events_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "t.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE alerts (alert_id TEXT, dedup_key TEXT, timestamp_ns INTEGER, data BLOB)"
+        )
+        await conn.commit()
+        applied = await run_migrations(conn)
+        assert applied >= 4
+
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='alert_feedback_events'"
+        ) as cur:
+            assert await cur.fetchone() is not None
+
+        async with conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name='idx_feedback_alert_time'"
+        ) as cur:
+            assert await cur.fetchone() is not None
+
+
+@pytest.mark.asyncio
+async def test_migration_v4_is_idempotent(tmp_path: Path) -> None:
+    db_path = tmp_path / "t.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE alerts (alert_id TEXT, dedup_key TEXT, timestamp_ns INTEGER, data BLOB)"
+        )
+        await conn.commit()
+        await run_migrations(conn)
+        applied2 = await run_migrations(conn)
+        assert applied2 == 0
