@@ -23,9 +23,9 @@ export function FeedbackHistory({ items }: Props): JSX.Element {
   }
   return (
     <ul className="flex flex-col gap-1" aria-label="feedback history">
-      {items.map((ev, i) => (
+      {items.map(ev => (
         <li
-          key={`${ev.submitted_at_ns}-${i}`}
+          key={ev.id}
           data-testid="feedback-history-row"
           className="flex items-center gap-2 text-xs"
         >

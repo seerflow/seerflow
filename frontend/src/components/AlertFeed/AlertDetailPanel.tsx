@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Alert, AlertDetail, Feedback, FeedbackEvent } from "@/lib/types";
+import type { Alert, AlertDetail, FeedbackEvent, FeedbackHistoryResponse } from "@/lib/types";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { logger } from "@/lib/logger";
@@ -9,11 +9,6 @@ import { FeedbackHistory } from "./FeedbackHistory";
 
 interface Props {
   alert: Alert;
-  onFeedback: (id: string, f: Feedback) => void;
-}
-
-interface HistoryPayload {
-  items: Array<Omit<FeedbackEvent, "submitted_at_ns"> & { submitted_at_ns: string }>;
 }
 
 export function AlertDetailPanel({ alert }: Props): JSX.Element {
@@ -35,13 +30,10 @@ export function AlertDetailPanel({ alert }: Props): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    api.get<HistoryPayload>(`/api/v1/alerts/${alert.alert_id}/feedback`)
-      .then(p => {
-        if (cancelled) return;
-        setHistory(
-          p.items.map(it => ({ ...it, submitted_at_ns: BigInt(it.submitted_at_ns) })),
-        );
-      })
+    // `submitted_at_ns` is revived to bigint inside `api.get` (see BIGINT_KEYS
+    // in lib/api.ts) — no manual conversion needed here.
+    api.get<FeedbackHistoryResponse>(`/api/v1/alerts/${alert.alert_id}/feedback`)
+      .then(p => { if (!cancelled) setHistory(p.items); })
       .catch((e: unknown) => { if (!cancelled) logger.warn("history load failed", e); });
     return () => { cancelled = true; };
   }, [alert.alert_id, version]);

@@ -28,10 +28,11 @@ vi.mock("@/lib/feedback", () => ({
 const sampleHistory = {
   items: [
     {
+      id: 1,
       feedback: "tp",
       note: "",
       origin: "cli",
-      submitted_at_ns: "1700000000000000000",
+      submitted_at_ns: 1_700_000_000_000_000_000n,
     },
   ],
   total: 1, page: 1, limit: 50, has_next: false,
@@ -59,7 +60,7 @@ describe("AlertDetailPanel", () => {
   it("fetches detail on mount and renders fields", async () => {
     const detail: AlertDetail = { ...base, contributing_events: [{event_id: "e1", timestamp_ns: 1n, message: "ev"}] };
     setupMocks(detail);
-    render(<AlertDetailPanel alert={base} onFeedback={vi.fn()} />);
+    render(<AlertDetailPanel alert={base} />);
     await waitFor(() => expect(screen.getByText("ev")).toBeInTheDocument());
     expect(screen.getByText("TA0001")).toBeInTheDocument();
   });
@@ -67,7 +68,7 @@ describe("AlertDetailPanel", () => {
   it("TP click invokes shared submitFeedback (S-066)", async () => {
     const detail: AlertDetail = { ...base };
     setupMocks(detail);
-    render(<AlertDetailPanel alert={base} onFeedback={vi.fn()} />);
+    render(<AlertDetailPanel alert={base} />);
     await waitFor(() => screen.getByRole("button", { name: /True positive/i }));
     fireEvent.click(screen.getByRole("button", { name: /True positive/i }));
     expect(submitMock).toHaveBeenCalledWith("a1", "tp");
@@ -76,14 +77,14 @@ describe("AlertDetailPanel", () => {
   it("fetches history on mount and renders rows (S-066)", async () => {
     const detail: AlertDetail = { ...base };
     setupMocks(detail);
-    render(<AlertDetailPanel alert={base} onFeedback={vi.fn()} />);
+    render(<AlertDetailPanel alert={base} />);
     await waitFor(() => expect(screen.getByTestId("feedback-history-row")).toBeInTheDocument());
   });
 
   it("refetches history when feedbackVersion bumps (S-066)", async () => {
     const detail: AlertDetail = { ...base };
     setupMocks(detail);
-    render(<AlertDetailPanel alert={base} onFeedback={vi.fn()} />);
+    render(<AlertDetailPanel alert={base} />);
     await waitFor(() => expect(screen.getByTestId("feedback-history-row")).toBeInTheDocument());
 
     const before = fetchMock.mock.calls.filter(

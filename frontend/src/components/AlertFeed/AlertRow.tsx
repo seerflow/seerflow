@@ -54,7 +54,7 @@ function Row({ alert, onClick, isOpen }: Props): JSX.Element {
       <span className="uppercase text-[10px] opacity-70 min-w-[64px]">{alert.alert_type}</span>
       <span className="truncate flex-1">{alert.rule_name}</span>
       {alert.entity_value && <span className="font-mono text-xs truncate max-w-[160px]">{alert.entity_value}</span>}
-      <div className="flex gap-1 ml-2" onClick={(e) => e.stopPropagation()}>
+      <div className="flex gap-1 ml-2">
         <FeedbackIconButton verdict="tp" active={alert.feedback === "tp"} alertId={alert.alert_id} />
         <FeedbackIconButton verdict="fp" active={alert.feedback === "fp"} alertId={alert.alert_id} />
       </div>

@@ -3,7 +3,9 @@ import { render, screen } from "@testing-library/react";
 import { FeedbackHistory } from "./FeedbackHistory";
 import type { FeedbackEvent } from "@/lib/types";
 
+let nextId = 1;
 const ev = (p: Partial<FeedbackEvent> = {}): FeedbackEvent => ({
+  id: nextId++,
   feedback: "tp",
   note: "",
   origin: "dashboard",

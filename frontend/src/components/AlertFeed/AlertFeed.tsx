@@ -33,7 +33,7 @@ export function AlertFeed(): JSX.Element {
   const status = useAlertStore(s => s.status);
   const openId = useAlertStore(s => s.selectedAlertId);
   const backfill = useAlertStore(s => s.backfill);
-  const { prepend, setFilter, setStatus, setFeedback, selectAlert, clearSelection } = useAlertStore.getState();
+  const { prepend, setFilter, setStatus, selectAlert, clearSelection } = useAlertStore.getState();
   const send = useWsSend();
 
   const wsBufferRef = useRef<WsMessage[]>([]);
@@ -141,7 +141,7 @@ export function AlertFeed(): JSX.Element {
       </div>
       {open && (
         <div className="w-[420px] shrink-0 overflow-y-auto">
-          <AlertDetailPanel alert={open} onFeedback={setFeedback} />
+          <AlertDetailPanel alert={open} />
         </div>
       )}
     </section>

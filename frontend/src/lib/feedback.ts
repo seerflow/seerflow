@@ -9,6 +9,12 @@ const LABEL: Record<Exclude<Feedback, "">, string> = {
   fp: "false positive",
 };
 
+// Product-defined toast durations (S-066). Kept as module-level constants
+// so `submitFeedback` — a plain function, not a React component — can call
+// `toast.*` directly without going through the `useToast` hook.
+const SUCCESS_MS = 3000;
+const ERROR_MS = 5000;
+
 export async function submitFeedback(
   alertId: string,
   verdict: Exclude<Feedback, "">,
@@ -23,13 +29,13 @@ export async function submitFeedback(
       origin: "dashboard",
     });
     useAlertStore.getState().bumpFeedbackVersion(alertId);
-    toast.success(`Marked as ${LABEL[verdict]}`);
+    toast.success(`Marked as ${LABEL[verdict]}`, { duration: SUCCESS_MS });
   } catch (err) {
     logger.warn("feedback failed", err);
     useAlertStore.getState().setFeedback(alertId, prev);
     const msg = err instanceof ApiError && err.status === 404
       ? "Alert no longer exists"
       : "Feedback failed — retry";
-    toast.error(msg);
+    toast.error(msg, { duration: ERROR_MS });
   }
 }

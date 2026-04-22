@@ -196,6 +196,7 @@ export interface AttackCoverageResponse {
 export type FeedbackOrigin = "dashboard" | "cli" | "api";
 
 export interface FeedbackEvent {
+  id: number;                // server-assigned autoincrement; stable React key
   feedback: "tp" | "fp";
   note: string;
   origin: FeedbackOrigin;
