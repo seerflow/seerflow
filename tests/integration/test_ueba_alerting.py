@@ -190,6 +190,92 @@ class TestUebaAlertingIntegration:
         finally:
             await storage.close()
 
+    async def test_ueba_alert_uses_ueba_cooldown_not_global_dedup_window(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """UEBA alerts must be deduped using ``ueba.alert_cooldown_seconds``.
+
+        The handler previously read ``alerting.dedup_window_seconds`` via
+        ``_dedup_window_ns`` for the UEBA alert write, so the UEBA-specific
+        cooldown knob was dead. This test wires a handler with a 60 s
+        UEBA cooldown and a 900 s global dedup window, captures the
+        ``dedup_window_ns`` kwarg ``storage.write_alert`` receives, and
+        asserts the UEBA-specific value wins.
+        """
+        from seerflow.config import AlertingConfig
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        try:
+            config = SeerflowConfig(
+                ueba=UEBAConfig(score_threshold=0.1, alert_cooldown_seconds=60),
+                alerting=AlertingConfig(dedup_window_seconds=900),
+            )
+            ensemble = DetectionEnsemble(config.detection)
+            params = UEBAParams(
+                alpha=0.05,
+                source_ip_cap=8,
+                template_top_k=8,
+                warmup_days=1,
+                warmup_min_events=3,
+            )
+            baseline_store = BaselineStore(params=params, max_entities=100)
+            ueba_engine = UEBAEngine(config=config.ueba)
+
+            captured: list[int] = []
+
+            class _CapturingStorage:
+                """Proxy that records the dedup_window_ns used for UEBA alerts."""
+
+                def __init__(self, inner: SqliteBackend) -> None:
+                    self._inner = inner
+
+                async def write_alert(self, alert, dedup_window_ns=900_000_000_000):  # type: ignore[no-untyped-def]
+                    if alert.alert_type == "ueba":
+                        captured.append(dedup_window_ns)
+                    return await self._inner.write_alert(alert, dedup_window_ns=dedup_window_ns)
+
+                def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+                    return getattr(self._inner, name)
+
+            capturing_storage = _CapturingStorage(storage)
+
+            handler = make_handler(
+                ensemble,
+                capturing_storage,  # type: ignore[arg-type]
+                baseline_store=baseline_store,
+                ueba_engine=ueba_engine,
+                alerting_config=config.alerting,
+                ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
+            )
+
+            from seerflow.models.entity import generate_ip_id
+
+            entity_uuid = str(generate_ip_id("10.0.0.1"))
+            _seed_warm_baseline(baseline_store, entity_uuid=entity_uuid)
+
+            with patch.object(
+                type(ensemble),
+                "process_event",
+                return_value=_neutral_detection_result(),
+            ):
+                raw = RawEvent(
+                    data=b"failed ssh login from 10.0.0.1",
+                    source_type="syslog",
+                    source_id="test",
+                    received_ns=12 * 86_400 * 1_000_000_000,
+                    metadata={},
+                )
+                await handler(raw)
+
+            assert captured == [60 * 1_000_000_000], (
+                f"expected UEBA alert to use ueba.alert_cooldown_seconds "
+                f"(60s = 60_000_000_000 ns), got {captured}"
+            )
+        finally:
+            await storage.close()
+
     async def test_pipeline_skips_ueba_when_engine_is_none(
         self,
         tmp_path: Path,

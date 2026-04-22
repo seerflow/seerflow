@@ -83,6 +83,7 @@ def make_handler(
     ws_manager: ConnectionManager | None = None,
     baseline_store: BaselineStore | None = None,
     ueba_engine: UEBAEngine | None = None,
+    ueba_alert_cooldown_ns: int = 900_000_000_000,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -216,7 +217,7 @@ def make_handler(
                 try:
                     is_new = await storage.write_alert(
                         ueba_alert,
-                        dedup_window_ns=_dedup_window_ns(ueba_alert.rule_name, _alerting),
+                        dedup_window_ns=ueba_alert_cooldown_ns,
                     )
                     if is_new:
                         if alert_dispatcher is not None:

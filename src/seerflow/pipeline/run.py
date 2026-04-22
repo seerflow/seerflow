@@ -403,6 +403,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         kill_chain_tracker=kill_chain_tracker,
         baseline_store=baseline_store,
         ueba_engine=ueba_engine,
+        ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
     )
     await pipeline.run(handler)
 
