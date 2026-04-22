@@ -20,6 +20,7 @@ from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
 from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
+from seerflow.ueba.engine import UEBAEngine
 from seerflow.ueba.store import BaselineStore
 
 if TYPE_CHECKING:
@@ -115,6 +116,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
 
     # UEBA baseline store — feature-flag gated by config.ueba.enabled.
     baseline_store: BaselineStore | None = None
+    ueba_engine: UEBAEngine | None = None
     if config.ueba.enabled:
         from seerflow.ueba.baseline import UEBAParams
 
@@ -134,6 +136,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
             _log.info("UEBA: restored %d baselines", restored)
         except Exception:
             _log.warning("UEBA baseline restore failed", exc_info=True)
+        ueba_engine = UEBAEngine(config=config.ueba)
 
     from seerflow.detection.attack_mapping import AttackMapper
 
@@ -399,6 +402,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         graph_structural=graph_structural,
         kill_chain_tracker=kill_chain_tracker,
         baseline_store=baseline_store,
+        ueba_engine=ueba_engine,
     )
     await pipeline.run(handler)
 
