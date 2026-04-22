@@ -72,6 +72,29 @@ def _make_alert(
     )
 
 
+async def _drain_dispatcher(
+    dispatcher: AlertDispatcher,
+    task: asyncio.Task[None],
+    received: list[dict[str, object]],
+    *,
+    timeout: float = 5.0,
+) -> None:
+    """Stop the dispatcher and wait for the consumer task to drain + exit.
+
+    Wraps the ``stop() + wait_for(task)`` pair with a TimeoutError-to-
+    AssertionError bridge so a stuck dispatcher produces a diagnostic
+    message naming how many alerts were received, instead of a bare
+    ``TimeoutError`` traceback.
+    """
+    await dispatcher.stop()
+    try:
+        await asyncio.wait_for(task, timeout=timeout)
+    except TimeoutError:
+        raise AssertionError(
+            f"Dispatcher did not drain within {timeout}s; received={len(received)}"
+        ) from None
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -89,13 +112,12 @@ async def webhook_server() -> AsyncIterator[tuple[str, list[dict[str, object]]]]
 
     app = web.Application()
     app.router.add_post("/webhook", _handler)
-    server = TestServer(app)
-    await server.start_server()
-    url = f"http://{server.host}:{server.port}/webhook"
-    try:
+    # ``async with TestServer`` is the idiomatic aiohttp pattern and
+    # handles start/close atomically, so a failure during start_server
+    # cannot leak the server object.
+    async with TestServer(app) as server:
+        url = f"http://{server.host}:{server.port}/webhook"
         yield url, received
-    finally:
-        await server.close()
 
 
 @pytest.fixture()
@@ -152,6 +174,7 @@ def _forced_anomaly() -> DetectionResult:
     )
 
 
+@pytest.mark.asyncio
 class TestWebhookPipeline:
     """Integration tests for handler → dispatcher → HTTP POST flow."""
 
@@ -186,8 +209,7 @@ class TestWebhookPipeline:
                 for msg in _ATTACK_MESSAGES:
                     await handler(_raw(msg))
 
-            await dispatcher.stop()
-            await asyncio.wait_for(task, timeout=5.0)
+            await _drain_dispatcher(dispatcher, task, received)
 
         # dispatcher.run() drains the queue before exit — the wait_for above
         # guarantees every enqueued alert has been POSTed by the time we reach
@@ -207,9 +229,9 @@ class TestWebhookPipeline:
     ) -> None:
         """Target with min_severity=99 receives no alerts from forced anomalies.
 
-        `_IMPOSSIBLY_HIGH_SEVERITY` is one above the live enum ceiling
-        (`SeverityLevel.FATAL`), so every alert produced must be filtered
-        out by `AlertDispatcher._dispatch`.
+        ``_IMPOSSIBLY_HIGH_SEVERITY`` is one above the live enum ceiling
+        (``SeverityLevel.FATAL``), so every alert produced must be filtered
+        out by ``AlertDispatcher._dispatch``.
         """
         url, received = webhook_server
         target = WebhookTarget(
@@ -236,8 +258,7 @@ class TestWebhookPipeline:
                 for msg in _ATTACK_MESSAGES:
                     await handler(_raw(msg))
 
-            await dispatcher.stop()
-            await asyncio.wait_for(task, timeout=5.0)
+            await _drain_dispatcher(dispatcher, task, received)
 
         assert len(received) == 0, (
             f"Expected 0 POSTs with min_severity={_IMPOSSIBLY_HIGH_SEVERITY}, got {len(received)}"
@@ -265,8 +286,7 @@ class TestWebhookPipeline:
                 dispatcher.enqueue(_make_alert(rule_name=f"rule-{i}"))
 
             # Stop and wait for drain.
-            await dispatcher.stop()
-            await asyncio.wait_for(task, timeout=5.0)
+            await _drain_dispatcher(dispatcher, task, received)
 
         assert len(received) == 5, f"Expected 5 POSTs after drain, got {len(received)}"
         # Verify each payload is distinct.
