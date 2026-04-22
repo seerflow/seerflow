@@ -89,6 +89,18 @@ WebSocket. For hot-reload development:
    to `http://127.0.0.1:8080`, so the dashboard talks to the real
    backend without CORS gymnastics.
 
+### Feedback buttons
+
+Every alert row has compact `✓` / `✗` icon buttons at the right edge. Clicking
+them sends a TP/FP verdict straight to `POST /api/v1/alerts/{id}/feedback`
+without expanding the row. A sonner toast confirms the click.
+
+Expanding a row shows the **Feedback history** section — a newest-first list of
+every prior verdict (badge + origin chip + relative timestamp). The list is
+backed by `GET /api/v1/alerts/{id}/feedback` and refetches whenever a new
+verdict lands. The `origin` field (`dashboard` / `cli` / `api`) shows where the
+verdict came from.
+
 ## Architecture notes
 
 - **Path alias:** `@/` resolves to `src/` in both `vite.config.ts`
