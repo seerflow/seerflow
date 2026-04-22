@@ -13,6 +13,7 @@ import time
 import uuid as _uuid_mod
 from typing import TYPE_CHECKING, Annotated
 
+import msgspec
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -250,6 +251,12 @@ async def get_entity_baseline(
                 "days_required": store.params.warmup_days,
             },
         )
+    ueba_engine = getattr(request.app.state, "ueba_engine", None)
+    last_score_payload: dict[str, float] | None = None
+    if ueba_engine is not None:
+        last = ueba_engine.last_score(str(entity_uuid))
+        if last is not None:
+            last_score_payload = msgspec.to_builtins(last)
     return JSONResponse(
         status_code=200,
         content={
@@ -265,5 +272,6 @@ async def get_entity_baseline(
             "volume_ema_hour": baseline.volume_ema_hour,
             "volume_last_ns": baseline.volume_last_ns,
             "templates": [list(pair) for pair in baseline.templates],
+            "last_score": last_score_payload,
         },
     )
