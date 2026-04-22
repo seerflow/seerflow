@@ -1,17 +1,26 @@
 import { useEffect, useState } from "react";
-import type { Alert, AlertDetail, Feedback } from "@/lib/types";
+import type { Alert, AlertDetail, Feedback, FeedbackEvent } from "@/lib/types";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { logger } from "@/lib/logger";
+import { submitFeedback } from "@/lib/feedback";
+import { useAlertStore } from "@/stores/alerts";
+import { FeedbackHistory } from "./FeedbackHistory";
 
 interface Props {
   alert: Alert;
   onFeedback: (id: string, f: Feedback) => void;
 }
 
-export function AlertDetailPanel({ alert, onFeedback }: Props): JSX.Element {
+interface HistoryPayload {
+  items: Array<Omit<FeedbackEvent, "submitted_at_ns"> & { submitted_at_ns: string }>;
+}
+
+export function AlertDetailPanel({ alert }: Props): JSX.Element {
   const [detail, setDetail] = useState<AlertDetail | null>(null);
+  const [history, setHistory] = useState<FeedbackEvent[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const version = useAlertStore(s => s.feedbackVersion[alert.alert_id] ?? 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -19,25 +28,28 @@ export function AlertDetailPanel({ alert, onFeedback }: Props): JSX.Element {
       .then(d => { if (!cancelled) setDetail(d); })
       .catch((e: unknown) => {
         if (cancelled) return;
-        const msg = e instanceof ApiError ? e.message : "Failed to load alert detail";
-        setErr(msg);
+        setErr(e instanceof ApiError ? e.message : "Failed to load alert detail");
       });
     return () => { cancelled = true; };
   }, [alert.alert_id]);
 
-  const submit = async (f: Feedback): Promise<void> => {
-    const prev = alert.feedback ?? "";
-    onFeedback(alert.alert_id, f);
-    try {
-      await api.post(`/api/v1/alerts/${alert.alert_id}/feedback`, { feedback: f });
-    } catch (e) {
-      logger.warn("feedback failed", e);
-      onFeedback(alert.alert_id, prev);
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    api.get<HistoryPayload>(`/api/v1/alerts/${alert.alert_id}/feedback`)
+      .then(p => {
+        if (cancelled) return;
+        setHistory(
+          p.items.map(it => ({ ...it, submitted_at_ns: BigInt(it.submitted_at_ns) })),
+        );
+      })
+      .catch((e: unknown) => { if (!cancelled) logger.warn("history load failed", e); });
+    return () => { cancelled = true; };
+  }, [alert.alert_id, version]);
 
   if (err) return <div role="alert" className="p-4 text-red-600">Error: {err}</div>;
   if (!detail) return <div className="p-4 text-muted-foreground">Loading…</div>;
+
+  const submit = (f: "tp" | "fp"): void => { void submitFeedback(alert.alert_id, f); };
 
   return (
     <div id={`alert-detail-${alert.alert_id}`} className="flex flex-col gap-3 p-4 border-l bg-background/50">
@@ -47,8 +59,7 @@ export function AlertDetailPanel({ alert, onFeedback }: Props): JSX.Element {
         <div className="flex flex-wrap gap-1" aria-label="entity references">
           {detail.entity_type && (
             <span className="rounded border bg-muted/30 px-2 py-0.5 text-xs font-mono">
-              {detail.entity_type}
-              {detail.entity_value ? `: ${detail.entity_value}` : ""}
+              {detail.entity_type}{detail.entity_value ? `: ${detail.entity_value}` : ""}
             </span>
           )}
         </div>
@@ -67,6 +78,10 @@ export function AlertDetailPanel({ alert, onFeedback }: Props): JSX.Element {
         <Button size="sm" variant={alert.feedback === "tp" ? "default" : "outline"} aria-label="True positive" onClick={() => submit("tp")}>TP</Button>
         <Button size="sm" variant={alert.feedback === "fp" ? "default" : "outline"} aria-label="False positive" onClick={() => submit("fp")}>FP</Button>
       </div>
+      <section className="pt-2 border-t" aria-label="feedback history section">
+        <h4 className="text-xs uppercase opacity-70 mb-1">Feedback history</h4>
+        <FeedbackHistory items={history} />
+      </section>
     </div>
   );
 }
