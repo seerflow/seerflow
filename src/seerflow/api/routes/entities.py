@@ -17,8 +17,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from seerflow.api.deps import (
-    UEBA_WARMUP_DAYS,
-    UEBA_WARMUP_MIN_EVENTS,
     StorageDeps,
     get_storage,
     require_entity_store,
@@ -243,9 +241,9 @@ async def get_entity_baseline(
             content={
                 "status": "warming_up",
                 "events_observed": baseline.event_count,
-                "events_required": UEBA_WARMUP_MIN_EVENTS,
+                "events_required": store.params.warmup_min_events,
                 "days_observed": days_observed,
-                "days_required": UEBA_WARMUP_DAYS,
+                "days_required": store.params.warmup_days,
             },
         )
     return JSONResponse(

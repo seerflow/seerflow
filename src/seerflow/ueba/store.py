@@ -27,6 +27,11 @@ class BaselineStore:
         self._max_entities = max_entities
         self._baselines: OrderedDict[str, EntityBaseline] = OrderedDict()
 
+    @property
+    def params(self) -> UEBAParams:
+        """Read-only accessor for the params this store was constructed with."""
+        return self._params
+
     def get(self, entity_uuid: str) -> EntityBaseline | None:
         """Read accessor. Does NOT promote LRU order."""
         return self._baselines.get(entity_uuid)

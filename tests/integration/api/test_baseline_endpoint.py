@@ -89,6 +89,26 @@ def test_baseline_warming_up_payload(client_warming: TestClient) -> None:
     assert body["status"] == "warming_up"
     assert body["events_observed"] == 1
     assert body["events_required"] == 50
+    assert "days_observed" in body
+    assert body["days_required"] == 7
+
+
+def test_baseline_warming_up_payload_reflects_custom_params(
+    backend: SqliteBackend,
+) -> None:
+    """Warming-up payload must report the store's live UEBAParams, not constants."""
+    app = create_api_app(log_store=backend, alert_store=backend)
+    store = _make_store(warmup_days=3, warmup_min_events=10)
+    store.snapshot_and_learn(_mk_event(1_000), entity_types=("ip",))
+    app.state.baseline_store = store
+    client = TestClient(app)
+
+    r = client.get(f"/api/v1/entities/{UUID_OK}/baseline")
+    assert r.status_code == 404
+    body = r.json()
+    assert body["status"] == "warming_up"
+    assert body["events_required"] == 10
+    assert body["days_required"] == 3
 
 
 def test_baseline_warm_returns_payload(client_warm: TestClient) -> None:
