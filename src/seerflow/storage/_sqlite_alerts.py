@@ -18,6 +18,7 @@ import msgspec
 
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+from seerflow.models.feedback import FeedbackEvent
 from seerflow.models.query import Page
 from seerflow.sigma.attack import format_technique
 
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     import aiosqlite
 
     from seerflow.models._types import FeedbackType
+    from seerflow.models.feedback import FeedbackOrigin
     from seerflow.models.query import AlertQuery
 
 _log = logging.getLogger(__name__)
@@ -269,6 +271,63 @@ class _SqliteAlertMixin:
                 stats[fb_type] = count
                 stats["total"] += count
         return stats
+
+    async def append_feedback_event(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str,
+        origin: FeedbackOrigin,
+        submitted_at_ns: int,
+    ) -> None:
+        """Append an immutable row to the feedback audit log."""
+        try:
+            await self._conn.execute(
+                "INSERT INTO alert_feedback_events "
+                "(alert_id, feedback, note, origin, submitted_at_ns) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [alert_id, feedback, note, origin, submitted_at_ns],
+            )
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("append_feedback_event failed for alert %s", alert_id)
+            raise
+
+    async def list_feedback_events(
+        self, alert_id: str, page: int = 1, limit: int = 50
+    ) -> Page[FeedbackEvent]:
+        """Return feedback audit-log entries newest-first, paginated."""
+        limit = max(1, min(limit, 200))
+        page = max(1, page)
+        offset = (page - 1) * limit
+
+        async with await self._conn.execute(
+            "SELECT COUNT(*) FROM alert_feedback_events WHERE alert_id = ?",
+            [alert_id],
+        ) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+
+        async with await self._conn.execute(
+            "SELECT feedback, note, origin, submitted_at_ns "
+            "FROM alert_feedback_events WHERE alert_id = ? "
+            "ORDER BY submitted_at_ns DESC, id DESC LIMIT ? OFFSET ?",
+            [alert_id, limit, offset],
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        items = tuple(
+            FeedbackEvent(
+                alert_id=alert_id,
+                feedback=r[0],
+                note=r[1],
+                origin=r[2],
+                submitted_at_ns=r[3],
+            )
+            for r in rows
+        )
+        return Page(items=items, total=total, page=page, limit=limit)
 
     async def count_by_severity(self) -> dict[str, int]:
         """Return alert counts grouped by severity name (lowercase).
