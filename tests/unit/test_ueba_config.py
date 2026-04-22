@@ -88,3 +88,30 @@ def test_load_config_rejects_non_number_ema_alpha(tmp_path: Path) -> None:
     config_path.write_text("ueba:\n  ema_alpha: fast\n")
     with pytest.raises(ConfigError, match=r"ueba\.ema_alpha"):
         load_config(str(config_path))
+
+
+@pytest.mark.unit
+def test_load_config_rejects_ema_alpha_above_one(tmp_path: Path) -> None:
+    """ema_alpha must be in (0, 1]; values > 1 raise ConfigError."""
+    config_path = tmp_path / "seerflow.yaml"
+    config_path.write_text("ueba:\n  ema_alpha: 2.0\n")
+    with pytest.raises(ConfigError, match=r"ueba\.ema_alpha.*\(0, 1\]"):
+        load_config(str(config_path))
+
+
+@pytest.mark.unit
+def test_load_config_rejects_ema_alpha_zero(tmp_path: Path) -> None:
+    """ema_alpha must be in (0, 1]; 0 raises ConfigError (open on lower bound)."""
+    config_path = tmp_path / "seerflow.yaml"
+    config_path.write_text("ueba:\n  ema_alpha: 0.0\n")
+    with pytest.raises(ConfigError, match=r"ueba\.ema_alpha.*\(0, 1\]"):
+        load_config(str(config_path))
+
+
+@pytest.mark.unit
+def test_load_config_accepts_ema_alpha_at_upper_bound(tmp_path: Path) -> None:
+    """ema_alpha = 1.0 is the inclusive upper bound."""
+    config_path = tmp_path / "seerflow.yaml"
+    config_path.write_text("ueba:\n  ema_alpha: 1.0\n")
+    cfg = load_config(str(config_path))
+    assert cfg.ueba.ema_alpha == pytest.approx(1.0)

@@ -914,6 +914,9 @@ def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
     Type mismatches raise ConfigError with the offending key labelled.
     """
     defaults = UEBAConfig()
+    ema_alpha = _require_number(data, "ema_alpha", defaults.ema_alpha, "ueba.ema_alpha")
+    if not (0.0 < ema_alpha <= 1.0):
+        raise ConfigError(f"ueba.ema_alpha must be in (0, 1], got {ema_alpha!r}")
     return UEBAConfig(
         enabled=_require_bool(data, "enabled", defaults.enabled, "ueba.enabled"),
         warmup_days=_require_pos_int(
@@ -928,7 +931,7 @@ def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
         max_entities=_require_pos_int(
             data, "max_entities", defaults.max_entities, "ueba.max_entities"
         ),
-        ema_alpha=_require_number(data, "ema_alpha", defaults.ema_alpha, "ueba.ema_alpha"),
+        ema_alpha=ema_alpha,
         source_ip_cap=_require_pos_int(
             data, "source_ip_cap", defaults.source_ip_cap, "ueba.source_ip_cap"
         ),
