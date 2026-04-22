@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 
 from seerflow.api.deps import StorageDeps, get_storage, parse_timestamp_ns
 from seerflow.api.limits import detail_limit, limiter, list_limit
@@ -114,7 +114,7 @@ async def list_alerts(
 @limiter.limit(detail_limit)
 async def get_alert(
     request: Request,
-    alert_id: str,
+    alert_id: Annotated[str, Path(max_length=64, description="Alert ID (UUID)")],
     storage: Storage,
 ) -> AlertResponse:
     """Get a single alert by ID."""
@@ -132,7 +132,7 @@ async def get_alert(
 @limiter.limit(detail_limit)
 async def submit_feedback(
     request: Request,
-    alert_id: str,
+    alert_id: Annotated[str, Path(max_length=64, description="Alert ID (UUID)")],
     body: FeedbackRequest,
     storage: Storage,
 ) -> Response:
@@ -156,7 +156,7 @@ async def submit_feedback(
 @limiter.limit(detail_limit)
 async def list_feedback(
     request: Request,
-    alert_id: str,
+    alert_id: Annotated[str, Path(max_length=64, description="Alert ID (UUID)")],
     storage: Storage,
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     limit: Annotated[int, Query(ge=1, le=200, description="Results per page")] = 50,
