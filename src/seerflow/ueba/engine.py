@@ -20,6 +20,16 @@ if TYPE_CHECKING:
     from seerflow.ueba.baseline import EntityBaseline
 
 
+# DSPOT calibration parameters for per-entity-type thresholds.
+# Intentionally module-level rather than UEBAConfig fields: these are the
+# library's calibration knobs (how DSPOT learns its quantile), not policy
+# knobs operators tune per deployment. Kept as named constants so reviewers
+# and future readers can find them without grepping the engine.
+_DSPOT_CALIBRATION_WINDOW = 1000
+_DSPOT_RISK_LEVEL = 0.0001
+_DSPOT_INITIAL_PERCENTILE = 98
+
+
 class UEBAScoreBreakdown(msgspec.Struct, frozen=True, gc=False):
     """Four-dimension deviation score + weighted composite for one event."""
 
@@ -174,9 +184,9 @@ class UEBAEngine:
         t = self._thresholds.get(entity_type)
         if t is None:
             t = DSpotThreshold(
-                calibration_window=1000,
-                risk_level=0.0001,
-                initial_percentile=98,
+                calibration_window=_DSPOT_CALIBRATION_WINDOW,
+                risk_level=_DSPOT_RISK_LEVEL,
+                initial_percentile=_DSPOT_INITIAL_PERCENTILE,
             )
             self._thresholds[entity_type] = t
         return t
