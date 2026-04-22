@@ -90,6 +90,15 @@ async def test_feedback_history_pagination(client: TestClient, backend: SqliteBa
     assert body["has_next"] is True
 
 
+async def test_feedback_history_rejects_limit_over_max(
+    client: TestClient, backend: SqliteBackend
+) -> None:
+    """``limit`` above the OpenAPI-documented ceiling must 422, not silently truncate."""
+    alert_id = await _seed_alert(backend, alert_id="a-5")
+    r = client.get(f"/api/v1/alerts/{alert_id}/feedback?limit=500")
+    assert r.status_code == 422
+
+
 async def test_post_feedback_rejects_cli_origin_over_http(
     client: TestClient, backend: SqliteBackend
 ) -> None:

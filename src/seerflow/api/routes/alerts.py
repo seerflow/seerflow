@@ -159,20 +159,18 @@ async def list_feedback(
     alert_id: str,
     storage: Storage,
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
-    limit: Annotated[int, Query(ge=1, description="Results per page")] = 50,
+    limit: Annotated[int, Query(ge=1, le=200, description="Results per page")] = 50,
 ) -> PaginatedResponse[FeedbackEventResponse]:
     """Return the feedback audit log for an alert, newest-first."""
-    limit = min(limit, 200)
     alert = await storage.alert_store.get_alert_by_id(alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
     result = await storage.alert_store.list_feedback_events(alert_id, page=page, limit=limit)
     items = [FeedbackEventResponse.from_event(e) for e in result.items]
-    has_next = (result.page * result.limit) < result.total
     return PaginatedResponse(
         items=items,
         total=result.total,
         page=result.page,
         limit=result.limit,
-        has_next=has_next,
+        has_next=result.has_next,
     )

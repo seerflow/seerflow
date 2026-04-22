@@ -67,7 +67,12 @@ class AlertStore(Protocol):  # pragma: no cover
         feedback: FeedbackType,
         note: str = "",
         origin: FeedbackOrigin = "api",
-    ) -> None: ...
+    ) -> None:
+        """Write feedback, note, and origin to the alert row and append an
+        audit-log event. Silent no-op if the alert does not exist. The SQLite
+        backend guarantees atomicity via ``BEGIN IMMEDIATE``.
+        """
+        ...
 
     async def get_alert_by_id(self, alert_id: str) -> Alert | None: ...
 

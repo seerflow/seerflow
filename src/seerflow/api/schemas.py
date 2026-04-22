@@ -192,6 +192,7 @@ class FeedbackEventResponse(BaseModel):
 
     @classmethod
     def from_event(cls, ev: FeedbackEvent) -> FeedbackEventResponse:
+        """Convert a FeedbackEvent storage struct to a Pydantic response model."""
         return cls(
             id=ev.id,
             feedback=ev.feedback,
