@@ -203,8 +203,18 @@ class LLMConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class UEBASubScoreWeights:
+    """Weights for the four UEBA sub-scores. Must sum to ``1.0 ± 1e-6``."""
+
+    time_of_day: float = 0.25
+    source_novelty: float = 0.30
+    volume: float = 0.20
+    pattern_novelty: float = 0.25
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class UEBAConfig:
-    """UEBA engine configuration (FR-052, S-064)."""
+    """UEBA engine configuration (FR-052/FR-053, S-064/S-065)."""
 
     enabled: bool = True
     warmup_days: int = 7
@@ -213,6 +223,10 @@ class UEBAConfig:
     ema_alpha: float = 0.05
     source_ip_cap: int = 64
     template_top_k: int = 32
+    # S-065 scoring fields.
+    score_threshold: float = 0.75
+    sub_score_weights: UEBASubScoreWeights = field(default_factory=UEBASubScoreWeights)
+    alert_cooldown_seconds: int = 900
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

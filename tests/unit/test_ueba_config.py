@@ -115,3 +115,99 @@ def test_load_config_accepts_ema_alpha_at_upper_bound(tmp_path: Path) -> None:
     config_path.write_text("ueba:\n  ema_alpha: 1.0\n")
     cfg = load_config(str(config_path))
     assert cfg.ueba.ema_alpha == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_ueba_config_defaults_score_fields() -> None:
+    cfg = UEBAConfig()
+    assert cfg.score_threshold == pytest.approx(0.75)
+    assert cfg.alert_cooldown_seconds == 900
+    assert cfg.sub_score_weights.time_of_day == pytest.approx(0.25)
+    assert cfg.sub_score_weights.source_novelty == pytest.approx(0.30)
+    assert cfg.sub_score_weights.volume == pytest.approx(0.20)
+    assert cfg.sub_score_weights.pattern_novelty == pytest.approx(0.25)
+
+
+@pytest.mark.unit
+def test_load_config_roundtrips_ueba_score_fields(tmp_path: Path) -> None:
+    yaml = tmp_path / "seerflow.yaml"
+    yaml.write_text(
+        "ueba:\n"
+        "  enabled: true\n"
+        "  score_threshold: 0.6\n"
+        "  alert_cooldown_seconds: 300\n"
+        "  sub_score_weights:\n"
+        "    time_of_day: 0.4\n"
+        "    source_novelty: 0.3\n"
+        "    volume: 0.1\n"
+        "    pattern_novelty: 0.2\n"
+    )
+    cfg = load_config(str(yaml))
+    assert cfg.ueba.score_threshold == pytest.approx(0.6)
+    assert cfg.ueba.alert_cooldown_seconds == 300
+    assert cfg.ueba.sub_score_weights.time_of_day == pytest.approx(0.4)
+    assert cfg.ueba.sub_score_weights.source_novelty == pytest.approx(0.3)
+    assert cfg.ueba.sub_score_weights.volume == pytest.approx(0.1)
+    assert cfg.ueba.sub_score_weights.pattern_novelty == pytest.approx(0.2)
+
+
+@pytest.mark.unit
+def test_load_config_rejects_weights_not_summing_to_one(tmp_path: Path) -> None:
+    yaml = tmp_path / "seerflow.yaml"
+    yaml.write_text(
+        "ueba:\n"
+        "  sub_score_weights:\n"
+        "    time_of_day: 0.5\n"
+        "    source_novelty: 0.5\n"
+        "    volume: 0.5\n"
+        "    pattern_novelty: 0.5\n"
+    )
+    with pytest.raises(ConfigError, match="sub_score_weights must sum to 1.0"):
+        load_config(str(yaml))
+
+
+@pytest.mark.unit
+def test_load_config_rejects_score_threshold_out_of_range(tmp_path: Path) -> None:
+    yaml = tmp_path / "seerflow.yaml"
+    yaml.write_text("ueba:\n  score_threshold: 1.5\n")
+    with pytest.raises(ConfigError, match=r"ueba\.score_threshold"):
+        load_config(str(yaml))
+
+
+@pytest.mark.unit
+def test_load_config_rejects_negative_score_threshold(tmp_path: Path) -> None:
+    yaml = tmp_path / "seerflow.yaml"
+    yaml.write_text("ueba:\n  score_threshold: -0.1\n")
+    with pytest.raises(ConfigError, match=r"ueba\.score_threshold"):
+        load_config(str(yaml))
+
+
+@pytest.mark.unit
+def test_load_config_rejects_non_mapping_sub_score_weights(tmp_path: Path) -> None:
+    yaml = tmp_path / "seerflow.yaml"
+    yaml.write_text("ueba:\n  sub_score_weights: not-a-mapping\n")
+    with pytest.raises(ConfigError, match="sub_score_weights must be a mapping"):
+        load_config(str(yaml))
+
+
+@pytest.mark.unit
+def test_load_config_rejects_zero_weight(tmp_path: Path) -> None:
+    yaml = tmp_path / "seerflow.yaml"
+    yaml.write_text(
+        "ueba:\n"
+        "  sub_score_weights:\n"
+        "    time_of_day: 0.0\n"
+        "    source_novelty: 0.4\n"
+        "    volume: 0.3\n"
+        "    pattern_novelty: 0.3\n"
+    )
+    with pytest.raises(ConfigError, match=r"time_of_day"):
+        load_config(str(yaml))
+
+
+@pytest.mark.unit
+def test_load_config_rejects_nonpositive_alert_cooldown(tmp_path: Path) -> None:
+    yaml = tmp_path / "seerflow.yaml"
+    yaml.write_text("ueba:\n  alert_cooldown_seconds: 0\n")
+    with pytest.raises(ConfigError, match=r"alert_cooldown_seconds"):
+        load_config(str(yaml))
