@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.ueba.store import BaselineStore
 
 _log = logging.getLogger("seerflow")
 
@@ -78,6 +79,7 @@ def make_handler(
     graph_structural: GraphStructuralEvaluator | None = None,
     kill_chain_tracker: KillChainTracker | None = None,
     ws_manager: ConnectionManager | None = None,
+    baseline_store: BaselineStore | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -172,6 +174,16 @@ def make_handler(
             seerflow_event = msgspec.structs.replace(
                 seerflow_event,
                 entity_refs=entity_refs,
+            )
+
+        # UEBA: capture pre-event baseline snapshot and update per entity.
+        # typed_for_edges is built in the same order as entity_refs_list, so
+        # the type tuple aligns positionally with entity_refs.
+        if baseline_store is not None and entity_refs:
+            entity_types = tuple(t for t, _u in typed_for_edges)
+            baseline_store.snapshot_and_learn(
+                seerflow_event,
+                entity_types=entity_types,  # type: ignore[arg-type]
             )
 
         # Advance watermark and check for late events
