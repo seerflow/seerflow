@@ -68,7 +68,9 @@ class TestFeedbackNoteRoundTrip:
             feedback, note = stored.get(alert_id, ("", ""))
             return _make_alert(alert_id=alert_id, feedback=feedback, feedback_note=note)
 
-        async def _update_feedback(alert_id: str, feedback: str, note: str = "", origin: str = "api") -> None:
+        async def _update_feedback(
+            alert_id: str, feedback: str, note: str = "", origin: str = "api"
+        ) -> None:
             stored[alert_id] = (feedback, note)
 
         alert_store.get_alert_by_id.side_effect = _get_alert_by_id
@@ -147,7 +149,9 @@ class TestFeedbackAuditLogParity:
             feedback, note = stored.get(alert_id, ("", ""))
             return _make_alert(alert_id=alert_id, feedback=feedback, feedback_note=note)
 
-        async def _update_feedback(alert_id: str, feedback: str, note: str = "", origin: str = "api") -> None:
+        async def _update_feedback(
+            alert_id: str, feedback: str, note: str = "", origin: str = "api"
+        ) -> None:
             stored[alert_id] = (feedback, note)
 
         alert_store.get_alert_by_id.side_effect = _get_alert_by_id

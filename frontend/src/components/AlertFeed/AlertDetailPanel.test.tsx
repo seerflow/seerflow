@@ -87,12 +87,12 @@ describe("AlertDetailPanel", () => {
     await waitFor(() => expect(screen.getByTestId("feedback-history-row")).toBeInTheDocument());
 
     const before = fetchMock.mock.calls.filter(
-      ([_method, url]: [string, string]) => typeof url === "string" && url.endsWith("/feedback"),
+      (call: unknown[]) => typeof call[1] === "string" && (call[1] as string).endsWith("/feedback"),
     ).length;
     useAlertStore.getState().bumpFeedbackVersion("a1");
     await waitFor(() => {
       const after = fetchMock.mock.calls.filter(
-        ([_method, url]: [string, string]) => typeof url === "string" && url.endsWith("/feedback"),
+        (call: unknown[]) => typeof call[1] === "string" && (call[1] as string).endsWith("/feedback"),
       ).length;
       expect(after).toBe(before + 1);
     });
