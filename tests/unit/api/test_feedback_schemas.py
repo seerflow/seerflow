@@ -13,10 +13,19 @@ def test_feedback_request_origin_defaults_to_api() -> None:
     assert fb.origin == "api"
 
 
-def test_feedback_request_accepts_dashboard_cli() -> None:
-    for origin in ("dashboard", "cli", "api"):
+def test_feedback_request_accepts_dashboard_and_api_but_rejects_cli() -> None:
+    """HTTP boundary accepts only origins a real HTTP client can legitimately claim.
+
+    ``"cli"`` must be rejected because CLI invocations do not cross HTTP;
+    accepting it would let any client forge the source label and corrupt
+    the audit log.
+    """
+    for origin in ("dashboard", "api"):
         fb = FeedbackRequest.model_validate({"feedback": "tp", "origin": origin})
         assert fb.origin == origin
+
+    with pytest.raises(ValidationError):
+        FeedbackRequest.model_validate({"feedback": "tp", "origin": "cli"})
 
 
 def test_feedback_request_rejects_unknown_origin() -> None:

@@ -152,11 +152,20 @@ class StatsResponse(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    """Request body for alert feedback submission."""
+    """Request body for alert feedback submission.
+
+    ``origin`` is constrained to values a real HTTP client can legitimately
+    claim. ``"cli"`` is excluded here because CLI invocations bypass HTTP
+    entirely (they call ``process_feedback`` directly), so accepting ``"cli"``
+    on the HTTP boundary would let any client forge that source label and
+    corrupt audit-log integrity. The storage layer's ``FeedbackOrigin`` type
+    and SQLite ``CHECK`` constraint still accept ``"cli"`` for rows written
+    by the in-process CLI path.
+    """
 
     feedback: Literal["tp", "fp"]
     note: str | None = Field(default=None, max_length=NOTE_MAX_LENGTH)
-    origin: Literal["dashboard", "cli", "api"] = "api"
+    origin: Literal["dashboard", "api"] = "api"
 
     @field_validator("note")
     @classmethod

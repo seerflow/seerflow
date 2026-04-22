@@ -79,7 +79,7 @@ async def test_feedback_history_pagination(client: TestClient, backend: SqliteBa
     for _ in range(5):
         client.post(
             f"/api/v1/alerts/{alert_id}/feedback",
-            json={"feedback": "tp", "origin": "cli"},
+            json={"feedback": "tp", "origin": "dashboard"},
         )
     r = client.get(f"/api/v1/alerts/{alert_id}/feedback?page=2&limit=2")
     body = r.json()
@@ -88,3 +88,21 @@ async def test_feedback_history_pagination(client: TestClient, backend: SqliteBa
     assert body["limit"] == 2
     assert len(body["items"]) == 2
     assert body["has_next"] is True
+
+
+async def test_post_feedback_rejects_cli_origin_over_http(
+    client: TestClient, backend: SqliteBackend
+) -> None:
+    """HTTP clients cannot forge ``origin="cli"``.
+
+    CLI-originated feedback is written by ``process_feedback`` directly
+    against the storage layer and never crosses HTTP. Accepting ``"cli"``
+    on the HTTP boundary would corrupt audit-log integrity by letting any
+    client impersonate the CLI source.
+    """
+    alert_id = await _seed_alert(backend, alert_id="a-4")
+    r = client.post(
+        f"/api/v1/alerts/{alert_id}/feedback",
+        json={"feedback": "tp", "origin": "cli"},
+    )
+    assert r.status_code == 422
