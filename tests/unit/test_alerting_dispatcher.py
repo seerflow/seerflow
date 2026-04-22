@@ -695,3 +695,48 @@ def test_dispatcher_masked_dashboard_url_handles_empty() -> None:
     session = _mock_session()
     dispatcher = AlertDispatcher(targets=(), session=session)
     assert dispatcher.masked_dashboard_url() == ""
+
+
+@pytest.mark.unit
+def test_dispatcher_masked_dashboard_url_handles_malformed() -> None:
+    """Malformed ``dashboard_url`` routes through ``mask_webhook_url`` and
+    returns the helper's sentinel rather than echoing the raw string.
+    """
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url="not-a-url-with-secret-xyz",
+    )
+    assert dispatcher.masked_dashboard_url() == "<invalid-url>"
+
+
+@pytest.mark.unit
+def test_webhook_delivery_adapter_repr_does_not_expose_dashboard_url() -> None:
+    """S-171 parity: _WebhookDeliveryAdapter's generated repr must never leak
+    the raw dashboard_url either — ``field(repr=False)`` enforces it.
+    """
+    from seerflow.alerting.dispatcher import _WebhookDeliveryAdapter
+
+    session = _mock_session()
+    dispatcher = AlertDispatcher(
+        targets=(),
+        session=session,
+        dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    target = WebhookTarget(
+        name="t1",
+        url="https://hooks.slack.test/services/T/B/secret",
+        format="slack",
+        min_severity=int(SeverityLevel.WARNING),
+    )
+    adapter = _WebhookDeliveryAdapter(
+        name=target.name,
+        min_severity=target.min_severity,
+        _target=target,
+        _dispatcher=dispatcher,
+        _dashboard_url=_SENSITIVE_DASHBOARD_URL,
+    )
+    text = repr(adapter)
+    assert "secret-token-abc123" not in text
+    assert "/auth/" not in text

@@ -229,7 +229,9 @@ class _WebhookDeliveryAdapter:
     min_severity: int
     _target: WebhookTarget
     _dispatcher: AlertDispatcher
-    _dashboard_url: str
+    # repr=False mirrors the S-171 discipline on AlertDispatcher —
+    # the adapter's generated __repr__ must never leak embedded tokens.
+    _dashboard_url: str = field(repr=False)
 
     async def deliver(self, alert: Alert) -> None:
         try:
