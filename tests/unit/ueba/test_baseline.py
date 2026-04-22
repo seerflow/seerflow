@@ -162,9 +162,7 @@ from seerflow.models.event import SeerflowEvent  # noqa: E402
 from seerflow.ueba.baseline import UEBAParams, apply_event  # noqa: E402
 
 
-def _mk_event(
-    ts_ns: int, ip: str = "10.0.0.1", template_id: int = 42
-) -> SeerflowEvent:
+def _mk_event(ts_ns: int, ip: str = "10.0.0.1", template_id: int = 42) -> SeerflowEvent:
     return SeerflowEvent(
         event_id=_uuid.uuid4(),
         timestamp_ns=ts_ns,
@@ -208,7 +206,7 @@ def test_apply_event_latches_warmup_after_both_gates() -> None:
         warmup_days=1,
         warmup_min_events=3,
     )
-    b: "EntityBaseline | None" = None
+    b: EntityBaseline | None = None
     for i in range(3):
         b = apply_event(
             baseline=b,
@@ -227,6 +225,26 @@ def test_apply_event_latches_warmup_after_both_gates() -> None:
         params=params,
     )
     assert b.warmup_complete is True
+
+
+@pytest.mark.unit
+def test_apply_event_skips_template_update_when_no_template() -> None:
+    """template_id=-1 (sentinel for "no Drain3 match") must not touch templates."""
+    params = UEBAParams(
+        alpha=0.5,
+        source_ip_cap=8,
+        template_top_k=8,
+        warmup_days=7,
+        warmup_min_events=50,
+    )
+    b = apply_event(
+        baseline=None,
+        entity_uuid="u1",
+        entity_type="user",
+        event=_mk_event(ts_ns=1_000, template_id=-1),
+        params=params,
+    )
+    assert b.templates == ()
 
 
 @pytest.mark.unit

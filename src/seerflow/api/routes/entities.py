@@ -237,9 +237,7 @@ async def get_entity_baseline(
     if baseline is None:
         raise HTTPException(status_code=404, detail="unknown entity")
     if not baseline.warmup_complete:
-        days_observed = (baseline.last_seen_ns - baseline.first_seen_ns) / (
-            86_400 * 1_000_000_000
-        )
+        days_observed = (baseline.last_seen_ns - baseline.first_seen_ns) / (86_400 * 1_000_000_000)
         return JSONResponse(
             status_code=404,
             content={

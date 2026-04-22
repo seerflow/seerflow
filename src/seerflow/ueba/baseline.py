@@ -166,8 +166,7 @@ def apply_event(
 
     span_ns = last_seen_ns - first_seen_ns
     warmup_complete = (
-        span_ns >= params.warmup_days * _NS_PER_DAY
-        and event_count >= params.warmup_min_events
+        span_ns >= params.warmup_days * _NS_PER_DAY and event_count >= params.warmup_min_events
     )
     # Latch once true.
     if baseline and baseline.warmup_complete:

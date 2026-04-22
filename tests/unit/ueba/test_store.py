@@ -95,10 +95,13 @@ def test_learn_promotes_lru() -> None:
     assert store.get("u3") is not None
 
 
-from pathlib import Path  # noqa: E402
+from typing import TYPE_CHECKING  # noqa: E402
 
 from seerflow.config import StorageConfig  # noqa: E402
 from seerflow.storage.sqlite import SqliteBackend  # noqa: E402
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 async def test_store_flush_and_restore_round_trip(tmp_path: Path) -> None:
@@ -131,3 +134,57 @@ async def test_restore_missing_key_is_noop(tmp_path: Path) -> None:
         assert len(store) == 0
     finally:
         await backend.close()
+
+
+class _FailingSaveStore:
+    """ModelStore stub whose ``save_state`` always raises."""
+
+    async def save_state(self, key: str, data: bytes) -> None:
+        raise RuntimeError("simulated storage outage")
+
+    async def load_state(self, key: str) -> bytes | None:
+        return None
+
+
+class _FailingLoadStore:
+    """ModelStore stub whose ``load_state`` always raises."""
+
+    async def save_state(self, key: str, data: bytes) -> None:
+        return None
+
+    async def load_state(self, key: str) -> bytes | None:
+        raise RuntimeError("simulated storage outage")
+
+
+class _CorruptBlobStore:
+    """ModelStore stub that returns a non-msgpack blob on load."""
+
+    async def save_state(self, key: str, data: bytes) -> None:
+        return None
+
+    async def load_state(self, key: str) -> bytes | None:
+        return b"not-a-valid-msgpack-blob"
+
+
+@pytest.mark.unit
+async def test_flush_swallows_model_store_exception() -> None:
+    store = BaselineStore(params=_params(), max_entities=4)
+    store.snapshot_and_learn(_mk_event("u1", 1), entity_types=("user",))
+    # Must not raise even though save_state fails.
+    await store.flush(_FailingSaveStore())  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+async def test_restore_swallows_load_state_exception() -> None:
+    store = BaselineStore(params=_params(), max_entities=4)
+    restored = await store.restore(_FailingLoadStore())  # type: ignore[arg-type]
+    assert restored == 0
+    assert len(store) == 0
+
+
+@pytest.mark.unit
+async def test_restore_swallows_corrupt_blob() -> None:
+    store = BaselineStore(params=_params(), max_entities=4)
+    restored = await store.restore(_CorruptBlobStore())  # type: ignore[arg-type]
+    assert restored == 0
+    assert len(store) == 0
