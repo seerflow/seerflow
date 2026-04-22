@@ -20,6 +20,7 @@ from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
 from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
+from seerflow.ueba.store import BaselineStore
 
 if TYPE_CHECKING:
     from seerflow.alerting.router import NotificationRouter
@@ -111,6 +112,28 @@ async def _run_with_config(config: SeerflowConfig) -> None:
             _log.info("Restored %d model states from storage", loaded)
     except Exception:
         _log.warning("Failed to restore model state — starting fresh", exc_info=True)
+
+    # UEBA baseline store — feature-flag gated by config.ueba.enabled.
+    baseline_store: BaselineStore | None = None
+    if config.ueba.enabled:
+        from seerflow.ueba.baseline import UEBAParams
+
+        ueba_params = UEBAParams(
+            alpha=config.ueba.ema_alpha,
+            source_ip_cap=config.ueba.source_ip_cap,
+            template_top_k=config.ueba.template_top_k,
+            warmup_days=config.ueba.warmup_days,
+            warmup_min_events=config.ueba.warmup_min_events,
+        )
+        baseline_store = BaselineStore(
+            params=ueba_params,
+            max_entities=config.ueba.max_entities,
+        )
+        try:
+            restored = await baseline_store.restore(storage)
+            _log.info("UEBA: restored %d baselines", restored)
+        except Exception:
+            _log.warning("UEBA baseline restore failed", exc_info=True)
 
     from seerflow.detection.attack_mapping import AttackMapper
 
@@ -375,6 +398,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         attack_mapper=attack_mapper,
         graph_structural=graph_structural,
         kill_chain_tracker=kill_chain_tracker,
+        baseline_store=baseline_store,
     )
     await pipeline.run(handler)
 
@@ -411,6 +435,13 @@ async def _run_with_config(config: SeerflowConfig) -> None:
                 _log.info("Final save: %d model states persisted", saved)
         except Exception:
             _log.warning("Final model save failed", exc_info=True)
+
+        if baseline_store is not None:
+            try:
+                await baseline_store.flush(storage)
+                _log.info("UEBA: flushed %d baselines", len(baseline_store))
+            except Exception:
+                _log.warning("UEBA baseline flush failed", exc_info=True)
     finally:
         if dispatcher is not None:
             await dispatcher.stop()

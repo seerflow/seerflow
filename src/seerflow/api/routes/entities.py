@@ -14,8 +14,13 @@ import uuid as _uuid_mod
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
-from seerflow.api.deps import StorageDeps, get_storage, require_entity_store
+from seerflow.api.deps import (
+    StorageDeps,
+    get_storage,
+    require_entity_store,
+)
 from seerflow.api.limits import detail_limit, limiter, list_limit
 from seerflow.api.schemas import (
     EntityRelationResponse,
@@ -200,4 +205,65 @@ async def get_entity_timeline(
         events=[EventResponse.from_event(e) for e in events],
         related=[EntityRelationResponse.from_relation(r) for r in related],
         total=len(events),
+    )
+
+
+@router.get(
+    "/entities/{entity_uuid}/baseline",
+    responses={
+        404: {"description": "Unknown entity or warming up"},
+        422: {"description": "Invalid UUID"},
+        429: {"description": "Rate limit exceeded"},
+        503: {"description": "UEBA disabled"},
+    },
+)
+@limiter.limit(list_limit)
+async def get_entity_baseline(
+    request: Request,
+    entity_uuid: _uuid_mod.UUID,
+) -> JSONResponse:
+    """Return the current UEBA baseline for ``entity_uuid``.
+
+    Response contract:
+
+    - 503 ``{"detail": "UEBA disabled"}`` — baseline store not configured
+      (mirrors ``require_entity_store`` for missing backends).
+    - 404 ``{"detail": "unknown entity"}`` — store configured, entity never seen.
+    - 404 ``{"status": "warming_up", ...}`` — seen but not past warmup gates.
+    - 200 — warm baseline payload.
+    """
+    store = getattr(request.app.state, "baseline_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="UEBA disabled")
+    baseline = store.get(str(entity_uuid))
+    if baseline is None:
+        raise HTTPException(status_code=404, detail="unknown entity")
+    if not baseline.warmup_complete:
+        days_observed = (baseline.last_seen_ns - baseline.first_seen_ns) / (86_400 * 1_000_000_000)
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "warming_up",
+                "events_observed": baseline.event_count,
+                "events_required": store.params.warmup_min_events,
+                "days_observed": days_observed,
+                "days_required": store.params.warmup_days,
+            },
+        )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "entity_uuid": baseline.entity_uuid,
+            "entity_type": baseline.entity_type,
+            "first_seen_ns": baseline.first_seen_ns,
+            "last_seen_ns": baseline.last_seen_ns,
+            "event_count": baseline.event_count,
+            "warmup_complete": baseline.warmup_complete,
+            "hours": list(baseline.hours),
+            "source_ips": [list(pair) for pair in baseline.source_ips],
+            "volume_ema_min": baseline.volume_ema_min,
+            "volume_ema_hour": baseline.volume_ema_hour,
+            "volume_last_ns": baseline.volume_last_ns,
+            "templates": [list(pair) for pair in baseline.templates],
+        },
     )

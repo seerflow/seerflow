@@ -203,6 +203,19 @@ class LLMConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class UEBAConfig:
+    """UEBA engine configuration (FR-052, S-064)."""
+
+    enabled: bool = True
+    warmup_days: int = 7
+    warmup_min_events: int = 50
+    max_entities: int = 100_000
+    ema_alpha: float = 0.05
+    source_ip_cap: int = 64
+    template_top_k: int = 32
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class SeerflowConfig:
     """Top-level Seerflow configuration."""
 
@@ -212,6 +225,7 @@ class SeerflowConfig:
     correlation: CorrelationConfig = field(default_factory=CorrelationConfig)
     alerting: AlertingConfig = field(default_factory=AlertingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    ueba: UEBAConfig = field(default_factory=UEBAConfig)
     dashboard_port: int = 8080
     health_bind_address: str = "127.0.0.1"
     log_level: str = "INFO"
@@ -266,6 +280,9 @@ from seerflow._config_builders import (  # noqa: E402
 )
 from seerflow._config_builders import (  # noqa: E402
     _build_storage as _build_storage,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_ueba as _build_ueba,
 )
 from seerflow._config_builders import (  # noqa: E402
     _build_webhook_configs as _build_webhook_configs,
@@ -361,6 +378,7 @@ def load_config(
         correlation=_build_correlation(raw.get("correlation", {})),
         alerting=_build_alerting(raw.get("alerting", {})),
         llm=_build_llm(raw.get("llm", {})),
+        ueba=_build_ueba(raw.get("ueba", {})),
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
