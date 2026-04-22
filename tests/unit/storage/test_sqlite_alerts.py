@@ -95,3 +95,16 @@ async def test_list_feedback_events_unknown_alert_empty(
     page = await sqlite_storage.list_feedback_events("missing")
     assert page.total == 0
     assert page.items == ()
+
+
+@pytest.mark.asyncio
+async def test_update_feedback_also_appends_log_row(sqlite_storage: SqliteBackend) -> None:
+    alert = make_alert(alert_id="a-1", feedback="")
+    await sqlite_storage.write_alert(alert)
+    await sqlite_storage.update_feedback("a-1", "fp", note="too noisy", origin="dashboard")
+    page = await sqlite_storage.list_feedback_events("a-1")
+    assert page.total == 1
+    (ev,) = page.items
+    assert ev.feedback == "fp"
+    assert ev.origin == "dashboard"
+    assert ev.note == "too noisy"

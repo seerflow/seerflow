@@ -62,7 +62,11 @@ class AlertStore(Protocol):  # pragma: no cover
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]: ...
 
     async def update_feedback(
-        self, alert_id: str, feedback: FeedbackType, note: str = ""
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str = "",
+        origin: FeedbackOrigin = "api",
     ) -> None: ...
 
     async def get_alert_by_id(self, alert_id: str) -> Alert | None: ...

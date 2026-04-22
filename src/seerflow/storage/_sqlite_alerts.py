@@ -220,14 +220,21 @@ class _SqliteAlertMixin:
         )
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
-    async def update_feedback(self, alert_id: str, feedback: FeedbackType, note: str = "") -> None:
-        """Update alert feedback and re-encode the BLOB.
+    async def update_feedback(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str = "",
+        origin: FeedbackOrigin = "api",
+    ) -> None:
+        """Update alert feedback and append an audit-log row in one transaction.
 
-        Implementation note: this performs a SELECT then UPDATE. On the SQLite
-        backend this is safe because a single aiosqlite connection serializes
-        all operations. A PostgreSQL backend MUST use SELECT ... FOR UPDATE
-        inside a transaction to prevent a concurrent write from being lost.
+        Implementation note: on the SQLite backend a single aiosqlite connection
+        serialises all operations. A PostgreSQL backend MUST use
+        ``SELECT ... FOR UPDATE`` inside a transaction to prevent lost updates.
         """
+        import time
+
         async with await self._conn.execute(
             "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]
         ) as cursor:
@@ -237,10 +244,18 @@ class _SqliteAlertMixin:
         alert = msgspec.msgpack.decode(row[0], type=Alert)
         updated = msgspec.structs.replace(alert, feedback=feedback, feedback_note=note)
         data = msgspec.msgpack.encode(updated)
+        submitted_at_ns = time.time_ns()
         try:
+            await self._conn.execute("BEGIN IMMEDIATE")
             await self._conn.execute(
                 "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
                 [feedback, data, alert_id],
+            )
+            await self._conn.execute(
+                "INSERT INTO alert_feedback_events "
+                "(alert_id, feedback, note, origin, submitted_at_ns) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [alert_id, feedback, note, origin, submitted_at_ns],
             )
             await self._conn.commit()
         except Exception:
