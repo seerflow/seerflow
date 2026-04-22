@@ -150,7 +150,7 @@ def test_baseline_warm_payload_exposes_last_score(backend: SqliteBackend) -> Non
         pattern_novelty=0.3,
         composite=0.42,
     )
-    engine._last_score[UUID_OK] = breakdown
+    engine._seed_last_score_for_test(UUID_OK, breakdown)
     app.state.ueba_engine = engine
 
     client = TestClient(app)

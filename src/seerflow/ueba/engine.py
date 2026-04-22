@@ -93,13 +93,20 @@ def score_pattern_novelty(*, template_id: int, templates: tuple[tuple[str, float
     if template_id == -1:
         return 0.0
     key = str(template_id)
-    tmpl = dict(templates)
-    if key not in tmpl:
+    # Templates are capped at template_top_k (default 32); linear scan
+    # avoids the per-event dict allocation flagged by the python-review.
+    matched: float | None = None
+    max_w = 0.0
+    for k, w in templates:
+        if w > max_w:
+            max_w = w
+        if k == key:
+            matched = w
+    if matched is None:
         return 1.0
-    max_w = max(tmpl.values(), default=1.0)
     if max_w <= 0.0:
         return 0.0
-    return 1.0 - tmpl[key] / max_w
+    return 1.0 - matched / max_w
 
 
 def _zero_breakdown() -> UEBAScoreBreakdown:
@@ -179,6 +186,18 @@ class UEBAEngine:
     def _thresholds_for_test(self) -> dict[str, DSpotThreshold]:
         """Expose the internal threshold map for unit tests only."""
         return self._thresholds
+
+    def _seed_last_score_for_test(
+        self,
+        entity_uuid: str,
+        breakdown: UEBAScoreBreakdown,
+    ) -> None:
+        """Seed ``_last_score`` without driving a real event through the pipeline.
+
+        Tests only — keeps assertion-grade breakdowns exact while avoiding
+        direct mutation of the private cache dict.
+        """
+        self._last_score[entity_uuid] = breakdown
 
     def _threshold_for(self, entity_type: str) -> DSpotThreshold:
         t = self._thresholds.get(entity_type)
