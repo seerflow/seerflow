@@ -91,3 +91,66 @@ def test_update_ema_first_sample_equals_observed() -> None:
 def test_update_ema_subsequent_blends() -> None:
     # alpha=0.5, prev=10, observed=20  -> 0.5*20 + 0.5*10 = 15
     assert update_ema(prev=10.0, observed=20.0, alpha=0.5, is_first=False) == 15.0
+
+
+from seerflow.ueba.baseline import update_source_ips, update_templates  # noqa: E402
+
+
+@pytest.mark.unit
+def test_update_source_ips_adds_new_ip() -> None:
+    out = update_source_ips(ips=(), new_ip="10.0.0.1", now_ns=100, cap=4)
+    assert out == (("10.0.0.1", 100),)
+
+
+@pytest.mark.unit
+def test_update_source_ips_refreshes_last_seen_for_existing() -> None:
+    existing = (("10.0.0.1", 100), ("10.0.0.2", 50))
+    out = update_source_ips(ips=existing, new_ip="10.0.0.2", now_ns=200, cap=4)
+    assert ("10.0.0.2", 200) in out
+    assert ("10.0.0.1", 100) in out
+    assert len(out) == 2
+
+
+@pytest.mark.unit
+def test_update_source_ips_evicts_oldest_at_cap() -> None:
+    existing = (
+        ("10.0.0.1", 10),
+        ("10.0.0.2", 20),
+        ("10.0.0.3", 30),
+        ("10.0.0.4", 40),
+    )
+    out = update_source_ips(ips=existing, new_ip="10.0.0.5", now_ns=50, cap=4)
+    assert ("10.0.0.1", 10) not in out  # oldest evicted
+    assert ("10.0.0.5", 50) in out
+    assert len(out) == 4
+
+
+@pytest.mark.unit
+def test_update_templates_decays_others_and_boosts_observed() -> None:
+    existing = (("t1", 0.8), ("t2", 0.4))
+    out = update_templates(
+        templates=existing,
+        template_id="t1",
+        alpha=0.5,
+        top_k=4,
+    )
+    as_dict = dict(out)
+    # t1: 0.5*1 + 0.5*0.8 = 0.9
+    assert as_dict["t1"] == pytest.approx(0.9)
+    # t2: decays => 0.5 * 0 + 0.5 * 0.4 = 0.2
+    assert as_dict["t2"] == pytest.approx(0.2)
+
+
+@pytest.mark.unit
+def test_update_templates_evicts_smallest_at_top_k() -> None:
+    existing = (("t1", 0.9), ("t2", 0.5), ("t3", 0.1))
+    out = update_templates(
+        templates=existing,
+        template_id="t4",
+        alpha=0.5,
+        top_k=3,
+    )
+    as_dict = dict(out)
+    assert "t3" not in as_dict  # weakest evicted to make room for t4
+    assert "t4" in as_dict
+    assert len(out) == 3
