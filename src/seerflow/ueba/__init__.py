@@ -1,5 +1,12 @@
 """UEBA: per-entity behavioral baselines and deviation scoring."""
 
-from seerflow.ueba.baseline import EntityBaseline, EntityType
+from seerflow.ueba.baseline import EntityBaseline, EntityType, UEBAParams, apply_event
+from seerflow.ueba.store import BaselineStore
 
-__all__ = ["EntityBaseline", "EntityType"]
+__all__ = [
+    "BaselineStore",
+    "EntityBaseline",
+    "EntityType",
+    "UEBAParams",
+    "apply_event",
+]
