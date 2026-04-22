@@ -10,7 +10,12 @@ export class ApiError extends Error {
 import { toBigintNs } from "./bigint-ns";
 import { logger } from "./logger";
 
-const BIGINT_KEYS = new Set(["timestamp_ns", "observed_ns", "bucket_start_ns"]);
+const BIGINT_KEYS = new Set([
+  "timestamp_ns",
+  "observed_ns",
+  "bucket_start_ns",
+  "submitted_at_ns",
+]);
 // 32 ≈ 6× headroom over the deepest legitimate Seerflow payload (≤5 levels:
 // alert object inside an items array inside the response root). Caps the
 // walker before V8's ~3,900-frame stack limit triggers RangeError on a

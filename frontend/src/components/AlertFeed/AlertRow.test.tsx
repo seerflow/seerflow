@@ -3,6 +3,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { AlertRow } from "./AlertRow";
 import type { Alert } from "@/lib/types";
 
+vi.mock("@/lib/feedback", () => ({ submitFeedback: vi.fn() }));
+
 const alert: Alert = {
   alert_id: "a1", timestamp_ns: 1_700_000_000_000_000_000n, alert_type: "sigma",
   rule_name: "SSH brute force", severity: 17, risk_score: 0.92,
@@ -30,5 +32,29 @@ describe("AlertRow", () => {
     const a: Alert = { ...alert, timestamp_ns: 1_700_000_000_000_000_123n };
     render(<AlertRow alert={a} onClick={() => {}} />);
     expect(screen.getByText("22:13:20")).toBeInTheDocument();
+  });
+
+  it("renders ✓ and ✗ buttons with aria labels (S-066)", () => {
+    render(<AlertRow alert={alert} onClick={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /mark true positive/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /mark false positive/i })).toBeInTheDocument();
+  });
+
+  it("clicking TP button does not toggle expand (S-066)", async () => {
+    const onClick = vi.fn();
+    const { submitFeedback } = await import("@/lib/feedback");
+    render(<AlertRow alert={alert} onClick={onClick} />);
+    fireEvent.click(screen.getByRole("button", { name: /mark true positive/i }));
+    expect(onClick).not.toHaveBeenCalled();
+    expect(submitFeedback).toHaveBeenCalledWith("a1", "tp");
+  });
+
+  it("Enter keydown on TP button does not toggle expand (S-066)", () => {
+    const onClick = vi.fn();
+    render(<AlertRow alert={alert} onClick={onClick} />);
+    const tpButton = screen.getByRole("button", { name: /mark true positive/i });
+    tpButton.focus();
+    fireEvent.keyDown(tpButton, { key: "Enter" });
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

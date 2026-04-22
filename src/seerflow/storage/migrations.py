@@ -159,10 +159,29 @@ async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
         await conn.commit()
 
 
+async def _migrate_v4_feedback_events(conn: aiosqlite.Connection) -> None:
+    """Migration 4: append-only TP/FP feedback audit log (S-066)."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS alert_feedback_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id        TEXT    NOT NULL,
+            feedback        TEXT    NOT NULL CHECK (feedback IN ('tp','fp')),
+            note            TEXT    NOT NULL DEFAULT '',
+            origin          TEXT    NOT NULL CHECK (origin IN ('dashboard','cli','api')),
+            submitted_at_ns INTEGER NOT NULL
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_feedback_alert_time "
+        "ON alert_feedback_events(alert_id, submitted_at_ns DESC)"
+    )
+
+
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     1: _migrate_v1_bootstrap,
     2: _migrate_v2_graph_edges,
     3: _migrate_v3_mitre_junctions,
+    4: _migrate_v4_feedback_events,
 }
 
 

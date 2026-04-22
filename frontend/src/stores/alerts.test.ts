@@ -77,6 +77,15 @@ describe("alertStore", () => {
     expect(s.getState().alerts[0].feedback).toBe("tp");
   });
 
+  it("bumpFeedbackVersion increments per alertId (S-066)", () => {
+    const s = createAlertStore(10);
+    s.getState().bumpFeedbackVersion("a-1");
+    s.getState().bumpFeedbackVersion("a-1");
+    s.getState().bumpFeedbackVersion("a-2");
+    expect(s.getState().feedbackVersion["a-1"]).toBe(2);
+    expect(s.getState().feedbackVersion["a-2"]).toBe(1);
+  });
+
   it("setFeedback ignores unmatched alert_id (S-204 coverage closure)", () => {
     const s = createAlertStore(10);
     s.getState().prepend(a({alert_id: "1", feedback: undefined}));

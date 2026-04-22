@@ -171,6 +171,14 @@ class TestGetAlert:
         resp = client.get("/api/v1/alerts/nonexistent")
         assert resp.status_code == 404
 
+    def test_oversized_alert_id_returns_422(self) -> None:
+        """Path segments above 64 chars are rejected before storage is touched."""
+        alert_store = AsyncMock()
+        client = TestClient(_make_app(alert_store))
+        resp = client.get(f"/api/v1/alerts/{'a' * 100}")
+        assert resp.status_code == 422
+        alert_store.get_alert_by_id.assert_not_called()
+
 
 class TestAlertFeedback:
     """Tests for POST /api/v1/alerts/{alert_id}/feedback."""
@@ -185,7 +193,22 @@ class TestAlertFeedback:
             json={"feedback": "tp"},
         )
         assert resp.status_code == 204
-        alert_store.update_feedback.assert_called_once_with("alert-001", "tp", "")
+        alert_store.update_feedback.assert_called_once_with("alert-001", "tp", "", origin="api")
+
+    def test_submit_tp_feedback_with_dashboard_origin(self) -> None:
+        """``origin`` from the request body passes through to the store call."""
+        alert_store = AsyncMock()
+        alert_store.get_alert_by_id.return_value = _make_alert()
+        alert_store.update_feedback.return_value = None
+        client = TestClient(_make_app(alert_store))
+        resp = client.post(
+            "/api/v1/alerts/alert-001/feedback",
+            json={"feedback": "tp", "origin": "dashboard"},
+        )
+        assert resp.status_code == 204
+        alert_store.update_feedback.assert_called_once_with(
+            "alert-001", "tp", "", origin="dashboard"
+        )
 
     def test_feedback_alert_not_found(self) -> None:
         alert_store = AsyncMock()
@@ -205,3 +228,22 @@ class TestAlertFeedback:
             json={"feedback": "invalid"},
         )
         assert resp.status_code == 422
+
+    def test_oversized_alert_id_returns_422(self) -> None:
+        """POST feedback rejects alert_id path segments above 64 chars."""
+        alert_store = AsyncMock()
+        client = TestClient(_make_app(alert_store))
+        resp = client.post(
+            f"/api/v1/alerts/{'a' * 100}/feedback",
+            json={"feedback": "tp"},
+        )
+        assert resp.status_code == 422
+        alert_store.get_alert_by_id.assert_not_called()
+
+    def test_list_feedback_oversized_alert_id_returns_422(self) -> None:
+        """GET feedback history rejects alert_id path segments above 64 chars."""
+        alert_store = AsyncMock()
+        client = TestClient(_make_app(alert_store))
+        resp = client.get(f"/api/v1/alerts/{'a' * 100}/feedback")
+        assert resp.status_code == 422
+        alert_store.get_alert_by_id.assert_not_called()

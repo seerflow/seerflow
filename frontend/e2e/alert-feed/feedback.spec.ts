@@ -30,7 +30,7 @@ test("TP click POSTs feedback:tp and fills button (204 path)", async ({ page }) 
   const rows = page.getByRole("button", { name: /^alert / });
   await rows.first().click();
 
-  const tpBtn = page.getByRole("button", { name: "True positive" });
+  const tpBtn = page.getByRole("button", { name: "True positive", exact: true });
   await tpBtn.click();
 
   await expect.poll(() => posts.length).toBeGreaterThanOrEqual(1);
@@ -52,7 +52,7 @@ test("500 response rolls TP button back to neutral", async ({ page }) => {
   const rows = page.getByRole("button", { name: /^alert / });
   await rows.first().click();
 
-  const tpBtn = page.getByRole("button", { name: "True positive" });
+  const tpBtn = page.getByRole("button", { name: "True positive", exact: true });
   await tpBtn.click();
 
   // Rollback restores `feedback: ""`, which re-renders the button as

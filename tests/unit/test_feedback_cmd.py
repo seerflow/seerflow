@@ -130,6 +130,7 @@ class TestRunFeedback:
             ensemble=mock_ensemble,
             pagerduty_routing_key="",
             note="",
+            origin="cli",
         )
         mock_ensemble.save_all_state.assert_awaited_once_with(mock_storage)
         mock_storage.close.assert_awaited_once()

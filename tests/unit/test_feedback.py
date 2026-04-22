@@ -76,7 +76,7 @@ class TestProcessFeedback:
             storage=storage,
         )
 
-        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "fp", "")
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "fp", "", origin="api")
         assert "fp" in result.lower() or "FP" in result
 
     async def test_tp_updates_storage(self) -> None:
@@ -94,7 +94,7 @@ class TestProcessFeedback:
             storage=storage,
         )
 
-        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "")
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "", origin="api")
         assert "tp" in result.lower() or "TP" in result
 
     async def test_fp_adjusts_dspot_threshold(self) -> None:
@@ -358,7 +358,7 @@ class TestUpdateFeedbackNote:
         )
 
         storage.update_feedback.assert_awaited_once_with(
-            alert.alert_id, "tp", "manual triage: matches known vuln scanner"
+            alert.alert_id, "tp", "manual triage: matches known vuln scanner", origin="api"
         )
 
     async def test_update_feedback_defaults_note_to_empty(self) -> None:
@@ -371,7 +371,7 @@ class TestUpdateFeedbackNote:
 
         await process_feedback(alert_id=alert.alert_id, feedback="tp", storage=storage)
 
-        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "")
+        storage.update_feedback.assert_awaited_once_with(alert.alert_id, "tp", "", origin="api")
 
 
 class TestResolvePagerDutyDelegates:

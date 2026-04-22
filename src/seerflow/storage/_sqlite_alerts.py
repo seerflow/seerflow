@@ -12,12 +12,14 @@ by the enclosing backend.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import msgspec
 
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+from seerflow.models.feedback import FeedbackEvent
 from seerflow.models.query import Page
 from seerflow.sigma.attack import format_technique
 
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
     import aiosqlite
 
     from seerflow.models._types import FeedbackType
+    from seerflow.models.feedback import FeedbackOrigin
     from seerflow.models.query import AlertQuery
 
 _log = logging.getLogger(__name__)
@@ -218,13 +221,45 @@ class _SqliteAlertMixin:
         )
         return Page(items=items, total=total, page=filters.page, limit=filters.limit)
 
-    async def update_feedback(self, alert_id: str, feedback: FeedbackType, note: str = "") -> None:
-        """Update alert feedback and re-encode the BLOB.
+    async def _insert_feedback_event_row(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str,
+        origin: FeedbackOrigin,
+        submitted_at_ns: int,
+    ) -> None:
+        """Emit the feedback-event INSERT. The caller owns the transaction.
 
-        Implementation note: this performs a SELECT then UPDATE. On the SQLite
-        backend this is safe because a single aiosqlite connection serializes
-        all operations. A PostgreSQL backend MUST use SELECT ... FOR UPDATE
-        inside a transaction to prevent a concurrent write from being lost.
+        Shared by :meth:`update_feedback` (which wraps it in a
+        ``BEGIN IMMEDIATE`` so the SELECT→UPDATE→INSERT run atomically) and
+        :meth:`append_feedback_event` (which commits on its own).
+        """
+        await self._conn.execute(
+            "INSERT INTO alert_feedback_events "
+            "(alert_id, feedback, note, origin, submitted_at_ns) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [alert_id, feedback, note, origin, submitted_at_ns],
+        )
+
+    async def update_feedback(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str = "",
+        origin: FeedbackOrigin = "api",
+    ) -> None:
+        """Update alert feedback and append an audit-log row.
+
+        The initial SELECT (to load the msgpack-encoded alert for decode)
+        runs outside the transaction: it is read-only and idempotent, so
+        repeating it is safe. ``BEGIN IMMEDIATE`` then guards UPDATE +
+        INSERT as a single write unit — they both commit or both roll back.
+
+        On the SQLite backend concurrent writes are serialised by the single
+        aiosqlite connection. A future Postgres backend MUST either use
+        ``SELECT ... FOR UPDATE`` inside the transaction or accept the same
+        lost-update window the SQLite impl has (rate-limiter caps exposure).
         """
         async with await self._conn.execute(
             "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]
@@ -235,10 +270,15 @@ class _SqliteAlertMixin:
         alert = msgspec.msgpack.decode(row[0], type=Alert)
         updated = msgspec.structs.replace(alert, feedback=feedback, feedback_note=note)
         data = msgspec.msgpack.encode(updated)
+        submitted_at_ns = time.time_ns()
         try:
+            await self._conn.execute("BEGIN IMMEDIATE")
             await self._conn.execute(
                 "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
                 [feedback, data, alert_id],
+            )
+            await self._insert_feedback_event_row(
+                alert_id, feedback, note, origin, submitted_at_ns
             )
             await self._conn.commit()
         except Exception:
@@ -269,6 +309,61 @@ class _SqliteAlertMixin:
                 stats[fb_type] = count
                 stats["total"] += count
         return stats
+
+    async def append_feedback_event(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str,
+        origin: FeedbackOrigin,
+        submitted_at_ns: int,
+    ) -> None:
+        """Append an immutable row to the feedback audit log."""
+        try:
+            await self._insert_feedback_event_row(
+                alert_id, feedback, note, origin, submitted_at_ns
+            )
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("append_feedback_event failed for alert %s", alert_id)
+            raise
+
+    async def list_feedback_events(
+        self, alert_id: str, page: int = 1, limit: int = 50
+    ) -> Page[FeedbackEvent]:
+        """Return feedback audit-log entries newest-first, paginated."""
+        limit = max(1, min(limit, 200))
+        page = max(1, page)
+        offset = (page - 1) * limit
+
+        async with await self._conn.execute(
+            "SELECT COUNT(*) FROM alert_feedback_events WHERE alert_id = ?",
+            [alert_id],
+        ) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+
+        async with await self._conn.execute(
+            "SELECT id, feedback, note, origin, submitted_at_ns "
+            "FROM alert_feedback_events WHERE alert_id = ? "
+            "ORDER BY submitted_at_ns DESC, id DESC LIMIT ? OFFSET ?",
+            [alert_id, limit, offset],
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        items = tuple(
+            FeedbackEvent(
+                alert_id=alert_id,
+                feedback=r[1],
+                note=r[2],
+                origin=r[3],
+                submitted_at_ns=r[4],
+                id=r[0],
+            )
+            for r in rows
+        )
+        return Page(items=items, total=total, page=page, limit=limit)
 
     async def count_by_severity(self) -> dict[str, int]:
         """Return alert counts grouped by severity name (lowercase).

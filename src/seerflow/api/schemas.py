@@ -15,6 +15,7 @@ from seerflow.utils.text import NOTE_MAX_LENGTH, sanitise_feedback_note
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
+    from seerflow.models.feedback import FeedbackEvent
     from seerflow.models.query import EntityRelation
 
 _T = TypeVar("_T")
@@ -151,10 +152,20 @@ class StatsResponse(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    """Request body for alert feedback submission."""
+    """Request body for alert feedback submission.
+
+    ``origin`` is constrained to values a real HTTP client can legitimately
+    claim. ``"cli"`` is excluded here because CLI invocations bypass HTTP
+    entirely (they call ``process_feedback`` directly), so accepting ``"cli"``
+    on the HTTP boundary would let any client forge that source label and
+    corrupt audit-log integrity. The storage layer's ``FeedbackOrigin`` type
+    and SQLite ``CHECK`` constraint still accept ``"cli"`` for rows written
+    by the in-process CLI path.
+    """
 
     feedback: Literal["tp", "fp"]
     note: str | None = Field(default=None, max_length=NOTE_MAX_LENGTH)
+    origin: Literal["dashboard", "api"] = "api"
 
     @field_validator("note")
     @classmethod
@@ -163,6 +174,32 @@ class FeedbackRequest(BaseModel):
         if v is None:
             return None
         return sanitise_feedback_note(v)
+
+
+class FeedbackEventResponse(BaseModel):
+    """JSON representation of a single feedback audit-log entry."""
+
+    id: int
+    feedback: Literal["tp", "fp"]
+    note: str
+    origin: Literal["dashboard", "cli", "api"]
+    submitted_at_ns: int
+
+    @field_serializer("submitted_at_ns", when_used="json")
+    def _serialize_submitted_at_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety."""
+        return str(v)
+
+    @classmethod
+    def from_event(cls, ev: FeedbackEvent) -> FeedbackEventResponse:
+        """Convert a FeedbackEvent storage struct to a Pydantic response model."""
+        return cls(
+            id=ev.id,
+            feedback=ev.feedback,
+            note=ev.note,
+            origin=ev.origin,
+            submitted_at_ns=ev.submitted_at_ns,
+        )
 
 
 class EntitySearchResult(BaseModel):

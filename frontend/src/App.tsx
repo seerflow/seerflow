@@ -14,6 +14,7 @@ import { AddWidgetMenu } from "@/components/DashboardGrid/AddWidgetMenu";
 import { ResetLayoutButton } from "@/components/DashboardGrid/ResetLayoutButton";
 import { hashHasEntity, hashHasCoverage } from "@/lib/hash";
 import { useEntityStore } from "@/stores/entity";
+import { Toaster } from "@/components/ui/sonner";
 
 export default function App() {
   const theme = useThemeStore((s) => s.theme);
@@ -70,6 +71,7 @@ export default function App() {
           )}
         </div>
       </main>
+      <Toaster richColors position="bottom-right" />
     </WsProvider>
   );
 }

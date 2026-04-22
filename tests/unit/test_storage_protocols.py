@@ -29,7 +29,27 @@ class _MockLogStore(LogStore):
 class _MockAlertStore(AlertStore):
     async def write_alert(self, alert: Alert, dedup_window_ns: int = 900_000_000_000) -> bool: ...
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]: ...
-    async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None: ...
+    async def update_feedback(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str = "",
+        origin: str = "api",
+    ) -> None: ...
+    async def append_feedback_event(self, *args: object, **kwargs: object) -> None: ...
+    async def list_feedback_events(self, *args: object, **kwargs: object) -> Page[object]:
+        from seerflow.models.query import Page
+
+        return Page(items=(), total=0, page=1, limit=50)
+
+    async def get_alert_by_id(self, alert_id: str) -> Alert | None:
+        return None
+
+    async def get_feedback_stats(self) -> dict[str, int]:
+        return {"tp": 0, "fp": 0, "total": 0}
+
+    async def count_by_severity(self) -> dict[str, int]:
+        return {}
 
 
 class _MockModelStore(ModelStore):

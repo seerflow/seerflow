@@ -190,3 +190,23 @@ export interface AttackCoverageResponse {
   tactics: AttackCoverageTactic[];
   summary: AttackCoverageSummary;
 }
+
+// --- Feedback audit log (S-066) ---
+
+export type FeedbackOrigin = "dashboard" | "cli" | "api";
+
+export interface FeedbackEvent {
+  id: number;                // server-assigned autoincrement; stable React key
+  feedback: "tp" | "fp";
+  note: string;
+  origin: FeedbackOrigin;
+  submitted_at_ns: bigint;   // JSON string on wire (JS bigint safety)
+}
+
+export interface FeedbackHistoryResponse {
+  items: FeedbackEvent[];
+  total: number;
+  page: number;
+  limit: number;
+  has_next: boolean;
+}

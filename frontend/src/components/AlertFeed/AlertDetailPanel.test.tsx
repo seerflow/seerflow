@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AlertDetailPanel } from "./AlertDetailPanel";
 import type { Alert, AlertDetail } from "@/lib/types";
+import { useAlertStore } from "@/stores/alerts";
 
 const base: Alert = {
   alert_id: "a1", timestamp_ns: 1n, alert_type: "sigma", rule_name: "r",
@@ -19,26 +20,82 @@ vi.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {},
 }));
 
+const submitMock = vi.fn();
+vi.mock("@/lib/feedback", () => ({
+  submitFeedback: (...a: unknown[]) => submitMock(...a),
+}));
+
+const sampleHistory = {
+  items: [
+    {
+      id: 1,
+      feedback: "tp",
+      note: "",
+      origin: "cli",
+      submitted_at_ns: 1_700_000_000_000_000_000n,
+    },
+  ],
+  total: 1, page: 1, limit: 50, has_next: false,
+};
+
+function setupMocks(detail: AlertDetail): void {
+  fetchMock.mockImplementation((method: string, url: string) => {
+    if (method === "GET" && typeof url === "string" && url.endsWith("/feedback")) {
+      return Promise.resolve(sampleHistory);
+    }
+    if (method === "GET") {
+      return Promise.resolve(detail);
+    }
+    return Promise.resolve({});
+  });
+}
+
 describe("AlertDetailPanel", () => {
-  beforeEach(() => fetchMock.mockReset());
+  beforeEach(() => {
+    fetchMock.mockReset();
+    submitMock.mockReset();
+    useAlertStore.setState({ feedbackVersion: {} });
+  });
 
   it("fetches detail on mount and renders fields", async () => {
     const detail: AlertDetail = { ...base, contributing_events: [{event_id: "e1", timestamp_ns: 1n, message: "ev"}] };
-    fetchMock.mockResolvedValueOnce(detail);
-    render(<AlertDetailPanel alert={base} onFeedback={vi.fn()} />);
+    setupMocks(detail);
+    render(<AlertDetailPanel alert={base} />);
     await waitFor(() => expect(screen.getByText("ev")).toBeInTheDocument());
     expect(screen.getByText("TA0001")).toBeInTheDocument();
   });
 
-  it("TP click POSTs feedback", async () => {
-    fetchMock.mockResolvedValueOnce(base).mockResolvedValueOnce({});
-    const onFeedback = vi.fn();
-    render(<AlertDetailPanel alert={base} onFeedback={onFeedback} />);
+  it("TP click invokes shared submitFeedback (S-066)", async () => {
+    const detail: AlertDetail = { ...base };
+    setupMocks(detail);
+    render(<AlertDetailPanel alert={base} />);
     await waitFor(() => screen.getByRole("button", { name: /True positive/i }));
     fireEvent.click(screen.getByRole("button", { name: /True positive/i }));
-    expect(onFeedback).toHaveBeenCalledWith("a1", "tp");
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("POST", "/api/v1/alerts/a1/feedback", { feedback: "tp" })
-    );
+    expect(submitMock).toHaveBeenCalledWith("a1", "tp");
+  });
+
+  it("fetches history on mount and renders rows (S-066)", async () => {
+    const detail: AlertDetail = { ...base };
+    setupMocks(detail);
+    render(<AlertDetailPanel alert={base} />);
+    await waitFor(() => expect(screen.getByTestId("feedback-history-row")).toBeInTheDocument());
+  });
+
+  it("refetches history when feedbackVersion bumps (S-066)", async () => {
+    const detail: AlertDetail = { ...base };
+    setupMocks(detail);
+    render(<AlertDetailPanel alert={base} />);
+    await waitFor(() => expect(screen.getByTestId("feedback-history-row")).toBeInTheDocument());
+
+    const before = fetchMock.mock.calls.filter(
+      (call: unknown[]) => typeof call[1] === "string" && (call[1] as string).endsWith("/feedback"),
+    ).length;
+    useAlertStore.getState().bumpFeedbackVersion("a1");
+    await waitFor(() => {
+      const after = fetchMock.mock.calls.filter(
+        (call: unknown[]) => typeof call[1] === "string" && (call[1] as string).endsWith("/feedback"),
+      ).length;
+      expect(after).toBe(before + 1);
+    });
   });
 });
