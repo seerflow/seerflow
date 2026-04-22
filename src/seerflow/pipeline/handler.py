@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import msgspec.structs
 
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.ueba.baseline import EntityType
     from seerflow.ueba.store import BaselineStore
 
 _log = logging.getLogger("seerflow")
@@ -178,12 +179,18 @@ def make_handler(
 
         # UEBA: capture pre-event baseline snapshot and update per entity.
         # typed_for_edges is built in the same order as entity_refs_list, so
-        # the type tuple aligns positionally with entity_refs.
+        # the type tuple aligns positionally with entity_refs. Each
+        # ``type_name`` is one of the EntityDispatch literal seeds
+        # ("ip"/"user"/"host"/"domain"/"file"/"process"), all valid EntityType
+        # values — cast narrows ``str`` to the Literal at the call boundary.
         if baseline_store is not None and entity_refs:
-            entity_types = tuple(t for t, _u in typed_for_edges)
+            entity_types = cast(
+                "tuple[EntityType, ...]",
+                tuple(t for t, _u in typed_for_edges),
+            )
             baseline_store.snapshot_and_learn(
                 seerflow_event,
-                entity_types=entity_types,  # type: ignore[arg-type]
+                entity_types=entity_types,
             )
 
         # Advance watermark and check for late events
