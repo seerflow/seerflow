@@ -7,7 +7,7 @@ import { FilterBar } from "./FilterBar";
 import { SummaryBadges } from "./SummaryBadges";
 import { api, ApiError } from "@/lib/api";
 import { AlertSchema } from "@/lib/schemas";
-import type { Alert, AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
+import type { AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
 import { isAlert } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { createFilterSlot } from "@/lib/wsFilter";
@@ -75,7 +75,9 @@ export function AlertFeed(): JSX.Element {
       // LiveEvent-shaped batches are EventStream's concern.
       const first = m.events[0];
       if (isAlert(first)) {
-        for (const a of m.events as Alert[]) prepend(a);
+        for (const a of m.events) {
+          if (isAlert(a)) prepend(a);
+        }
       }
     }
   }, [prepend]);
