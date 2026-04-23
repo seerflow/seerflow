@@ -9,6 +9,12 @@ import { formatRelative } from "@/lib/relativeTime";
 import type { Alert } from "@/lib/types";
 import type { MergedTactic } from "./types";
 
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 interface DrilldownPanelProps {
   matrix: MergedTactic[];
   coverageWindow: { since: string; until: string };
@@ -130,7 +136,7 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
               </p>
               <p className="text-xs text-zinc-500">
                 {cell.tech.ruleCount} rules · {cell.tech.alertCount} alerts (
-                {win.since} → {win.until})
+                {fmtDate(win.since)} → {fmtDate(win.until)})
               </p>
             </SheetHeader>
 

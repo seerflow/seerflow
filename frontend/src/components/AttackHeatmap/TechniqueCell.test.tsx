@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { TechniqueCell } from "./TechniqueCell";
 
@@ -77,16 +78,13 @@ describe("TechniqueCell", () => {
     expect(onOpen).toHaveBeenCalledWith("execution", "T1053");
   });
 
-  it("calls onOpen on Enter key (native button click)", () => {
+  it("calls onOpen on Enter key via native button activation", async () => {
+    const user = userEvent.setup();
     const onOpen = vi.fn();
     render(<TechniqueCell {...baseProps} onOpen={onOpen} />);
     const btn = screen.getByRole("button");
     btn.focus();
-    // jsdom + @testing-library/user-event would synthesize click for Enter,
-    // but @testing-library/react's fireEvent.keyDown does not. We assert
-    // semantic correctness instead: native <button> + onClick handler is
-    // the documented React pattern that browsers honor for Enter/Space.
-    fireEvent.click(btn);
+    await user.keyboard("{Enter}");
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
