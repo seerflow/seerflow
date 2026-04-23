@@ -7,8 +7,12 @@ export class ApiError extends Error {
   }
 }
 
+import * as v from "valibot";
 import { toBigintNs } from "./bigint-ns";
 import { logger } from "./logger";
+import { validateOrDropItem } from "./schemas";
+
+type AnySchema = v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>;
 
 const BIGINT_KEYS = new Set([
   "timestamp_ns",
@@ -82,7 +86,7 @@ function reviveBigintTimestamps(value: unknown): unknown {
   return walk(value, 0);
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<T> {
+async function request<T>(path: string, init: RequestInit, opts?: GetOpts): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`, init);
     const text = await res.text();
@@ -91,6 +95,27 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     const body = (typeof parsed === "object" && parsed !== null && hasBigintMarker(parsed))
       ? reviveBigintTimestamps(parsed)
       : parsed;
+    if (opts?.schema) {
+      if (opts.itemsKey) {
+        if (!body || typeof body !== "object" || !(opts.itemsKey in body) || !Array.isArray((body as Record<string, unknown>)[opts.itemsKey])) {
+          throw new ApiError(0, `response-schema-fail: expected array at "${opts.itemsKey}"`);
+        }
+        const pathKind = path.split("?")[0];
+        const kind = `rest:${pathKind}`;
+        const rawItems = (body as Record<string, unknown[]>)[opts.itemsKey] as unknown[];
+        const schema = opts.schema;
+        const items = rawItems
+          .map(item => validateOrDropItem(schema, item, kind))
+          .filter((x): x is NonNullable<typeof x> => x !== null);
+        (body as Record<string, unknown>)[opts.itemsKey] = items;
+        return body as T;
+      }
+      const parsedOut = v.safeParse(opts.schema, body);
+      if (!parsedOut.success) {
+        throw new ApiError(0, `response-schema-fail: ${parsedOut.issues.map(i => i.message).join("; ")}`);
+      }
+      return parsedOut.output as T;
+    }
     return body as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
@@ -98,10 +123,15 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   }
 }
 
-interface GetOpts { signal?: AbortSignal }
+interface GetOpts {
+  signal?: AbortSignal;
+  schema?: AnySchema;
+  itemsKey?: string;
+}
 
 export const api = {
-  get:  <T,>(path: string, opts?: GetOpts) => request<T>(path, {method: "GET", headers: {"Accept": "application/json"}, signal: opts?.signal}),
-  post: <T,>(path: string, body: unknown) =>
-    request<T>(path, {method: "POST", headers: {"Content-Type": "application/json", "Accept": "application/json"}, body: JSON.stringify(body)}),
+  get:  <T,>(path: string, opts?: GetOpts) =>
+    request<T>(path, { method: "GET", headers: { "Accept": "application/json" }, signal: opts?.signal }, opts),
+  post: <T,>(path: string, body: unknown, opts?: GetOpts) =>
+    request<T>(path, { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(body) }, opts),
 };

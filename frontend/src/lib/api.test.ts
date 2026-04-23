@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { api, ApiError, __walker } from "./api";
 import { logger } from "./logger";
+import { AlertSchema } from "./schemas";
+import * as metrics from "./validationMetrics";
 
 const fetchMock = vi.fn();
 
@@ -164,5 +166,71 @@ describe("api boundary parsing", () => {
     );
     await api.get("/api/v1/health");
     expect(__walker.calls).toBe(0);
+  });
+});
+
+describe("api schema opt-in", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+    metrics._resetForTests();
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const validAlertWire = {
+    alert_id: "a1",
+    timestamp_ns: "1700000000000000123",
+    alert_type: "sigma",
+    rule_name: "r",
+    severity: 3,
+    risk_score: 0.5,
+    entity_uuid: null,
+    entity_type: null,
+    entity_value: null,
+    message: "m",
+    mitre_tactics: [],
+    mitre_techniques: [],
+    dedup_count: 1,
+  };
+
+  it("throws ApiError on scalar schema fail", async () => {
+    const bad = { alert_id: 999 };
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(bad), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    await expect(api.get("/api/v1/alerts/x", { schema: AlertSchema })).rejects.toThrow(/response-schema-fail/);
+  });
+
+  it("validates list items under itemsKey and filters invalid ones", async () => {
+    const items = [validAlertWire, { ...validAlertWire, severity: 999 }];
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ items, total: 2, page: 0, limit: 50, has_next: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const res = await api.get<{ items: unknown[] }>("/api/v1/alerts?limit=50", {
+      schema: AlertSchema,
+      itemsKey: "items",
+    });
+    expect(res.items.length).toBe(1);
+    expect(metrics.getCounters()["rest:/api/v1/alerts"]).toBe(1);
+  });
+
+  it("passes through unchanged when no schema is provided", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ x: 1 }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const res = await api.get<{ x: number }>("/api/v1/x");
+    expect(res).toEqual({ x: 1 });
+  });
+
+  it("throws ApiError when itemsKey is missing or not an array", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ notItems: [] }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    await expect(
+      api.get("/api/v1/alerts?limit=50", { schema: AlertSchema, itemsKey: "items" }),
+    ).rejects.toThrow(/response-schema-fail/);
   });
 });
