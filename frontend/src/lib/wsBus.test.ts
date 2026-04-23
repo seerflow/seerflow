@@ -14,6 +14,21 @@ const statusMsg: WsMessage = {
   },
 };
 
+const eventMsg: WsMessage = {
+  type: "event",
+  data: {
+    event_id: "evt-1",
+    timestamp_ns: 1000n,
+    observed_ns: 1001n,
+    severity_id: 3,
+    severity_text: "INFO",
+    source_type: "syslog",
+    message: "m",
+    template_id: 7,
+    entity_refs: [],
+  },
+};
+
 beforeEach(() => bus._clearAllForTests());
 
 describe("wsBus", () => {
@@ -106,5 +121,18 @@ describe("emitCoalesced (S-209)", () => {
 
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith(statusMsg);
+  });
+
+  it("falls back to synchronous emit when requestAnimationFrame is undefined", () => {
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    const spy = vi.fn();
+    bus.on("event", spy);
+
+    bus.emitCoalesced(eventMsg);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(eventMsg);
+
+    vi.unstubAllGlobals();
   });
 });

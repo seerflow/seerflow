@@ -56,5 +56,13 @@ export function _clearAllForTests(): void {
 export const clearAll = _clearAllForTests;
 
 export function emitCoalesced(msg: WsMessage): void {
+  if (msg.type !== "event") {
+    emit(msg);
+    return;
+  }
+  if (typeof requestAnimationFrame !== "function") {
+    emit(msg);
+    return;
+  }
   emit(msg);
 }
