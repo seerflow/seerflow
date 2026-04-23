@@ -6,6 +6,8 @@ import {
   AlertSchema,
   AlertDetailSchema,
   parseWsFrame,
+  PaginatedResponseSchema,
+  validateOrDropItem,
 } from "./schemas";
 import * as metrics from "./validationMetrics";
 import { logger } from "./logger";
@@ -299,5 +301,40 @@ describe("parseWsFrame", () => {
       expect((first as { timestamp_ns: bigint }).timestamp_ns).toBe(100n);
       expect((second as { timestamp_ns: bigint }).timestamp_ns).toBe(100n);
     }
+  });
+});
+
+describe("PaginatedResponseSchema", () => {
+  it("accepts a valid Alert envelope", () => {
+    const env = { items: [validAlert], total: 1, page: 0, limit: 50, has_next: false };
+    const s = PaginatedResponseSchema(AlertSchema);
+    expect(v.safeParse(s, env).success).toBe(true);
+  });
+
+  it("rejects limit > 1000", () => {
+    const s = PaginatedResponseSchema(AlertSchema);
+    expect(v.safeParse(s, { items: [], total: 0, page: 0, limit: 2000, has_next: false }).success).toBe(false);
+  });
+
+  it("rejects page < 0", () => {
+    const s = PaginatedResponseSchema(AlertSchema);
+    expect(v.safeParse(s, { items: [], total: 0, page: -1, limit: 50, has_next: false }).success).toBe(false);
+  });
+});
+
+describe("validateOrDropItem", () => {
+  beforeEach(() => {
+    metrics._resetForTests();
+    (logger.warn as ReturnType<typeof vi.fn>).mockClear();
+  });
+
+  it("returns parsed output on valid input", () => {
+    expect(validateOrDropItem(AlertSchema, validAlert, "rest:alert")).toEqual(validAlert);
+  });
+
+  it("returns null + counts on invalid", () => {
+    const bad = { ...validAlert, severity: 999 };
+    expect(validateOrDropItem(AlertSchema, bad, "rest:alert")).toBeNull();
+    expect(metrics.getCounters()["rest:alert"]).toBe(1);
   });
 });

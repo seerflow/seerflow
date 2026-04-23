@@ -192,3 +192,25 @@ export function parseWsFrame(raw: unknown): WsMessageInfer | null {
   /* v8 ignore stop */
   return deep.output;
 }
+
+export function PaginatedResponseSchema<T extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>>(item: T) {
+  return v.object({
+    items: v.pipe(v.array(item), v.maxLength(1000)),
+    total: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(10_000_000)),
+    page: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    limit: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1000)),
+    has_next: v.boolean(),
+  });
+}
+
+export function validateOrDropItem<T extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>>(
+  schema: T,
+  raw: unknown,
+  kind: string,
+): v.InferOutput<T> | null {
+  const r = v.safeParse(schema, raw);
+  if (r.success) return r.output as v.InferOutput<T>;
+  incrementDropped(kind);
+  warnThrottled(kind, r.issues.map(i => ({ kind: i.kind, type: i.type, path: i.path?.map(p => p.key) })));
+  return null;
+}
