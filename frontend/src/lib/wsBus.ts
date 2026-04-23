@@ -54,3 +54,7 @@ export function _clearAllForTests(): void {
  * the bus; only test setup calls this.
  */
 export const clearAll = _clearAllForTests;
+
+export function emitCoalesced(msg: WsMessage): void {
+  emit(msg);
+}

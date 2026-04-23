@@ -92,3 +92,19 @@ describe("_clearAllForTests (S-208)", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe("emitCoalesced (S-209)", () => {
+  beforeEach(() => {
+    bus._clearAllForTests();
+  });
+
+  it("passes non-event frames through synchronously (no rAF scheduling)", () => {
+    const spy = vi.fn();
+    bus.on("status", spy);
+
+    bus.emitCoalesced(statusMsg);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(statusMsg);
+  });
+});
