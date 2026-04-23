@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useWebSocket } from "./useWebSocket";
 import { logger } from "@/lib/logger";
+import * as metrics from "@/lib/validationMetrics";
 
 class MockWS {
   static instances: MockWS[] = [];
@@ -55,7 +56,7 @@ describe("useWebSocket", () => {
 });
 
 describe("useWebSocket schema validation (S-194)", () => {
-  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; metrics._resetForTests(); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("drops malformed alert frames with logger.warn (S-194 AC-2)", () => {
@@ -89,7 +90,7 @@ describe("useWebSocket schema validation (S-194)", () => {
       type: "alert",
       data: {
         alert_id: "a1", timestamp_ns: "1700000000000000123", alert_type: "ml",
-        rule_name: "r", severity: 10, risk_score: 0,
+        rule_name: "r", severity: 5, risk_score: 0,
         entity_uuid: "u", entity_type: "ip", entity_value: "x",
         message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
       },
@@ -128,8 +129,8 @@ describe("useWebSocket schema validation (S-194)", () => {
     renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
     const ws = MockWS.instances[0]; act(() => { ws._open(); });
     act(() => { ws._msg({ type: "alert_batch", alerts: [
-      { alert_id: "a1", timestamp_ns: "1700000000000000123", alert_type: "ml", rule_name: "r", severity: 10, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
-      { alert_id: "a2", timestamp_ns: "1700000000000000456", alert_type: "sigma", rule_name: "r", severity: 14, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
+      { alert_id: "a1", timestamp_ns: "1700000000000000123", alert_type: "ml", rule_name: "r", severity: 5, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
+      { alert_id: "a2", timestamp_ns: "1700000000000000456", alert_type: "sigma", rule_name: "r", severity: 6, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x", message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1 },
     ] }); });
     expect(onMessage).toHaveBeenCalledOnce();
     const arg = onMessage.mock.calls[0][0];
@@ -180,6 +181,17 @@ describe("useWebSocket schema validation (S-194)", () => {
       alerts: Array.from({ length: 100 }, (_, i) => ({
         alert_id: `a${i}`,
         timestamp_ns: "1700000000000000000",
+        alert_type: "ml",
+        rule_name: "r",
+        severity: 3,
+        risk_score: 0,
+        entity_uuid: "u",
+        entity_type: "ip",
+        entity_value: "x",
+        message: "m",
+        mitre_tactics: [],
+        mitre_techniques: [],
+        dedup_count: 1,
       })),
     };
     act(() => { ws._msg(ok); });
@@ -193,7 +205,7 @@ describe("useWebSocket schema validation (S-194)", () => {
 });
 
 describe("useWebSocket event arm (S-199)", () => {
-  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; metrics._resetForTests(); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("parses event timestamp_ns + observed_ns strings into bigint (S-199 AC-6)", () => {
@@ -208,7 +220,7 @@ describe("useWebSocket event arm (S-199)", () => {
           event_id: "e1",
           timestamp_ns: "1700000000000000123",
           observed_ns:  "1700000000000000456",
-          severity_id: 10,
+          severity_id: 5,
           severity_text: "ERROR",
           source_type: "syslog",
           message: "m",
@@ -257,65 +269,27 @@ describe("useWebSocket event arm (S-199)", () => {
     expect(warn).toHaveBeenCalled();
   });
 
-  it("caps BigInt conversion in batch arm to prevent DoS (S-199)", () => {
+  it("drops batch frames containing over-long timestamp_ns at the schema layer (S-191 DoS guard)", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const onMessage = vi.fn();
     renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
     const ws = MockWS.instances[0]; act(() => { ws._open(); });
 
-    // The batch arm is v.array(v.unknown()) so crafted strings reach the
-    // converter directly. toBigintNs must return the raw string for >25-digit
-    // values rather than calling BigInt() on them.
+    // After S-191 migration to parseWsFrame, batch events are validated against
+    // LiveEventWireSchema/AlertWireSchema which enforce the 1..25 digit regex on
+    // timestamp_ns. A crafted 50-digit string fails the wire regex and the entire
+    // frame is dropped — stronger protection than the previous pass-through path.
     act(() => { ws._msg({
       type: "batch",
       events: [{ event_id: "e1", timestamp_ns: "1".repeat(50), observed_ns: "1700000000000000000" }],
     }); });
-    expect(onMessage).toHaveBeenCalledOnce();
-    const payload = onMessage.mock.calls[0][0];
-    expect(payload.type).toBe("batch");
-    // Over-long timestamp_ns left as string (no BigInt call); observed_ns converted normally.
-    expect(payload.events[0].timestamp_ns).toBe("1".repeat(50));
-    expect(payload.events[0].observed_ns).toBe(1700000000000000000n);
-  });
-});
-
-describe("useWebSocket conversion safety (S-204)", () => {
-  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-
-  it("warns and drops alert frame when BigInt() throws on validated digit string (S-204 AC-4a)", () => {
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const onMessage = vi.fn();
-    const realBigInt = globalThis.BigInt;
-    vi.stubGlobal("BigInt", (() => { throw new TypeError("forced"); }) as unknown as typeof BigInt);
-    try {
-      // Prove the stub is effective from the hook's resolution site — guards
-      // against a silent false-green if BigInt ever gets inlined as a local
-      // binding by the bundler.
-      expect(() => globalThis.BigInt("1")).toThrow(TypeError);
-      renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
-      const ws = MockWS.instances[0];
-      act(() => { ws._open(); });
-      act(() => { ws._msg({
-        type: "alert",
-        data: {
-          alert_id: "a1",
-          timestamp_ns: "1700000000000000123",
-          alert_type: "ml", rule_name: "r", severity: 10, risk_score: 0,
-          entity_uuid: "u", entity_type: "ip", entity_value: "x",
-          message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
-        },
-      }); });
-      expect(onMessage).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith("ws timestamp conversion failed", expect.any(TypeError));
-    } finally {
-      globalThis.BigInt = realBigInt;
-      warn.mockRestore();
-    }
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
   });
 });
 
 describe("useWebSocket send queue (S-204)", () => {
-  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; });
+  beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket); MockWS.instances = []; metrics._resetForTests(); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("queues messages sent before the socket opens and flushes on open (S-204 AC-4b)", () => {
@@ -336,5 +310,58 @@ describe("useWebSocket send queue (S-204)", () => {
     act(() => { ws.onmessage?.({ data: "{not-json" }); });
     expect(onMessage).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith("ws parse fail", expect.any(Error));
+  });
+});
+
+describe("useWebSocket parseWsFrame delegation (S-191)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
+    MockWS.instances = [];
+    metrics._resetForTests();
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("drops a frame with unknown top-level type and counts it under ws:unknown", () => {
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0];
+    act(() => { ws._open(); });
+
+    act(() => { ws._msg({ type: "weird" }); });
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(metrics.getCounters()["ws:unknown"]).toBe(1);
+  });
+
+  it("drops a frame with severity 999 and counts it under ws:alert", () => {
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket("ws://x", { onMessage, onStatusChange: vi.fn() }));
+    const ws = MockWS.instances[0];
+    act(() => { ws._open(); });
+
+    act(() => { ws._msg({
+      type: "alert",
+      data: {
+        alert_id: "a1",
+        timestamp_ns: "1700000000000000123",
+        alert_type: "ml",
+        rule_name: "r",
+        severity: 999,
+        risk_score: 0,
+        entity_uuid: "u",
+        entity_type: "ip",
+        entity_value: "x",
+        message: "m",
+        mitre_tactics: [],
+        mitre_techniques: [],
+        dedup_count: 1,
+      },
+    }); });
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(metrics.getCounters()["ws:alert"]).toBe(1);
   });
 });

@@ -57,7 +57,7 @@ describe("AlertFeed integration", () => {
       MockWS.last!._open();
       MockWS.last!._msg({ type: "alert", data: {
         alert_id: "live", timestamp_ns: "2", alert_type: "sigma", rule_name: "live-rule",
-        severity: 17, risk_score: 0.9, entity_uuid: null, entity_type: null,
+        severity: 6, risk_score: 0.9, entity_uuid: null, entity_type: null,
         entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
         dedup_count: 1, source_type: "syslog",
       } });
@@ -79,7 +79,7 @@ describe("AlertFeed integration", () => {
       MockWS.last!._open();
       MockWS.last!._msg({ type: "alert", data: {
         alert_id: "live", timestamp_ns: "2", alert_type: "sigma", rule_name: "live-rule",
-        severity: 17, risk_score: 0.9, entity_uuid: null, entity_type: null,
+        severity: 6, risk_score: 0.9, entity_uuid: null, entity_type: null,
         entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
         dedup_count: 1, source_type: "syslog",
       } });
@@ -126,7 +126,7 @@ describe("AlertFeed integration", () => {
       MockWS.last!._open();
       MockWS.last!._msg({ type: "alert", data: {
         alert_id: "remounted", timestamp_ns: "1", alert_type: "ml", rule_name: "remount-rule",
-        severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+        severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
         entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
         dedup_count: 1, source_type: "syslog",
       } });
@@ -152,7 +152,7 @@ describe("AlertFeed integration", () => {
       for (let i = 0; i < 250; i++) {
         MockWS.last!._msg({ type: "alert", data: {
           alert_id: `a${i}`, timestamp_ns: String(i + 1), alert_type: "ml", rule_name: `r${i}`,
-          severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+          severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
           entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
           dedup_count: 1, source_type: "syslog",
         } });
@@ -226,7 +226,7 @@ describe("AlertFeed integration", () => {
 
     const mkAlert = (id: string, rule: string) => ({
       alert_id: id, timestamp_ns: "1", alert_type: "ml" as const, rule_name: rule,
-      severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+      severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
       entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
       dedup_count: 1, source_type: "syslog",
     });
