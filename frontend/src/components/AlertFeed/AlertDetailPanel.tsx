@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Alert, AlertDetail, FeedbackEvent, FeedbackHistoryResponse } from "@/lib/types";
 import { api, ApiError } from "@/lib/api";
+import { AlertDetailSchema } from "@/lib/schemas";
 import { Button } from "@/components/ui/button";
 import { logger } from "@/lib/logger";
 import { submitFeedback } from "@/lib/feedback";
@@ -19,7 +20,11 @@ export function AlertDetailPanel({ alert }: Props): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    api.get<AlertDetail>(`/api/v1/alerts/${alert.alert_id}`)
+    // Scalar schema opt-in: api.ts::request runs v.safeParse against
+    // AlertDetailSchema and throws ApiError(0, "response-schema-fail: …") when
+    // the REST payload violates the contract. That surfaces through setErr
+    // below exactly like any other transport failure (S-191 I-1).
+    api.get<AlertDetail>(`/api/v1/alerts/${alert.alert_id}`, { schema: AlertDetailSchema })
       .then(d => { if (!cancelled) setDetail(d); })
       .catch((e: unknown) => {
         if (cancelled) return;
