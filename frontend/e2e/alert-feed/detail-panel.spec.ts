@@ -31,6 +31,6 @@ test("row click opens detail panel with events, MITRE chips, risk score", async 
   await expect(page.getByText("T1547")).toBeVisible();
   await expect(page.getByText("T1055")).toBeVisible();
   await expect(page.getByText(/Risk score:/)).toBeVisible();
-  // `risk_score.toFixed(2)` = "78.00".
-  await expect(page.getByText(/78\.00/)).toBeVisible();
+  // `risk_score.toFixed(2)` = "0.78" (backend clamps risk_score to [0, 1]).
+  await expect(page.getByText(/0\.78/)).toBeVisible();
 });
