@@ -6,19 +6,50 @@ import { useAlertStore } from "@/stores/alerts";
 
 const base: Alert = {
   alert_id: "a1", timestamp_ns: 1n, alert_type: "sigma", rule_name: "r",
-  severity: 13, risk_score: 0.5, entity_uuid: "u", entity_type: "ip",
+  severity: 5, risk_score: 0.5, entity_uuid: "u", entity_type: "ip",
   entity_value: "10.0.0.1", message: "m", mitre_tactics: ["TA0001"],
   mitre_techniques: ["T1078"], dedup_count: 1, source_type: "syslog",
 };
 
 const fetchMock = vi.fn();
-vi.mock("@/lib/api", () => ({
-  api: {
-    get: (...a: unknown[]) => fetchMock("GET", ...a),
-    post: (...a: unknown[]) => fetchMock("POST", ...a),
-  },
-  ApiError: class ApiError extends Error {},
-}));
+vi.mock("@/lib/api", async () => {
+  const valibot = await import("valibot");
+  class MockApiError extends Error {
+    status: number;
+    cause: unknown;
+    constructor(status: number, message: string, cause?: unknown) {
+      super(message);
+      this.status = status;
+      this.cause = cause;
+    }
+  }
+  return {
+    api: {
+      // Mimic api.ts::request for the scalar-schema case (no itemsKey): run
+      // `v.safeParse(opts.schema, body)` and throw ApiError(0, "response-schema-fail: …")
+      // when the response violates the schema. Mirrors AlertFeed.test.tsx's mock.
+      get: async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
+        const res = await fetchMock("GET", path, opts);
+        if (opts?.schema && !opts?.itemsKey) {
+          const parsed = valibot.safeParse(
+            opts.schema as Parameters<typeof valibot.safeParse>[0],
+            res,
+          );
+          if (!parsed.success) {
+            throw new MockApiError(
+              0,
+              `response-schema-fail: ${parsed.issues.map(i => i.message).join("; ")}`,
+            );
+          }
+          return parsed.output;
+        }
+        return res;
+      },
+      post: (...a: unknown[]) => fetchMock("POST", ...a),
+    },
+    ApiError: MockApiError,
+  };
+});
 
 const submitMock = vi.fn();
 vi.mock("@/lib/feedback", () => ({
@@ -79,6 +110,19 @@ describe("AlertDetailPanel", () => {
     setupMocks(detail);
     render(<AlertDetailPanel alert={base} />);
     await waitFor(() => expect(screen.getByTestId("feedback-history-row")).toBeInTheDocument());
+  });
+
+  it("surfaces schema-fail error when the REST detail violates AlertDetailSchema (S-191 I-1)", async () => {
+    // severity 999 violates AlertDetailSchema (OCSF severity must be 0..6).
+    // The schema-opt-in mock throws ApiError(0, "response-schema-fail: …") which
+    // flows through the existing setErr branch and renders role=alert.
+    const malformed = { ...base, severity: 999 } as unknown as AlertDetail;
+    setupMocks(malformed);
+    render(<AlertDetailPanel alert={base} />);
+    const errNode = await screen.findByRole("alert");
+    expect(errNode.textContent).toMatch(/response-schema-fail/);
+    // Loading + success paths must not render when schema fails.
+    expect(screen.queryByText("r")).toBeNull();
   });
 
   it("refetches history when feedbackVersion bumps (S-066)", async () => {

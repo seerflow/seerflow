@@ -18,7 +18,7 @@ describe("submitFeedback", () => {
           timestamp_ns: 1n,
           alert_type: "ml",
           rule_name: "r",
-          severity: 10,
+          severity: 3,
           risk_score: 0.1,
           entity_uuid: null,
           entity_type: null,

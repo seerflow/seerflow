@@ -5,7 +5,33 @@ import { WsProvider } from "@/components/WsProvider";
 import { useEventStore, MAX_EVENTS } from "@/stores/events";
 import * as wsBus from "@/lib/wsBus";
 import { _resetForTests } from "@/lib/wsFilter";
+import { api } from "@/lib/api";
+import { validateOrDropItem } from "@/lib/schemas";
 import type { LiveEvent } from "@/lib/types";
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    get: vi.fn(async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
+      const res: Record<string, unknown> = { items: [], total: 0, page: 1, limit: 100, has_next: false };
+      // Mimic api.ts::request: when schema+itemsKey provided, validate each
+      // item with the shared `validateOrDropItem` so invalid rows are dropped
+      // and `rest:<path-without-query>` counters are incremented.
+      if (opts?.schema && opts?.itemsKey) {
+        const kind = `rest:${path.split("?")[0]}`;
+        const raw = res[opts.itemsKey];
+        if (Array.isArray(raw)) {
+          const items = raw
+            .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
+            .filter((x): x is NonNullable<typeof x> => x !== null);
+          return { ...res, [opts.itemsKey]: items };
+        }
+      }
+      return res;
+    }),
+    post: vi.fn(),
+  },
+  ApiError: class ApiError extends Error {},
+}));
 
 function ev(i: number, over: Partial<LiveEvent> = {}): LiveEvent {
   return {
@@ -47,11 +73,6 @@ beforeEach(() => {
     knownSources: new Set(), status: "open",
     droppedFromRing: 0, droppedFromPausedBuffer: 0, lastDisconnectedAtMs: null,
   });
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-    ok: true, status: 200,
-    text: async () => JSON.stringify({ items: [], total: 0, page: 1, limit: 100, has_next: false }),
-    headers: { get: () => "application/json" },
-  }));
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -202,5 +223,58 @@ describe("EventStream", () => {
     expect(cls).toContain("min-h-0");
     expect(cls).not.toContain("min-h-[320px]");
     expect(cls).not.toContain("h-[420px]");
+  });
+});
+
+describe("S-191 T10: REST warm-up schema validation", () => {
+  beforeEach(async () => {
+    _resetForTests();
+    wsBus.clearAll();
+    MockWS.last = null;
+    vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
+    useEventStore.setState({
+      events: [], pausedBuffer: [], paused: false,
+      filter: { sources: new Set(), minSeverity: 0, templateIds: new Set() },
+      knownSources: new Set(), status: "open",
+      droppedFromRing: 0, droppedFromPausedBuffer: 0, lastDisconnectedAtMs: null,
+    });
+    const metrics = await import("@/lib/validationMetrics");
+    metrics._resetForTests();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("drops invalid REST items from /api/v1/events warm-up under rest:/api/v1/events", async () => {
+    const validFixture: LiveEvent = {
+      event_id: "e1", timestamp_ns: 1n, observed_ns: 1n,
+      severity_id: 2, severity_text: "INFO", source_type: "syslog",
+      message: "m1", template_id: 1, entity_refs: [], entity_summary: {},
+    };
+    // severity_id 999 fails LiveEventSchema (OCSF 0..6).
+    const invalidFixture = { ...validFixture, event_id: "bad", severity_id: 999 };
+    (api.get as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
+        const res: Record<string, unknown> = { items: [validFixture, invalidFixture] };
+        if (opts?.schema && opts?.itemsKey) {
+          const kind = `rest:${path.split("?")[0]}`;
+          const raw = res[opts.itemsKey];
+          if (Array.isArray(raw)) {
+            const items = raw
+              .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
+              .filter((x): x is NonNullable<typeof x> => x !== null);
+            res[opts.itemsKey] = items;
+          }
+        }
+        return res;
+      },
+    );
+
+    render(<WsProvider><EventStream /></WsProvider>);
+    // Warm-up resolves asynchronously → wait for the store to land exactly the
+    // valid event; the invalid one must be dropped via rest:/api/v1/events.
+    await waitFor(() => {
+      expect(useEventStore.getState().events.map(e => e.event_id)).toEqual(["e1"]);
+    });
+    const metrics = await import("@/lib/validationMetrics");
+    expect(metrics.getCounters()["rest:/api/v1/events"]).toBe(1);
   });
 });

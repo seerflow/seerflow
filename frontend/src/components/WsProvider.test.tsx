@@ -2,6 +2,7 @@ import { render, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WsProvider, useWsSend } from "./WsProvider";
 import * as bus from "@/lib/wsBus";
+import { logger } from "@/lib/logger";
 
 class FakeSocket {
   static lastInstance: FakeSocket | null = null;
@@ -84,8 +85,10 @@ describe("WsProvider", () => {
   });
 
   it("replays the merged wsFilter on every (re)connect via getFilterMessage", async () => {
-    const { setIntent } = await import("@/lib/wsFilter");
-    setIntent("alerts", { sources: ["auth"] });
+    const { createFilterSlot, _resetForTests } = await import("@/lib/wsFilter");
+    _resetForTests();
+    const alerts = createFilterSlot("alerts");
+    alerts.set({ sources: ["auth"] });
     render(<WsProvider><div /></WsProvider>);
     act(() => { FakeSocket.lastInstance!.onopen?.(); });
     const first = JSON.parse(FakeSocket.lastInstance!.sent[0]!);
@@ -98,5 +101,87 @@ describe("WsProvider", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(() => render(<Consumer />)).toThrow(/useWsSend/i);
     spy.mockRestore();
+  });
+});
+
+describe("resolveUrl origin allowlist", () => {
+  const origBase = import.meta.env.VITE_API_BASE;
+  const origAllow = import.meta.env.VITE_WS_ORIGIN_ALLOWLIST;
+  let origLocation: Location;
+
+  beforeEach(() => {
+    origLocation = window.location;
+  });
+
+  afterEach(() => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = origBase;
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = origAllow;
+    // Always restore window.location so an assertion failure in a sibling test
+    // doesn't poison the rest of the describe block.
+    Object.defineProperty(window, "location", { writable: true, value: origLocation });
+  });
+
+  it("allows same-origin by default", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = window.location.origin;
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
+
+  it("throws on cross-origin when allowlist is empty", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://evil.example";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+    // Mute React's error boundary console output for this case.
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => render(<WsProvider><div /></WsProvider>)).toThrow(/not in VITE_WS_ORIGIN_ALLOWLIST/);
+    spy.mockRestore();
+  });
+
+  it("permits cross-origin when listed in allowlist", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://api.seerflow.io";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "https://api.seerflow.io,https://stg.seerflow.io";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
+
+  it("upgrades ws: to wss: when page is served over https", () => {
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...window.location, protocol: "https:", origin: "https://dash.local" },
+    });
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://dash.local";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+
+    // Same-origin https: resolved url starts "wss:" because base replace /^http/ -> ws
+    // gives "wss://..." already — the upgrade branch is not hit but render must not throw.
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
+
+  it("logs when VITE_API_BASE is plain http: under https page (ws: upgrade branch)", () => {
+    const warnSpy = vi.spyOn(logger, "warn");
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...window.location, protocol: "https:", origin: "http://dash.local" },
+    });
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "http://dash.local";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("upgrading to wss:"),
+      expect.any(String),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("normalises allowlist entries to lowercase", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://api.seerflow.io";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "HTTPS://Api.Seerflow.IO";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
+
+  it("falls back to window.location.origin when VITE_API_BASE is empty string", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
   });
 });

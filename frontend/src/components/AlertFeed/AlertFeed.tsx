@@ -6,13 +6,22 @@ import { AlertDetailPanel } from "./AlertDetailPanel";
 import { FilterBar } from "./FilterBar";
 import { SummaryBadges } from "./SummaryBadges";
 import { api, ApiError } from "@/lib/api";
-import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert } from "@/lib/types";
+import { AlertSchema } from "@/lib/schemas";
+import type { AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
 import { logger } from "@/lib/logger";
-import { setIntent as setWsIntent } from "@/lib/wsFilter";
+import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
+
+// One-shot WsFilter capability for this widget — the module is imported once
+// per worker so `createFilterSlot("alerts")` fires exactly once. Test harnesses
+// call `_resetForTests()` which clears the issued set without breaking this
+// already-bound closure.
+const alertsSlot = createFilterSlot("alerts");
 import { useWsSend } from "@/components/WsProvider";
 
-const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
+// OCSF 0..6 min-severity thresholds. Must stay aligned with
+// `severityBucket` in `@/lib/severity` — see file header there.
+const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 5, high: 4, medium: 3, low: 0 };
 const MAX_WS_BUFFER = 200;  // S-194: bound buffer to survive slow warm-up under high WS load
 
 function toWsFilter(f: AlertFilter): WsFilter {
@@ -42,29 +51,15 @@ export function AlertFeed(): JSX.Element {
   const handleMessage = useCallback((m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "alert_batch") m.alerts.forEach(prepend);
-    else if (m.type === "batch") {
-      // The batch envelope can also carry LiveEvent payloads — those are routed
-      // directly by EventStream's wsBus subscription (S-062 Phase A). AlertFeed
-      // only handles alert batches here.
-      const first = m.events.length > 0 ? m.events[0] : null;
-      if (first && !("event_id" in (first as object))) {
-        (m.events as Alert[]).forEach(prepend);
-      }
-    }
-    else if (m.type === "event" && m.data !== null && typeof m.data === "object") {
-      // S-199: useWebSocket's `event` arm pre-validates (Valibot regex) and converts
-      // `timestamp_ns` / `observed_ns` to `bigint` before dispatch. The narrowing below
-      // relies on that contract — do not relax the `typeof === "bigint"` guard.
-      // S-062 Phase A: fan-out into useEventStore is removed; EventStream now
-      // subscribes to wsBus directly. The appendScore call below is retained
-      // because AnomalyTimeline has not migrated to the bus yet (Phase B).
-      const d = m.data as unknown as {
-        timestamp_ns?: bigint;
-        score?: number | null;
-        upper_threshold?: number | null;
-        source_type?: string;
-      };
-      if (typeof d.timestamp_ns === "bigint" && typeof d.score === "number" && typeof d.source_type === "string") {
+    else if (m.type === "event") {
+      // S-191 T9: parseWsFrame (WS chokepoint) enforces finite `score` and
+      // bigint `timestamp_ns`/`observed_ns` plus bounded `source_type` on
+      // every `event` frame before dispatch. The `typeof` guards that lived
+      // here are now dead code — AlertFeed only receives validated payloads.
+      // AnomalyTimeline has not yet migrated to wsBus (S-062 Phase B), so we
+      // still fan out into useAnomalyStore for anomaly-scored events only.
+      const d = m.data;
+      if (d.score !== undefined) {
         useAnomalyStore.getState().appendScore({
           timestamp_ns: d.timestamp_ns,
           score: d.score,
@@ -83,7 +78,10 @@ export function AlertFeed(): JSX.Element {
       for (const m of wsBufferRef.current) handleMessage(m);
       wsBufferRef.current = [];
     };
-    api.get<{ items: Parameters<typeof backfill>[0] }>("/api/v1/alerts?limit=50")
+    api.get<{ items: Parameters<typeof backfill>[0] }>("/api/v1/alerts?limit=50", {
+      schema: AlertSchema,
+      itemsKey: "items",
+    })
       .then(r => { if (cancelled) return; backfill(r.items); finish(); })
       .catch((e: ApiError) => { logger.warn("warm-up failed", e); finish(); });
     return () => {
@@ -113,7 +111,7 @@ export function AlertFeed(): JSX.Element {
   }, [handleMessage, setStatus]);
 
   useEffect(() => {
-    const merged = setWsIntent("alerts", toWsFilter(filter));
+    const merged = alertsSlot.set(toWsFilter(filter));
     const t = setTimeout(() => send(merged), 150);
     return () => clearTimeout(t);
   }, [filter, send]);

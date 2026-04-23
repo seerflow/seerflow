@@ -1,9 +1,14 @@
 import type { SeverityBucket } from "./types";
 
+// OCSF `SeverityLevel` (0..6) — matches `SeerflowEvent.severity_id` /
+// `Alert.severity` on the wire. 5=CRITICAL and 6=FATAL fall into "critical";
+// 4=ERROR is "high"; 3=WARNING is "medium"; 0=TRACE / 1=INFORMATIONAL /
+// 2=NOTICE are "low". DO NOT restore the pre-S-058 OTel 1-24 thresholds —
+// the backend never emits those values.
 export function severityBucket(id: number): SeverityBucket {
-  if (id >= 17) return "critical";
-  if (id >= 13) return "high";
-  if (id >= 9)  return "medium";
+  if (id >= 5) return "critical";
+  if (id === 4) return "high";
+  if (id === 3) return "medium";
   return "low";
 }
 

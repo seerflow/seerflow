@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
-import * as v from "valibot";
 import type { WsStatus, WsFilter, WsMessage } from "@/lib/types";
 import { logger } from "@/lib/logger";
-import { MAX_NS_STRING_LEN, toBigintNs } from "@/lib/bigint-ns";
-
-// S-199 security: a 1-25 digit decimal bound caps the work BigInt(...) must do
-// on any single wire value. Larger strings are rejected by Valibot before they
-// reach BigInt; see the `MAX_NS_STRING_LEN` constant in `@/lib/api` for the
-// rationale behind 25 digits.
-const NS_WIRE_RE = new RegExp(`^\\d{1,${MAX_NS_STRING_LEN}}$`);
+import { parseWsFrame } from "@/lib/schemas";
 
 interface Opts {
   onMessage: (m: WsMessage) => void;
@@ -17,49 +10,6 @@ interface Opts {
 }
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
-
-// S-194 AC-2: shallow runtime schema for incoming WS frames. Validates the
-// discriminator and the fields each consumer reads at the top level only.
-// Deeper validation would duplicate backend models with little real-world
-// payoff (see Brainstorm Note #4 in docs/stories/S-194.md).
-// looseObject is used so that extra fields beyond the validated minimum are
-// preserved and passed through to consumers unchanged.
-const AlertDataSchema = v.looseObject({
-  alert_id: v.string(),
-  timestamp_ns: v.pipe(v.string(), v.regex(NS_WIRE_RE)),
-});
-
-const StatusDataSchema = v.looseObject({
-  events_ingested_per_sec: v.number(),
-  alerts_24h: v.number(),
-  connected_clients: v.number(),
-  dropped_events: v.number(),
-  dropped_alerts: v.number(),
-  dropped_total: v.number(),
-});
-
-// S-199: require bigint-safe string timestamps on the event arm, mirroring
-// the alert arm. Other fields (score, is_anomaly, template_id, ...) stay
-// loose so schema drift on optional metadata doesn't drop live events.
-const EventDataSchema = v.looseObject({
-  timestamp_ns: v.pipe(v.string(), v.regex(NS_WIRE_RE)),
-  observed_ns:  v.pipe(v.string(), v.regex(NS_WIRE_RE)),
-});
-
-// S-203 AC-4: cap alert_batch at 100 alerts. Backend caps batch_max_events=10
-// (src/seerflow/api/ws.py:213); 100 leaves 10x headroom while bounding worst-case
-// validation work to microseconds.
-const WsMessageSchema = v.union([
-  v.object({ type: v.literal("alert"),       data: AlertDataSchema }),
-  v.object({ type: v.literal("alert_batch"), alerts: v.pipe(v.array(AlertDataSchema), v.maxLength(100)) }),
-  v.object({ type: v.literal("status"),      data: StatusDataSchema }),
-  v.object({ type: v.literal("event"),       data: EventDataSchema }),
-  // Security: cap the batch event count to bound worst-case BigInt-conversion
-  // and widget-ingest work on a crafted frame. Backend caps batch_max_events=10
-  // (src/seerflow/api/ws.py); 500 leaves 50x headroom while still protecting
-  // the main thread.
-  v.object({ type: v.literal("batch"),       events: v.pipe(v.array(v.unknown()), v.maxLength(500)) }),
-]);
 
 export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => void } {
   const wsRef = useRef<WebSocket | null>(null);
@@ -90,54 +40,9 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
         let raw: unknown;
         try { raw = JSON.parse(ev.data); }
         catch (e) { logger.warn("ws parse fail", e); return; }
-        const result = v.safeParse(WsMessageSchema, raw);
-        if (!result.success) {
-          // S-194: log only diagnostic shape (kind/type/path), not raw `input`/`received` —
-          // the rejected frame may contain PII (entity_value, rule_name, etc.).
-          logger.warn(
-            "ws schema mismatch",
-            result.issues.map(i => ({ kind: i.kind, type: i.type, path: i.path?.map(p => p.key) })),
-          );
-          return;
-        }
-        const msg = result.output;
-        try {
-          if (msg.type === "alert") {
-            // S-194 AC-1: convert string wire timestamp into bigint at the boundary.
-            const data = { ...msg.data, timestamp_ns: BigInt(msg.data.timestamp_ns) };
-            optsRef.current.onMessage({ type: "alert", data } as unknown as WsMessage);
-          } else if (msg.type === "alert_batch") {
-            // S-194: convert each alert's string timestamp_ns to bigint before dispatch.
-            const alerts = msg.alerts.map(a => ({ ...a, timestamp_ns: BigInt(a.timestamp_ns) }));
-            optsRef.current.onMessage({ type: "alert_batch", alerts } as unknown as WsMessage);
-          } else if (msg.type === "event") {
-            // S-199 AC-6: convert string wire timestamps into bigint at the boundary.
-            const data = {
-              ...msg.data,
-              timestamp_ns: BigInt(msg.data.timestamp_ns),
-              observed_ns:  BigInt(msg.data.observed_ns),
-            };
-            optsRef.current.onMessage({ type: "event", data } as unknown as WsMessage);
-          } else if (msg.type === "batch") {
-            // S-199: defensive per-element conversion — heterogeneous batch accepts
-            // both LiveEvent and Alert shapes, so convert only what looks convertible.
-            // `toBigintNs` caps the digit count to guard against BigInt-allocation DoS
-            // from a crafted batch frame (the `batch` arm is `v.array(v.unknown())`).
-            const events = msg.events.map((e) => {
-              if (!e || typeof e !== "object") return e;
-              const rec = e as Record<string, unknown>;
-              const next: Record<string, unknown> = { ...rec };
-              if (typeof rec.timestamp_ns === "string") next.timestamp_ns = toBigintNs(rec.timestamp_ns);
-              if (typeof rec.observed_ns  === "string") next.observed_ns  = toBigintNs(rec.observed_ns);
-              return next;
-            });
-            optsRef.current.onMessage({ type: "batch", events } as unknown as WsMessage);
-          } else {
-            optsRef.current.onMessage(msg as unknown as WsMessage);
-          }
-        } catch (e) {
-          logger.warn("ws timestamp conversion failed", e);
-        }
+        const msg = parseWsFrame(raw);
+        if (!msg) return;
+        optsRef.current.onMessage(msg as WsMessage);
       };
       ws.onerror = () => logger.warn("ws error");
       ws.onclose = () => {

@@ -9,6 +9,7 @@ type Intent = {
 };
 
 const intents: Record<WidgetId, Intent> = { alerts: {}, events: {} };
+const issued = new Set<WidgetId>();
 
 function unionStr(a?: string[], b?: string[]): string[] | undefined {
   const set = new Set<string>([...(a ?? []), ...(b ?? [])]);
@@ -40,17 +41,30 @@ export function merged(): WsFilter {
   return out;
 }
 
-export function setIntent(widget: WidgetId, partial: Intent): WsFilter {
-  intents[widget] = partial;
-  return merged();
-}
+export type FilterSlot = {
+  set(partial: Intent): WsFilter;
+  clear(): WsFilter;
+};
 
-export function clearIntent(widget: WidgetId): WsFilter {
-  intents[widget] = {};
-  return merged();
+export function createFilterSlot(widget: WidgetId): FilterSlot {
+  if (issued.has(widget)) {
+    throw new Error(`wsFilter slot for "${widget}" already issued`);
+  }
+  issued.add(widget);
+  return {
+    set: (partial) => {
+      intents[widget] = partial;
+      return merged();
+    },
+    clear: () => {
+      intents[widget] = {};
+      return merged();
+    },
+  };
 }
 
 export function _resetForTests(): void {
   intents.alerts = {};
   intents.events = {};
+  issued.clear();
 }

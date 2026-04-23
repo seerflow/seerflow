@@ -1,21 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { severityBucket } from "./severity";
 
-describe("severityBucket", () => {
+describe("severityBucket (OCSF 0..6)", () => {
   it.each([
-    [1, "low"], [8, "low"],
-    [9, "medium"], [12, "medium"],
-    [13, "high"], [16, "high"],
-    [17, "critical"], [24, "critical"],
+    [0, "low"],  [1, "low"],  [2, "low"],
+    [3, "medium"],
+    [4, "high"],
+    [5, "critical"], [6, "critical"],
   ] as const)("id=%i -> %s", (id, bucket) => {
     expect(severityBucket(id)).toBe(bucket);
   });
 
-  it("clamps out-of-range low", () => {
-    expect(severityBucket(0)).toBe("low");
+  it("treats negative ids as low (defensive)", () => {
+    expect(severityBucket(-1)).toBe("low");
   });
 
-  it("clamps out-of-range critical", () => {
+  it("treats out-of-range high ids as critical (defensive)", () => {
     expect(severityBucket(99)).toBe("critical");
   });
 });
