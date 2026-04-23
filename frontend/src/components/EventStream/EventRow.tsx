@@ -74,7 +74,6 @@ function EventRowImpl({ event, expanded, onToggle }: Props): JSX.Element {
           <dt className="font-semibold">template_id</dt><dd>{event.template_id}</dd>
           <dt className="font-semibold">observed_ns</dt><dd>{String(event.observed_ns)}</dd>
           {Object.entries(event.entity_summary ?? {})
-            .filter(([k]) => Object.hasOwn(event.entity_summary ?? {}, k))
             .map(([k, vs]) => (
               <span key={k} className="contents">
                 <dt className="font-semibold">{k}</dt><dd>{vs?.join(", ")}</dd>
