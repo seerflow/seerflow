@@ -1,21 +1,19 @@
 import { TechniqueCell } from "./TechniqueCell";
+import type { MergedTechnique } from "./types";
 
-interface TechniqueEntry {
-  id: string;
-  name: string;
-  ruleCount: number;
-  alertCount: number;
-  ruleNames: string[];
-  covered: boolean;
-  detected: boolean;
-}
-
-interface TacticColumnProps {
+export interface TacticColumnProps {
+  tacticShortname: string;
   tacticName: string;
-  techniques: TechniqueEntry[];
+  techniques: MergedTechnique[];
+  onOpen?: (tactic: string, technique: string) => void;
 }
 
-export function TacticColumn({ tacticName, techniques }: TacticColumnProps) {
+export function TacticColumn({
+  tacticShortname,
+  tacticName,
+  techniques,
+  onOpen,
+}: TacticColumnProps) {
   return (
     <div className="flex min-w-[7rem] flex-col items-center gap-0.5">
       <h3
@@ -27,6 +25,7 @@ export function TacticColumn({ tacticName, techniques }: TacticColumnProps) {
       {techniques.map((t) => (
         <TechniqueCell
           key={t.id}
+          tactic={tacticShortname}
           technique={t.id}
           name={t.name}
           ruleCount={t.ruleCount}
@@ -34,6 +33,7 @@ export function TacticColumn({ tacticName, techniques }: TacticColumnProps) {
           ruleNames={t.ruleNames}
           covered={t.covered}
           detected={t.detected}
+          onOpen={onOpen}
         />
       ))}
     </div>

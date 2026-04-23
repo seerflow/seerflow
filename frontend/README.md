@@ -214,6 +214,14 @@ cd frontend && RUN_E2E=1 npx playwright test e2e/widget-grid.spec.ts
 The spec uses `stubRestAlerts` + `stubWebSocket` from
 `e2e/fixtures/stubs.ts`; no live backend needed.
 
+### ATT&CK Coverage
+
+- The heatmap is reachable from the header shield (`#coverage`) and from the optional widget catalog entry "ATT&CK coverage".
+- Click any technique cell to open a side panel listing the rules that cover the technique and the most recent 20 alerts that matched it within the current coverage window (default last 30 days, taken straight from the `/api/v1/attack/coverage` response).
+- Clicking an alert row in the panel closes the panel, sets the selected alert in the Alert Feed widget, and navigates back to the dashboard grid (`#`). If the Alert Feed widget is not currently mounted in the grid, the panel surfaces an inline note — add the widget once to inspect future selections.
+- The panel keeps an in-memory cache keyed by `(tactic, technique, since, until)`. Reopening the same cell within a session does not refetch.
+- **Known gap:** sub-techniques (e.g. `T1053.005`) are not rolled up into their parent technique today. Clicking a parent cell may show "0 alerts" while sub-technique alerts exist. Tracked for a separate backend story.
+
 ## Deferred dependencies (YAGNI)
 
 These libraries are reserved for downstream sprint stories and are

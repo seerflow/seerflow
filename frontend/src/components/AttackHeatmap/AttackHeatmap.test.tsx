@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AttackHeatmap } from "./AttackHeatmap";
 import { useCoverageStore, type CoverageState } from "@/stores/coverage";
+import { useDrilldownStore } from "@/stores/drilldown";
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    get: vi.fn(),
+  },
+}));
 
 type StoreSelector = <T>(state: CoverageState) => T;
 
@@ -16,10 +23,10 @@ const mockCoverageData = {
   window_until: "2026-04-15T00:00:00+00:00",
   tactics: [
     {
-      tactic: "persistence",
-      tactic_display_name: "Persistence (TA0003)",
+      tactic: "execution",
+      tactic_display_name: "Execution (TA0002)",
       techniques: [
-        { tactic: "persistence", technique: "T1053", rule_count: 2, alert_count: 1, covered: true, detected: true, rule_names: ["sched_task", "crontab"] },
+        { tactic: "execution", technique: "T1053", rule_count: 2, alert_count: 1, covered: true, detected: true, rule_names: ["sched_task", "crontab"] },
       ],
     },
   ],
@@ -32,9 +39,16 @@ function mockStore(state: CoverageState): void {
   );
 }
 
+function renderHeatmapWithSampleData() {
+  mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
+  return render(<AttackHeatmap />);
+}
+
 describe("AttackHeatmap", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockFetch.mockReset();
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [] });
   });
 
   it("shows loading state", () => {
@@ -82,5 +96,27 @@ describe("AttackHeatmap", () => {
     expect(outer.className).toMatch(/\bh-full\b/);
     expect(outer.className).toMatch(/\bmin-h-0\b/);
     expect(outer.className).not.toMatch(/min-h-\[/);
+  });
+});
+
+describe("AttackHeatmap click-to-drill", () => {
+  beforeEach(async () => {
+    useDrilldownStore.getState().close();
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [] });
+  });
+
+  it("clicking a covered technique cell opens the drilldown panel", async () => {
+    renderHeatmapWithSampleData();
+    const cells = await screen.findAllByRole("button", { name: /T1053/ });
+    const coveredCell = cells.find((c) => c.getAttribute("aria-label")?.includes("Detected"))!;
+    fireEvent.click(coveredCell);
+    await waitFor(() =>
+      expect(useDrilldownStore.getState().openCell).toEqual({
+        tactic: "execution",
+        technique: "T1053",
+      }),
+    );
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });

@@ -1,26 +1,12 @@
 import { useEffect } from "react";
 import { useCoverageStore } from "@/stores/coverage";
+import { useDrilldownStore } from "@/stores/drilldown";
 import { TacticColumn } from "./TacticColumn";
 import { CoverageSummary } from "./CoverageSummary";
+import { DrilldownPanel } from "./DrilldownPanel";
 import catalog from "@/data/attack-enterprise.json";
 import type { AttackCoverageResponse } from "@/lib/types";
-
-interface MergedTechnique {
-  id: string;
-  name: string;
-  ruleCount: number;
-  alertCount: number;
-  ruleNames: string[];
-  covered: boolean;
-  detected: boolean;
-}
-
-interface MergedTactic {
-  id: string;
-  shortname: string;
-  name: string;
-  techniques: MergedTechnique[];
-}
+import type { MergedTactic } from "./types";
 
 /**
  * Merge API coverage response with the static ATT&CK catalog.
@@ -141,8 +127,10 @@ export function AttackHeatmap() {
         {merged.map((tactic) => (
           <TacticColumn
             key={tactic.id}
+            tacticShortname={tactic.shortname}
             tacticName={tactic.name}
             techniques={tactic.techniques}
+            onOpen={(t, T) => useDrilldownStore.getState().open(t, T)}
           />
         ))}
       </div>
@@ -160,6 +148,10 @@ export function AttackHeatmap() {
           Coverage
         </span>
       </div>
+      <DrilldownPanel
+        matrix={merged}
+        coverageWindow={{ since: data.window_since, until: data.window_until }}
+      />
     </div>
   );
 }
