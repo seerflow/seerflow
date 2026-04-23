@@ -10,7 +10,9 @@ import { LiveEventSchema } from "@/lib/schemas";
 import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
 import { useWsSend } from "@/components/WsProvider";
+import { useDebouncedWsSend } from "@/hooks/useDebouncedWsSend";
 import type { LiveEvent, EventFilter, WsStatus } from "@/lib/types";
+import { isLiveEvent } from "@/lib/types";
 
 // One-shot WsFilter capability for this widget — the module is imported once
 // per worker so `createFilterSlot("events")` fires exactly once. Test harnesses
@@ -64,9 +66,10 @@ export function EventStream(): JSX.Element {
       }),
       wsBus.on("batch", (m) => {
         // Heterogeneous envelope — only ingest LiveEvent-shaped batches.
+        // S-208: isLiveEvent replaces the `"event_id" in first` stringly-typed check.
         const first = m.events[0];
-        if (first && typeof first === "object" && "event_id" in first) {
-          useEventStore.getState().ingest(m.events as unknown as LiveEvent[]);
+        if (isLiveEvent(first)) {
+          useEventStore.getState().ingest(m.events as LiveEvent[]);
         }
       }),
       wsBus.on("__status", (m) => setStatus(m.status)),
@@ -83,15 +86,13 @@ export function EventStream(): JSX.Element {
     return () => { cancelled = true; };
   }, [backfill]);
 
-  // Push WS filter intent on filter change (debounce 150 ms). Clear on unmount
-  // so a remount of EventStream doesn't inherit the previous instance's intent.
+  // Push WS filter intent on filter change (debounce 150 ms). S-208: shared
+  // hook. Clear on unmount stays in the separate effect below.
+  const debouncedSend = useDebouncedWsSend(send, 150);
   useEffect(() => {
-    const t = setTimeout(() => {
-      const merged = eventsSlot.set(intentFromFilter(filter));
-      send(merged);
-    }, 150);
-    return () => clearTimeout(t);
-  }, [filter, send]);
+    const merged = eventsSlot.set(intentFromFilter(filter));
+    debouncedSend(merged);
+  }, [filter, debouncedSend]);
 
   useEffect(() => () => {
     eventsSlot.clear();
