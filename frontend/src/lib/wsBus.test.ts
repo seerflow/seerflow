@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as bus from "./wsBus";
 import type { WsMessage } from "./types";
+import { logger } from "@/lib/logger";
 
 const statusMsg: WsMessage = {
   type: "status",
@@ -190,5 +191,34 @@ describe("emitCoalesced (S-209)", () => {
       "evt-2",
       "evt-3",
     ]);
+  });
+
+  it("flushes a partial batch and warns once when the frame buffer exceeds the cap", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const batchSpy = vi.fn();
+    bus.on("batch", batchSpy);
+
+    // Push 501 events synchronously before the first rAF fires.
+    for (let i = 0; i < 501; i++) {
+      bus.emitCoalesced({
+        ...eventMsg,
+        data: { ...eventMsg.data, event_id: `evt-${i}` },
+      });
+    }
+
+    // Overflow triggers an immediate partial flush; the 501st event lands on a fresh buffer.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "wsBus.rAF buffer overflow",
+      { dropped: 500 }
+    );
+    expect(batchSpy).toHaveBeenCalledTimes(1);
+    expect(batchSpy.mock.calls[0][0].events).toHaveLength(500);
+
+    await vi.runAllTimersAsync();
+
+    // The 501st event flushes on the next rAF tick as a single event frame.
+    expect(batchSpy).toHaveBeenCalledTimes(1); // no second batch
+    warnSpy.mockRestore();
   });
 });

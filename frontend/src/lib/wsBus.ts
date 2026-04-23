@@ -80,6 +80,10 @@ export function emitCoalesced(msg: WsMessage): void {
     emit(msg);
     return;
   }
+  if (rafFrameBuffer.length >= RAF_BUFFER_MAX) {
+    logger.warn("wsBus.rAF buffer overflow", { dropped: rafFrameBuffer.length });
+    flushFrame();
+  }
   rafFrameBuffer.push(msg.data);
   if (!rafScheduled) {
     rafScheduled = true;
