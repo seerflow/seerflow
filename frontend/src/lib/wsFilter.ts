@@ -8,63 +8,72 @@ type Intent = {
   min_severity?: number;
 };
 
-const intents: Record<WidgetId, Intent> = { alerts: {}, events: {} };
-const issued = new Set<WidgetId>();
-
-function unionStr(a?: string[], b?: string[]): string[] | undefined {
-  const set = new Set<string>([...(a ?? []), ...(b ?? [])]);
-  return set.size ? [...set] : undefined;
-}
-function unionAt(a?: AlertType[], b?: AlertType[]): AlertType[] | undefined {
-  const set = new Set<AlertType>([...(a ?? []), ...(b ?? [])]);
-  return set.size ? [...set] : undefined;
-}
-function unionNum(a?: number[], b?: number[]): number[] | undefined {
-  const set = new Set<number>([...(a ?? []), ...(b ?? [])]);
-  return set.size ? [...set] : undefined;
-}
-
-export function merged(): WsFilter {
-  const a = intents.alerts;
-  const e = intents.events;
-  const sources = unionStr(a.sources, e.sources);
-  const alert_types = unionAt(a.alert_types, e.alert_types);
-  const template_ids = unionNum(a.template_ids, e.template_ids);
-  const sevs = [a.min_severity, e.min_severity].filter(
-    (n): n is number => typeof n === "number",
-  );
-  const out: WsFilter = { type: "filter" };
-  if (sources) out.sources = sources;
-  if (alert_types) out.alert_types = alert_types;
-  if (template_ids) out.template_ids = template_ids;
-  if (sevs.length) out.min_severity = Math.min(...sevs);
-  return out;
-}
-
 export type FilterSlot = {
   set(partial: Intent): WsFilter;
   clear(): WsFilter;
 };
 
-export function createFilterSlot(widget: WidgetId): FilterSlot {
-  if (issued.has(widget)) {
-    throw new Error(`wsFilter slot for "${widget}" already issued`);
-  }
-  issued.add(widget);
-  return {
-    set: (partial) => {
-      intents[widget] = partial;
-      return merged();
-    },
-    clear: () => {
-      intents[widget] = {};
-      return merged();
-    },
-  };
-}
+const api = (() => {
+  const intents: Record<WidgetId, Intent> = { alerts: {}, events: {} };
+  const issued = new Set<WidgetId>();
 
-export function _resetForTests(): void {
-  intents.alerts = {};
-  intents.events = {};
-  issued.clear();
-}
+  function unionStr(a?: string[], b?: string[]): string[] | undefined {
+    const set = new Set<string>([...(a ?? []), ...(b ?? [])]);
+    return set.size ? [...set] : undefined;
+  }
+  function unionAt(a?: AlertType[], b?: AlertType[]): AlertType[] | undefined {
+    const set = new Set<AlertType>([...(a ?? []), ...(b ?? [])]);
+    return set.size ? [...set] : undefined;
+  }
+  function unionNum(a?: number[], b?: number[]): number[] | undefined {
+    const set = new Set<number>([...(a ?? []), ...(b ?? [])]);
+    return set.size ? [...set] : undefined;
+  }
+
+  function merged(): WsFilter {
+    const a = intents.alerts;
+    const e = intents.events;
+    const sources = unionStr(a.sources, e.sources);
+    const alert_types = unionAt(a.alert_types, e.alert_types);
+    const template_ids = unionNum(a.template_ids, e.template_ids);
+    const sevs = [a.min_severity, e.min_severity].filter(
+      (n): n is number => typeof n === "number",
+    );
+    const out: WsFilter = { type: "filter" };
+    if (sources) out.sources = sources;
+    if (alert_types) out.alert_types = alert_types;
+    if (template_ids) out.template_ids = template_ids;
+    if (sevs.length) out.min_severity = Math.min(...sevs);
+    return out;
+  }
+
+  function createFilterSlot(widget: WidgetId): FilterSlot {
+    if (issued.has(widget)) {
+      throw new Error(`wsFilter slot for "${widget}" already issued`);
+    }
+    issued.add(widget);
+    return {
+      set: (partial) => {
+        intents[widget] = partial;
+        return merged();
+      },
+      clear: () => {
+        intents[widget] = {};
+        return merged();
+      },
+    };
+  }
+
+  /** @internal test-only reset. Do not call from product code. */
+  function _resetForTests(): void {
+    intents.alerts = {};
+    intents.events = {};
+    issued.clear();
+  }
+
+  return { merged, createFilterSlot, _resetForTests };
+})();
+
+export const merged = api.merged;
+export const createFilterSlot = api.createFilterSlot;
+export const _resetForTests = api._resetForTests;
