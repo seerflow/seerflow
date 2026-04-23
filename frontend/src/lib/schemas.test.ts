@@ -287,14 +287,14 @@ describe("parseWsFrame", () => {
     }
   });
 
-  it("revives a heterogeneous batch of one event and one alert", () => {
-    const mixed = {
+  it("revives a batch of events", () => {
+    const batch = {
       type: "batch",
       events: [
         {
           event_id: "e1",
           timestamp_ns: "100",
-          observed_ns: "200",
+          observed_ns: "150",
           severity_id: 3,
           severity_text: "info",
           source_type: "syslog",
@@ -303,19 +303,26 @@ describe("parseWsFrame", () => {
           entity_refs: [],
           entity_summary: {},
         },
-        { ...wireAlert.data, alert_id: "a1" },
+        {
+          event_id: "e2",
+          timestamp_ns: "200",
+          observed_ns: "250",
+          severity_id: 3,
+          severity_text: "info",
+          source_type: "syslog",
+          message: "world",
+          template_id: 7,
+          entity_refs: [],
+          entity_summary: {},
+        },
       ],
     };
-    const out = parseWsFrame(mixed);
+    const out = parseWsFrame(batch);
     expect(out).not.toBeNull();
     if (out && out.type === "batch") {
       expect(out.events).toHaveLength(2);
-      // LiveEvent has observed_ns, Alert does not — use that to discriminate
-      const [first, second] = out.events;
-      expect("observed_ns" in first).toBe(true);
-      expect("alert_type" in second).toBe(true);
-      expect((first as { timestamp_ns: bigint }).timestamp_ns).toBe(100n);
-      expect((second as { timestamp_ns: bigint }).timestamp_ns).toBe(100n);
+      expect(out.events[0].timestamp_ns).toBe(100n);
+      expect(out.events[1].timestamp_ns).toBe(200n);
     }
   });
 });

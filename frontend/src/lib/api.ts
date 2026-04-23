@@ -103,12 +103,10 @@ async function request<T>(path: string, init: RequestInit, opts?: GetOpts): Prom
         const pathKind = path.split("?")[0];
         const kind = `rest:${pathKind}`;
         const rawItems = (body as Record<string, unknown[]>)[opts.itemsKey] as unknown[];
-        const schema = opts.schema;
         const items = rawItems
-          .map(item => validateOrDropItem(schema, item, kind))
+          .map(item => validateOrDropItem(opts.schema!, item, kind))
           .filter((x): x is NonNullable<typeof x> => x !== null);
-        (body as Record<string, unknown>)[opts.itemsKey] = items;
-        return body as T;
+        return { ...(body as Record<string, unknown>), [opts.itemsKey]: items } as T;
       }
       const parsedOut = v.safeParse(opts.schema, body);
       if (!parsedOut.success) {

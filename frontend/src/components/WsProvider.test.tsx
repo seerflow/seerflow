@@ -178,4 +178,10 @@ describe("resolveUrl origin allowlist", () => {
     (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "HTTPS://Api.Seerflow.IO";
     expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
   });
+
+  it("falls back to window.location.origin when VITE_API_BASE is empty string", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
 });

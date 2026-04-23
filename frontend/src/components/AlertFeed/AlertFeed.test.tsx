@@ -25,7 +25,7 @@ vi.mock("@/lib/api", () => ({
           const items = raw
             .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
             .filter((x): x is NonNullable<typeof x> => x !== null);
-          (res as Record<string, unknown>)[opts.itemsKey] = items;
+          return { ...(res as Record<string, unknown>), [opts.itemsKey]: items };
         }
       }
       return res;
@@ -240,7 +240,7 @@ describe("AlertFeed integration", () => {
     expect(MockWS.last!.sent).toEqual([]);
   });
 
-  it("handles alert_batch arrivals and 'batch' envelope carrying alerts", async () => {
+  it("handles alert_batch arrivals", async () => {
     fetchMock.mockResolvedValueOnce({ items: [] });
     renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
@@ -257,11 +257,6 @@ describe("AlertFeed integration", () => {
     });
     expect(screen.getByText("batch-rule-1")).toBeInTheDocument();
     expect(screen.getByText("batch-rule-2")).toBeInTheDocument();
-
-    act(() => {
-      MockWS.last!._msg({ type: "batch", events: [mkAlert("b3", "envelope-rule-3")] });
-    });
-    expect(screen.getByText("envelope-rule-3")).toBeInTheDocument();
   });
 
   it("uses h-full min-h-0 so the section fills its grid cell (no viewport calc)", async () => {

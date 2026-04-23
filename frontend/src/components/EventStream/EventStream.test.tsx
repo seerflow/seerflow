@@ -23,7 +23,7 @@ vi.mock("@/lib/api", () => ({
           const items = raw
             .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
             .filter((x): x is NonNullable<typeof x> => x !== null);
-          res[opts.itemsKey] = items;
+          return { ...res, [opts.itemsKey]: items };
         }
       }
       return res;

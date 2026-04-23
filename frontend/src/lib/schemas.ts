@@ -104,10 +104,8 @@ export const WsMessageWireSchema = v.variant("type", [
   v.object({ type: v.literal("event"),       data: LiveEventWireSchema }),
   v.object({
     type: v.literal("batch"),
-    events: v.pipe(
-      v.array(v.union([LiveEventWireSchema, AlertWireSchema])),
-      v.maxLength(500),
-    ),
+    // Backend only puts LiveEvents in `batch`; alerts ship through `alert_batch`.
+    events: v.pipe(v.array(LiveEventWireSchema), v.maxLength(500)),
   }),
 ]);
 
@@ -118,10 +116,7 @@ export const WsMessageSchema = v.variant("type", [
   v.object({ type: v.literal("event"),       data: LiveEventSchema }),
   v.object({
     type: v.literal("batch"),
-    events: v.pipe(
-      v.array(v.union([LiveEventSchema, AlertSchema])),
-      v.maxLength(500),
-    ),
+    events: v.pipe(v.array(LiveEventSchema), v.maxLength(500)),
   }),
 ]);
 
@@ -170,12 +165,7 @@ export function parseWsFrame(raw: unknown): WsMessageInfer | null {
       revived = { type: "event", data: reviveEvent(w.data) };
       break;
     case "batch":
-      revived = {
-        type: "batch",
-        events: w.events.map((e) =>
-          "alert_type" in e ? reviveAlert(e) : reviveEvent(e),
-        ),
-      };
+      revived = { type: "batch", events: w.events.map(reviveEvent) };
       break;
   }
   const deep = v.safeParse(WsMessageSchema, revived);

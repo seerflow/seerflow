@@ -9,7 +9,10 @@ type SendFn = (msg: unknown) => void;
 const Ctx = createContext<SendFn | null>(null);
 
 function resolveUrl(): string {
-  const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
+  // Treat empty string the same as missing — an unset env var in Vite can arrive
+  // as "" (shell) or undefined (dotfile missing) and both should fall through to
+  // same-origin rather than crash `new URL("")` with TypeError: Invalid URL.
+  const base = (import.meta.env.VITE_API_BASE as string | undefined) || window.location.origin;
   const allowCsv = (import.meta.env.VITE_WS_ORIGIN_ALLOWLIST as string | undefined) ?? "";
   // Lowercase the allowlist so operators who write e.g. "HTTPS://Api.Seerflow.IO"
   // still match against the canonical (lowercase) `URL(base).origin`.
