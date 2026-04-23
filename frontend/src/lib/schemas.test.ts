@@ -1,7 +1,18 @@
 // frontend/src/lib/schemas.test.ts
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as v from "valibot";
-import { LiveEventSchema, AlertSchema, AlertDetailSchema } from "./schemas";
+import {
+  LiveEventSchema,
+  AlertSchema,
+  AlertDetailSchema,
+  parseWsFrame,
+  WsMessageWireSchema,
+  WsMessageSchema,
+} from "./schemas";
+import * as metrics from "./validationMetrics";
+import { logger } from "./logger";
+
+vi.mock("./logger", () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 const validEvent = {
   event_id: "e1",
@@ -125,3 +136,84 @@ describe("AlertDetailSchema", () => {
     expect(v.safeParse(AlertDetailSchema, detail).success).toBe(false);
   });
 });
+
+describe("parseWsFrame", () => {
+  beforeEach(() => {
+    metrics._resetForTests();
+    (logger.warn as ReturnType<typeof vi.fn>).mockClear();
+  });
+
+  const wireAlert = {
+    type: "alert",
+    data: {
+      alert_id: "a1",
+      timestamp_ns: "100",
+      alert_type: "sigma",
+      rule_name: "r",
+      severity: 3,
+      risk_score: 0.5,
+      entity_uuid: null,
+      entity_type: null,
+      entity_value: null,
+      message: "m",
+      mitre_tactics: [],
+      mitre_techniques: [],
+      dedup_count: 1,
+    },
+  };
+
+  it("converts a valid wire alert frame into a revived WsMessage", () => {
+    const out = parseWsFrame(wireAlert);
+    expect(out).not.toBeNull();
+    expect(out!.type).toBe("alert");
+    if (out!.type === "alert") {
+      expect(out!.data.timestamp_ns).toBe(100n);
+    }
+  });
+
+  it("drops a frame with severity 999 and increments counter", () => {
+    const bad = { ...wireAlert, data: { ...wireAlert.data, severity: 999 } };
+    const out = parseWsFrame(bad);
+    expect(out).toBeNull();
+    expect(metrics.getCounters()["ws:alert"]).toBe(1);
+  });
+
+  it("drops a frame with unknown top-level type under ws:unknown", () => {
+    const out = parseWsFrame({ type: "weird", foo: 1 });
+    expect(out).toBeNull();
+    expect(metrics.getCounters()["ws:unknown"]).toBe(1);
+  });
+
+  it("drops and counts a wire event with too-long message", () => {
+    const wireEvent = {
+      type: "event",
+      data: {
+        event_id: "e1",
+        timestamp_ns: "100",
+        observed_ns: "100",
+        severity_id: 3,
+        severity_text: "info",
+        source_type: "syslog",
+        message: "x".repeat(16 * 1024 + 1),
+        template_id: 7,
+        entity_refs: [],
+        entity_summary: {},
+      },
+    };
+    expect(parseWsFrame(wireEvent)).toBeNull();
+    expect(metrics.getCounters()["ws:event"]).toBe(1);
+  });
+
+  it("caps alert_batch at 100", () => {
+    const batch = {
+      type: "alert_batch",
+      alerts: Array.from({ length: 101 }, (_, i) => ({ ...wireAlert.data, alert_id: `a${i}` })),
+    };
+    expect(parseWsFrame(batch)).toBeNull();
+    expect(metrics.getCounters()["ws:alert_batch"]).toBe(1);
+  });
+});
+
+// Reference WsMessageWireSchema / WsMessageSchema to ensure exports are wired up.
+void WsMessageWireSchema;
+void WsMessageSchema;

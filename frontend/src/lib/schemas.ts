@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { incrementDropped, warnThrottled } from "./validationMetrics";
 
 const MAX_MESSAGE_BYTES = 16 * 1024;
 const MAX_SOURCE_TYPE = 64;
@@ -72,3 +73,116 @@ export const AlertDetailSchema = v.object({
 export type LiveEventInfer = v.InferOutput<typeof LiveEventSchema>;
 export type AlertInfer = v.InferOutput<typeof AlertSchema>;
 export type AlertDetailInfer = v.InferOutput<typeof AlertDetailSchema>;
+
+const NS_WIRE_RE = /^\d{1,25}$/;
+const NsWireStringSchema = v.pipe(v.string(), v.regex(NS_WIRE_RE));
+
+const AlertWireSchema = v.object({
+  ...AlertSchema.entries,
+  timestamp_ns: NsWireStringSchema,
+});
+
+const LiveEventWireSchema = v.object({
+  ...LiveEventSchema.entries,
+  timestamp_ns: NsWireStringSchema,
+  observed_ns: NsWireStringSchema,
+});
+
+const StatusDataSchema = v.object({
+  events_ingested_per_sec: finite(),
+  alerts_24h: finite(),
+  connected_clients: finite(),
+  dropped_events: finite(),
+  dropped_alerts: finite(),
+  dropped_total: finite(),
+});
+
+export const WsMessageWireSchema = v.variant("type", [
+  v.object({ type: v.literal("alert"),       data: AlertWireSchema }),
+  v.object({ type: v.literal("alert_batch"), alerts: v.pipe(v.array(AlertWireSchema), v.maxLength(100)) }),
+  v.object({ type: v.literal("status"),      data: StatusDataSchema }),
+  v.object({ type: v.literal("event"),       data: LiveEventWireSchema }),
+  v.object({
+    type: v.literal("batch"),
+    events: v.pipe(
+      v.array(v.union([LiveEventWireSchema, AlertWireSchema])),
+      v.maxLength(500),
+    ),
+  }),
+]);
+
+export const WsMessageSchema = v.variant("type", [
+  v.object({ type: v.literal("alert"),       data: AlertSchema }),
+  v.object({ type: v.literal("alert_batch"), alerts: v.pipe(v.array(AlertSchema), v.maxLength(100)) }),
+  v.object({ type: v.literal("status"),      data: StatusDataSchema }),
+  v.object({ type: v.literal("event"),       data: LiveEventSchema }),
+  v.object({
+    type: v.literal("batch"),
+    events: v.pipe(
+      v.array(v.union([LiveEventSchema, AlertSchema])),
+      v.maxLength(500),
+    ),
+  }),
+]);
+
+export type WsMessageInfer = v.InferOutput<typeof WsMessageSchema>;
+
+function reviveAlert(a: v.InferOutput<typeof AlertWireSchema>): v.InferOutput<typeof AlertSchema> {
+  return { ...a, timestamp_ns: BigInt(a.timestamp_ns) };
+}
+
+function reviveEvent(e: v.InferOutput<typeof LiveEventWireSchema>): v.InferOutput<typeof LiveEventSchema> {
+  return { ...e, timestamp_ns: BigInt(e.timestamp_ns), observed_ns: BigInt(e.observed_ns) };
+}
+
+function inferKind(raw: unknown): string {
+  if (raw && typeof raw === "object" && "type" in raw) {
+    const t = (raw as { type: unknown }).type;
+    if (typeof t === "string" &&
+        ["alert", "alert_batch", "status", "event", "batch"].includes(t)) {
+      return `ws:${t}`;
+    }
+  }
+  return "ws:unknown";
+}
+
+export function parseWsFrame(raw: unknown): WsMessageInfer | null {
+  const kind = inferKind(raw);
+  const wire = v.safeParse(WsMessageWireSchema, raw);
+  if (!wire.success) {
+    incrementDropped(kind);
+    warnThrottled(kind, wire.issues.map(i => ({ kind: i.kind, type: i.type, path: i.path?.map(p => p.key) })));
+    return null;
+  }
+  const w = wire.output;
+  let revived: WsMessageInfer;
+  switch (w.type) {
+    case "alert":
+      revived = { type: "alert", data: reviveAlert(w.data) };
+      break;
+    case "alert_batch":
+      revived = { type: "alert_batch", alerts: w.alerts.map(reviveAlert) };
+      break;
+    case "status":
+      revived = { type: "status", data: w.data };
+      break;
+    case "event":
+      revived = { type: "event", data: reviveEvent(w.data) };
+      break;
+    case "batch":
+      revived = {
+        type: "batch",
+        events: w.events.map((e) =>
+          "alert_type" in e ? reviveAlert(e) : reviveEvent(e),
+        ),
+      };
+      break;
+  }
+  const deep = v.safeParse(WsMessageSchema, revived);
+  if (!deep.success) {
+    incrementDropped(kind);
+    warnThrottled(kind, deep.issues.map(i => ({ kind: i.kind, type: i.type, path: i.path?.map(p => p.key) })));
+    return null;
+  }
+  return deep.output;
+}
