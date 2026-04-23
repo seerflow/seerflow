@@ -95,6 +95,48 @@ describe("WsProvider", () => {
     expect(first).toEqual({ type: "filter", sources: ["auth"] });
   });
 
+  it("reconnect re-emits __status:open and replays merged filter (regression lock)", async () => {
+    const { createFilterSlot, _resetForTests } = await import("@/lib/wsFilter");
+    _resetForTests();
+    const alerts = createFilterSlot("alerts");
+    alerts.set({ sources: ["syslog"] });
+
+    vi.useFakeTimers();
+    const statusFrames: string[] = [];
+    const off = bus.on("__status", (msg) => { statusFrames.push(msg.status); });
+
+    render(<WsProvider><div /></WsProvider>);
+
+    // First open — filter replay + __status:open
+    act(() => { FakeSocket.lastInstance!.onopen?.(); });
+    const firstFilterFrames = FakeSocket.lastInstance!.sent.filter(
+      (s) => JSON.parse(s).type === "filter",
+    );
+    expect(firstFilterFrames).toHaveLength(1);
+    expect(JSON.parse(firstFilterFrames[0]!)).toEqual({ type: "filter", sources: ["syslog"] });
+    expect(statusFrames.filter((s) => s === "open")).toHaveLength(1);
+
+    // Close — hook schedules reconnect with BACKOFF_MS[0] = 1000 ms
+    act(() => { FakeSocket.lastInstance!.onclose?.(); });
+    expect(statusFrames.filter((s) => s === "closed")).toHaveLength(1);
+
+    // Advance past the first backoff delay so the hook fires setTimeout(connect, 1000)
+    act(() => { vi.advanceTimersByTime(1000); });
+
+    // Second open on the new socket
+    act(() => { FakeSocket.lastInstance!.onopen?.(); });
+    const secondFilterFrames = FakeSocket.lastInstance!.sent.filter(
+      (s) => JSON.parse(s).type === "filter",
+    );
+    expect(secondFilterFrames).toHaveLength(1);
+    expect(JSON.parse(secondFilterFrames[0]!)).toEqual({ type: "filter", sources: ["syslog"] });
+    expect(statusFrames.filter((s) => s === "open")).toHaveLength(2);
+
+    off();
+    _resetForTests();
+    vi.useRealTimers();
+  });
+
   it("useWsSend() throws when called outside the provider", () => {
     function Consumer(): JSX.Element { useWsSend(); return <div />; }
     // Mute React's error boundary console output for this case.
