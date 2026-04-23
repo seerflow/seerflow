@@ -67,6 +67,7 @@ describe("DrilldownPanel", () => {
     useDrilldownStore.getState().close();
     useAlertStore.getState().clearSelection();
     useLayoutStore.setState({ widgets: ["alertFeed", "anomalyTimeline", "entityExplorer", "eventStream"] });
+    window.location.hash = "";
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockReset();
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [] });
