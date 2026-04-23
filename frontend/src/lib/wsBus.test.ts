@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as bus from "./wsBus";
 import type { WsMessage } from "./types";
-import { _clearAllForTests } from "./wsBus";
 
 const statusMsg: WsMessage = {
   type: "status",
@@ -70,7 +69,7 @@ describe("_clearAllForTests (S-208)", () => {
   it("on() → _clearAllForTests() → off() is a no-op", () => {
     const spy = vi.fn();
     const off = bus.on("alert", spy);
-    _clearAllForTests();
+    bus._clearAllForTests();
     expect(() => off()).not.toThrow();
     bus.emit({
       type: "alert",
