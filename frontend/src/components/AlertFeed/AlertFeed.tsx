@@ -7,7 +7,8 @@ import { FilterBar } from "./FilterBar";
 import { SummaryBadges } from "./SummaryBadges";
 import { api, ApiError } from "@/lib/api";
 import { AlertSchema } from "@/lib/schemas";
-import type { AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
+import type { Alert, AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
+import { isAlert } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
@@ -18,6 +19,7 @@ import * as wsBus from "@/lib/wsBus";
 // already-bound closure.
 const alertsSlot = createFilterSlot("alerts");
 import { useWsSend } from "@/components/WsProvider";
+import { useDebouncedWsSend } from "@/hooks/useDebouncedWsSend";
 
 // OCSF 0..6 min-severity thresholds. Must stay aligned with
 // `severityBucket` in `@/lib/severity` — see file header there.
@@ -68,6 +70,14 @@ export function AlertFeed(): JSX.Element {
         });
       }
     }
+    else if (m.type === "batch") {
+      // S-208: heterogeneous envelope — only ingest Alert-shaped batches.
+      // LiveEvent-shaped batches are EventStream's concern.
+      const first = m.events[0];
+      if (isAlert(first)) {
+        for (const a of m.events as Alert[]) prepend(a);
+      }
+    }
   }, [prepend]);
 
   useEffect(() => {
@@ -110,11 +120,11 @@ export function AlertFeed(): JSX.Element {
     return () => { for (const off of offs) off(); };
   }, [handleMessage, setStatus]);
 
+  const debouncedSend = useDebouncedWsSend(send, 150);
   useEffect(() => {
     const merged = alertsSlot.set(toWsFilter(filter));
-    const t = setTimeout(() => send(merged), 150);
-    return () => clearTimeout(t);
-  }, [filter, send]);
+    debouncedSend(merged);
+  }, [filter, debouncedSend]);
 
   const { visible, counts } = useAlertStore(selectVisibleAndCounts);
   const sources = useMemo(
