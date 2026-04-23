@@ -142,4 +142,44 @@ describe("DrilldownPanel", () => {
     useDrilldownStore.getState().open("execution", "T1053");
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
   });
+
+  it("clicking an alert row sets selectedAlertId, navigates hash to '#', and closes the panel", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
+    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const row = await screen.findByRole("button", { name: /Open alert alrt-1/ });
+    fireEvent.click(row);
+    expect(useAlertStore.getState().selectedAlertId).toBe("alrt-1");
+    expect(window.location.hash).toBe("");
+    expect(useDrilldownStore.getState().openCell).toBeNull();
+  });
+
+  it("shows the AlertFeed-missing note when the widget is not in the layout", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
+    useLayoutStore.setState({ widgets: ["anomalyTimeline", "entityExplorer", "eventStream"] });
+    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    expect(await screen.findByText(/Add the Alert Feed widget/)).toBeInTheDocument();
+  });
+
+  it("hides the AlertFeed-missing note when the widget is mounted", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
+    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    await screen.findByText(/Scheduled task created/);
+    expect(screen.queryByText(/Add the Alert Feed widget/)).not.toBeInTheDocument();
+  });
+
+  it("Esc key closes the panel via Radix outside-close path", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
+    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    await screen.findByText(/Scheduled task created/);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(useDrilldownStore.getState().openCell).toBeNull());
+  });
 });
