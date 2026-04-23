@@ -60,7 +60,7 @@ describe("AlertFeed integration", () => {
     vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
     fetchMock.mockReset();
     MockWS.last = null;
-    wsBus.clearAll();
+    wsBus._clearAllForTests();
     resetWsIntents();
     useAlertStore.setState({ alerts: [], filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() }, status: "connecting", dropped: 0, selectedAlertId: null });
   });
@@ -140,7 +140,7 @@ describe("AlertFeed integration", () => {
     const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
     fetchMock.mockReturnValueOnce(warmupPromise);
     useAlertStore.setState({ alerts: [], detail: {}, filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() }, dropped: 0, selectedAlertId: null });
-    wsBus.clearAll();
+    wsBus._clearAllForTests();
 
     renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
@@ -277,7 +277,7 @@ describe("S-191 T9: REST warm-up schema validation", () => {
     vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
     fetchMock.mockReset();
     MockWS.last = null;
-    wsBus.clearAll();
+    wsBus._clearAllForTests();
     resetWsIntents();
     validationMetrics._resetForTests();
     useAlertStore.setState({

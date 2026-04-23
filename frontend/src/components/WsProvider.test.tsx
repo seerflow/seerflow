@@ -19,7 +19,7 @@ class FakeSocket {
 
 beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeSocket as unknown as typeof WebSocket);
-  bus.clearAll();
+  bus._clearAllForTests();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
