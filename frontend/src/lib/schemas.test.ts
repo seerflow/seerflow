@@ -78,6 +78,12 @@ describe("LiveEventSchema", () => {
     const big = { ...validEvent, entity_summary: { ips: Array.from({ length: 65 }, (_, i) => `1.2.3.${i}`) } };
     expect(v.safeParse(LiveEventSchema, big).success).toBe(false);
   });
+
+  it("accepts a LiveEvent without entity_summary (REST EventResponse shape)", () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { entity_summary: _unused, ...withoutEntitySummary } = validEvent;
+    expect(v.safeParse(LiveEventSchema, withoutEntitySummary).success).toBe(true);
+  });
 });
 
 describe("AlertSchema", () => {
@@ -112,6 +118,16 @@ describe("AlertSchema", () => {
   it("rejects mitre_tactics over 32 items", () => {
     const big = { ...validAlert, mitre_tactics: Array.from({ length: 33 }, (_, i) => `TA${String(i).padStart(4, "0")}`) };
     expect(v.safeParse(AlertSchema, big).success).toBe(false);
+  });
+
+  it("accepts an Alert with feedback: null (backend serialises unset as null)", () => {
+    expect(v.safeParse(AlertSchema, { ...validAlert, feedback: null }).success).toBe(true);
+  });
+
+  it("still accepts an Alert with feedback omitted (undefined)", () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { feedback: _unused, ...withoutFeedback } = validAlert as typeof validAlert & { feedback?: unknown };
+    expect(v.safeParse(AlertSchema, withoutFeedback).success).toBe(true);
   });
 });
 

@@ -32,7 +32,7 @@ export const LiveEventSchema = v.object({
   message: BoundedString(MAX_MESSAGE_BYTES),
   template_id: v.pipe(v.number(), v.integer(), v.minValue(0)),
   entity_refs: v.pipe(v.array(BoundedString(256)), v.maxLength(128)),
-  entity_summary: EntitySummarySchema,
+  entity_summary: v.optional(EntitySummarySchema),
   score: v.optional(finite()),
   is_anomaly: v.optional(v.boolean()),
   upper_threshold: v.optional(finite()),
@@ -55,7 +55,7 @@ export const AlertSchema = v.object({
   mitre_techniques: v.pipe(v.array(v.pipe(v.string(), v.regex(MITRE_RE))), v.maxLength(32)),
   dedup_count: v.pipe(v.number(), v.integer(), v.minValue(0)),
   source_type: v.optional(BoundedString(MAX_SOURCE_TYPE)),
-  feedback: v.optional(v.picklist(["", "tp", "fp"] as const)),
+  feedback: v.nullish(v.picklist(["", "tp", "fp"] as const)),
 });
 
 export const AlertDetailSchema = v.object({
