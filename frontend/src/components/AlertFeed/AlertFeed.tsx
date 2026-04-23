@@ -8,8 +8,14 @@ import { SummaryBadges } from "./SummaryBadges";
 import { api, ApiError } from "@/lib/api";
 import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert } from "@/lib/types";
 import { logger } from "@/lib/logger";
-import { setIntent as setWsIntent } from "@/lib/wsFilter";
+import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
+
+// One-shot WsFilter capability for this widget — the module is imported once
+// per worker so `createFilterSlot("alerts")` fires exactly once. Test harnesses
+// call `_resetForTests()` which clears the issued set without breaking this
+// already-bound closure.
+const alertsSlot = createFilterSlot("alerts");
 import { useWsSend } from "@/components/WsProvider";
 
 const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
@@ -113,7 +119,7 @@ export function AlertFeed(): JSX.Element {
   }, [handleMessage, setStatus]);
 
   useEffect(() => {
-    const merged = setWsIntent("alerts", toWsFilter(filter));
+    const merged = alertsSlot.set(toWsFilter(filter));
     const t = setTimeout(() => send(merged), 150);
     return () => clearTimeout(t);
   }, [filter, send]);

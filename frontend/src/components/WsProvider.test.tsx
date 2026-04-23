@@ -85,8 +85,10 @@ describe("WsProvider", () => {
   });
 
   it("replays the merged wsFilter on every (re)connect via getFilterMessage", async () => {
-    const { setIntent } = await import("@/lib/wsFilter");
-    setIntent("alerts", { sources: ["auth"] });
+    const { createFilterSlot, _resetForTests } = await import("@/lib/wsFilter");
+    _resetForTests();
+    const alerts = createFilterSlot("alerts");
+    alerts.set({ sources: ["auth"] });
     render(<WsProvider><div /></WsProvider>);
     act(() => { FakeSocket.lastInstance!.onopen?.(); });
     const first = JSON.parse(FakeSocket.lastInstance!.sent[0]!);

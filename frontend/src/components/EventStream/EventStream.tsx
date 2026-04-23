@@ -6,12 +6,18 @@ import { PauseControl } from "./PauseControl";
 import { EventFilterBar } from "./EventFilterBar";
 import { api, ApiError } from "@/lib/api";
 import { logger } from "@/lib/logger";
-import { setIntent as setWsIntent, clearIntent as clearWsIntent } from "@/lib/wsFilter";
+import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
 import { useWsSend } from "@/components/WsProvider";
 import type { LiveEvent, EventFilter, WsStatus } from "@/lib/types";
 
-function intentFromFilter(f: EventFilter): Parameters<typeof setWsIntent>[1] {
+// One-shot WsFilter capability for this widget — the module is imported once
+// per worker so `createFilterSlot("events")` fires exactly once. Test harnesses
+// call `_resetForTests()` which clears the issued set without breaking this
+// already-bound closure.
+const eventsSlot = createFilterSlot("events");
+
+function intentFromFilter(f: EventFilter): Parameters<typeof eventsSlot.set>[0] {
   return {
     sources: f.sources.size ? [...f.sources] : undefined,
     template_ids: f.templateIds.size ? [...f.templateIds] : undefined,
@@ -80,14 +86,14 @@ export function EventStream(): JSX.Element {
   // so a remount of EventStream doesn't inherit the previous instance's intent.
   useEffect(() => {
     const t = setTimeout(() => {
-      const merged = setWsIntent("events", intentFromFilter(filter));
+      const merged = eventsSlot.set(intentFromFilter(filter));
       send(merged);
     }, 150);
     return () => clearTimeout(t);
   }, [filter, send]);
 
   useEffect(() => () => {
-    clearWsIntent("events");
+    eventsSlot.clear();
     // No CustomEvent dispatch — AlertFeed no longer listens for the legacy
     // "seerflow:wsfilter-changed" hop; filter merging happens via useWsSend().
   }, []);
