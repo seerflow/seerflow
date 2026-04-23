@@ -221,4 +221,38 @@ describe("emitCoalesced (S-209)", () => {
     expect(batchSpy).toHaveBeenCalledTimes(1); // no second batch
     warnSpy.mockRestore();
   });
+
+  it("compresses 1k events into 2 batches under a single flush cycle (guards notify fan-out)", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const batchSpy = vi.fn();
+    const eventSpy = vi.fn();
+    bus.on("batch", batchSpy);
+    bus.on("event", eventSpy);
+
+    for (let i = 0; i < 1000; i++) {
+      bus.emitCoalesced({
+        ...eventMsg,
+        data: { ...eventMsg.data, event_id: `evt-${i}` },
+      });
+    }
+
+    // Trace: events 0..499 fill the buffer to capacity. The 501st push (event
+    // index 500) trips the overflow branch, flushes 500 as a batch inline, then
+    // lands event 500 on a fresh buffer. Events 501..999 pile on without another
+    // overflow (buffer grows 1→500 in that second run). So after the synchronous
+    // loop we observe exactly one inline batch (500 events) + one pending rAF.
+    expect(batchSpy).toHaveBeenCalledTimes(1);
+    expect(batchSpy.mock.calls[0][0].events).toHaveLength(500);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    await vi.runAllTimersAsync();
+
+    // The rAF tick flushes the second 500-event batch. No per-event notifies;
+    // 1000 wire events → 2 downstream notify cycles = 500× reduction.
+    expect(batchSpy).toHaveBeenCalledTimes(2);
+    expect(batchSpy.mock.calls[1][0].events).toHaveLength(500);
+    expect(eventSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
 });
