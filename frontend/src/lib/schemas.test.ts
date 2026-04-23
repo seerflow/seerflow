@@ -6,8 +6,6 @@ import {
   AlertSchema,
   AlertDetailSchema,
   parseWsFrame,
-  WsMessageWireSchema,
-  WsMessageSchema,
 } from "./schemas";
 import * as metrics from "./validationMetrics";
 import { logger } from "./logger";
@@ -212,8 +210,94 @@ describe("parseWsFrame", () => {
     expect(parseWsFrame(batch)).toBeNull();
     expect(metrics.getCounters()["ws:alert_batch"]).toBe(1);
   });
-});
 
-// Reference WsMessageWireSchema / WsMessageSchema to ensure exports are wired up.
-void WsMessageWireSchema;
-void WsMessageSchema;
+  it("revives a valid wire event frame into bigint timestamps", () => {
+    const wireEvent = {
+      type: "event",
+      data: {
+        event_id: "e1",
+        timestamp_ns: "100",
+        observed_ns: "200",
+        severity_id: 3,
+        severity_text: "info",
+        source_type: "syslog",
+        message: "hello",
+        template_id: 7,
+        entity_refs: [],
+        entity_summary: { ips: ["1.2.3.4"] },
+      },
+    };
+    const out = parseWsFrame(wireEvent);
+    expect(out).not.toBeNull();
+    if (out && out.type === "event") {
+      expect(out.data.timestamp_ns).toBe(100n);
+      expect(out.data.observed_ns).toBe(200n);
+    }
+  });
+
+  it("accepts a valid status frame without bigint revival", () => {
+    const wireStatus = {
+      type: "status",
+      data: {
+        events_ingested_per_sec: 1,
+        alerts_24h: 2,
+        connected_clients: 3,
+        dropped_events: 0,
+        dropped_alerts: 0,
+        dropped_total: 0,
+      },
+    };
+    const out = parseWsFrame(wireStatus);
+    expect(out).not.toBeNull();
+    expect(out?.type).toBe("status");
+  });
+
+  it("revives a valid alert_batch frame with 2 alerts", () => {
+    const batch = {
+      type: "alert_batch",
+      alerts: [
+        { ...wireAlert.data, alert_id: "a1" },
+        { ...wireAlert.data, alert_id: "a2" },
+      ],
+    };
+    const out = parseWsFrame(batch);
+    expect(out).not.toBeNull();
+    if (out && out.type === "alert_batch") {
+      expect(out.alerts).toHaveLength(2);
+      expect(out.alerts[0].timestamp_ns).toBe(100n);
+      expect(out.alerts[1].timestamp_ns).toBe(100n);
+    }
+  });
+
+  it("revives a heterogeneous batch of one event and one alert", () => {
+    const mixed = {
+      type: "batch",
+      events: [
+        {
+          event_id: "e1",
+          timestamp_ns: "100",
+          observed_ns: "200",
+          severity_id: 3,
+          severity_text: "info",
+          source_type: "syslog",
+          message: "hello",
+          template_id: 7,
+          entity_refs: [],
+          entity_summary: {},
+        },
+        { ...wireAlert.data, alert_id: "a1" },
+      ],
+    };
+    const out = parseWsFrame(mixed);
+    expect(out).not.toBeNull();
+    if (out && out.type === "batch") {
+      expect(out.events).toHaveLength(2);
+      // LiveEvent has observed_ns, Alert does not — use that to discriminate
+      const [first, second] = out.events;
+      expect("observed_ns" in first).toBe(true);
+      expect("alert_type" in second).toBe(true);
+      expect((first as { timestamp_ns: bigint }).timestamp_ns).toBe(100n);
+      expect((second as { timestamp_ns: bigint }).timestamp_ns).toBe(100n);
+    }
+  });
+});
