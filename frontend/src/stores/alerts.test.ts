@@ -4,7 +4,7 @@ import type { Alert } from "@/lib/types";
 
 const a = (overrides: Partial<Alert> = {}): Alert => ({
   alert_id: "1", timestamp_ns: 1n, alert_type: "ml", rule_name: "r",
-  severity: 17, risk_score: 0.9, entity_uuid: null, entity_type: null,
+  severity: 6, risk_score: 0.9, entity_uuid: null, entity_type: null,
   entity_value: null, message: "m", mitre_tactics: [], mitre_techniques: [],
   dedup_count: 1, source_type: "syslog", ...overrides,
 });
@@ -56,17 +56,17 @@ describe("alertStore", () => {
 
   it("filters by severity (S-203, formerly selectVisible)", () => {
     const s = createAlertStore(10);
-    s.getState().prepend(a({alert_id: "c", severity: 17}));
-    s.getState().prepend(a({alert_id: "l", severity: 2}));
+    s.getState().prepend(a({alert_id: "c", severity: 6}));
+    s.getState().prepend(a({alert_id: "l", severity: 1}));
     s.getState().setFilter({severities: new Set(["critical"])});
     expect(selectVisibleAndCounts(s.getState()).visible.map(x => x.alert_id)).toEqual(["c"]);
   });
 
   it("returns per-bucket counts (S-203, formerly selectCounts)", () => {
     const s = createAlertStore(10);
-    s.getState().prepend(a({alert_id: "1", severity: 17}));
-    s.getState().prepend(a({alert_id: "2", severity: 13}));
-    s.getState().prepend(a({alert_id: "3", severity: 5}));
+    s.getState().prepend(a({alert_id: "1", severity: 6}));  // critical (>=5)
+    s.getState().prepend(a({alert_id: "2", severity: 4}));  // high     (=4)
+    s.getState().prepend(a({alert_id: "3", severity: 1}));  // low      (<=2)
     expect(selectVisibleAndCounts(s.getState()).counts).toEqual({total: 3, critical: 1, high: 1, medium: 0, low: 1});
   });
 
@@ -139,9 +139,9 @@ describe("selectVisibleAndCounts (S-194 AC-5)", () => {
   it("selectVisibleAndCounts returns one-pass {visible, counts} (S-194 AC-5)", () => {
     const s = createAlertStore(10);
     s.getState().backfill([
-      a({ alert_id: "crit", severity: 18, timestamp_ns: 3n }),  // critical (>=17)
-      a({ alert_id: "high", severity: 14, timestamp_ns: 2n }),  // high     (>=13)
-      a({ alert_id: "med",  severity: 10, timestamp_ns: 1n }),  // medium   (>=9)
+      a({ alert_id: "crit", severity: 6, timestamp_ns: 3n }),  // critical (>=5)
+      a({ alert_id: "high", severity: 4, timestamp_ns: 2n }),  // high     (=4)
+      a({ alert_id: "med",  severity: 3, timestamp_ns: 1n }),  // medium   (=3)
     ]);
     const r = selectVisibleAndCounts(s.getState());
     expect(r.visible.map(x => x.alert_id)).toEqual(["crit", "high", "med"]);
@@ -150,7 +150,7 @@ describe("selectVisibleAndCounts (S-194 AC-5)", () => {
 
   it("selectVisibleAndCounts caches by (alerts, filter) reference identity (S-194 AC-5)", () => {
     const s = createAlertStore(10);
-    s.getState().backfill([a({ alert_id: "x", severity: 18, timestamp_ns: 1n })]);
+    s.getState().backfill([a({ alert_id: "x", severity: 5, timestamp_ns: 1n })]);
     const a1 = selectVisibleAndCounts(s.getState());
     const a2 = selectVisibleAndCounts(s.getState());
     // Same store state -> same returned object reference (cache hit).
@@ -160,8 +160,8 @@ describe("selectVisibleAndCounts (S-194 AC-5)", () => {
   it("selectVisibleAndCounts cache is scoped per store instance (S-203 AC-1)", () => {
     const s1 = createAlertStore(10);
     const s2 = createAlertStore(10);
-    s1.getState().backfill([a({ alert_id: "a", severity: 18 })]);  // critical
-    s2.getState().backfill([a({ alert_id: "b", severity: 6 })]);   // low
+    s1.getState().backfill([a({ alert_id: "a", severity: 5 })]);  // critical
+    s2.getState().backfill([a({ alert_id: "b", severity: 1 })]);  // low
     const s1_state = s1.getState();
     const s2_state = s2.getState();
     // s1_state and s2_state are different objects (zustand creates new state obj on each set)

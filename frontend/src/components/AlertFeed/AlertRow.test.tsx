@@ -7,7 +7,7 @@ vi.mock("@/lib/feedback", () => ({ submitFeedback: vi.fn() }));
 
 const alert: Alert = {
   alert_id: "a1", timestamp_ns: 1_700_000_000_000_000_000n, alert_type: "sigma",
-  rule_name: "SSH brute force", severity: 17, risk_score: 0.92,
+  rule_name: "SSH brute force", severity: 6, risk_score: 0.92,
   entity_uuid: null, entity_type: "ip", entity_value: "10.0.0.1",
   message: "matched", mitre_tactics: ["TA0006"], mitre_techniques: ["T1110"],
   dedup_count: 3, source_type: "syslog",

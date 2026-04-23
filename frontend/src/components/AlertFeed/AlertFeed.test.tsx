@@ -222,7 +222,7 @@ describe("AlertFeed integration", () => {
         (m): m is { type: string; min_severity?: number } =>
           typeof m === "object" && m !== null && (m as { type?: unknown }).type === "filter",
       );
-      expect(filterFrames.some(m => m.min_severity === 17)).toBe(true);
+      expect(filterFrames.some(m => m.min_severity === 5)).toBe(true);
     });
   });
 

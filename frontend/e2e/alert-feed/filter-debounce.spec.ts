@@ -29,7 +29,7 @@ test("Critical chip filters rows and sends one filter frame after debounce", asy
   // 150 ms debounce + small safety margin.
   await page.clock.fastForward(500);
 
-  // Only severity >= 17 rows remain: wu-001 (20) + wu-005 (18).
+  // OCSF critical = severity >= 5: wu-001 (6, FATAL) + wu-005 (5, CRITICAL).
   await expect(page.getByRole("button", { name: /^alert / })).toHaveCount(2);
   await expect(
     page.getByRole("button", { name: "Critical" }),
@@ -45,5 +45,5 @@ test("Critical chip filters rows and sends one filter frame after debounce", asy
     .filter((m) => m.type === "filter");
   expect(filterFrames.length).toBeGreaterThanOrEqual(1);
   const last = filterFrames[filterFrames.length - 1];
-  expect(last.min_severity).toBe(17);
+  expect(last.min_severity).toBe(5);
 });

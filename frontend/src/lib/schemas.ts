@@ -3,7 +3,12 @@ import { incrementDropped, warnThrottled } from "./validationMetrics";
 
 const MAX_MESSAGE_BYTES = 16 * 1024;
 const MAX_SOURCE_TYPE = 64;
-const MITRE_RE = /^[A-Z][A-Z0-9.-]{0,31}$/;
+// Accepts both uppercase technique IDs (e.g., "T1059.001") and lowercase
+// kebab-case tactic names (e.g., "execution", "credential-access"). Backend
+// emits tactic names in canonical lowercase form (see
+// `src/seerflow/sigma/attack.py::TACTICS`) while techniques are uppercase.
+// 32-char cap is preserved as a DoS guard for the regex engine.
+const MITRE_RE = /^[A-Za-z][A-Za-z0-9.-]{0,31}$/;
 // alert_id / event_id flow into URL paths (e.g. /api/v1/alerts/${id}/feedback)
 // so must not contain path separators, slashes, dots, or whitespace. Length-only
 // bounds would let a crafted "../foo" pivot requests to arbitrary same-origin

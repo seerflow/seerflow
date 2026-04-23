@@ -109,8 +109,23 @@ describe("AlertSchema", () => {
     expect(v.safeParse(AlertSchema, { ...validAlert, alert_type: "bogus" }).success).toBe(false);
   });
 
-  it("rejects mitre_tactics entries that don't match [A-Z][A-Z0-9.-]{0,31}", () => {
-    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_tactics: ["lowercase"] }).success).toBe(false);
+  it("accepts lowercase kebab-case tactic names (backend canonical form)", () => {
+    // Backend emits tactics in lowercase kebab-case (see
+    // `src/seerflow/sigma/attack.py::TACTICS`). MITRE_RE must accept them.
+    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_tactics: ["credential-access"] }).success).toBe(true);
+    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_tactics: ["execution"] }).success).toBe(true);
+  });
+
+  it("accepts uppercase technique IDs (e.g., T1059.001)", () => {
+    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_techniques: ["T1059.001"] }).success).toBe(true);
+  });
+
+  it("rejects mitre_tactics entries that fail [A-Za-z][A-Za-z0-9.-]{0,31}", () => {
+    // Leading digit, empty, oversize, or containing forbidden characters.
+    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_tactics: ["1badstart"] }).success).toBe(false);
+    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_tactics: [""] }).success).toBe(false);
+    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_tactics: ["x".repeat(33)] }).success).toBe(false);
+    expect(v.safeParse(AlertSchema, { ...validAlert, mitre_tactics: ["has space"] }).success).toBe(false);
   });
 
   it("rejects oversize message", () => {

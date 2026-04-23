@@ -19,7 +19,9 @@ import * as wsBus from "@/lib/wsBus";
 const alertsSlot = createFilterSlot("alerts");
 import { useWsSend } from "@/components/WsProvider";
 
-const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 17, high: 13, medium: 9, low: 1 };
+// OCSF 0..6 min-severity thresholds. Must stay aligned with
+// `severityBucket` in `@/lib/severity` — see file header there.
+const BUCKET_TO_MIN_SEV: Record<SeverityBucket, number> = { critical: 5, high: 4, medium: 3, low: 0 };
 const MAX_WS_BUFFER = 200;  // S-194: bound buffer to survive slow warm-up under high WS load
 
 function toWsFilter(f: AlertFilter): WsFilter {

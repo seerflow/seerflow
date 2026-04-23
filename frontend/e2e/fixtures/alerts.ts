@@ -33,17 +33,20 @@ export type FixtureAlertDetail = FixtureAlert & {
   contributing_events?: Array<{ event_id: string; timestamp_ns: bigint; message: string }>;
 };
 
-// Five warm-up alerts. Severity buckets (per SEE-58 mapping, 17-24=critical,
-// 13-16=high, 9-12=medium, 1-8=low): two critical (20, 18), one high (14),
-// one medium (10), one low (5).
+// Five warm-up alerts. Severity buckets follow the OCSF `SeverityLevel`
+// enum (`src/seerflow/models/event.py::SeverityLevel`, 0..6): critical=5..6,
+// high=4, medium=3, low=0..2. Risk scores live on [0, 1] to match the
+// backend clamp at `src/seerflow/models/alert.py`.
+// Two critical (6=FATAL, 5=CRITICAL), one high (4=ERROR), one medium
+// (3=WARNING), one low (1=INFORMATIONAL).
 export const warmUpAlerts: FixtureAlert[] = [
   {
     alert_id: "wu-001",
     timestamp_ns: "1700000000000000001",
     alert_type: "sigma",
     rule_name: "Suspicious PowerShell",
-    severity: 20,
-    risk_score: 85,
+    severity: 6,
+    risk_score: 0.85,
     entity_uuid: "uuid-host-1",
     entity_type: "host",
     entity_value: "host-1",
@@ -58,8 +61,8 @@ export const warmUpAlerts: FixtureAlert[] = [
     timestamp_ns: "1700000000000000002",
     alert_type: "ml",
     rule_name: "Volume spike",
-    severity: 14,
-    risk_score: 60,
+    severity: 4,
+    risk_score: 0.6,
     entity_uuid: "uuid-host-2",
     entity_type: "host",
     entity_value: "host-2",
@@ -74,8 +77,8 @@ export const warmUpAlerts: FixtureAlert[] = [
     timestamp_ns: "1700000000000000003",
     alert_type: "correlation",
     rule_name: "Brute force",
-    severity: 10,
-    risk_score: 45,
+    severity: 3,
+    risk_score: 0.45,
     entity_uuid: "uuid-user-alice",
     entity_type: "user",
     entity_value: "alice",
@@ -90,8 +93,8 @@ export const warmUpAlerts: FixtureAlert[] = [
     timestamp_ns: "1700000000000000004",
     alert_type: "ioc",
     rule_name: "Known-bad IP",
-    severity: 5,
-    risk_score: 25,
+    severity: 1,
+    risk_score: 0.25,
     entity_uuid: "uuid-ip-1234",
     entity_type: "ip",
     entity_value: "1.2.3.4",
@@ -106,8 +109,8 @@ export const warmUpAlerts: FixtureAlert[] = [
     timestamp_ns: "1700000000000000005",
     alert_type: "sigma",
     rule_name: "Registry autorun",
-    severity: 18,
-    risk_score: 78,
+    severity: 5,
+    risk_score: 0.78,
     entity_uuid: "uuid-host-3",
     entity_type: "host",
     entity_value: "host-3",
@@ -119,14 +122,14 @@ export const warmUpAlerts: FixtureAlert[] = [
   },
 ];
 
-// Live-pushed alert (severity 22 -> critical bucket).
+// Live-pushed alert (severity 6 -> critical bucket, FATAL).
 export const livePushAlert: FixtureAlert = {
   alert_id: "lp-100",
   timestamp_ns: "1700000000000000999",
   alert_type: "sigma",
   rule_name: "Mimikatz detected",
-  severity: 22,
-  risk_score: 95,
+  severity: 6,
+  risk_score: 0.95,
   entity_uuid: "uuid-host-9",
   entity_type: "host",
   entity_value: "host-9",

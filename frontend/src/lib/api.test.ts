@@ -61,7 +61,7 @@ describe("api boundary parsing", () => {
       items: [{
         alert_id: "a1",
         timestamp_ns: "1700000000000000123",
-        alert_type: "ml", rule_name: "r", severity: 10, risk_score: 0,
+        alert_type: "ml", rule_name: "r", severity: 3, risk_score: 0,
         entity_uuid: "u", entity_type: "ip", entity_value: "x",
         message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
       }],

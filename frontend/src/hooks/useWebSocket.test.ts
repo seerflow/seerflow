@@ -146,7 +146,7 @@ describe("useWebSocket schema validation (S-194)", () => {
     const ws = MockWS.instances[0]; act(() => { ws._open(); });
     act(() => { ws._msg({ type: "alert", data: {
       alert_id: "a1", timestamp_ns: "not-a-number", alert_type: "ml", rule_name: "r",
-      severity: 10, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x",
+      severity: 3, risk_score: 0, entity_uuid: "u", entity_type: "ip", entity_value: "x",
       message: "m", mitre_tactics: [], mitre_techniques: [], dedup_count: 1,
     } }); });
     expect(onMessage).not.toHaveBeenCalled();
