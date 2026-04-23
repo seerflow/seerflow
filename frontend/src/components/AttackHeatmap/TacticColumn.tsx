@@ -27,6 +27,7 @@ export function TacticColumn({ tacticName, techniques }: TacticColumnProps) {
       {techniques.map((t) => (
         <TechniqueCell
           key={t.id}
+          tactic={tacticName.toLowerCase().replace(/\s+/g, "_")}
           technique={t.id}
           name={t.name}
           ruleCount={t.ruleCount}
