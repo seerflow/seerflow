@@ -165,4 +165,30 @@ describe("emitCoalesced (S-209)", () => {
     expect(eventSpy).toHaveBeenCalledWith(eventMsg);
     expect(batchSpy).not.toHaveBeenCalled();
   });
+
+  it("coalesces multiple events in one tick into a single batch frame (order preserved)", async () => {
+    const eventSpy = vi.fn();
+    const batchSpy = vi.fn();
+    bus.on("event", eventSpy);
+    bus.on("batch", batchSpy);
+
+    const e1 = { ...eventMsg, data: { ...eventMsg.data, event_id: "evt-1" } };
+    const e2 = { ...eventMsg, data: { ...eventMsg.data, event_id: "evt-2" } };
+    const e3 = { ...eventMsg, data: { ...eventMsg.data, event_id: "evt-3" } };
+    bus.emitCoalesced(e1);
+    bus.emitCoalesced(e2);
+    bus.emitCoalesced(e3);
+
+    await vi.runAllTimersAsync();
+
+    expect(eventSpy).not.toHaveBeenCalled();
+    expect(batchSpy).toHaveBeenCalledTimes(1);
+    const frame = batchSpy.mock.calls[0][0];
+    expect(frame.type).toBe("batch");
+    expect(frame.events.map((x: { event_id: string }) => x.event_id)).toEqual([
+      "evt-1",
+      "evt-2",
+      "evt-3",
+    ]);
+  });
 });

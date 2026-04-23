@@ -20,7 +20,11 @@ function flushFrame(): void {
   const events = rafFrameBuffer;
   rafFrameBuffer = [];
   if (events.length === 0) return;
-  emit({ type: "event", data: events[0] });
+  if (events.length === 1) {
+    emit({ type: "event", data: events[0] });
+  } else {
+    emit({ type: "batch", events });
+  }
 }
 
 export function on<T extends WsType>(type: T, handler: Handler<T>): () => void {
