@@ -75,4 +75,18 @@ describe("useDebouncedWsSend", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(2);
   });
+
+  it("cancels the pending timer when `delay` changes without a new call", async () => {
+    const send = vi.fn<(v: number) => void>();
+    const { result, rerender } = renderHook(
+      ({ delay }: { delay: number }) => useDebouncedWsSend(send, delay),
+      { initialProps: { delay: 500 } },
+    );
+
+    act(() => { result.current(1); });
+    rerender({ delay: 50 });
+    // Do NOT call result.current again. The old 500ms timer must have been cancelled.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(send).not.toHaveBeenCalled();
+  });
 });

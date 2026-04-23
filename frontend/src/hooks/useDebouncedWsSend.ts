@@ -22,7 +22,7 @@ export function useDebouncedWsSend<T>(
         timerRef.current = null;
       }
     };
-  }, []);
+  }, [delay]);
 
   return useCallback(
     (v: T) => {
