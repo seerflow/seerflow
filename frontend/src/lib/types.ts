@@ -18,7 +18,7 @@ export interface Alert {
   mitre_techniques: string[];
   dedup_count: number;
   source_type?: string;
-  feedback?: Feedback;
+  feedback?: Feedback | null;
 }
 
 export interface AlertDetail extends Alert {
@@ -147,7 +147,7 @@ export interface LiveEvent {
   message: string;
   template_id: number;
   entity_refs: string[];
-  entity_summary: Partial<Record<"ips" | "users" | "hosts" | "domains" | "files" | "processes", string[]>>;
+  entity_summary?: Partial<Record<"ips" | "users" | "hosts" | "domains" | "files" | "processes", string[]>>;
   score?: number;
   is_anomaly?: boolean;
   upper_threshold?: number;

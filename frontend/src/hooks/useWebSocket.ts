@@ -42,7 +42,7 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
         catch (e) { logger.warn("ws parse fail", e); return; }
         const msg = parseWsFrame(raw);
         if (!msg) return;
-        optsRef.current.onMessage(msg as WireWsMessage);
+        optsRef.current.onMessage(msg);
       };
       ws.onerror = () => logger.warn("ws error");
       ws.onclose = () => {
