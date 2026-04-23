@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useState } from "react";
 
 export interface TechniqueCellProps {
   tactic: string;
@@ -45,20 +45,12 @@ export function TechniqueCell({
     onOpen?.(tactic, technique);
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      fire();
-    }
-  }
-
   return (
     <button
       type="button"
       aria-label={label}
       title={title}
       onClick={fire}
-      onKeyDown={onKeyDown}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onBlur={() => setHovered(false)}
