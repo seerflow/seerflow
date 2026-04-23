@@ -2,6 +2,7 @@ import { render, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WsProvider, useWsSend } from "./WsProvider";
 import * as bus from "@/lib/wsBus";
+import { logger } from "@/lib/logger";
 
 class FakeSocket {
   static lastInstance: FakeSocket | null = null;
@@ -129,5 +130,50 @@ describe("resolveUrl origin allowlist", () => {
     (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://api.seerflow.io";
     (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "https://api.seerflow.io,https://stg.seerflow.io";
     expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
+
+  it("upgrades ws: to wss: when page is served over https", () => {
+    const origProtocol = window.location.protocol;
+    const origHref = window.location.href;
+    // Use jsdom's window.location override via Object.defineProperty
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...window.location, protocol: "https:", origin: "https://dash.local" },
+    });
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://dash.local";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+
+    // Render should NOT throw — same-origin https, but the url starts "wss:" not "ws:"
+    // (because base replace /^http/ -> ws gives "wss://..." already).
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+
+    // Restore
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...window.location, protocol: origProtocol, origin: origHref.replace(/\/$/, "") },
+    });
+  });
+
+  it("logs when VITE_API_BASE is plain http: under https page (ws: upgrade branch)", () => {
+    const warnSpy = vi.spyOn(logger, "warn");
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...window.location, protocol: "https:", origin: "http://dash.local" },
+    });
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "http://dash.local";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("upgrading to wss:"),
+      expect.any(String),
+    );
+
+    warnSpy.mockRestore();
+    // Restore window.location to default
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...window.location, protocol: "http:", origin: "http://localhost:3000" },
+    });
   });
 });
