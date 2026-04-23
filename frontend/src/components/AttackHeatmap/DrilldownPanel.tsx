@@ -27,6 +27,7 @@ interface FetchState {
 }
 
 const INITIAL: FetchState = { loading: false, error: null, alerts: [] };
+const CACHE_MAX = 50;
 
 function statusLabel(c: boolean, d: boolean): "Detected" | "Covered" | "Gap" {
   if (c && d) return "Detected";
@@ -90,7 +91,12 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
       .get<{ items: Alert[] }>(url, { signal: ctl.signal })
       .then((res) => {
         if (ctl.signal.aborted) return;
-        cacheRef.current.set(key, res.items);
+        const cache = cacheRef.current;
+        if (cache.size >= CACHE_MAX) {
+          const oldest = cache.keys().next().value;
+          if (oldest !== undefined) cache.delete(oldest);
+        }
+        cache.set(key, res.items);
         setState({ loading: false, error: null, alerts: res.items });
       })
       .catch((e: unknown) => {
