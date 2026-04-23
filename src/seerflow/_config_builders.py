@@ -40,6 +40,7 @@ from seerflow.config import (
     ReceiverConfig,
     StorageConfig,
     UEBAConfig,
+    UEBASubScoreWeights,
     WebhookEndpointConfig,
 )
 
@@ -907,6 +908,41 @@ def _require_number(data: dict[str, Any], key: str, default: float, label: str) 
     return float(value)
 
 
+def _build_sub_score_weights(data: dict[str, Any]) -> UEBASubScoreWeights:
+    """Build and validate the ``ueba.sub_score_weights`` block."""
+    defaults = UEBASubScoreWeights()
+    weights = UEBASubScoreWeights(
+        time_of_day=_require_number(
+            data, "time_of_day", defaults.time_of_day, "ueba.sub_score_weights.time_of_day"
+        ),
+        source_novelty=_require_number(
+            data,
+            "source_novelty",
+            defaults.source_novelty,
+            "ueba.sub_score_weights.source_novelty",
+        ),
+        volume=_require_number(data, "volume", defaults.volume, "ueba.sub_score_weights.volume"),
+        pattern_novelty=_require_number(
+            data,
+            "pattern_novelty",
+            defaults.pattern_novelty,
+            "ueba.sub_score_weights.pattern_novelty",
+        ),
+    )
+    for name, val in (
+        ("time_of_day", weights.time_of_day),
+        ("source_novelty", weights.source_novelty),
+        ("volume", weights.volume),
+        ("pattern_novelty", weights.pattern_novelty),
+    ):
+        if not (0.0 < val <= 1.0):
+            raise ConfigError(f"ueba.sub_score_weights.{name} must be in (0.0, 1.0], got {val!r}")
+    total = weights.time_of_day + weights.source_novelty + weights.volume + weights.pattern_novelty
+    if abs(total - 1.0) > 1e-6:
+        raise ConfigError(f"ueba.sub_score_weights must sum to 1.0 (got {total})")
+    return weights
+
+
 def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
     """Build UEBAConfig from a YAML ``ueba:`` section.
 
@@ -917,6 +953,25 @@ def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
     ema_alpha = _require_number(data, "ema_alpha", defaults.ema_alpha, "ueba.ema_alpha")
     if not (0.0 < ema_alpha <= 1.0):
         raise ConfigError(f"ueba.ema_alpha must be in (0, 1], got {ema_alpha!r}")
+
+    score_threshold = _require_number(
+        data, "score_threshold", defaults.score_threshold, "ueba.score_threshold"
+    )
+    if not (0.0 <= score_threshold <= 1.0):
+        raise ConfigError(f"ueba.score_threshold must be in [0.0, 1.0], got {score_threshold!r}")
+
+    weights_raw = data.get("sub_score_weights", {})
+    if not isinstance(weights_raw, dict):
+        raise ConfigError("ueba.sub_score_weights must be a mapping")
+    sub_score_weights = _build_sub_score_weights(weights_raw)
+
+    alert_cooldown_seconds = _require_pos_int(
+        data,
+        "alert_cooldown_seconds",
+        defaults.alert_cooldown_seconds,
+        "ueba.alert_cooldown_seconds",
+    )
+
     return UEBAConfig(
         enabled=_require_bool(data, "enabled", defaults.enabled, "ueba.enabled"),
         warmup_days=_require_pos_int(
@@ -938,6 +993,9 @@ def _build_ueba(data: dict[str, Any]) -> UEBAConfig:
         template_top_k=_require_pos_int(
             data, "template_top_k", defaults.template_top_k, "ueba.template_top_k"
         ),
+        score_threshold=score_threshold,
+        sub_score_weights=sub_score_weights,
+        alert_cooldown_seconds=alert_cooldown_seconds,
     )
 
 

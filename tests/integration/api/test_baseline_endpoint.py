@@ -9,8 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
+from seerflow.config import UEBAConfig
 from seerflow.models.event import SeerflowEvent
 from seerflow.ueba.baseline import UEBAParams
+from seerflow.ueba.engine import UEBAEngine, UEBAScoreBreakdown
 from seerflow.ueba.store import BaselineStore
 
 if TYPE_CHECKING:
@@ -117,6 +119,51 @@ def test_baseline_warm_returns_payload(client_warm: TestClient) -> None:
     body = r.json()
     assert body["entity_uuid"] == UUID_OK
     assert len(body["hours"]) == 24
+
+
+def test_baseline_warm_payload_last_score_null_when_never_scored(
+    client_warm: TestClient,
+) -> None:
+    """last_score is null by default — no UEBAEngine attached to app.state."""
+    r = client_warm.get(f"/api/v1/entities/{UUID_OK}/baseline")
+    assert r.status_code == 200
+    body = r.json()
+    assert "last_score" in body
+    assert body["last_score"] is None
+
+
+def test_baseline_warm_payload_exposes_last_score(backend: SqliteBackend) -> None:
+    """When a UEBAEngine has cached a last_score, the 200 payload surfaces it."""
+    app = create_api_app(log_store=backend, alert_store=backend)
+    store = _make_store(warmup_days=1, warmup_min_events=3)
+    for i in range(4):
+        store.snapshot_and_learn(
+            _mk_event(i * 86_400 * 1_000_000_000),
+            entity_types=("ip",),
+        )
+    app.state.baseline_store = store
+    engine = UEBAEngine(config=UEBAConfig())
+    breakdown = UEBAScoreBreakdown(
+        time_of_day=0.8,
+        source_novelty=0.4,
+        volume=0.2,
+        pattern_novelty=0.3,
+        composite=0.42,
+    )
+    engine._seed_last_score_for_test(UUID_OK, breakdown)
+    app.state.ueba_engine = engine
+
+    client = TestClient(app)
+    r = client.get(f"/api/v1/entities/{UUID_OK}/baseline")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["last_score"] == {
+        "time_of_day": pytest.approx(0.8),
+        "source_novelty": pytest.approx(0.4),
+        "volume": pytest.approx(0.2),
+        "pattern_novelty": pytest.approx(0.3),
+        "composite": pytest.approx(0.42),
+    }
 
 
 def test_baseline_invalid_uuid_returns_422(client_empty: TestClient) -> None:

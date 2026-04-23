@@ -31,7 +31,8 @@ if TYPE_CHECKING:
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.sqlite import SqliteBackend
-    from seerflow.ueba.baseline import EntityType
+    from seerflow.ueba.baseline import EntityBaseline, EntityType
+    from seerflow.ueba.engine import UEBAEngine
     from seerflow.ueba.store import BaselineStore
 
 _log = logging.getLogger("seerflow")
@@ -81,6 +82,8 @@ def make_handler(
     kill_chain_tracker: KillChainTracker | None = None,
     ws_manager: ConnectionManager | None = None,
     baseline_store: BaselineStore | None = None,
+    ueba_engine: UEBAEngine | None = None,
+    ueba_alert_cooldown_ns: int = 900_000_000_000,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -183,15 +186,51 @@ def make_handler(
         # ``type_name`` is one of the EntityDispatch literal seeds
         # ("ip"/"user"/"host"/"domain"/"file"/"process"), all valid EntityType
         # values — cast narrows ``str`` to the Literal at the call boundary.
+        ueba_snapshot: EntityBaseline | None = None
+        ueba_entity_types: tuple[EntityType, ...] = ()
         if baseline_store is not None and entity_refs:
-            entity_types = cast(
+            ueba_entity_types = cast(
                 "tuple[EntityType, ...]",
                 tuple(t for t, _u in typed_for_edges),
             )
-            baseline_store.snapshot_and_learn(
+            ueba_snapshot = baseline_store.snapshot_and_learn(
                 seerflow_event,
-                entity_types=entity_types,
+                entity_types=ueba_entity_types,
             )
+
+        # UEBA scoring (S-065): score against the pre-update snapshot and
+        # fold the composite into risk_score. Emit a ueba.deviation alert
+        # on threshold crossing, dispatching through the same path as
+        # every other alert source.
+        if ueba_engine is not None and entity_refs and ueba_entity_types:
+            ueba_breakdown, ueba_alert = ueba_engine.score_and_maybe_alert(
+                seerflow_event,
+                baseline=ueba_snapshot,
+                entity_type=ueba_entity_types[0],
+            )
+            if ueba_breakdown.composite > seerflow_event.risk_score:
+                seerflow_event = msgspec.structs.replace(
+                    seerflow_event,
+                    risk_score=ueba_breakdown.composite,
+                )
+            if ueba_alert is not None:
+                try:
+                    is_new = await storage.write_alert(
+                        ueba_alert,
+                        dedup_window_ns=ueba_alert_cooldown_ns,
+                    )
+                    if is_new:
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(ueba_alert)
+                        if pagerduty_sink is not None:
+                            pagerduty_sink.enqueue_trigger(ueba_alert)
+                        if otlp_sink is not None:
+                            otlp_sink.enqueue(ueba_alert)
+                        if ws_manager is not None:
+                            ws_manager.broadcast_alert(ueba_alert)
+                    await _feed_kill_chain(ueba_alert)
+                except Exception:
+                    _log.warning("UEBA alert write failed", exc_info=True)
 
         # Advance watermark and check for late events
         if watermark is not None:
