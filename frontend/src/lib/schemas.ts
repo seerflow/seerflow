@@ -179,10 +179,16 @@ export function parseWsFrame(raw: unknown): WsMessageInfer | null {
       break;
   }
   const deep = v.safeParse(WsMessageSchema, revived);
+  /* v8 ignore start */
+  // Defensive: unreachable when reviveAlert/reviveEvent are correct, since the
+  // revived shape is a strict superset of what WsMessageWireSchema already
+  // accepted (bigint replaces string). Kept so a future regression in a revive
+  // helper is caught at the boundary instead of reaching the store.
   if (!deep.success) {
     incrementDropped(kind);
     warnThrottled(kind, deep.issues.map(i => ({ kind: i.kind, type: i.type, path: i.path?.map(p => p.key) })));
     return null;
   }
+  /* v8 ignore stop */
   return deep.output;
 }
