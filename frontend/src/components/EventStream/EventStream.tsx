@@ -6,6 +6,7 @@ import { PauseControl } from "./PauseControl";
 import { EventFilterBar } from "./EventFilterBar";
 import { api, ApiError } from "@/lib/api";
 import { logger } from "@/lib/logger";
+import { LiveEventSchema } from "@/lib/schemas";
 import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
 import { useWsSend } from "@/components/WsProvider";
@@ -76,7 +77,7 @@ export function EventStream(): JSX.Element {
   // REST warm-up
   useEffect(() => {
     let cancelled = false;
-    api.get<{ items: LiveEvent[] }>("/api/v1/events?limit=100")
+    api.get<{ items: LiveEvent[] }>("/api/v1/events?limit=100", { schema: LiveEventSchema, itemsKey: "items" })
       .then((r) => { if (!cancelled) backfill(r.items); })
       .catch((e: ApiError) => logger.warn("event warm-up failed", e));
     return () => { cancelled = true; };
