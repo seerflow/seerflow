@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { useCoverageStore } from "@/stores/coverage";
+import { useDrilldownStore } from "@/stores/drilldown";
 import { TacticColumn } from "./TacticColumn";
 import { CoverageSummary } from "./CoverageSummary";
+import { DrilldownPanel } from "./DrilldownPanel";
 import catalog from "@/data/attack-enterprise.json";
 import type { AttackCoverageResponse } from "@/lib/types";
 
@@ -144,6 +146,7 @@ export function AttackHeatmap() {
             tacticShortname={tactic.shortname}
             tacticName={tactic.name}
             techniques={tactic.techniques}
+            onOpen={(t, T) => useDrilldownStore.getState().open(t, T)}
           />
         ))}
       </div>
@@ -161,6 +164,10 @@ export function AttackHeatmap() {
           Coverage
         </span>
       </div>
+      <DrilldownPanel
+        matrix={merged}
+        window={{ since: data.window_since, until: data.window_until }}
+      />
     </div>
   );
 }
