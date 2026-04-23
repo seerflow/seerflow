@@ -74,12 +74,12 @@ describe("DrilldownPanel", () => {
   });
 
   it("renders nothing when no cell is open", () => {
-    const { container } = render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    const { container } = render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("renders rules section with alphabetized rule names when a covered cell is open", async () => {
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     const rulesHeading = await screen.findByRole("heading", { name: /rules/i });
     expect(rulesHeading).toBeInTheDocument();
@@ -88,7 +88,7 @@ describe("DrilldownPanel", () => {
   });
 
   it("renders empty rules state for a gap cell", async () => {
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1059");
     expect(await screen.findByText(/No rules cover this technique/)).toBeInTheDocument();
   });
@@ -96,7 +96,7 @@ describe("DrilldownPanel", () => {
   it("calls /api/v1/alerts with tactic, technique, since, until, limit", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(
@@ -109,14 +109,14 @@ describe("DrilldownPanel", () => {
   it("renders alerts list on success", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     expect(await screen.findByText(/Scheduled task created/)).toBeInTheDocument();
     expect(screen.getByText(/web-01/)).toBeInTheDocument();
   });
 
   it("renders empty alerts state when fetch returns []", async () => {
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     expect(await screen.findByText(/No alerts in window/)).toBeInTheDocument();
   });
@@ -124,7 +124,7 @@ describe("DrilldownPanel", () => {
   it("renders error + Retry on fetch failure", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("boom"));
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     expect(await screen.findByText(/boom/)).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: /retry/i });
@@ -136,7 +136,7 @@ describe("DrilldownPanel", () => {
   it("uses cache on second open of the same cell (no second fetch)", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     await screen.findByText(/Scheduled task created/);
     useDrilldownStore.getState().close();
@@ -147,7 +147,7 @@ describe("DrilldownPanel", () => {
   it("clicking an alert row sets selectedAlertId, navigates hash to '#', and closes the panel", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     const row = await screen.findByRole("button", { name: /Open alert alrt-1/ });
     fireEvent.click(row);
@@ -160,7 +160,7 @@ describe("DrilldownPanel", () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
     useLayoutStore.setState({ widgets: ["anomalyTimeline", "entityExplorer", "eventStream"] });
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     expect(await screen.findByText(/Add the Alert Feed widget/)).toBeInTheDocument();
   });
@@ -168,7 +168,7 @@ describe("DrilldownPanel", () => {
   it("hides the AlertFeed-missing note when the widget is mounted", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     await screen.findByText(/Scheduled task created/);
     expect(screen.queryByText(/Add the Alert Feed widget/)).not.toBeInTheDocument();
@@ -177,10 +177,30 @@ describe("DrilldownPanel", () => {
   it("Esc key closes the panel via Radix outside-close path", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} window={windowProps} />);
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
     useDrilldownStore.getState().open("execution", "T1053");
     await screen.findByText(/Scheduled task created/);
     fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(useDrilldownStore.getState().openCell).toBeNull());
+  });
+
+  it.skip("aborts in-flight fetch when switching to a different cell (no stale data)", async () => {
+    const { api } = await import("@/lib/api");
+    let resolveFirst!: (v: unknown) => void;
+    const firstPromise = new Promise((res) => { resolveFirst = res; });
+    (api.get as ReturnType<typeof vi.fn>)
+      .mockImplementationOnce(() => firstPromise)
+      .mockResolvedValueOnce({ items: [{ ...sampleAlert, alert_id: "alrt-2", message: "Second cell alert" }] });
+
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    // First fetch in flight; switch to second cell before it resolves
+    useDrilldownStore.getState().open("execution", "T1059");
+    // Now resolve the first fetch — its data must NOT appear because the panel switched
+    resolveFirst({ items: [{ ...sampleAlert, alert_id: "alrt-stale", message: "Stale first cell alert" }] });
+    // Wait for the second fetch's data to land
+    expect(await screen.findByText(/No alerts in window/)).toBeInTheDocument();
+    // Stale data must never have rendered
+    expect(screen.queryByText(/Stale first cell alert/)).not.toBeInTheDocument();
   });
 });

@@ -1,19 +1,10 @@
 import { TechniqueCell } from "./TechniqueCell";
-
-interface TechniqueEntry {
-  id: string;
-  name: string;
-  ruleCount: number;
-  alertCount: number;
-  ruleNames: string[];
-  covered: boolean;
-  detected: boolean;
-}
+import type { MergedTechnique } from "./types";
 
 export interface TacticColumnProps {
   tacticShortname: string;
   tacticName: string;
-  techniques: TechniqueEntry[];
+  techniques: MergedTechnique[];
   onOpen?: (tactic: string, technique: string) => void;
 }
 

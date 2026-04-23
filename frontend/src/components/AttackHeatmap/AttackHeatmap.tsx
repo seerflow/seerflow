@@ -6,23 +6,7 @@ import { CoverageSummary } from "./CoverageSummary";
 import { DrilldownPanel } from "./DrilldownPanel";
 import catalog from "@/data/attack-enterprise.json";
 import type { AttackCoverageResponse } from "@/lib/types";
-
-interface MergedTechnique {
-  id: string;
-  name: string;
-  ruleCount: number;
-  alertCount: number;
-  ruleNames: string[];
-  covered: boolean;
-  detected: boolean;
-}
-
-interface MergedTactic {
-  id: string;
-  shortname: string;
-  name: string;
-  techniques: MergedTechnique[];
-}
+import type { MergedTactic } from "./types";
 
 /**
  * Merge API coverage response with the static ATT&CK catalog.
@@ -166,7 +150,7 @@ export function AttackHeatmap() {
       </div>
       <DrilldownPanel
         matrix={merged}
-        window={{ since: data.window_since, until: data.window_until }}
+        coverageWindow={{ since: data.window_since, until: data.window_until }}
       />
     </div>
   );

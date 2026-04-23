@@ -7,27 +7,11 @@ import { useLayoutStore } from "@/stores/layout";
 import { severityIcon } from "@/lib/severityIcon";
 import { formatRelative } from "@/lib/relativeTime";
 import type { Alert } from "@/lib/types";
-
-interface MergedTechnique {
-  id: string;
-  name: string;
-  ruleCount: number;
-  alertCount: number;
-  ruleNames: string[];
-  covered: boolean;
-  detected: boolean;
-}
-
-export interface MergedTactic {
-  id: string;
-  shortname: string;
-  name: string;
-  techniques: MergedTechnique[];
-}
+import type { MergedTactic } from "./types";
 
 interface DrilldownPanelProps {
   matrix: MergedTactic[];
-  window: { since: string; until: string };
+  coverageWindow: { since: string; until: string };
 }
 
 interface FetchState {
@@ -58,7 +42,7 @@ function cacheKey(tactic: string, technique: string, since: string, until: strin
   return `${tactic}|${technique}|${since}|${until}`;
 }
 
-export function DrilldownPanel({ matrix, window: win }: DrilldownPanelProps) {
+export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelProps) {
   const openCell = useDrilldownStore((s) => s.openCell);
   const close = useDrilldownStore((s) => s.close);
   const alertFeedMounted = useLayoutStore((s) => s.widgets.includes("alertFeed"));
@@ -76,6 +60,12 @@ export function DrilldownPanel({ matrix, window: win }: DrilldownPanelProps) {
     if (!tech) return null;
     return { tac, tech };
   }, [matrix, openCell]);
+
+  useEffect(() => {
+    if (openCell !== null && cell === null) {
+      close();
+    }
+  }, [openCell, cell, close]);
 
   useEffect(() => {
     if (!openCell) return;
@@ -199,7 +189,7 @@ export function DrilldownPanel({ matrix, window: win }: DrilldownPanelProps) {
                             type="button"
                             onClick={() => handleSelect(a.alert_id)}
                             className="flex w-full items-start gap-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
-                            aria-label={`Open alert ${a.alert_id} — ${a.message}`}
+                            aria-label={`Open alert ${a.alert_id} — ${a.message || a.rule_name}`}
                           >
                             <span aria-hidden className="text-base leading-tight">
                               {ico.emoji}
