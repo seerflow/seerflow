@@ -6,10 +6,32 @@ import { useAlertStore } from "@/stores/alerts";
 import { logger } from "@/lib/logger";
 import * as wsBus from "@/lib/wsBus";
 import { _resetForTests as resetWsIntents } from "@/lib/wsFilter";
+import { AlertSchema, validateOrDropItem } from "@/lib/schemas";
+import * as validationMetrics from "@/lib/validationMetrics";
+import { useAnomalyStore } from "@/stores/anomaly";
 
 const fetchMock = vi.fn();
 vi.mock("@/lib/api", () => ({
-  api: { get: (...a: unknown[]) => fetchMock("GET", ...a), post: vi.fn() },
+  api: {
+    get: async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
+      const res = await fetchMock("GET", path, opts);
+      // Mimic api.ts::request: when schema+itemsKey provided, validate each
+      // item with the shared `validateOrDropItem` so invalid rows are dropped
+      // and `rest:<path-without-query>` counters are incremented.
+      if (opts?.schema && opts?.itemsKey && res && typeof res === "object") {
+        const kind = `rest:${path.split("?")[0]}`;
+        const raw = (res as Record<string, unknown>)[opts.itemsKey];
+        if (Array.isArray(raw)) {
+          const items = raw
+            .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
+            .filter((x): x is NonNullable<typeof x> => x !== null);
+          (res as Record<string, unknown>)[opts.itemsKey] = items;
+        }
+      }
+      return res;
+    },
+    post: vi.fn(),
+  },
   ApiError: class ApiError extends Error {},
 }));
 
@@ -47,7 +69,7 @@ describe("AlertFeed integration", () => {
   it("warm-up then live alert appears at top", async () => {
     fetchMock.mockResolvedValueOnce({ items: [
       { alert_id: "warm", timestamp_ns: 1n, alert_type: "ml", rule_name: "warmup-rule",
-        severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+        severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
         entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
         dedup_count: 1, source_type: "syslog" },
     ] });
@@ -92,7 +114,7 @@ describe("AlertFeed integration", () => {
     await act(async () => {
       resolveWarmup({ items: [
         { alert_id: "warm", timestamp_ns: 1n, alert_type: "ml", rule_name: "warmup-rule",
-          severity: 9, risk_score: 0.1, entity_uuid: null, entity_type: null,
+          severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
           entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
           dedup_count: 1, source_type: "syslog" },
       ] });
@@ -252,5 +274,141 @@ describe("AlertFeed integration", () => {
     expect(cls).toContain("h-full");
     expect(cls).toContain("min-h-0");
     expect(cls).not.toMatch(/h-\[calc\(/);
+  });
+});
+
+describe("S-191 T9: REST warm-up schema validation", () => {
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
+    fetchMock.mockReset();
+    MockWS.last = null;
+    wsBus.clearAll();
+    resetWsIntents();
+    validationMetrics._resetForTests();
+    useAlertStore.setState({
+      alerts: [],
+      filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() },
+      status: "connecting",
+      dropped: 0,
+      selectedAlertId: null,
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("drops invalid REST items from /api/v1/alerts warm-up under rest:/api/v1/alerts", async () => {
+    // NOTE: the mocked `api.get` runs `validateOrDropItem` with the same schema
+    // AlertFeed passes in — so this test verifies the component wires the schema
+    // through, which is what bumps the `rest:/api/v1/alerts` counter.
+    const validFixture = {
+      alert_id: "valid",
+      timestamp_ns: 1n,
+      alert_type: "ml" as const,
+      rule_name: "valid-rule",
+      severity: 5,
+      risk_score: 0.1,
+      entity_uuid: null,
+      entity_type: null,
+      entity_value: null,
+      message: "",
+      mitre_tactics: [],
+      mitre_techniques: [],
+      dedup_count: 1,
+      source_type: "syslog",
+    };
+    // severity 999 fails AlertSchema (OCSF 0..6).
+    const invalidFixture = { ...validFixture, alert_id: "bad", severity: 999 };
+    fetchMock.mockResolvedValueOnce({ items: [validFixture, invalidFixture] });
+
+    // Sanity: raw AlertSchema rejects the invalid fixture.
+    expect(validateOrDropItem(AlertSchema, invalidFixture, "rest:test")).toBeNull();
+
+    render(<WsProvider><AlertFeed /></WsProvider>);
+    // Warm-up resolves asynchronously → wait for the store to land exactly the
+    // valid alert; the invalid one must be dropped via rest:/api/v1/alerts.
+    await waitFor(() => {
+      expect(useAlertStore.getState().alerts.map(a => a.alert_id)).toEqual(["valid"]);
+    });
+    expect(validationMetrics.getCounters()["rest:/api/v1/alerts"]).toBe(1);
+  });
+
+  it("fans anomaly-scored `event` frames out to useAnomalyStore.appendScore", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    // Seed a bucket so appendScore has something to merge into.
+    useAnomalyStore.setState({
+      items: [{ bucket_start_ns: 0n, max_score: null, avg_score: null, event_count: 0, upper_threshold: null, alert_count: 0 }],
+      source: null,
+      knownSources: new Set(),
+      resolution: "1m",
+    });
+    const spy = vi.spyOn(useAnomalyStore.getState(), "appendScore");
+
+    render(<WsProvider><AlertFeed /></WsProvider>);
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+    // Give warm-up a tick to resolve so frames dispatch synchronously.
+    await new Promise(r => setTimeout(r, 0));
+
+    act(() => {
+      MockWS.last!._msg({ type: "event", data: {
+        event_id: "e1", timestamp_ns: "5", observed_ns: "5",
+        severity_id: 3, severity_text: "MEDIUM", source_type: "syslog",
+        message: "anom", template_id: 1, entity_refs: [], entity_summary: {},
+        score: 0.9, is_anomaly: true, upper_threshold: 0.5,
+      } });
+    });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+      score: 0.9,
+      source_type: "syslog",
+      upper_threshold: 0.5,
+    }));
+  });
+
+  it("ignores `event` frames without a score (chokepoint-validated but non-anomalous)", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    const spy = vi.spyOn(useAnomalyStore.getState(), "appendScore");
+
+    render(<WsProvider><AlertFeed /></WsProvider>);
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+    await new Promise(r => setTimeout(r, 0));
+
+    act(() => {
+      MockWS.last!._msg({ type: "event", data: {
+        event_id: "e2", timestamp_ns: "6", observed_ns: "6",
+        severity_id: 2, severity_text: "LOW", source_type: "syslog",
+        message: "plain", template_id: 1, entity_refs: [], entity_summary: {},
+        // no score → the `d.score !== undefined` guard skips appendScore.
+      } });
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("defaults upper_threshold to null when omitted on an anomaly `event`", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    useAnomalyStore.setState({
+      items: [{ bucket_start_ns: 0n, max_score: null, avg_score: null, event_count: 0, upper_threshold: null, alert_count: 0 }],
+      source: null,
+      knownSources: new Set(),
+      resolution: "1m",
+    });
+    const spy = vi.spyOn(useAnomalyStore.getState(), "appendScore");
+
+    render(<WsProvider><AlertFeed /></WsProvider>);
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+    await new Promise(r => setTimeout(r, 0));
+
+    act(() => {
+      MockWS.last!._msg({ type: "event", data: {
+        event_id: "e3", timestamp_ns: "7", observed_ns: "7",
+        severity_id: 3, severity_text: "MEDIUM", source_type: "kafka",
+        message: "anom", template_id: 1, entity_refs: [], entity_summary: {},
+        score: 0.7,  // no upper_threshold
+      } });
+    });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+      upper_threshold: null,
+      source_type: "kafka",
+    }));
   });
 });
