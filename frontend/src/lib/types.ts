@@ -223,9 +223,21 @@ export type WireWsMessage = Exclude<WsMessage, { type: "__status" }>;
 // wire envelope carries `events: LiveEvent[] | Alert[]`. Checks are
 // structural on the discriminator id field the widgets already rely on.
 export function isAlert(x: unknown): x is Alert {
-  return typeof x === "object" && x !== null && "alert_id" in x;
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    Object.hasOwn(x, "alert_id") &&
+    typeof (x as { alert_id: unknown }).alert_id === "string" &&
+    !Object.hasOwn(x, "event_id")
+  );
 }
 
 export function isLiveEvent(x: unknown): x is LiveEvent {
-  return typeof x === "object" && x !== null && "event_id" in x;
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    Object.hasOwn(x, "event_id") &&
+    typeof (x as { event_id: unknown }).event_id === "string" &&
+    !Object.hasOwn(x, "alert_id")
+  );
 }

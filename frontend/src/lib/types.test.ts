@@ -49,3 +49,27 @@ describe("isLiveEvent", () => {
   it("rejects undefined", () => { expect(isLiveEvent(undefined)).toBe(false); });
   it("rejects empty object", () => { expect(isLiveEvent({})).toBe(false); });
 });
+
+describe("isAlert / isLiveEvent — hardened discriminator", () => {
+  it("rejects objects that carry BOTH alert_id and event_id", () => {
+    const both = { alert_id: "a", event_id: "e" };
+    expect(isAlert(both)).toBe(false);
+    expect(isLiveEvent(both)).toBe(false);
+  });
+
+  it("rejects objects where the discriminator is not a string", () => {
+    expect(isAlert({ alert_id: 42 })).toBe(false);
+    expect(isAlert({ alert_id: null })).toBe(false);
+    expect(isLiveEvent({ event_id: 42 })).toBe(false);
+    expect(isLiveEvent({ event_id: null })).toBe(false);
+  });
+
+  it("rejects objects with inherited alert_id / event_id (prototype chain)", () => {
+    const parent = { alert_id: "from-proto" };
+    const child = Object.create(parent);
+    expect(isAlert(child)).toBe(false);
+    const parent2 = { event_id: "from-proto" };
+    const child2 = Object.create(parent2);
+    expect(isLiveEvent(child2)).toBe(false);
+  });
+});
