@@ -141,6 +141,7 @@ export function AttackHeatmap() {
         {merged.map((tactic) => (
           <TacticColumn
             key={tactic.id}
+            tacticShortname={tactic.shortname}
             tacticName={tactic.name}
             techniques={tactic.techniques}
           />
