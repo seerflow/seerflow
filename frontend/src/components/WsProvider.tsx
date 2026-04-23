@@ -10,6 +10,14 @@ const Ctx = createContext<SendFn | null>(null);
 
 function resolveUrl(): string {
   const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
+  const allowCsv = (import.meta.env.VITE_WS_ORIGIN_ALLOWLIST as string | undefined) ?? "";
+  const allow = allowCsv.split(",").map(s => s.trim()).filter(Boolean);
+
+  const targetOrigin = new URL(base).origin;
+  if (targetOrigin !== window.location.origin && !allow.includes(targetOrigin)) {
+    throw new Error(`Refusing WS connect to "${targetOrigin}": not in VITE_WS_ORIGIN_ALLOWLIST`);
+  }
+
   const url = base.replace(/^http/, "ws") + "/api/v1/ws";
   // Security: if the page is served over HTTPS, never allow a plaintext `ws:`
   // connection — auto-upgrade to `wss:`. The dev-only logger warn lands in the

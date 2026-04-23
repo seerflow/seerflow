@@ -100,3 +100,34 @@ describe("WsProvider", () => {
     spy.mockRestore();
   });
 });
+
+describe("resolveUrl origin allowlist", () => {
+  const origBase = import.meta.env.VITE_API_BASE;
+  const origAllow = import.meta.env.VITE_WS_ORIGIN_ALLOWLIST;
+
+  afterEach(() => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = origBase;
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = origAllow;
+  });
+
+  it("allows same-origin by default", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = window.location.origin;
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
+
+  it("throws on cross-origin when allowlist is empty", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://evil.example";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
+    // Mute React's error boundary console output for this case.
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => render(<WsProvider><div /></WsProvider>)).toThrow(/not in VITE_WS_ORIGIN_ALLOWLIST/);
+    spy.mockRestore();
+  });
+
+  it("permits cross-origin when listed in allowlist", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://api.seerflow.io";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "https://api.seerflow.io,https://stg.seerflow.io";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
+  });
+});
