@@ -37,7 +37,7 @@ function resolveUrl(): string {
 export function WsProvider({ children }: { children: ReactNode }): JSX.Element {
   const url = useMemo(resolveUrl, []);
   const { send } = useWebSocket(url, {
-    onMessage: (m: WsMessage) => wsBus.emit(m),
+    onMessage: (m: WsMessage) => wsBus.emitCoalesced(m),
     onStatusChange: (s: WsStatus) => wsBus.emit({ type: "__status", status: s }),
     // Replay the current merged filter on every (re)connect so the server
     // resumes honoring widget filters without waiting for the 150 ms debounce

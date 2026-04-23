@@ -61,6 +61,7 @@ describe("AlertFeed integration", () => {
     fetchMock.mockReset();
     MockWS.last = null;
     wsBus._clearAllForTests();
+    wsBus._resetFrameBufferForTests();
     resetWsIntents();
     useAlertStore.setState({ alerts: [], filter: { severities: new Set(), types: new Set(), sources: new Set(), tactics: new Set() }, status: "connecting", dropped: 0, selectedAlertId: null });
   });
@@ -329,6 +330,10 @@ describe("S-191 T9: REST warm-up schema validation", () => {
     expect(validationMetrics.getCounters()["rest:/api/v1/alerts"]).toBe(1);
   });
 
+  // S-209: WsProvider now routes `event` frames through wsBus.emitCoalesced,
+  // which defers dispatch to the next animation frame. Tests that assert on
+  // the appendScore fan-out wait for the rAF tick (jsdom's native rAF fires
+  // on a ~16 ms timer) via `waitFor` before asserting.
   it("fans anomaly-scored `event` frames out to useAnomalyStore.appendScore", async () => {
     fetchMock.mockResolvedValueOnce({ items: [] });
     // Seed a bucket so appendScore has something to merge into.
@@ -354,6 +359,8 @@ describe("S-191 T9: REST warm-up schema validation", () => {
         score: 0.9, is_anomaly: true, upper_threshold: 0.5,
       } });
     });
+    // Wait for the rAF tick that wsBus.emitCoalesced schedules.
+    await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({
       score: 0.9,
       source_type: "syslog",
@@ -378,6 +385,8 @@ describe("S-191 T9: REST warm-up schema validation", () => {
         // no score → the `d.score !== undefined` guard skips appendScore.
       } });
     });
+    // Let any pending rAF tick run before asserting the negative case.
+    await new Promise(r => setTimeout(r, 20));
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -404,6 +413,7 @@ describe("S-191 T9: REST warm-up schema validation", () => {
         score: 0.7,  // no upper_threshold
       } });
     });
+    await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({
       upper_threshold: null,
       source_type: "kafka",
