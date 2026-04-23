@@ -105,10 +105,18 @@ describe("WsProvider", () => {
 describe("resolveUrl origin allowlist", () => {
   const origBase = import.meta.env.VITE_API_BASE;
   const origAllow = import.meta.env.VITE_WS_ORIGIN_ALLOWLIST;
+  let origLocation: Location;
+
+  beforeEach(() => {
+    origLocation = window.location;
+  });
 
   afterEach(() => {
     (import.meta.env as Record<string, unknown>).VITE_API_BASE = origBase;
     (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = origAllow;
+    // Always restore window.location so an assertion failure in a sibling test
+    // doesn't poison the rest of the describe block.
+    Object.defineProperty(window, "location", { writable: true, value: origLocation });
   });
 
   it("allows same-origin by default", () => {
@@ -133,9 +141,6 @@ describe("resolveUrl origin allowlist", () => {
   });
 
   it("upgrades ws: to wss: when page is served over https", () => {
-    const origProtocol = window.location.protocol;
-    const origHref = window.location.href;
-    // Use jsdom's window.location override via Object.defineProperty
     Object.defineProperty(window, "location", {
       writable: true,
       value: { ...window.location, protocol: "https:", origin: "https://dash.local" },
@@ -143,15 +148,9 @@ describe("resolveUrl origin allowlist", () => {
     (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://dash.local";
     (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "";
 
-    // Render should NOT throw — same-origin https, but the url starts "wss:" not "ws:"
-    // (because base replace /^http/ -> ws gives "wss://..." already).
+    // Same-origin https: resolved url starts "wss:" because base replace /^http/ -> ws
+    // gives "wss://..." already — the upgrade branch is not hit but render must not throw.
     expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
-
-    // Restore
-    Object.defineProperty(window, "location", {
-      writable: true,
-      value: { ...window.location, protocol: origProtocol, origin: origHref.replace(/\/$/, "") },
-    });
   });
 
   it("logs when VITE_API_BASE is plain http: under https page (ws: upgrade branch)", () => {
@@ -170,10 +169,11 @@ describe("resolveUrl origin allowlist", () => {
     );
 
     warnSpy.mockRestore();
-    // Restore window.location to default
-    Object.defineProperty(window, "location", {
-      writable: true,
-      value: { ...window.location, protocol: "http:", origin: "http://localhost:3000" },
-    });
+  });
+
+  it("normalises allowlist entries to lowercase", () => {
+    (import.meta.env as Record<string, unknown>).VITE_API_BASE = "https://api.seerflow.io";
+    (import.meta.env as Record<string, unknown>).VITE_WS_ORIGIN_ALLOWLIST = "HTTPS://Api.Seerflow.IO";
+    expect(() => render(<WsProvider><div /></WsProvider>)).not.toThrow();
   });
 });

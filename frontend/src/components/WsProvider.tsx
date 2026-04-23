@@ -11,7 +11,9 @@ const Ctx = createContext<SendFn | null>(null);
 function resolveUrl(): string {
   const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? window.location.origin;
   const allowCsv = (import.meta.env.VITE_WS_ORIGIN_ALLOWLIST as string | undefined) ?? "";
-  const allow = allowCsv.split(",").map(s => s.trim()).filter(Boolean);
+  // Lowercase the allowlist so operators who write e.g. "HTTPS://Api.Seerflow.IO"
+  // still match against the canonical (lowercase) `URL(base).origin`.
+  const allow = allowCsv.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
   const targetOrigin = new URL(base).origin;
   if (targetOrigin !== window.location.origin && !allow.includes(targetOrigin)) {
