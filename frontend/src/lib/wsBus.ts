@@ -1,4 +1,4 @@
-import type { WsMessage } from "./types";
+import type { LiveEvent, WsMessage } from "./types";
 import { logger } from "./logger";
 
 type WsType = WsMessage["type"];
@@ -10,6 +10,18 @@ type Handler<T extends WsType> = (msg: Extract<WsMessage, { type: T }>) => void;
 type AnyHandler = (msg: WsMessage) => void;
 
 const handlers = new Map<WsType, Set<AnyHandler>>();
+
+let rafFrameBuffer: LiveEvent[] = [];
+let rafScheduled = false;
+const RAF_BUFFER_MAX = 500;
+
+function flushFrame(): void {
+  rafScheduled = false;
+  const events = rafFrameBuffer;
+  rafFrameBuffer = [];
+  if (events.length === 0) return;
+  emit({ type: "event", data: events[0] });
+}
 
 export function on<T extends WsType>(type: T, handler: Handler<T>): () => void {
   let set = handlers.get(type);
@@ -64,5 +76,14 @@ export function emitCoalesced(msg: WsMessage): void {
     emit(msg);
     return;
   }
-  emit(msg);
+  rafFrameBuffer.push(msg.data);
+  if (!rafScheduled) {
+    rafScheduled = true;
+    requestAnimationFrame(flushFrame);
+  }
+}
+
+export function _resetFrameBufferForTests(): void {
+  rafFrameBuffer = [];
+  rafScheduled = false;
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as bus from "./wsBus";
 import type { WsMessage } from "./types";
 
@@ -111,6 +111,17 @@ describe("_clearAllForTests (S-208)", () => {
 describe("emitCoalesced (S-209)", () => {
   beforeEach(() => {
     bus._clearAllForTests();
+    bus._resetFrameBufferForTests();
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => {
+      setTimeout(() => fn(performance.now()), 0);
+      return 0;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("passes non-event frames through synchronously (no rAF scheduling)", () => {
@@ -134,5 +145,24 @@ describe("emitCoalesced (S-209)", () => {
     expect(spy).toHaveBeenCalledWith(eventMsg);
 
     vi.unstubAllGlobals();
+  });
+
+  it("defers a single event to the next rAF tick and re-emits as type=event", async () => {
+    const eventSpy = vi.fn();
+    const batchSpy = vi.fn();
+    bus.on("event", eventSpy);
+    bus.on("batch", batchSpy);
+
+    bus.emitCoalesced(eventMsg);
+
+    // Not yet flushed.
+    expect(eventSpy).not.toHaveBeenCalled();
+    expect(batchSpy).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+
+    expect(eventSpy).toHaveBeenCalledTimes(1);
+    expect(eventSpy).toHaveBeenCalledWith(eventMsg);
+    expect(batchSpy).not.toHaveBeenCalled();
   });
 });
