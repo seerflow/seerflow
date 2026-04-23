@@ -14,7 +14,7 @@ const statusMsg: WsMessage = {
   },
 };
 
-beforeEach(() => bus.clearAll());
+beforeEach(() => bus._clearAllForTests());
 
 describe("wsBus", () => {
   it("delivers a matching emit to a subscriber", () => {
@@ -62,5 +62,33 @@ describe("wsBus", () => {
 
   it("is a no-op after clearAll with no handlers", () => {
     expect(() => bus.emit(statusMsg)).not.toThrow();
+  });
+});
+
+describe("_clearAllForTests (S-208)", () => {
+  it("on() → _clearAllForTests() → off() is a no-op", () => {
+    const spy = vi.fn();
+    const off = bus.on("alert", spy);
+    bus._clearAllForTests();
+    expect(() => off()).not.toThrow();
+    bus.emit({
+      type: "alert",
+      data: {
+        alert_id: "a-1",
+        timestamp_ns: 1n,
+        alert_type: "ml",
+        rule_name: "r",
+        severity: 3,
+        risk_score: 0.5,
+        entity_uuid: null,
+        entity_type: null,
+        entity_value: null,
+        message: "m",
+        mitre_tactics: [],
+        mitre_techniques: [],
+        dedup_count: 0,
+      },
+    });
+    expect(spy).not.toHaveBeenCalled();
   });
 });

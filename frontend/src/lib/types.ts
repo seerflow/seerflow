@@ -18,7 +18,7 @@ export interface Alert {
   mitre_techniques: string[];
   dedup_count: number;
   source_type?: string;
-  feedback?: Feedback;
+  feedback?: Feedback | null;
 }
 
 export interface AlertDetail extends Alert {
@@ -147,7 +147,7 @@ export interface LiveEvent {
   message: string;
   template_id: number;
   entity_refs: string[];
-  entity_summary: Partial<Record<"ips" | "users" | "hosts" | "domains" | "files" | "processes", string[]>>;
+  entity_summary?: Partial<Record<"ips" | "users" | "hosts" | "domains" | "files" | "processes", string[]>>;
   score?: number;
   is_anomaly?: boolean;
   upper_threshold?: number;
@@ -209,4 +209,35 @@ export interface FeedbackHistoryResponse {
   page: number;
   limit: number;
   has_next: boolean;
+}
+
+// --- S-208: bus-facing vs wire-arrival union split ---
+// `WireWsMessage` is the subset of `WsMessage` that can actually arrive on
+// the network. `WsProvider` synthesises the `__status` variant internally;
+// wire frames never carry it. Derived via `Exclude` so new wire variants
+// propagate automatically when added to `WsMessage`.
+export type WireWsMessage = Exclude<WsMessage, { type: "__status" }>;
+
+// --- S-208: structural type guards for heterogeneous batch envelopes ---
+// Used by AlertFeed / EventStream to discriminate `batch` payloads where the
+// wire envelope carries `events: LiveEvent[] | Alert[]`. Checks are
+// structural on the discriminator id field the widgets already rely on.
+export function isAlert(x: unknown): x is Alert {
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    Object.hasOwn(x, "alert_id") &&
+    typeof (x as { alert_id: unknown }).alert_id === "string" &&
+    !Object.hasOwn(x, "event_id")
+  );
+}
+
+export function isLiveEvent(x: unknown): x is LiveEvent {
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    Object.hasOwn(x, "event_id") &&
+    typeof (x as { event_id: unknown }).event_id === "string" &&
+    !Object.hasOwn(x, "alert_id")
+  );
 }

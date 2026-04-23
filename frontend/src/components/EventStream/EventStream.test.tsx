@@ -64,7 +64,7 @@ function renderWithProvider(): ReturnType<typeof render> {
 
 beforeEach(() => {
   _resetForTests();
-  wsBus.clearAll();
+  wsBus._clearAllForTests();
   MockWS.last = null;
   vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
   useEventStore.setState({
@@ -229,7 +229,7 @@ describe("EventStream", () => {
 describe("S-191 T10: REST warm-up schema validation", () => {
   beforeEach(async () => {
     _resetForTests();
-    wsBus.clearAll();
+    wsBus._clearAllForTests();
     MockWS.last = null;
     vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
     useEventStore.setState({

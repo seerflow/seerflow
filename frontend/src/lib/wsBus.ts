@@ -40,10 +40,17 @@ export function emit(msg: WsMessage): void {
 }
 
 // Must not REPLACE the stored Sets — unsubscribe closures returned by `on`
-// capture the live Set reference. `clear()` in place keeps those closures
-// valid; swapping to a fresh Set would silently detach them.
-export function clearAll(): void {
+// capture the live Set reference. `_clearAllForTests()` clears in place so
+// those closures stay valid; swapping to a fresh Set would silently detach them.
+export function _clearAllForTests(): void {
   for (const set of handlers.values()) {
     set.clear();
   }
 }
+
+/**
+ * @deprecated S-208: use `_clearAllForTests` instead. This alias is kept for
+ * one release cycle for any out-of-repo importer. Prod code must never clear
+ * the bus; only test setup calls this.
+ */
+export const clearAll = _clearAllForTests;

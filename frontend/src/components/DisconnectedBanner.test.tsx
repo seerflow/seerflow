@@ -11,7 +11,7 @@ function emitStatus(status: WsStatus): void {
 describe("DisconnectedBanner (wsBus)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    bus.clearAll();
+    bus._clearAllForTests();
   });
   afterEach(() => {
     vi.useRealTimers();

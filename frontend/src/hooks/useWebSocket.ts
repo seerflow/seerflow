@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { WsStatus, WsFilter, WsMessage } from "@/lib/types";
+import type { WsStatus, WsFilter, WireWsMessage } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { parseWsFrame } from "@/lib/schemas";
 
 interface Opts {
-  onMessage: (m: WsMessage) => void;
+  onMessage: (m: WireWsMessage) => void;
   onStatusChange: (s: WsStatus) => void;
   getFilterMessage?: () => WsFilter | null;
 }
@@ -42,7 +42,7 @@ export function useWebSocket(url: string, opts: Opts): { send: (m: unknown) => v
         catch (e) { logger.warn("ws parse fail", e); return; }
         const msg = parseWsFrame(raw);
         if (!msg) return;
-        optsRef.current.onMessage(msg as WsMessage);
+        optsRef.current.onMessage(msg);
       };
       ws.onerror = () => logger.warn("ws error");
       ws.onclose = () => {

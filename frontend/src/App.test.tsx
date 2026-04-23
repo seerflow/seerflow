@@ -106,7 +106,7 @@ describe("DisconnectedBanner dashboard mount", () => {
     useThemeStore.setState({ theme: "light" });
     useEntityStore.setState(useEntityStore.getInitialState());
     useLayoutStore.getState().resetToDefault();
-    wsBus.clearAll();
+    wsBus._clearAllForTests();
     (globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
       class { observe() {} disconnect() {} unobserve() {} } as unknown as typeof ResizeObserver;
   });
@@ -219,7 +219,7 @@ describe("S-062C App shell", () => {
     useThemeStore.setState({ theme: "light" });
     useEntityStore.setState(useEntityStore.getInitialState());
     useLayoutStore.getState().resetToDefault();
-    wsBus.clearAll();
+    wsBus._clearAllForTests();
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -255,7 +255,7 @@ describe("S-062C banner placement", () => {
     useThemeStore.setState({ theme: "light" });
     useEntityStore.setState(useEntityStore.getInitialState());
     useLayoutStore.getState().resetToDefault();
-    wsBus.clearAll();
+    wsBus._clearAllForTests();
     (globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
       class { observe() {} disconnect() {} unobserve() {} } as unknown as typeof ResizeObserver;
   });

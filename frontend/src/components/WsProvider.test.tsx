@@ -19,7 +19,7 @@ class FakeSocket {
 
 beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeSocket as unknown as typeof WebSocket);
-  bus.clearAll();
+  bus._clearAllForTests();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -93,6 +93,60 @@ describe("WsProvider", () => {
     act(() => { FakeSocket.lastInstance!.onopen?.(); });
     const first = JSON.parse(FakeSocket.lastInstance!.sent[0]!);
     expect(first).toEqual({ type: "filter", sources: ["auth"] });
+  });
+
+  describe("WsProvider reconnect regression", () => {
+    let _resetForTests: () => void;
+
+    beforeEach(async () => {
+      const mod = await import("@/lib/wsFilter");
+      _resetForTests = mod._resetForTests;
+      _resetForTests();
+    });
+
+    afterEach(() => {
+      _resetForTests();
+      vi.useRealTimers();
+    });
+
+    it("re-emits __status:open and replays merged filter (regression lock)", async () => {
+      const { createFilterSlot } = await import("@/lib/wsFilter");
+      const alerts = createFilterSlot("alerts");
+      alerts.set({ sources: ["syslog"] });
+
+      vi.useFakeTimers();
+      const statusFrames: string[] = [];
+      const off = bus.on("__status", (msg) => { statusFrames.push(msg.status); });
+
+      render(<WsProvider><div /></WsProvider>);
+
+      // First open — filter replay + __status:open
+      act(() => { FakeSocket.lastInstance!.onopen?.(); });
+      const firstFilterFrames = FakeSocket.lastInstance!.sent.filter(
+        (s) => JSON.parse(s).type === "filter",
+      );
+      expect(firstFilterFrames).toHaveLength(1);
+      expect(JSON.parse(firstFilterFrames[0]!)).toEqual({ type: "filter", sources: ["syslog"] });
+      expect(statusFrames.filter((s) => s === "open")).toHaveLength(1);
+
+      // Close — hook schedules reconnect with BACKOFF_MS[0] = 1000 ms
+      act(() => { FakeSocket.lastInstance!.onclose?.(); });
+      expect(statusFrames.filter((s) => s === "closed")).toHaveLength(1);
+
+      // Advance past the first backoff delay so the hook fires setTimeout(connect, 1000)
+      act(() => { vi.advanceTimersByTime(1000); });
+
+      // Second open on the new socket
+      act(() => { FakeSocket.lastInstance!.onopen?.(); });
+      const secondFilterFrames = FakeSocket.lastInstance!.sent.filter(
+        (s) => JSON.parse(s).type === "filter",
+      );
+      expect(secondFilterFrames).toHaveLength(1);
+      expect(JSON.parse(secondFilterFrames[0]!)).toEqual({ type: "filter", sources: ["syslog"] });
+      expect(statusFrames.filter((s) => s === "open")).toHaveLength(2);
+
+      off();
+    });
   });
 
   it("useWsSend() throws when called outside the provider", () => {
