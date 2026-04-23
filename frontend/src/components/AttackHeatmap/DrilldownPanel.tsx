@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api } from "@/lib/api";
 import { useDrilldownStore } from "@/stores/drilldown";
 import { useAlertStore } from "@/stores/alerts";
@@ -132,6 +132,9 @@ export function DrilldownPanel({ matrix, window: win }: DrilldownPanelProps) {
               <SheetTitle>
                 {cell.tech.id} — {cell.tech.name}
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                Coverage details for this MITRE ATT&CK technique, including loaded rules and recent matching alerts.
+              </SheetDescription>
               <p className="text-xs text-zinc-500">
                 {cell.tac.name} · <span data-status>{statusLabel(cell.tech.covered, cell.tech.detected)}</span>
               </p>
