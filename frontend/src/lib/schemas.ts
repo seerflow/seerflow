@@ -4,6 +4,13 @@ import { incrementDropped, warnThrottled } from "./validationMetrics";
 const MAX_MESSAGE_BYTES = 16 * 1024;
 const MAX_SOURCE_TYPE = 64;
 const MITRE_RE = /^[A-Z][A-Z0-9.-]{0,31}$/;
+// alert_id / event_id flow into URL paths (e.g. /api/v1/alerts/${id}/feedback)
+// so must not contain path separators, slashes, dots, or whitespace. Length-only
+// bounds would let a crafted "../foo" pivot requests to arbitrary same-origin
+// paths on a compromised backend. 128 chars is large enough for UUIDs and
+// prefixed keys ("alert_<ulid>") while rejecting traversal vectors.
+const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const SafeId = v.pipe(v.string(), v.regex(SAFE_ID_RE));
 
 const finite = () =>
   v.pipe(v.number(), v.check((n: number) => Number.isFinite(n), "must be finite"));
@@ -23,7 +30,7 @@ const EntitySummarySchema = v.strictObject({
 });
 
 export const LiveEventSchema = v.object({
-  event_id: BoundedString(128),
+  event_id: SafeId,
   timestamp_ns: BigintNsSchema,
   observed_ns: BigintNsSchema,
   severity_id: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(6)),
@@ -41,7 +48,7 @@ export const LiveEventSchema = v.object({
 export const AlertTypeSchema = v.picklist(["ml", "sigma", "correlation", "ueba", "ioc"] as const);
 
 export const AlertSchema = v.object({
-  alert_id: BoundedString(128),
+  alert_id: SafeId,
   timestamp_ns: BigintNsSchema,
   alert_type: AlertTypeSchema,
   rule_name: BoundedString(256),
@@ -62,7 +69,7 @@ export const AlertDetailSchema = v.object({
   ...AlertSchema.entries,
   contributing_events: v.optional(v.pipe(
     v.array(v.object({
-      event_id: BoundedString(128),
+      event_id: SafeId,
       timestamp_ns: BigintNsSchema,
       message: BoundedString(MAX_MESSAGE_BYTES),
     })),

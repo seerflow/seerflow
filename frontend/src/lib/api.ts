@@ -20,6 +20,12 @@ const BIGINT_KEYS = new Set([
   "bucket_start_ns",
   "submitted_at_ns",
 ]);
+// Keys that JSON.parse can place as literal own-properties and which, when
+// copied via `out[k] = ...`, would mutate Object.prototype (or the new object's
+// prototype/constructor chain) rather than adding an own field. Valibot's
+// v.object reads inherited fields via the prototype chain, so skipping these
+// keys here is defence-in-depth against schema-passing pollution.
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 // 32 ≈ 6× headroom over the deepest legitimate Seerflow payload (≤5 levels:
 // alert object inside an items array inside the response root). Caps the
 // walker before V8's ~3,900-frame stack limit triggers RangeError on a
@@ -73,6 +79,7 @@ function reviveBigintTimestamps(value: unknown): unknown {
       const obj = v as Record<string, unknown>;
       const out: Record<string, unknown> = {};
       for (const [k, vv] of Object.entries(obj)) {
+        if (DANGEROUS_KEYS.has(k)) continue;  // prevent prototype pollution
         if (BIGINT_KEYS.has(k) && typeof vv === "string") {
           out[k] = toBigintNs(vv);
         } else {

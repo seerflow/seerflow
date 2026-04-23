@@ -167,6 +167,23 @@ describe("api boundary parsing", () => {
     await api.get("/api/v1/health");
     expect(__walker.calls).toBe(0);
   });
+
+  it("strips __proto__ keys from revived responses to prevent prototype pollution", async () => {
+    // JSON.parse produces a literal __proto__ own-property — regular object
+    // literals don't, so we must construct the poisoned body via JSON.parse.
+    const poisoned = JSON.parse('{"__proto__":{"timestamp_ns":"123"},"ok":true,"inner":{"timestamp_ns":"456"}}');
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(poisoned), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const res = await api.get<{ ok: boolean }>("/api/v1/x");
+    expect(res.ok).toBe(true);
+    // Prototype must remain the vanilla Object.prototype — no pollution.
+    expect(Object.getPrototypeOf(res)).toBe(Object.prototype);
+    // Access via prototype lookup — should not return the poisoned value.
+    expect((res as unknown as { timestamp_ns?: bigint }).timestamp_ns).toBeUndefined();
+    // Defence-in-depth: also check a fresh object's prototype is uncontaminated.
+    expect(({} as unknown as { timestamp_ns?: bigint }).timestamp_ns).toBeUndefined();
+  });
 });
 
 describe("api schema opt-in", () => {

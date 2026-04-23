@@ -84,6 +84,12 @@ describe("LiveEventSchema", () => {
     const { entity_summary: _unused, ...withoutEntitySummary } = validEvent;
     expect(v.safeParse(LiveEventSchema, withoutEntitySummary).success).toBe(true);
   });
+
+  it("rejects event_id with path-traversal characters", () => {
+    expect(v.safeParse(LiveEventSchema, { ...validEvent, event_id: "../secret" }).success).toBe(false);
+    expect(v.safeParse(LiveEventSchema, { ...validEvent, event_id: "a/b" }).success).toBe(false);
+    expect(v.safeParse(LiveEventSchema, { ...validEvent, event_id: "" }).success).toBe(false);
+  });
 });
 
 describe("AlertSchema", () => {
@@ -128,6 +134,12 @@ describe("AlertSchema", () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { feedback: _unused, ...withoutFeedback } = validAlert as typeof validAlert & { feedback?: unknown };
     expect(v.safeParse(AlertSchema, withoutFeedback).success).toBe(true);
+  });
+
+  it("rejects alert_id with path-traversal characters", () => {
+    expect(v.safeParse(AlertSchema, { ...validAlert, alert_id: "../../admin" }).success).toBe(false);
+    expect(v.safeParse(AlertSchema, { ...validAlert, alert_id: "a b" }).success).toBe(false);
+    expect(v.safeParse(AlertSchema, { ...validAlert, alert_id: "" }).success).toBe(false);
   });
 });
 
