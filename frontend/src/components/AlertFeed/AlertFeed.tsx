@@ -7,7 +7,7 @@ import { FilterBar } from "./FilterBar";
 import { SummaryBadges } from "./SummaryBadges";
 import { api, ApiError } from "@/lib/api";
 import { AlertSchema } from "@/lib/schemas";
-import type { AlertFilter, WsFilter, WsMessage, SeverityBucket, Alert } from "@/lib/types";
+import type { AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
@@ -49,15 +49,6 @@ export function AlertFeed(): JSX.Element {
   const handleMessage = useCallback((m: WsMessage): void => {
     if (m.type === "alert") prepend(m.data);
     else if (m.type === "alert_batch") m.alerts.forEach(prepend);
-    else if (m.type === "batch") {
-      // The batch envelope can also carry LiveEvent payloads — those are routed
-      // directly by EventStream's wsBus subscription (S-062 Phase A). AlertFeed
-      // only handles alert batches here.
-      const first = m.events.length > 0 ? m.events[0] : null;
-      if (first && !("event_id" in (first as object))) {
-        (m.events as Alert[]).forEach(prepend);
-      }
-    }
     else if (m.type === "event") {
       // S-191 T9: parseWsFrame (WS chokepoint) enforces finite `score` and
       // bigint `timestamp_ns`/`observed_ns` plus bounded `source_type` on
