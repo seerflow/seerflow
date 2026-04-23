@@ -57,6 +57,16 @@ describe("LiveEventSchema", () => {
   it("rejects non-bigint timestamp_ns", () => {
     expect(v.safeParse(LiveEventSchema, { ...validEvent, timestamp_ns: "100" }).success).toBe(false);
   });
+
+  it("rejects entity_refs over 128 items", () => {
+    const big = { ...validEvent, entity_refs: Array.from({ length: 129 }, (_, i) => `e${i}`) };
+    expect(v.safeParse(LiveEventSchema, big).success).toBe(false);
+  });
+
+  it("rejects entity_summary.ips over 64 items", () => {
+    const big = { ...validEvent, entity_summary: { ips: Array.from({ length: 65 }, (_, i) => `1.2.3.${i}`) } };
+    expect(v.safeParse(LiveEventSchema, big).success).toBe(false);
+  });
 });
 
 describe("AlertSchema", () => {
@@ -82,6 +92,15 @@ describe("AlertSchema", () => {
 
   it("rejects oversize message", () => {
     expect(v.safeParse(AlertSchema, { ...validAlert, message: "x".repeat(16 * 1024 + 1) }).success).toBe(false);
+  });
+
+  it("rejects entity_uuid over 64 chars", () => {
+    expect(v.safeParse(AlertSchema, { ...validAlert, entity_uuid: "x".repeat(65) }).success).toBe(false);
+  });
+
+  it("rejects mitre_tactics over 32 items", () => {
+    const big = { ...validAlert, mitre_tactics: Array.from({ length: 33 }, (_, i) => `TA${String(i).padStart(4, "0")}`) };
+    expect(v.safeParse(AlertSchema, big).success).toBe(false);
   });
 });
 

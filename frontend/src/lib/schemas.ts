@@ -13,12 +13,12 @@ const BoundedString = (max: number) =>
   v.pipe(v.string(), v.maxLength(max));
 
 const EntitySummarySchema = v.strictObject({
-  ips: v.optional(v.array(BoundedString(256))),
-  users: v.optional(v.array(BoundedString(256))),
-  hosts: v.optional(v.array(BoundedString(256))),
-  domains: v.optional(v.array(BoundedString(256))),
-  files: v.optional(v.array(BoundedString(256))),
-  processes: v.optional(v.array(BoundedString(256))),
+  ips: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
+  users: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
+  hosts: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
+  domains: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
+  files: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
+  processes: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
 });
 
 export const LiveEventSchema = v.object({
@@ -30,7 +30,7 @@ export const LiveEventSchema = v.object({
   source_type: BoundedString(MAX_SOURCE_TYPE),
   message: BoundedString(MAX_MESSAGE_BYTES),
   template_id: v.pipe(v.number(), v.integer(), v.minValue(0)),
-  entity_refs: v.array(BoundedString(256)),
+  entity_refs: v.pipe(v.array(BoundedString(256)), v.maxLength(128)),
   entity_summary: EntitySummarySchema,
   score: v.optional(finite()),
   is_anomaly: v.optional(v.boolean()),
@@ -46,12 +46,12 @@ export const AlertSchema = v.object({
   rule_name: BoundedString(256),
   severity: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(6)),
   risk_score: v.pipe(finite(), v.minValue(0), v.maxValue(1)),
-  entity_uuid: v.union([v.string(), v.null_()]),
+  entity_uuid: v.union([BoundedString(64), v.null_()]),
   entity_type: v.union([BoundedString(64), v.null_()]),
   entity_value: v.union([BoundedString(256), v.null_()]),
   message: BoundedString(MAX_MESSAGE_BYTES),
-  mitre_tactics: v.array(v.pipe(v.string(), v.regex(MITRE_RE))),
-  mitre_techniques: v.array(v.pipe(v.string(), v.regex(MITRE_RE))),
+  mitre_tactics: v.pipe(v.array(v.pipe(v.string(), v.regex(MITRE_RE))), v.maxLength(32)),
+  mitre_techniques: v.pipe(v.array(v.pipe(v.string(), v.regex(MITRE_RE))), v.maxLength(32)),
   dedup_count: v.pipe(v.number(), v.integer(), v.minValue(0)),
   source_type: v.optional(BoundedString(MAX_SOURCE_TYPE)),
   feedback: v.optional(v.picklist(["", "tp", "fp"] as const)),
