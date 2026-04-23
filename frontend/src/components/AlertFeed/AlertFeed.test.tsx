@@ -204,11 +204,13 @@ describe("AlertFeed integration", () => {
     expect(useAlertStore.getState().status).toBe("closed");
   });
 
-  it("pushes merged filter payload through useWsSend when the filter changes", async () => {
+  it("pushes merged filter payload through useWsSend after 150 ms debounce when filter changes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     fetchMock.mockResolvedValueOnce({ items: [] });
     renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => { MockWS.last!._open(); });
+    MockWS.last!.sent.length = 0;
 
     // Switching the filter bucket schedules a 150 ms debounced filter push.
     act(() => {
@@ -216,14 +218,15 @@ describe("AlertFeed integration", () => {
         filter: { severities: new Set(["critical"]), types: new Set(), sources: new Set(), tactics: new Set() },
       });
     });
-
-    await waitFor(() => {
-      const filterFrames = MockWS.last!.sent.filter(
-        (m): m is { type: string; min_severity?: number } =>
-          typeof m === "object" && m !== null && (m as { type?: unknown }).type === "filter",
-      );
-      expect(filterFrames.some(m => m.min_severity === 5)).toBe(true);
-    });
+    // Before debounce expires, nothing sent yet.
+    expect(MockWS.last!.sent).toEqual([]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    const filterFrames = MockWS.last!.sent.filter(
+      (m): m is { type: string; min_severity?: number } =>
+        typeof m === "object" && m !== null && (m as { type?: unknown }).type === "filter",
+    );
+    expect(filterFrames.some(m => m.min_severity === 5)).toBe(true);
+    vi.useRealTimers();
   });
 
   it("no longer listens for the legacy seerflow:wsfilter-changed CustomEvent", async () => {
