@@ -282,6 +282,10 @@ describe("S-191 T9: REST warm-up schema validation", () => {
     fetchMock.mockReset();
     MockWS.last = null;
     wsBus._clearAllForTests();
+    // S-209: this describe dispatches `type: "event"` frames through WsProvider,
+    // which now routes via wsBus.emitCoalesced → rafFrameBuffer. Reset the buffer
+    // so a prior test's unflushed event cannot cross into the next test.
+    wsBus._resetFrameBufferForTests();
     resetWsIntents();
     validationMetrics._resetForTests();
     useAlertStore.setState({
