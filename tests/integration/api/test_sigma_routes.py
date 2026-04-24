@@ -231,9 +231,7 @@ def test_yaml_anchor_bomb_rejected(app_with_sigma) -> None:  # type: ignore[no-u
     """Hostile payload with >32 anchors fails fast in the validator."""
     payload = "title: T\n" + "\n".join(f"k{i}: &a{i} x" for i in range(40))
     with TestClient(app_with_sigma) as client:
-        resp = client.post(
-            "/api/v1/sigma/rules?dry_run=true", json={"yaml": payload}
-        )
+        resp = client.post("/api/v1/sigma/rules?dry_run=true", json={"yaml": payload})
         body = resp.json()
         assert body["valid"] is False
         assert body["stage"] == "yaml"
