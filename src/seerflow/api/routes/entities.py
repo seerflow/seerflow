@@ -9,14 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 import uuid as _uuid_mod
-from typing import TYPE_CHECKING, Annotated
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Final, Literal
 
 import msgspec
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from seerflow.api.anomaly_timeline import (
+    RANGE_NS,
+    RESOLUTION_NS,
+    allowed_resolutions,
+    default_resolution,
+)
 from seerflow.api.deps import (
     StorageDeps,
     get_storage,
@@ -28,6 +36,9 @@ from seerflow.api.schemas import (
     EntitySearchResult,
     EntityTimelineResponse,
     EventResponse,
+    RiskBucketResponse,
+    RiskHistoryMetaResponse,
+    RiskHistoryResponse,
 )
 from seerflow.models.entity import (
     generate_domain_id,
@@ -36,12 +47,13 @@ from seerflow.models.entity import (
     generate_user_id,
     normalize_username,
 )
-from seerflow.models.query import EventQuery, TimeRange
+from seerflow.models.query import AlertQuery, EventQuery, TimeRange
 from seerflow.storage.protocols import EntityStore  # noqa: TC001
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
+    from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
 
 _log = logging.getLogger(__name__)
@@ -71,6 +83,69 @@ def _uuid_for_domain(value: str) -> str:
 DEFAULT_TIMELINE_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000  # 24h
 _MAX_TIMESTAMP_NS = 2**63 - 1  # SQLite int64 ceiling (~year 2262)
 
+# Hard ceiling preventing runaway scans on high-alert entities.
+_ALERT_QUERY_LIMIT: Final[int] = 10_000
+
+
+@dataclass(slots=True)
+class _Acc:
+    points: float = 0.0
+    alert_count: int = 0
+    max_score: float = -1.0
+    max_ts_ns: int = 0
+    top_rule_name: str = ""
+
+
+def _bucket_alerts(
+    alerts: Sequence[Alert],
+    *,
+    now_ns: int,
+    range_ns: int,
+    res_ns: int,
+) -> list[RiskBucketResponse]:
+    """Bucket ``alerts`` into zero-filled RiskBucket entries over ``[now-range, now)``.
+
+    Buckets are half-open ``[bucket_start_ns, bucket_start_ns + res_ns)``.
+    An alert with ``timestamp_ns % res_ns == 0`` lands in the *later* bucket.
+    Empty buckets appear with ``points=0.0``, ``alert_count=0``, ``top_rule_name=""``.
+    ``top_rule_name`` is the rule name of the max-``risk_score`` alert in the
+    bucket; ties break by earliest ``timestamp_ns``.
+    """
+    start_ns = now_ns - range_ns
+    first_bucket = (start_ns // res_ns) * res_ns
+    bucket_count = math.ceil((now_ns - first_bucket) / res_ns)
+
+    buckets: dict[int, _Acc] = {}
+    for a in alerts:
+        key = (a.timestamp_ns // res_ns) * res_ns
+        if key < first_bucket or key >= first_bucket + bucket_count * res_ns:
+            continue
+        acc = buckets.setdefault(key, _Acc())
+        acc.points += a.risk_score
+        acc.alert_count += 1
+        if (
+            acc.max_score < 0
+            or a.risk_score > acc.max_score
+            or (a.risk_score == acc.max_score and a.timestamp_ns < acc.max_ts_ns)
+        ):
+            acc.max_score = a.risk_score
+            acc.max_ts_ns = a.timestamp_ns
+            acc.top_rule_name = a.rule_name or ""
+
+    items: list[RiskBucketResponse] = []
+    for i in range(bucket_count):
+        b = first_bucket + i * res_ns
+        got = buckets.get(b)
+        items.append(
+            RiskBucketResponse(
+                bucket_start_ns=b,
+                points=got.points if got else 0.0,
+                alert_count=got.alert_count if got else 0,
+                top_rule_name=got.top_rule_name if got else "",
+            )
+        )
+    return items
+
 
 def _coerce_time_range(start_ns: int | None, end_ns: int | None) -> TimeRange:
     """Default to last 24 hours if either bound is omitted.
@@ -92,6 +167,13 @@ _ENTITY_FIELDS: tuple[tuple[str, str, Callable[[str], str]], ...] = (
     ("related_hosts", "host", _uuid_for_host),
     ("related_domains", "domain", _uuid_for_domain),
 )
+
+
+RangeArg = Annotated[Literal["1h", "6h", "24h", "7d"], Query(description="Window size")]
+ResolutionArg = Annotated[
+    Literal["1m", "5m", "15m", "1h"] | None,
+    Query(description="Bucket size (defaults to smallest allowed)"),
+]
 
 
 def _extract_entities(events: list[SeerflowEvent]) -> list[EntitySearchResult]:
@@ -206,6 +288,63 @@ async def get_entity_timeline(
         events=[EventResponse.from_event(e) for e in events],
         related=[EntityRelationResponse.from_relation(r) for r in related],
         total=len(events),
+    )
+
+
+@router.get(
+    "/entities/{entity_uuid}/risk-history",
+    response_model=RiskHistoryResponse,
+    responses={
+        422: {"description": "Invalid UUID / range / resolution"},
+        429: {"description": "Rate limit exceeded"},
+    },
+)
+@limiter.limit(list_limit)
+async def get_entity_risk_history(
+    request: Request,
+    entity_uuid: _uuid_mod.UUID,
+    storage: Storage,
+    range: RangeArg = "1h",  # noqa: A002 -- matches public query param name
+    resolution: ResolutionArg = None,
+) -> RiskHistoryResponse:
+    """Return a bucketed risk-score series for an entity (S-060.F1)."""
+    resolved_resolution = resolution or default_resolution(range)
+    if resolved_resolution not in allowed_resolutions(range):
+        raise HTTPException(
+            status_code=422,
+            detail=(f"resolution {resolved_resolution!r} not allowed for range {range!r}"),
+        )
+
+    range_ns = RANGE_NS[range]
+    res_ns = RESOLUTION_NS[resolved_resolution]
+    # Align ``now_ns`` to the resolution boundary so the helper yields exactly
+    # ``range_ns / res_ns`` dense buckets (mirrors anomaly_timeline.query's
+    # ``end_idx_aligned`` behaviour).
+    now_ns = (time.time_ns() // res_ns) * res_ns
+    entity_uuid_str = str(entity_uuid)
+
+    alert_page = await storage.alert_store.query_alerts(
+        AlertQuery(
+            entity_uuid=entity_uuid_str,
+            time_range=TimeRange(start_ns=now_ns - range_ns, end_ns=now_ns),
+            limit=_ALERT_QUERY_LIMIT,
+        )
+    )
+
+    items = _bucket_alerts(
+        alert_page.items,
+        now_ns=now_ns,
+        range_ns=range_ns,
+        res_ns=res_ns,
+    )
+
+    return RiskHistoryResponse(
+        meta=RiskHistoryMetaResponse(
+            range=range,
+            resolution=resolved_resolution,
+            alert_count_truncated=alert_page.total > len(alert_page.items),
+        ),
+        items=items,
     )
 
 

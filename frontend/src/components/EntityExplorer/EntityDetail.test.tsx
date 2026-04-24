@@ -34,7 +34,10 @@ describe("EntityDetail", () => {
   });
 
   it("click on range chip calls store.setRange", async () => {
-    (api.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ entity_uuid: UUID, events: [], related: [], total: 0 });
+    (api.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url.includes("/risk-history")) return Promise.resolve({ items: [] });
+      return Promise.resolve({ entity_uuid: UUID, events: [], related: [], total: 0 });
+    });
     useEntityStore.setState({ selectedEntityUuid: UUID, range: "24h" });
     render(<EntityDetail />);
     fireEvent.click(screen.getByRole("button", { name: "1h" }));
@@ -49,5 +52,46 @@ describe("EntityDetail", () => {
     expect(section.className).toMatch(/\bmin-h-0\b/);
     expect(section.className).toMatch(/\bflex\b/);
     expect(section.className).toMatch(/\bflex-col\b/);
+  });
+});
+
+describe("EntityDetail risk sparkline (S-060.F1)", () => {
+  it("does not render the interim disclosure title", () => {
+    useEntityStore.setState({
+      selectedEntityUuid: "11111111-1111-1111-1111-111111111111",
+      selectedEntityValue: "alice",
+      selectedEntityType: "user",
+      range: "1h",
+      events: [],
+      related: [],
+      riskHistory: [],
+      riskHistoryLoading: false,
+      riskHistoryError: null,
+    });
+    render(<EntityDetail />);
+    expect(
+      document.querySelector("[title*='Derived from current alert feed']"),
+    ).toBeNull();
+    expect(screen.queryByText(/^Risk \d+$/)).not.toBeInTheDocument();
+  });
+
+  it("renders the sparkline empty-state when history is all zero", () => {
+    useEntityStore.setState({
+      selectedEntityUuid: "11111111-1111-1111-1111-111111111111",
+      selectedEntityValue: "alice",
+      selectedEntityType: "user",
+      range: "1h",
+      events: [],
+      related: [],
+      riskHistory: [
+        { bucket_start_ns: "0", points: 0, alert_count: 0, top_rule_name: "" },
+      ],
+      riskHistoryLoading: false,
+      riskHistoryError: null,
+    });
+    render(<EntityDetail />);
+    expect(
+      screen.getByText(/No risk signals for this entity/i),
+    ).toBeInTheDocument();
   });
 });

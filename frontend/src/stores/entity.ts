@@ -8,6 +8,8 @@ import type {
   EntityEvent,
   EntityTimelineResponse,
   EntityViewState,
+  RiskBucket,
+  RiskHistoryResponse,
   TimelineRange,
 } from "@/lib/types";
 
@@ -38,8 +40,13 @@ interface State {
   loading: Loading;
   error: string | null;
 
+  riskHistory: RiskBucket[];
+  riskHistoryLoading: boolean;
+  riskHistoryError: string | null;
+
   _searchAbort: AbortController | null;
   _detailAbort: AbortController | null;
+  _riskAbort: AbortController | null;
   _searchTimer: ReturnType<typeof setTimeout> | null;
 
   setQuery: (q: string) => void;
@@ -49,6 +56,7 @@ interface State {
   setSourceFilter: (s: string | null) => Promise<void>;
   setSeverityMin: (n: number | null) => Promise<void>;
   refresh: () => Promise<void>;
+  fetchRiskHistory: () => Promise<void>;
   restoreFromHash: (hash: string) => Promise<void>;
   clearSelection: () => void;
   pushRecent: (r: EntitySearchResult) => void;
@@ -105,8 +113,13 @@ export const useEntityStore = create<State>((set, get) => ({
   loading: "idle" as Loading,
   error: null,
 
+  riskHistory: [],
+  riskHistoryLoading: false,
+  riskHistoryError: null,
+
   _searchAbort: null,
   _detailAbort: null,
+  _riskAbort: null,
   _searchTimer: null,
 
   setQuery: (q) => set({ query: q }),
@@ -148,11 +161,15 @@ export const useEntityStore = create<State>((set, get) => ({
       selectedEntityValue: found ? found.entity_value : null,
     });
     await get().refresh();
+    void get().fetchRiskHistory();
   },
 
   setRange: async (r) => {
     set({ range: r });
-    if (get().selectedEntityUuid) await get().refresh();
+    if (get().selectedEntityUuid) {
+      await get().refresh();
+      void get().fetchRiskHistory();
+    }
   },
 
   setSourceFilter: async (s) => {
@@ -163,6 +180,27 @@ export const useEntityStore = create<State>((set, get) => ({
   setSeverityMin: async (n) => {
     set({ severityMin: n });
     if (get().selectedEntityUuid) await get().refresh();
+  },
+
+  fetchRiskHistory: async () => {
+    const { selectedEntityUuid: uuid, range, _riskAbort } = get();
+    if (!uuid || !isValidEntityUuid(uuid)) return;
+    _riskAbort?.abort();
+    const ctrl = new AbortController();
+    set({ _riskAbort: ctrl, riskHistoryLoading: true, riskHistoryError: null, riskHistory: [] });
+    try {
+      const res = await api.get<RiskHistoryResponse>(
+        `/api/v1/entities/${uuid}/risk-history?range=${encodeURIComponent(range)}`,
+        { signal: ctrl.signal },
+      );
+      if (ctrl.signal.aborted) return;
+      set({ riskHistory: res.items, riskHistoryLoading: false, _riskAbort: null });
+    } catch (e) {
+      if (ctrl.signal.aborted) return;
+      const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : "fetch failed";
+      logger.warn("risk-history fetch failed", e);
+      set({ riskHistoryError: msg, riskHistoryLoading: false, _riskAbort: null });
+    }
   },
 
   refresh: async () => {
@@ -223,9 +261,11 @@ export const useEntityStore = create<State>((set, get) => ({
       severityMin: parsed.severity_min ?? null,
     });
     await get().refresh();
+    void get().fetchRiskHistory();
   },
 
-  clearSelection: () =>
+  clearSelection: () => {
+    get()._riskAbort?.abort();
     set({
       selectedEntityUuid: null,
       selectedEntityType: null,
@@ -235,7 +275,12 @@ export const useEntityStore = create<State>((set, get) => ({
       total: 0,
       sourceFilter: null,
       severityMin: null,
-    }),
+      riskHistory: [],
+      riskHistoryLoading: false,
+      riskHistoryError: null,
+      _riskAbort: null,
+    });
+  },
 
   pushRecent: (r) => {
     const filtered = get().recent.filter((x) => x.entity_uuid !== r.entity_uuid);

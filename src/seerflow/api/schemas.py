@@ -276,6 +276,35 @@ class TimelineResponse(BaseModel):
     items: list[TimelineBucketResponse]
 
 
+class RiskBucketResponse(BaseModel):
+    """One bucket of the per-entity risk-history series (S-060.F1)."""
+
+    bucket_start_ns: int = Field(ge=0)
+    points: float = Field(ge=0.0)
+    alert_count: int = Field(ge=0)
+    top_rule_name: str = ""
+
+    @field_serializer("bucket_start_ns", when_used="json")
+    def _serialize_bucket_start_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199)."""
+        return str(v)
+
+
+class RiskHistoryMetaResponse(BaseModel):
+    """Echo of the resolved (range, resolution) plus truncation flag."""
+
+    range: Literal["1h", "6h", "24h", "7d"]
+    resolution: Literal["1m", "5m", "15m", "1h"]
+    alert_count_truncated: bool = False
+
+
+class RiskHistoryResponse(BaseModel):
+    """Envelope for GET /api/v1/entities/{uuid}/risk-history."""
+
+    meta: RiskHistoryMetaResponse
+    items: list[RiskBucketResponse]
+
+
 class AttackCoverageCell(BaseModel):
     """One (tactic, technique) cell in the ATT&CK coverage matrix."""
 

@@ -188,8 +188,9 @@ describe("App hash routing", () => {
   });
 
   it("switches to EntityDetail when hash includes entity=<uuid>", async () => {
-    (api.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      entity_uuid: "u", events: [], related: [], total: 0,
+    (api.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url.includes("/risk-history")) return Promise.resolve({ items: [] });
+      return Promise.resolve({ entity_uuid: "u", events: [], related: [], total: 0 });
     });
     window.history.replaceState(null, "", "/#entity=11111111-2222-3333-4444-555555555555");
     render(<App />);
