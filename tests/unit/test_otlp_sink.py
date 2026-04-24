@@ -619,6 +619,81 @@ class TestOtlpSinkGrpcGenericException:
             mock_log.exception.assert_called_once()
 
 
+class TestOtlpSinkGrpcTls:
+    @pytest.mark.asyncio
+    async def test_grpc_uses_secure_channel_when_tls_true(self) -> None:
+        import grpc as _grpc
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", tls=True)
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel) as secure,
+            patch.object(grpc.aio, "insecure_channel") as insecure,
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        secure.assert_called_once()
+        insecure.assert_not_called()
+        args, _kwargs = secure.call_args
+        assert args[0] == "host:4317"
+        assert isinstance(args[1], _grpc.ChannelCredentials)
+
+    @pytest.mark.asyncio
+    async def test_grpc_uses_insecure_channel_when_tls_false(self) -> None:
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", tls=False)
+
+        with (
+            patch.object(grpc.aio, "secure_channel") as secure,
+            patch.object(grpc.aio, "insecure_channel", return_value=mock_channel) as insecure,
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        insecure.assert_called_once_with("host:4317")
+        secure.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_grpc_auto_tls_from_https_scheme(self) -> None:
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="https://collector.example.com:4317", protocol="grpc")
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel) as secure,
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        secure.assert_called_once()
+        target = secure.call_args[0][0]
+        assert target == "collector.example.com:4317"
+
+
 class TestResolveTls:
     def test_explicit_true_wins(self) -> None:
         from seerflow.alerting.sinks.otlp import _resolve_tls

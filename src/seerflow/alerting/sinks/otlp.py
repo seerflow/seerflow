@@ -295,7 +295,11 @@ class OtlpSink:
 
         if self._grpc_channel is None:
             target = _normalize_grpc_endpoint(self._endpoint)
-            self._grpc_channel = grpc.aio.insecure_channel(target)
+            if self._use_tls:
+                creds = grpc.ssl_channel_credentials()
+                self._grpc_channel = grpc.aio.secure_channel(target, creds)
+            else:
+                self._grpc_channel = grpc.aio.insecure_channel(target)
         stub = LogsServiceStub(self._grpc_channel)  # type: ignore[no-untyped-call]
         for attempt in range(self._MAX_RETRIES):
             try:
