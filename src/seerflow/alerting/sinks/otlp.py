@@ -170,6 +170,17 @@ def _normalize_grpc_endpoint(endpoint: str) -> str:
     return endpoint
 
 
+def _resolve_tls(endpoint: str, tls: bool | None) -> bool:
+    """Resolve effective TLS usage for a gRPC OTLP endpoint.
+
+    Explicit ``tls`` wins; otherwise auto-detect from scheme.
+    Bare ``host:port`` defaults to plaintext for backward compatibility.
+    """
+    if tls is not None:
+        return tls
+    return endpoint.startswith("https://")
+
+
 def masked_url(url: str) -> str:
     """Mask an endpoint URL to avoid logging sensitive paths.
 
@@ -212,15 +223,24 @@ class OtlpSink:
         protocol: Literal["grpc", "http"],
         export_interval: int = 5,
         max_pending: int = 10_000,
+        *,
+        tls: bool | None = None,
     ) -> None:
         self._endpoint = endpoint
         self._protocol = protocol
         self._export_interval = export_interval
         self._max_pending = max_pending
+        self._use_tls = _resolve_tls(endpoint, tls)
         self._pending: list[Alert] = []
         self._running = True
         self._grpc_channel: grpc.aio.Channel | None = None
         self._http_session: aiohttp.ClientSession | None = None
+        if tls is False and endpoint.startswith("https://"):
+            _log.warning(
+                "OTLP sink: otlp_tls=False but endpoint scheme is https (%s) "
+                "— scheme/override mismatch, using plaintext",
+                masked_url(endpoint),
+            )
 
     def enqueue(self, alert: Alert) -> None:
         """Add an alert to the pending batch. Drops with warning if at max."""

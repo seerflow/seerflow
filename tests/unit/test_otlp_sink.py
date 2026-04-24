@@ -619,6 +619,70 @@ class TestOtlpSinkGrpcGenericException:
             mock_log.exception.assert_called_once()
 
 
+class TestResolveTls:
+    def test_explicit_true_wins(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("http://host:4317", tls=True) is True
+
+    def test_explicit_false_wins(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("https://host:4317", tls=False) is False
+
+    def test_none_with_https_scheme_enables_tls(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("https://host:4317", tls=None) is True
+
+    def test_none_with_http_scheme_disables_tls(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("http://host:4317", tls=None) is False
+
+    def test_none_with_bare_host_port_disables_tls(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("host:4317", tls=None) is False
+
+
+class TestOtlpSinkTlsInit:
+    def test_init_accepts_tls_kwarg(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(
+            endpoint="https://host:4317", protocol="grpc", tls=True,
+        )
+        assert sink._use_tls is True
+
+    def test_init_auto_detects_tls_from_https_scheme(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="https://host:4317", protocol="grpc")
+        assert sink._use_tls is True
+
+    def test_init_defaults_plaintext_for_bare_endpoint(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc")
+        assert sink._use_tls is False
+
+    def test_init_warns_on_https_with_tls_false(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="https://host:4317", protocol="grpc", tls=False)
+        messages = [rec.message for rec in caplog.records]
+        assert any(
+            "mismatch" in m.lower() or "otlp_tls=false" in m.lower() for m in messages
+        )
+        assert not any("https://host:4317" in m for m in messages)
+
+
 class TestOtlpSinkHttpExhaustsRetries:
     @pytest.mark.asyncio
     async def test_http_logs_error_after_all_retries_exhausted(self) -> None:
