@@ -1445,7 +1445,6 @@ class TestRunQueryHealth:
         from seerflow.query import run_query_health
 
         mock_storage = AsyncMock()
-        mock_storage.load_state = AsyncMock(return_value=None)
         mock_storage.close = AsyncMock()
 
         with (
