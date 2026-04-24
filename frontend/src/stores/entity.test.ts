@@ -292,3 +292,109 @@ describe("entityStore.fetchRiskHistory (S-060.F1)", () => {
     expect(useEntityStore.getState().riskHistory).toEqual([]);
   });
 });
+
+describe("entityStore.discoveredSourceTypes (S-060.F2)", () => {
+  const ev = (id: string, source_type: string) => ({
+    event_id: id,
+    timestamp_ns: 1n,
+    source_type,
+    severity_id: 3,
+    message: "m",
+    entity_refs: [],
+  });
+
+  it("seeds discoveredSourceTypes from refresh() response (sorted union)", async () => {
+    mockedGet.mockResolvedValueOnce({
+      entity_uuid: UUID,
+      events: [ev("e1", "syslog"), ev("e2", "auth"), ev("e3", "syslog")],
+      related: [],
+      total: 3,
+    });
+    useEntityStore.setState({ selectedEntityUuid: UUID });
+    await useEntityStore.getState().refresh();
+    expect(useEntityStore.getState().discoveredSourceTypes).toEqual(["auth", "syslog"]);
+  });
+
+  it("unions discoveredSourceTypes across successive refresh() calls (narrowing-safe)", async () => {
+    mockedGet
+      .mockResolvedValueOnce({
+        entity_uuid: UUID,
+        events: [ev("e1", "syslog"), ev("e2", "auth")],
+        related: [],
+        total: 2,
+      })
+      .mockResolvedValueOnce({
+        entity_uuid: UUID,
+        events: [ev("e3", "k8s")],
+        related: [],
+        total: 1,
+      });
+    useEntityStore.setState({ selectedEntityUuid: UUID });
+    await useEntityStore.getState().refresh();
+    await useEntityStore.getState().refresh();
+    expect(useEntityStore.getState().discoveredSourceTypes).toEqual(["auth", "k8s", "syslog"]);
+  });
+});
+
+describe("entityStore.selectEntity filter reset (S-060.F2)", () => {
+  it("resets sourceFilter, severityMin, discoveredSourceTypes before refresh()", async () => {
+    mockedGet.mockResolvedValueOnce({
+      entity_uuid: UUID,
+      events: [],
+      related: [],
+      total: 0,
+    });
+    useEntityStore.setState({
+      sourceFilter: "syslog",
+      severityMin: 3,
+      discoveredSourceTypes: ["syslog", "auth"],
+      selectedEntityUuid: UUID,
+    });
+    const NEW_UUID = "22222222-2222-2222-2222-222222222222";
+    await useEntityStore.getState().selectEntity(NEW_UUID);
+    const s = useEntityStore.getState();
+    expect(s.sourceFilter).toBeNull();
+    expect(s.severityMin).toBeNull();
+    expect(s.discoveredSourceTypes).toEqual([]);
+  });
+
+  it("preserves the active range across selectEntity", async () => {
+    mockedGet.mockResolvedValueOnce({
+      entity_uuid: UUID,
+      events: [],
+      related: [],
+      total: 0,
+    });
+    useEntityStore.setState({ range: "7d" });
+    await useEntityStore.getState().selectEntity(UUID);
+    expect(useEntityStore.getState().range).toBe("7d");
+  });
+});
+
+describe("entityStore.clearSelection clears discoveredSourceTypes (S-060.F2)", () => {
+  it("clears discoveredSourceTypes alongside other entity state", () => {
+    useEntityStore.setState({
+      selectedEntityUuid: UUID,
+      discoveredSourceTypes: ["syslog", "auth"],
+    });
+    useEntityStore.getState().clearSelection();
+    expect(useEntityStore.getState().discoveredSourceTypes).toEqual([]);
+  });
+});
+
+describe("entityStore.restoreFromHash does NOT reset filter keys (S-060.F2)", () => {
+  it("applies source/severity from hash without zero-ing them", async () => {
+    mockedGet.mockResolvedValueOnce({
+      entity_uuid: UUID,
+      events: [],
+      related: [],
+      total: 0,
+    });
+    await useEntityStore
+      .getState()
+      .restoreFromHash(`#entity=${UUID}&range=24h&source=syslog&severity=3`);
+    const s = useEntityStore.getState();
+    expect(s.sourceFilter).toBe("syslog");
+    expect(s.severityMin).toBe(3);
+  });
+});
