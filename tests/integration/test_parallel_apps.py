@@ -51,7 +51,14 @@ class TestParallelApps:
         )
 
     async def test_reconfigure_resets_counters(self, backend: SqliteBackend) -> None:
-        """Rebuilding the limiter for a new app clears in-memory counters."""
+        """Rebuilding the limiter for a new app clears in-memory counters — globally.
+
+        The single-tenant contract says the *second* ``configure_limiter`` call
+        wins for subsequent requests against *both* apps, because the storage
+        is rebound on the shared module-level singleton. This test therefore
+        asserts app_a's bucket is also clean after app_b is built — not just
+        that app_b starts fresh.
+        """
         app_a = _build(backend, api_list_rate_limit="2/minute")
         for _ in range(2):
             assert app_a.get("/api/v1/alerts").status_code == 200
@@ -60,6 +67,10 @@ class TestParallelApps:
         app_b = _build(backend, api_list_rate_limit="2/minute")
         assert app_b.get("/api/v1/alerts").status_code == 200, (
             "Fresh app must start with a clean bucket; storage rebind is broken"
+        )
+        assert app_a.get("/api/v1/alerts").status_code == 200, (
+            "app_a's previously-exhausted bucket must also be clear after "
+            "app_b's configure_limiter call rebinds the shared storage"
         )
 
     async def test_reconfigure_to_disabled_actually_disables_enforcement(

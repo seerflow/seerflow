@@ -161,7 +161,10 @@ def configure_limiter(config: SeerflowConfig) -> None:
     the middleware.
 
     Raises :class:`ConfigError` if ``api_rate_limit_redis_url`` is set
-    but the ``redis`` package is not installed.
+    but the ``redis`` package is not installed. Raises
+    :class:`AttributeError` via ``_rebind_limiter_internals`` if slowapi
+    has renamed or removed its private ``_storage`` / ``_limiter``
+    attributes (see that helper's docstring).
     """
     if config.api_rate_limit_redis_url:
         try:
@@ -184,8 +187,8 @@ def configure_limiter(config: SeerflowConfig) -> None:
         storage_uri=storage_uri,
         enabled=config.api_rate_limit_enabled,
     )
-    limiter.enabled = config.api_rate_limit_enabled
     _rebind_limiter_internals(limiter, fresh)
+    limiter.enabled = config.api_rate_limit_enabled
 
     global _current_list_limit, _current_detail_limit, _current_coverage_limit
     _current_list_limit = config.api_list_rate_limit

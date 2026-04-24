@@ -159,9 +159,17 @@ class TestRebindLimiterInternals:
         assert old._storage is new._storage
         assert old._limiter is new._limiter
 
+    @pytest.mark.parametrize("missing_on", ["new", "old"])
     def test_raises_attribute_error_with_loud_log_if_storage_removed(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, missing_on: str
     ) -> None:
+        """Both legs of the ``hasattr`` guard (old + new) must fire loudly.
+
+        Covers the case where slowapi has renamed ``_storage`` on either the
+        singleton being mutated (``old``) or the freshly-constructed instance
+        being copied from (``new``). A partial implementation change in the
+        helper that only checked one side would be caught here.
+        """
         import logging
 
         from slowapi import Limiter
@@ -171,7 +179,10 @@ class TestRebindLimiterInternals:
         old = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
         new = Limiter(key_func=_key_func, storage_uri="memory://", enabled=True)
 
-        del new._storage
+        if missing_on == "new":
+            del new._storage
+        else:
+            del old._storage
 
         with (
             caplog.at_level(logging.ERROR, logger="seerflow.api.limits"),
