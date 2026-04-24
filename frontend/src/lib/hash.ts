@@ -67,3 +67,10 @@ export function hashHasCoverage(hash: string): boolean {
   const trimmed = hash.startsWith("#") ? hash.slice(1) : hash;
   return trimmed === "coverage";
 }
+
+/** S-151: ``#sigma-rules`` selects the Sigma rules management page. */
+export function hashHasSigmaRules(hash: string): boolean {
+  if (!hash) return false;
+  const trimmed = hash.startsWith("#") ? hash.slice(1) : hash;
+  return trimmed === "sigma-rules";
+}

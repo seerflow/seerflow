@@ -4,6 +4,7 @@ import {
   serializeEntityHash,
   navigateToEntity,
   isValidEntityUuid,
+  hashHasSigmaRules,
 } from "./hash";
 
 const UUID = "11111111-2222-3333-4444-555555555555";
@@ -92,5 +93,18 @@ describe("isValidEntityUuid", () => {
     expect(isValidEntityUuid(null)).toBe(false);
     expect(isValidEntityUuid(42)).toBe(false);
     expect(isValidEntityUuid("not-a-uuid")).toBe(false);
+  });
+});
+
+describe("hashHasSigmaRules", () => {
+  it("matches exact #sigma-rules hash", () => {
+    expect(hashHasSigmaRules("#sigma-rules")).toBe(true);
+    expect(hashHasSigmaRules("sigma-rules")).toBe(true);
+  });
+
+  it("rejects empty and unrelated hashes", () => {
+    expect(hashHasSigmaRules("")).toBe(false);
+    expect(hashHasSigmaRules("#coverage")).toBe(false);
+    expect(hashHasSigmaRules("#sigma-rules?extra=1")).toBe(false);
   });
 });

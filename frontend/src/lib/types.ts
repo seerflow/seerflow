@@ -241,3 +241,56 @@ export function isLiveEvent(x: unknown): x is LiveEvent {
     !Object.hasOwn(x, "alert_id")
   );
 }
+
+// ---------------------------------------------------------------------------
+// Sigma rules management (S-151)
+// ---------------------------------------------------------------------------
+
+export type SigmaRuleSource = "bundled" | "custom" | "custom_uploaded";
+export type SigmaValidationStage = "yaml" | "schema" | "compile";
+
+export interface SigmaRuleSummary {
+  rule_id: string;
+  title: string;
+  description: string;
+  severity: number;
+  logsource_key: [string, string, string];
+  attack_tactics: string[];
+  attack_techniques: string[];
+  enabled: boolean;
+  source: SigmaRuleSource;
+  match_count_lifetime: number;
+  last_fired_ns: number | null;
+  alert_count_24h: number;
+}
+
+export interface SigmaRuleDetail extends SigmaRuleSummary {
+  yaml_source: string;
+}
+
+export interface SigmaRuleListResponse {
+  items: SigmaRuleSummary[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface SigmaRuleValidationResult {
+  valid: boolean;
+  rule_id?: string;
+  title?: string;
+  logsource_key?: [string, string, string];
+  stage?: SigmaValidationStage;
+  message?: string;
+  line?: number;
+  column?: number;
+  field?: string;
+}
+
+export interface SigmaRuleFilter {
+  search: string;
+  category: string | null;
+  logsource_product: string | null;
+  enabledOnly: boolean;
+  source: SigmaRuleSource | null;
+}

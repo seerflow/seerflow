@@ -216,3 +216,72 @@ export function validateOrDropItem<T extends v.BaseSchema<unknown, unknown, v.Ba
   warnThrottled(kind, r.issues.map(i => ({ kind: i.kind, type: i.type, path: i.path?.map(p => p.key) })));
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Sigma rules management (S-151)
+// ---------------------------------------------------------------------------
+
+export const SigmaRuleSourceSchema = v.picklist([
+  "bundled",
+  "custom",
+  "custom_uploaded",
+] as const);
+
+const SigmaLogsourceTuple = v.pipe(
+  v.array(v.pipe(v.string(), v.maxLength(64))),
+  v.length(3),
+);
+
+export const SigmaRuleSummarySchema = v.object({
+  rule_id: v.pipe(v.string(), v.maxLength(64)),
+  title: v.pipe(v.string(), v.maxLength(512)),
+  description: v.pipe(v.string(), v.maxLength(8192)),
+  severity: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(24)),
+  logsource_key: SigmaLogsourceTuple,
+  attack_tactics: v.pipe(v.array(v.pipe(v.string(), v.maxLength(64))), v.maxLength(32)),
+  attack_techniques: v.pipe(v.array(v.pipe(v.string(), v.maxLength(64))), v.maxLength(32)),
+  enabled: v.boolean(),
+  source: SigmaRuleSourceSchema,
+  match_count_lifetime: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  last_fired_ns: v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  alert_count_24h: v.pipe(v.number(), v.integer(), v.minValue(0)),
+});
+
+export const SigmaRuleDetailSchema = v.object({
+  ...SigmaRuleSummarySchema.entries,
+  yaml_source: v.pipe(v.string(), v.maxLength(65_536)),
+});
+
+export const SigmaRuleListResponseSchema = v.object({
+  items: v.pipe(v.array(SigmaRuleSummarySchema), v.maxLength(500)),
+  total: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  page: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  limit: v.pipe(v.number(), v.integer(), v.minValue(1)),
+});
+
+export const SigmaRuleValidationStageSchema = v.picklist([
+  "yaml",
+  "schema",
+  "compile",
+] as const);
+
+export const SigmaRuleValidationResultSchema = v.object({
+  valid: v.boolean(),
+  rule_id: v.optional(v.pipe(v.string(), v.maxLength(64))),
+  title: v.optional(v.pipe(v.string(), v.maxLength(512))),
+  logsource_key: v.optional(SigmaLogsourceTuple),
+  stage: v.optional(SigmaRuleValidationStageSchema),
+  message: v.optional(v.pipe(v.string(), v.maxLength(4096))),
+  line: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  column: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  field: v.optional(v.pipe(v.string(), v.maxLength(128))),
+});
+
+export type SigmaRuleSummaryInfer = v.InferOutput<typeof SigmaRuleSummarySchema>;
+export type SigmaRuleDetailInfer = v.InferOutput<typeof SigmaRuleDetailSchema>;
+export type SigmaRuleListResponseInfer = v.InferOutput<
+  typeof SigmaRuleListResponseSchema
+>;
+export type SigmaRuleValidationResultInfer = v.InferOutput<
+  typeof SigmaRuleValidationResultSchema
+>;
