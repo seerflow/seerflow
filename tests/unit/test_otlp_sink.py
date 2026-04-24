@@ -502,6 +502,20 @@ class TestNormalizeGrpcEndpoint:
 
         assert _normalize_grpc_endpoint("localhost:4317") == "localhost:4317"
 
+    def test_strips_uppercase_https(self) -> None:
+        """RFC 3986 §3.1: schemes are case-insensitive."""
+        from seerflow.alerting.sinks.otlp import _normalize_grpc_endpoint
+
+        assert (
+            _normalize_grpc_endpoint("HTTPS://collector.example.com:4317")
+            == "collector.example.com:4317"
+        )
+
+    def test_strips_mixed_case_http(self) -> None:
+        from seerflow.alerting.sinks.otlp import _normalize_grpc_endpoint
+
+        assert _normalize_grpc_endpoint("HtTp://localhost:4317") == "localhost:4317"
+
 
 class TestMaskedUrl:
     def test_http_url_masked(self) -> None:

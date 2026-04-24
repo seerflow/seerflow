@@ -6,6 +6,13 @@ import asyncio
 import contextlib
 import importlib.metadata
 import logging
+
+# ``QueueEmpty``/``QueueFull`` are hoisted to module-level names so that tests
+# which patch ``seerflow.alerting.sinks.otlp.asyncio`` (to mock ``sleep`` in the
+# gRPC/HTTP retry loops) do not accidentally mask the exception classes used in
+# the ``_flush`` / ``enqueue`` except clauses. Sibling sinks (pagerduty,
+# dispatcher, receivers/manager) use the qualified ``asyncio.QueueFull`` form
+# because their tests do not patch ``asyncio`` at all.
 from asyncio import QueueEmpty, QueueFull
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
@@ -165,9 +172,14 @@ def build_export_request(alerts: list[Alert]) -> ExportLogsServiceRequest:
 
 
 def _normalize_grpc_endpoint(endpoint: str) -> str:
-    """Strip http:// or https:// scheme for gRPC channels (they take host:port)."""
+    """Strip http:// or https:// scheme for gRPC channels (they take host:port).
+
+    Case-insensitive per RFC 3986 §3.1 so that uppercase or mixed-case
+    schemes parse identically to the canonical lowercase form.
+    """
+    lowered = endpoint.lower()
     for prefix in ("https://", "http://"):
-        if endpoint.startswith(prefix):
+        if lowered.startswith(prefix):
             return endpoint[len(prefix) :]
     return endpoint
 
@@ -178,6 +190,11 @@ def _resolve_tls(endpoint: str, tls: bool | None) -> bool:
     Explicit ``tls`` wins; otherwise auto-detect from scheme.
     Bare ``host:port`` defaults to plaintext for backward compatibility.
     URL schemes are case-insensitive per RFC 3986 §3.1.
+
+    HTTP callers ignore the resolved value — the aiohttp POST honors whatever
+    scheme the endpoint string carries. Only ``_send_grpc`` consults
+    ``self._use_tls`` to choose between ``secure_channel`` and
+    ``insecure_channel``.
     """
     if tls is not None:
         return tls
@@ -256,7 +273,22 @@ class OtlpSink:
             )
 
     async def run(self) -> None:
-        """Background loop: wait for interval or stop signal, then flush."""
+        """Background loop: wait for interval or stop signal, then flush.
+
+        Two exit paths are covered:
+
+        1. Graceful ``stop()`` — ``_stop_event.wait()`` returns, the in-loop
+           ``_flush()`` drains, the ``while`` condition re-checks
+           ``is_set() is True`` and exits; the ``finally`` ``_flush`` then runs
+           once more as a no-op (queue is already empty).
+        2. ``CancelledError`` during ``_stop_event.wait()`` — the ``while`` body
+           is skipped, the exception propagates to ``finally`` where we drain
+           any alerts enqueued between the last flush and cancellation.
+
+        The redundant no-op flush on the graceful path is intentional: it
+        preserves the "nothing is lost after the last loop iteration"
+        invariant without extra state.
+        """
         try:
             while not self._stop_event.is_set():
                 with contextlib.suppress(TimeoutError):
@@ -266,7 +298,6 @@ class OtlpSink:
                     )
                 await self._flush()
         finally:
-            # Drain any alerts enqueued between last flush and cancellation.
             await self._flush()
 
     async def stop(self) -> None:

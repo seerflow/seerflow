@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import TYPE_CHECKING
 
 import pytest
 from aiohttp import web
+
+if TYPE_CHECKING:
+    import pathlib
 
 from seerflow.alerting.sinks.otlp import OtlpSink
 from seerflow.models.alert import Alert
@@ -103,7 +107,7 @@ class TestOtlpHttpIntegration:
 class TestOtlpTlsConfigPropagation:
     """SEE-191: verify otlp_tls YAML propagates all the way to OtlpSink._use_tls."""
 
-    def test_yaml_otlp_tls_true_propagates_to_sink(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    def test_yaml_otlp_tls_true_propagates_to_sink(self, tmp_path: pathlib.Path) -> None:
         from seerflow.config import load_config
 
         yaml_file = tmp_path / "seerflow.yaml"
@@ -121,7 +125,7 @@ class TestOtlpTlsConfigPropagation:
         )
         assert sink._use_tls is True
 
-    def test_yaml_omitted_otlp_tls_defaults_to_auto_detect(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    def test_yaml_omitted_otlp_tls_defaults_to_auto_detect(self, tmp_path: pathlib.Path) -> None:
         from seerflow.config import load_config
 
         yaml_file = tmp_path / "seerflow.yaml"
