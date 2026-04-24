@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -95,6 +96,9 @@ def _build_ws_manager(
 _SIGMA_FLUSH_INTERVAL_S = 60.0
 
 
+_logger = logging.getLogger(__name__)
+
+
 async def _sigma_flush_loop(engine: SigmaEngine, interval_s: float) -> None:
     """Background task that flushes accumulated match counters periodically.
 
@@ -102,16 +106,13 @@ async def _sigma_flush_loop(engine: SigmaEngine, interval_s: float) -> None:
     exception is logged but does not propagate — the loop is best-effort
     observability, not a correctness invariant.
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
     try:
         while True:
             await asyncio.sleep(interval_s)
             try:
                 await engine.flush_counters()
             except Exception:
-                logger.warning("Sigma counter flush failed", exc_info=True)
+                _logger.warning("Sigma counter flush failed", exc_info=True)
     except asyncio.CancelledError:
         return
 

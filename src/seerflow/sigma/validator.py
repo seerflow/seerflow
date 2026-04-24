@@ -9,6 +9,7 @@ Three failure stages:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import yaml
@@ -17,6 +18,16 @@ from sigma.rule import SigmaRule
 
 from seerflow.sigma.matcher import compile_rule
 from seerflow.sigma.pipeline import seerflow_pipeline
+
+# Anchor (``&``) and alias (``*``) caps. PyYAML's safe loader does not
+# bound alias expansion; a 64 KB body with deeply nested ``*x`` references
+# can still spike CPU/memory before the loader raises. Bundled SigmaHQ
+# rules use 0 anchors in practice; 32 leaves headroom for legitimate
+# operator-authored rules without exposing the loader to billion-laughs.
+_MAX_YAML_ANCHORS = 32
+_MAX_YAML_ALIASES = 32
+_ANCHOR_RE = re.compile(r"&[A-Za-z0-9_-]+")
+_ALIAS_RE = re.compile(r"\*[A-Za-z0-9_-]+")
 
 
 @dataclass(frozen=True)
@@ -28,6 +39,12 @@ class SigmaRuleValidationError(Exception):
     line: int | None = None
     column: int | None = None
     field: str | None = None
+
+    def __post_init__(self) -> None:
+        # Initialise ``Exception.args`` so ``repr(exc)`` and pickling work
+        # — frozen dataclass otherwise leaves ``args=()`` and downstream
+        # error reporters silently lose context.
+        Exception.__init__(self, str(self))
 
     def __str__(self) -> str:
         loc = ""
@@ -45,6 +62,16 @@ def validate_yaml(text: str) -> SigmaRule:
     On success returns the ``SigmaRule`` with the seerflow pipeline applied.
     Caller is responsible for indexing/persistence.
     """
+    if len(_ANCHOR_RE.findall(text)) > _MAX_YAML_ANCHORS:
+        raise SigmaRuleValidationError(
+            stage="yaml",
+            message=f"too many YAML anchors (max {_MAX_YAML_ANCHORS})",
+        )
+    if len(_ALIAS_RE.findall(text)) > _MAX_YAML_ALIASES:
+        raise SigmaRuleValidationError(
+            stage="yaml",
+            message=f"too many YAML aliases (max {_MAX_YAML_ALIASES})",
+        )
     try:
         yaml.safe_load(text)
     except yaml.YAMLError as exc:

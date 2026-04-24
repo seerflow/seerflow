@@ -9,8 +9,15 @@ import { Badge } from "@/components/ui/badge";
 import { MonacoYamlEditor } from "./MonacoYamlEditor";
 import { severityLabel } from "./severity";
 
-function attackUrl(technique: string): string {
-  // T1059.001 -> T1059/001 (MITRE URL convention)
+// MITRE technique IDs follow T#### or T####.### (sub-technique). Reject
+// anything else to prevent ``javascript:`` URI injection through the
+// ``href`` attribute — the rule YAML upload path is operator-trusted but
+// not human-vetted before render. Returns ``null`` for invalid inputs so
+// the component renders a non-clickable label instead.
+const TECHNIQUE_RE = /^[Tt]\d{4}(\.\d{3})?$/;
+
+function attackUrl(technique: string): string | null {
+  if (!TECHNIQUE_RE.test(technique)) return null;
   const id = technique.toUpperCase().replace(".", "/");
   return `https://attack.mitre.org/techniques/${id}/`;
 }
@@ -103,17 +110,24 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
 
       {rule.attack_techniques.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-1">
-          {rule.attack_techniques.map((t) => (
-            <a
-              key={t}
-              className="text-xs underline"
-              href={attackUrl(t)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t.toUpperCase()}
-            </a>
-          ))}
+          {rule.attack_techniques.map((t) => {
+            const url = attackUrl(t);
+            return url ? (
+              <a
+                key={t}
+                className="text-xs underline"
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t.toUpperCase()}
+              </a>
+            ) : (
+              <span key={t} className="text-xs text-muted-foreground">
+                {t.toUpperCase()}
+              </span>
+            );
+          })}
         </div>
       )}
 

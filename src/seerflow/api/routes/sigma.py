@@ -37,7 +37,8 @@ from seerflow.api.schemas import (
 )
 from seerflow.models.query import AlertQuery, TimeRange
 from seerflow.sigma.engine import SigmaRuleCollisionError
-from seerflow.sigma.validator import SigmaRuleValidationError
+from seerflow.sigma.ids import compute_rule_id
+from seerflow.sigma.validator import SigmaRuleValidationError, validate_yaml
 
 if TYPE_CHECKING:
     from seerflow.sigma.engine import SigmaEngine
@@ -50,6 +51,11 @@ Engines = Annotated[DetectionEngines, Depends(get_engines)]
 # 24h alert-count window scan ceiling. Mirrors attack/coverage: a single
 # bounded scan beats N per-rule round-trips; AlertStore enforces 10000 cap.
 _ALERT_SCAN_LIMIT = 10_000
+
+# Operator upload ceiling. 5 uploads/min for a year is ~2.5M rules; the
+# bundled set is ~60. 1000 leaves ample room for legitimate growth and
+# bounds disk fill if rate-limit is bypassed.
+_MAX_CUSTOM_UPLOADS = 1000
 
 
 def _require_engine(engines: DetectionEngines) -> SigmaEngine:
@@ -86,13 +92,12 @@ def _matches_filters(
     source: str | None,
     search: str | None,
 ) -> bool:
-    ls_key = rule["logsource_key"]
-    assert isinstance(ls_key, list)
-    if category and ls_key[0] != category:
+    ls_key = cast("list[str]", rule["logsource_key"])
+    if category and (not ls_key or ls_key[0] != category):
         return False
     if severity is not None and rule["severity"] != severity:
         return False
-    if logsource_product and ls_key[1] != logsource_product:
+    if logsource_product and (len(ls_key) < 2 or ls_key[1] != logsource_product):
         return False
     if enabled is not None and rule["enabled"] != enabled:
         return False
@@ -253,15 +258,32 @@ async def upload_rule(
     if upload_dir is None:
         raise HTTPException(status_code=422, detail="sigma_custom_upload_dir not configured")
 
+    # Disk-fill cap: count current ``custom_uploaded`` rules before
+    # accepting the new one. The bundled set is excluded so legitimate
+    # operators are not blocked by the cap.
+    uploaded_count = sum(1 for r in engine.list_rules() if r["source"] == "custom_uploaded")
+    if uploaded_count >= _MAX_CUSTOM_UPLOADS:
+        raise HTTPException(
+            status_code=507,
+            detail=f"upload limit reached ({_MAX_CUSTOM_UPLOADS} custom rules)",
+        )
+
+    # Validate once and pass the parsed rule through to ``add_rule`` so the
+    # pipeline + compile chain runs a single time per upload.
     try:
-        meta = engine.validate_rule(body.yaml)
+        rule_obj = validate_yaml(body.yaml)
     except SigmaRuleValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    rid = str(meta["rule_id"])
+    rid = compute_rule_id(rule_obj)
     persist_path = upload_dir / f"{rid}.yml"
     try:
-        engine.add_rule(body.yaml, persist_path, source_kind="custom_uploaded")
+        engine.add_rule(
+            body.yaml,
+            persist_path,
+            source_kind="custom_uploaded",
+            prevalidated_rule=rule_obj,
+        )
     except SigmaRuleCollisionError as exc:
         return JSONResponse(
             status_code=409,
@@ -272,6 +294,11 @@ async def upload_rule(
                 "existing_source": exc.existing_source,
             },
         )
+    except OSError as exc:
+        raise HTTPException(
+            status_code=507,
+            detail=f"failed to persist rule: {exc.strerror or exc}",
+        ) from exc
 
     rule = next(r for r in engine.list_rules() if r["rule_id"] == rid)
     counts_24h = await _alert_counts_24h(storage)

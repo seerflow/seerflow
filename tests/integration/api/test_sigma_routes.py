@@ -195,6 +195,51 @@ def test_no_engine_returns_503(backend: SqliteBackend) -> None:
         assert resp.status_code == 503
 
 
+def test_alert_count_24h_populated_when_alerts_exist(
+    app_with_sigma,  # type: ignore[no-untyped-def]
+    backend: SqliteBackend,
+    engine_with_one_rule: SigmaEngine,
+) -> None:
+    """S-151 review: ``alert_count_24h`` must be > 0 after firing the rule.
+
+    Catches the title↔rule_name key mismatch raised by code review: if
+    ``Alert.rule_name`` and ``rule['title']`` ever drift, the count silently
+    returns 0. Round-trip through real ``evaluate`` + AlertStore.
+    """
+    import asyncio
+
+    from tests.helpers import make_event
+
+    event = make_event(
+        message="contains s151-route-token here",
+        log_source_product="linux",
+        log_source_category="process_creation",
+    )
+    alerts = engine_with_one_rule.evaluate(event)
+    assert len(alerts) == 1, "rule should match the test event"
+    asyncio.run(backend.write_alert(alerts[0]))
+
+    with TestClient(app_with_sigma) as client:
+        body = client.get("/api/v1/sigma/rules").json()
+        target = body["items"][0]
+        assert target["alert_count_24h"] == 1, (
+            f"alert_count_24h should reflect persisted alerts; got {target}"
+        )
+
+
+def test_yaml_anchor_bomb_rejected(app_with_sigma) -> None:  # type: ignore[no-untyped-def]
+    """Hostile payload with >32 anchors fails fast in the validator."""
+    payload = "title: T\n" + "\n".join(f"k{i}: &a{i} x" for i in range(40))
+    with TestClient(app_with_sigma) as client:
+        resp = client.post(
+            "/api/v1/sigma/rules?dry_run=true", json={"yaml": payload}
+        )
+        body = resp.json()
+        assert body["valid"] is False
+        assert body["stage"] == "yaml"
+        assert "anchors" in body["message"]
+
+
 def test_disabled_state_persists_across_app_restart(
     backend: SqliteBackend,
     upload_dir: Path,

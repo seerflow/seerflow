@@ -73,6 +73,12 @@ class SigmaRuleCollisionError(Exception):
     rule_id: str
     existing_source: str
 
+    def __post_init__(self) -> None:
+        # Initialise ``Exception.args`` so ``repr(exc)`` and pickling work
+        # — frozen dataclass otherwise leaves ``args=()`` and downstream
+        # error reporters silently lose context.
+        Exception.__init__(self, str(self))
+
     def __str__(self) -> str:
         return f"rule_id {self.rule_id} already loaded (source={self.existing_source})"
 
@@ -205,8 +211,14 @@ class SigmaEngine:
                 continue
             try:
                 if match_event(compiled, event_dict):
-                    self._match_counts[compiled.rule_id] += 1
-                    self._last_fired_ns[compiled.rule_id] = event.timestamp_ns
+                    # Counter writes serialised against ``flush_counters``
+                    # / ``list_rules`` snapshots taken under the same lock.
+                    # The lock is held only across two dict assignments so the
+                    # hot path stays effectively contention-free against the
+                    # rare flush/list reader.
+                    with self._mutation_lock:
+                        self._match_counts[compiled.rule_id] += 1
+                        self._last_fired_ns[compiled.rule_id] = event.timestamp_ns
                     alerts.append(_create_sigma_alert(compiled, event))
             except Exception:
                 logger.warning(
@@ -259,6 +271,13 @@ class SigmaEngine:
         """Return a snapshot of every loaded rule with stats + flags."""
         out: list[dict[str, object]] = []
         disabled = self._disabled_rule_ids
+        # Snapshot counter dicts under the lock so a concurrent ``evaluate``
+        # writer can't trigger a "dictionary changed size during iteration"
+        # error mid-list. ``Counter.get`` is used (rather than ``[]``) to
+        # avoid the default-insert side effect on missing keys.
+        with self._mutation_lock:
+            counts_snap = dict(self._match_counts)
+            fired_snap = dict(self._last_fired_ns)
         for rule in self.iter_compiled_rules():
             out.append(
                 {
@@ -272,8 +291,8 @@ class SigmaEngine:
                     "enabled": rule.rule_id not in disabled,
                     "source": self._source_kind.get(rule.rule_id, "bundled"),
                     "yaml_source": self._yaml_source.get(rule.rule_id, ""),
-                    "match_count_lifetime": int(self._match_counts[rule.rule_id]),
-                    "last_fired_ns": self._last_fired_ns.get(rule.rule_id),
+                    "match_count_lifetime": int(counts_snap.get(rule.rule_id, 0)),
+                    "last_fired_ns": fired_snap.get(rule.rule_id),
                 }
             )
         return out
@@ -301,26 +320,52 @@ class SigmaEngine:
         persist_path: Path,
         *,
         source_kind: str = "custom_uploaded",
+        prevalidated_rule: SigmaRule | None = None,
     ) -> str:
         """Validate, persist, index, and return the new ``rule_id``.
 
         Raises :class:`SigmaRuleValidationError` (no persistence) on bad YAML.
         Raises :class:`SigmaRuleCollisionError` (no persistence) if the
         derived ``rule_id`` is already loaded — first-loaded wins.
+        Re-raises :class:`OSError` (no in-memory mutation) if the disk write
+        fails so callers can surface it as 5xx.
+
+        ``prevalidated_rule`` lets callers skip the redundant
+        ``validate_yaml`` round-trip when they have already validated the
+        same YAML (e.g. the upload route's two-stage flow).
         """
-        rule = validate_yaml(yaml_text)
+        rule = prevalidated_rule if prevalidated_rule is not None else validate_yaml(yaml_text)
         rid = compute_rule_id(rule)
 
+        # Fail-fast collision check under the lock so we don't write a file
+        # that we'll immediately reject. The check is repeated after the
+        # write to close the TOCTOU window — see below.
         with self._mutation_lock:
             if rid in self._yaml_source:
                 raise SigmaRuleCollisionError(
                     rule_id=rid,
                     existing_source=self._source_kind.get(rid, "bundled"),
                 )
-            persist_path.parent.mkdir(parents=True, exist_ok=True)
-            persist_path.write_text(yaml_text)
 
-            compiled = compile_rule(rule)
+        # Write OUTSIDE the lock — slow filesystems (NFS, full disk) must not
+        # block ``set_enabled`` callers on the event loop. OSError propagates
+        # to the caller (route handler) which maps it to a 5xx response.
+        persist_path.parent.mkdir(parents=True, exist_ok=True)
+        persist_path.write_text(yaml_text)
+
+        compiled = compile_rule(rule)
+        with self._mutation_lock:
+            # Re-check collision: another writer could have raced between
+            # the first check and now. If so, clean up the orphan file.
+            if rid in self._yaml_source:
+                try:
+                    persist_path.unlink()
+                except OSError:  # pragma: no cover - cleanup best-effort
+                    logger.warning("Failed to clean up orphan upload at %s", persist_path)
+                raise SigmaRuleCollisionError(
+                    rule_id=rid,
+                    existing_source=self._source_kind.get(rid, "bundled"),
+                )
             new_index = {k: list(v) for k, v in self._index.items()}
             new_index.setdefault(compiled.logsource_key, []).append(compiled)
             self._index = new_index
@@ -337,25 +382,31 @@ class SigmaEngine:
         disabled = {sid for sid, s in states.items() if not s.enabled}
         with self._mutation_lock:
             self._disabled_rule_ids = frozenset(disabled)
-        for rid, s in states.items():
-            self._match_counts[rid] = s.match_count_lifetime
-            if s.last_fired_ns is not None:
-                self._last_fired_ns[rid] = s.last_fired_ns
+            for rid, s in states.items():
+                self._match_counts[rid] = s.match_count_lifetime
+                if s.last_fired_ns is not None:
+                    self._last_fired_ns[rid] = s.last_fired_ns
 
     async def flush_counters(self) -> None:
         """Persist accumulated match counters to the state store and reset.
 
         No-op when no state store is attached or counters are empty.
+        Snapshot + reset are atomic under the mutation lock so concurrent
+        ``evaluate`` writes can't be silently dropped.
         """
-        if self._state_store is None or not self._match_counts:
+        if self._state_store is None:
             return
+        with self._mutation_lock:
+            if not self._match_counts:
+                return
+            counts_snap = self._match_counts
+            fired_snap = dict(self._last_fired_ns)
+            self._match_counts = Counter()
         deltas: dict[str, tuple[int, int]] = {
-            rid: (n, self._last_fired_ns.get(rid, 0))
-            for rid, n in self._match_counts.items()
-            if n > 0
+            rid: (n, fired_snap.get(rid, 0)) for rid, n in counts_snap.items() if n > 0
         }
-        await self._state_store.increment_counts(deltas)
-        self._match_counts.clear()
+        if deltas:
+            await self._state_store.increment_counts(deltas)
 
 
 def _create_sigma_alert(compiled: CompiledRule, event: SeerflowEvent) -> Alert:
