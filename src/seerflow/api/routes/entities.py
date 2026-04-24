@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 import uuid as _uuid_mod
-from typing import TYPE_CHECKING, Annotated
+from collections.abc import Sequence  # noqa: TC003 — runtime use in _bucket_alerts signature
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Final
 
 import msgspec
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -28,7 +31,9 @@ from seerflow.api.schemas import (
     EntitySearchResult,
     EntityTimelineResponse,
     EventResponse,
+    RiskBucketResponse,
 )
+from seerflow.models.alert import Alert  # noqa: TC001 — runtime use in _bucket_alerts signature
 from seerflow.models.entity import (
     generate_domain_id,
     generate_host_id,
@@ -70,6 +75,65 @@ def _uuid_for_domain(value: str) -> str:
 
 DEFAULT_TIMELINE_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000  # 24h
 _MAX_TIMESTAMP_NS = 2**63 - 1  # SQLite int64 ceiling (~year 2262)
+
+_ALERT_QUERY_LIMIT: Final[int] = 10_000  # S-060.F1: per-request alert scan ceiling.
+
+
+def _bucket_alerts(
+    alerts: Sequence[Alert],
+    *,
+    now_ns: int,
+    range_ns: int,
+    res_ns: int,
+) -> list[RiskBucketResponse]:
+    """Bucket ``alerts`` into zero-filled RiskBucket entries over ``[now-range, now)``.
+
+    Buckets are half-open ``[bucket_start_ns, bucket_start_ns + res_ns)``.
+    An alert with ``timestamp_ns % res_ns == 0`` lands in the *later* bucket.
+    Empty buckets appear with ``points=0.0``, ``alert_count=0``, ``top_rule_name=""``.
+    ``top_rule_name`` is the rule name of the max-``risk_score`` alert in the
+    bucket; ties break by earliest ``timestamp_ns``.
+    """
+    start_ns = now_ns - range_ns
+    first_bucket = (start_ns // res_ns) * res_ns
+    bucket_count = math.ceil((now_ns - first_bucket) / res_ns)
+
+    @dataclass(slots=True)
+    class _Acc:
+        points: float = 0.0
+        alert_count: int = 0
+        max_score: float = -1.0
+        max_ts_ns: int = 0
+        top_rule_name: str = ""
+
+    buckets: dict[int, _Acc] = {}
+    for a in alerts:
+        key = (a.timestamp_ns // res_ns) * res_ns
+        acc = buckets.setdefault(key, _Acc())
+        acc.points += a.risk_score
+        acc.alert_count += 1
+        if (
+            acc.max_score < 0
+            or a.risk_score > acc.max_score
+            or (a.risk_score == acc.max_score and a.timestamp_ns < acc.max_ts_ns)
+        ):
+            acc.max_score = a.risk_score
+            acc.max_ts_ns = a.timestamp_ns
+            acc.top_rule_name = a.rule_name or ""
+
+    items: list[RiskBucketResponse] = []
+    for i in range(bucket_count):
+        b = first_bucket + i * res_ns
+        got = buckets.get(b)
+        items.append(
+            RiskBucketResponse(
+                bucket_start_ns=b,
+                points=got.points if got else 0.0,
+                alert_count=got.alert_count if got else 0,
+                top_rule_name=got.top_rule_name if got else "",
+            )
+        )
+    return items
 
 
 def _coerce_time_range(start_ns: int | None, end_ns: int | None) -> TimeRange:
