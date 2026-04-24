@@ -447,7 +447,11 @@ async def run_query_health(args: argparse.Namespace) -> None:
         ensemble = DetectionEnsemble(config.detection)
         await ensemble.load_all_state(storage)
         health = ensemble.get_health()
-    finally:
+    except Exception as exc:  # noqa: BLE001 — storage backend raises unknown types at CLI boundary
+        await storage.close()
+        print(f"Error loading ensemble state: {exc}", file=sys.stderr)
+        sys.exit(1)
+    else:
         await storage.close()
 
     if args.json:
