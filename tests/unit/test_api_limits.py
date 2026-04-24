@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from unittest.mock import MagicMock
 
@@ -141,3 +142,54 @@ class TestLimitClosures:
         defaults = SeerflowConfig()
         assert list_limit_fn() == defaults.api_list_rate_limit
         assert detail_limit() == defaults.api_detail_rate_limit
+
+
+class TestRebindLimiterInternals:
+    """S-185: the single helper that touches slowapi private attributes."""
+
+    def test_swaps_storage_and_limiter_references(self) -> None:
+        from slowapi import Limiter
+
+        from seerflow.api.limits import _rebind_limiter_internals
+
+        old = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
+        new = Limiter(key_func=_key_func, storage_uri="memory://", enabled=True)
+
+        _rebind_limiter_internals(old, new)
+
+        assert old._storage is new._storage
+        assert old._limiter is new._limiter
+
+    @pytest.mark.parametrize("missing_on", ["new", "old"])
+    def test_raises_attribute_error_with_loud_log_if_storage_removed(
+        self, caplog: pytest.LogCaptureFixture, missing_on: str
+    ) -> None:
+        """Both legs of the ``hasattr`` guard (old + new) must fire loudly.
+
+        Covers the case where slowapi has renamed ``_storage`` on either the
+        singleton being mutated (``old``) or the freshly-constructed instance
+        being copied from (``new``). A partial implementation change in the
+        helper that only checked one side would be caught here.
+        """
+        from slowapi import Limiter
+
+        from seerflow.api.limits import _rebind_limiter_internals
+
+        old = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
+        new = Limiter(key_func=_key_func, storage_uri="memory://", enabled=True)
+
+        if missing_on == "new":
+            del new._storage
+        else:
+            del old._storage
+
+        with (
+            caplog.at_level(logging.ERROR, logger="seerflow.api.limits"),
+            pytest.raises(AttributeError, match="_storage"),
+        ):
+            _rebind_limiter_internals(old, new)
+
+        assert any(
+            "slowapi.Limiter is missing private attribute" in record.message
+            for record in caplog.records
+        )

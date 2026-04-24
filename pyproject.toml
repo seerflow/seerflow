@@ -41,7 +41,7 @@ dependencies = [
     "pysigma>=1.2.0",
     "pyyaml>=6.0.3",
     "river>=0.23.0",
-    "slowapi>=0.1.9",
+    "slowapi>=0.1.9,<0.2.0",
     "uvloop>=0.22.1; sys_platform != 'win32'",
     "watchfiles>=1.1.1",
 ]
