@@ -291,6 +291,7 @@ export interface SigmaRuleFilter {
   search: string;
   category: string | null;
   logsource_product: string | null;
+  severity: number | null;
   enabledOnly: boolean;
   source: SigmaRuleSource | null;
 }

@@ -20,6 +20,7 @@ const INITIAL_FILTER: SigmaRuleFilter = {
   search: "",
   category: null,
   logsource_product: null,
+  severity: null,
   enabledOnly: false,
   source: null,
 };
@@ -42,6 +43,7 @@ function buildListParams(f: SigmaRuleFilter): ListParams {
     search: f.search || undefined,
     category: f.category || undefined,
     logsource_product: f.logsource_product || undefined,
+    severity: f.severity ?? undefined,
     enabled: f.enabledOnly ? true : undefined,
     source: f.source || undefined,
   };

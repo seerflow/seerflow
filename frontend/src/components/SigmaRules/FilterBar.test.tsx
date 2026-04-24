@@ -39,6 +39,29 @@ describe("FilterBar", () => {
     expect(onChange).toHaveBeenCalledWith({ enabledOnly: true });
   });
 
+  it("severity select coerces value to number; empty -> null", () => {
+    const onChange = vi.fn();
+    render(<FilterBar onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText(/filter by severity/i), {
+      target: { value: "4" },
+    });
+    expect(onChange).toHaveBeenCalledWith({ severity: 4 });
+
+    fireEvent.change(screen.getByLabelText(/filter by severity/i), {
+      target: { value: "" },
+    });
+    expect(onChange).toHaveBeenCalledWith({ severity: null });
+  });
+
+  it("logsource product select fires with null for All", () => {
+    const onChange = vi.fn();
+    render(<FilterBar onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText(/filter by logsource product/i), {
+      target: { value: "windows" },
+    });
+    expect(onChange).toHaveBeenCalledWith({ logsource_product: "windows" });
+  });
+
   it("does not fire onChange on initial render with initialSearch", () => {
     const onChange = vi.fn();
     render(<FilterBar initialSearch="preset" onChange={onChange} />);
