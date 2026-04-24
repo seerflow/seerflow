@@ -619,6 +619,51 @@ class TestOtlpSinkGrpcGenericException:
             mock_log.exception.assert_called_once()
 
 
+class TestOtlpSinkFastShutdown:
+    @pytest.mark.asyncio
+    async def test_stop_exits_within_one_second_even_with_long_interval(self) -> None:
+        import time
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", export_interval=60)
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+
+        run_task = asyncio.create_task(sink.run())
+        await asyncio.sleep(0.05)
+
+        start = time.monotonic()
+        await sink.stop()
+        await asyncio.wait_for(run_task, timeout=2.0)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0, f"stop() took {elapsed:.3f}s; should be < 1s"
+
+    @pytest.mark.asyncio
+    async def test_stop_is_idempotent(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", export_interval=60)
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+
+        await sink.stop()
+        await sink.stop()
+        assert sink._stop_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_final_flush_runs_even_if_stop_set_before_run(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", export_interval=60)
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+        sink.enqueue(_make_alert())
+
+        await sink.stop()
+        await asyncio.wait_for(sink.run(), timeout=2.0)
+
+        sink._send_grpc.assert_called_once()  # type: ignore[attr-defined]
+
+
 class TestOtlpSinkGrpcTls:
     @pytest.mark.asyncio
     async def test_grpc_uses_secure_channel_when_tls_true(self) -> None:

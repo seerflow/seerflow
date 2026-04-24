@@ -232,7 +232,7 @@ class OtlpSink:
         self._max_pending = max_pending
         self._use_tls = _resolve_tls(endpoint, tls)
         self._pending: list[Alert] = []
-        self._running = True
+        self._stop_event: asyncio.Event = asyncio.Event()
         self._grpc_channel: grpc.aio.Channel | None = None
         self._http_session: aiohttp.ClientSession | None = None
         if tls is False and endpoint.startswith("https://"):
@@ -250,16 +250,24 @@ class OtlpSink:
         self._pending.append(alert)
 
     async def run(self) -> None:
-        """Background loop: sleep for interval, then flush pending batch."""
-        while self._running:
-            await asyncio.sleep(self._export_interval)
+        """Background loop: wait for interval or stop signal, then flush."""
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(),
+                        timeout=self._export_interval,
+                    )
+                except TimeoutError:
+                    pass
+                await self._flush()
+        finally:
+            # Drain any alerts enqueued between last flush and cancellation.
             await self._flush()
-        # Final flush on shutdown
-        await self._flush()
 
     async def stop(self) -> None:
-        """Signal the sink to stop. run() will flush and exit."""
-        self._running = False
+        """Signal the sink to stop. ``run()`` will flush and exit."""
+        self._stop_event.set()
 
     async def close(self) -> None:
         """Close transport resources."""
