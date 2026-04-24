@@ -233,7 +233,7 @@ class TestOtlpSinkEnqueue:
         sink = OtlpSink(endpoint="localhost:4317", protocol="grpc", export_interval=5)
         alert = _make_alert()
         sink.enqueue(alert)
-        assert len(sink._pending) == 1
+        assert sink._pending.qsize() == 1
 
     @pytest.mark.asyncio
     async def test_enqueue_drops_when_at_max(self) -> None:
@@ -242,7 +242,7 @@ class TestOtlpSinkEnqueue:
         sink = OtlpSink(endpoint="localhost:4317", protocol="grpc", max_pending=1)
         sink.enqueue(_make_alert())
         sink.enqueue(_make_alert())  # should drop
-        assert len(sink._pending) == 1
+        assert sink._pending.qsize() == 1
 
     @pytest.mark.asyncio
     async def test_enqueue_logs_warning_when_full(self) -> None:
@@ -268,7 +268,7 @@ class TestOtlpSinkBatching:
         sink._send_grpc.assert_called_once()  # type: ignore[union-attr]
         req = sink._send_grpc.call_args[0][0]  # type: ignore[union-attr]
         assert len(req.resource_logs[0].scope_logs[0].log_records) == 3
-        assert len(sink._pending) == 0
+        assert sink._pending.empty()
 
     @pytest.mark.asyncio
     async def test_flush_noop_when_empty(self) -> None:
@@ -617,6 +617,66 @@ class TestOtlpSinkGrpcGenericException:
             sink.enqueue(_make_alert())
             await sink._flush()
             mock_log.exception.assert_called_once()
+
+
+class TestOtlpSinkConcurrentEnqueue:
+    @pytest.mark.asyncio
+    async def test_high_volume_sync_enqueue(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", max_pending=2000)
+        for _ in range(1000):
+            sink.enqueue(_make_alert())
+        assert sink._pending.qsize() == 1000
+
+    @pytest.mark.asyncio
+    async def test_queue_full_drops_and_warns(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", max_pending=1)
+        sink.enqueue(_make_alert())
+        with patch("seerflow.alerting.sinks.otlp._log") as mock_log:
+            sink.enqueue(_make_alert())
+            mock_log.warning.assert_called_once()
+        assert sink._pending.qsize() == 1
+
+    @pytest.mark.asyncio
+    async def test_threadsafe_enqueue_via_call_soon_threadsafe(self) -> None:
+        import threading
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        loop = asyncio.get_running_loop()
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", max_pending=500)
+
+        done = threading.Event()
+
+        def worker() -> None:
+            for _ in range(100):
+                loop.call_soon_threadsafe(sink.enqueue, _make_alert())
+            done.set()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        await asyncio.to_thread(done.wait)
+        for _ in range(5):
+            await asyncio.sleep(0)
+        t.join(timeout=2.0)
+        assert sink._pending.qsize() == 100
+
+    @pytest.mark.asyncio
+    async def test_flush_drains_queue(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc")
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+        for i in range(3):
+            sink.enqueue(_make_alert(rule_name=f"rule-{i}"))
+        await sink._flush()
+        assert sink._pending.empty()
+        sink._send_grpc.assert_called_once()  # type: ignore[attr-defined]
+        req = sink._send_grpc.call_args[0][0]  # type: ignore[attr-defined]
+        assert len(req.resource_logs[0].scope_logs[0].log_records) == 3
 
 
 class TestOtlpSinkFastShutdown:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import logging
+from asyncio import QueueEmpty, QueueFull
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
@@ -231,7 +232,7 @@ class OtlpSink:
         self._export_interval = export_interval
         self._max_pending = max_pending
         self._use_tls = _resolve_tls(endpoint, tls)
-        self._pending: list[Alert] = []
+        self._pending: asyncio.Queue[Alert] = asyncio.Queue(maxsize=max_pending)
         self._stop_event: asyncio.Event = asyncio.Event()
         self._grpc_channel: grpc.aio.Channel | None = None
         self._http_session: aiohttp.ClientSession | None = None
@@ -243,11 +244,13 @@ class OtlpSink:
             )
 
     def enqueue(self, alert: Alert) -> None:
-        """Add an alert to the pending batch. Drops with warning if at max."""
-        if len(self._pending) >= self._max_pending:
-            _log.warning("OTLP sink pending list full — dropping alert %s", alert.alert_id)
-            return
-        self._pending.append(alert)
+        """Add an alert to the pending queue. Drops with warning if full."""
+        try:
+            self._pending.put_nowait(alert)
+        except QueueFull:
+            _log.warning(
+                "OTLP sink pending queue full — dropping alert %s", alert.alert_id,
+            )
 
     async def run(self) -> None:
         """Background loop: wait for interval or stop signal, then flush."""
@@ -279,11 +282,15 @@ class OtlpSink:
             self._http_session = None
 
     async def _flush(self) -> None:
-        """Swap out the pending list and send as a single batch."""
-        if not self._pending:
+        """Drain the pending queue and send as a single batch."""
+        batch: list[Alert] = []
+        while True:
+            try:
+                batch.append(self._pending.get_nowait())
+            except QueueEmpty:
+                break
+        if not batch:
             return
-        batch = self._pending
-        self._pending = []
         batch_size = len(batch)
         try:
             request = build_export_request(batch)
