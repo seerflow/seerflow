@@ -831,7 +831,9 @@ class TestOtlpSinkTlsInit:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
         sink = OtlpSink(
-            endpoint="https://host:4317", protocol="grpc", tls=True,
+            endpoint="https://host:4317",
+            protocol="grpc",
+            tls=True,
         )
         assert sink._use_tls is True
 
@@ -847,9 +849,7 @@ class TestOtlpSinkTlsInit:
         sink = OtlpSink(endpoint="host:4317", protocol="grpc")
         assert sink._use_tls is False
 
-    def test_init_warns_on_https_with_tls_false(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_init_warns_on_https_with_tls_false(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 
         from seerflow.alerting.sinks.otlp import OtlpSink
@@ -857,9 +857,7 @@ class TestOtlpSinkTlsInit:
         with caplog.at_level(logging.WARNING, logger="seerflow"):
             OtlpSink(endpoint="https://host:4317", protocol="grpc", tls=False)
         messages = [rec.message for rec in caplog.records]
-        assert any(
-            "mismatch" in m.lower() or "otlp_tls=false" in m.lower() for m in messages
-        )
+        assert any("mismatch" in m.lower() or "otlp_tls=false" in m.lower() for m in messages)
         assert not any("https://host:4317" in m for m in messages)
 
 

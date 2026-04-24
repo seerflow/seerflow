@@ -767,7 +767,7 @@ def _validate_otlp_settings(
         raise ConfigError(
             f"alerting.otlp_export_interval_seconds must be an integer >= 1, got {interval!r}"
         )
-    tls_raw = data.get("otlp_tls", None)
+    tls_raw = data.get("otlp_tls")
     if tls_raw is not None and not isinstance(tls_raw, bool):
         raise ConfigError(
             f"alerting.otlp_tls must be a boolean or null, got {type(tls_raw).__name__}"

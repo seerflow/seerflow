@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.metadata
 import logging
 from asyncio import QueueEmpty, QueueFull
@@ -249,20 +250,19 @@ class OtlpSink:
             self._pending.put_nowait(alert)
         except QueueFull:
             _log.warning(
-                "OTLP sink pending queue full — dropping alert %s", alert.alert_id,
+                "OTLP sink pending queue full — dropping alert %s",
+                alert.alert_id,
             )
 
     async def run(self) -> None:
         """Background loop: wait for interval or stop signal, then flush."""
         try:
             while not self._stop_event.is_set():
-                try:
+                with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(
                         self._stop_event.wait(),
                         timeout=self._export_interval,
                     )
-                except TimeoutError:
-                    pass
                 await self._flush()
         finally:
             # Drain any alerts enqueued between last flush and cancellation.
