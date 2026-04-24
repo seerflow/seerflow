@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from seerflow.sigma.engine import SigmaEngine, SigmaRuleCollisionError
 from seerflow.sigma.validator import SigmaRuleValidationError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _NEW_YAML = """
 title: New Rule S151 Add

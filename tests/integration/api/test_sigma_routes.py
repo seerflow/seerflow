@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,6 +12,8 @@ from seerflow.config import DetectionConfig, SeerflowConfig
 from seerflow.sigma.engine import SigmaEngine
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from seerflow.storage.sqlite import SqliteBackend
 
 
@@ -61,9 +62,7 @@ def app_with_sigma(
     engine_with_one_rule: SigmaEngine,
     upload_dir: Path,
 ):
-    cfg = SeerflowConfig(
-        detection=DetectionConfig(sigma_custom_upload_dir=str(upload_dir))
-    )
+    cfg = SeerflowConfig(detection=DetectionConfig(sigma_custom_upload_dir=str(upload_dir)))
     return create_api_app(
         log_store=backend,
         alert_store=backend,
@@ -137,9 +136,7 @@ def test_patch_unknown_rule_returns_404(app_with_sigma) -> None:  # type: ignore
 
 def test_dry_run_validate_valid(app_with_sigma) -> None:  # type: ignore[no-untyped-def]
     with TestClient(app_with_sigma) as client:
-        resp = client.post(
-            "/api/v1/sigma/rules?dry_run=true", json={"yaml": _NEW_UPLOAD_YAML}
-        )
+        resp = client.post("/api/v1/sigma/rules?dry_run=true", json={"yaml": _NEW_UPLOAD_YAML})
         assert resp.status_code == 200
         body = resp.json()
         assert body["valid"] is True
@@ -148,9 +145,7 @@ def test_dry_run_validate_valid(app_with_sigma) -> None:  # type: ignore[no-unty
 
 def test_dry_run_invalid_returns_stage(app_with_sigma) -> None:  # type: ignore[no-untyped-def]
     with TestClient(app_with_sigma) as client:
-        resp = client.post(
-            "/api/v1/sigma/rules?dry_run=true", json={"yaml": "title: x\n  bad: ["}
-        )
+        resp = client.post("/api/v1/sigma/rules?dry_run=true", json={"yaml": "title: x\n  bad: ["})
         assert resp.status_code == 200
         body = resp.json()
         assert body["valid"] is False
@@ -187,9 +182,7 @@ def test_post_invalid_yaml_returns_422(app_with_sigma) -> None:  # type: ignore[
 def test_post_no_upload_dir_returns_422(backend: SqliteBackend) -> None:
     cfg = SeerflowConfig(detection=DetectionConfig(sigma_custom_upload_dir=None))
     engine = SigmaEngine()
-    app = create_api_app(
-        log_store=backend, alert_store=backend, config=cfg, sigma_engine=engine
-    )
+    app = create_api_app(log_store=backend, alert_store=backend, config=cfg, sigma_engine=engine)
     with TestClient(app) as client:
         resp = client.post("/api/v1/sigma/rules", json={"yaml": _NEW_UPLOAD_YAML})
         assert resp.status_code == 422
@@ -208,9 +201,7 @@ def test_disabled_state_persists_across_app_restart(
     tmp_path: Path,
 ) -> None:
     """S-151: state survives engine rebuild via attach_state_store hydration."""
-    cfg = SeerflowConfig(
-        detection=DetectionConfig(sigma_custom_upload_dir=str(upload_dir))
-    )
+    cfg = SeerflowConfig(detection=DetectionConfig(sigma_custom_upload_dir=str(upload_dir)))
     e1 = SigmaEngine()
     rule_path = tmp_path / "fixture.yml"
     rule_path.write_text(_RULE_YAML)

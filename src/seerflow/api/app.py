@@ -110,7 +110,7 @@ async def _sigma_flush_loop(engine: SigmaEngine, interval_s: float) -> None:
             await asyncio.sleep(interval_s)
             try:
                 await engine.flush_counters()
-            except Exception:  # noqa: BLE001 - best-effort flush
+            except Exception:
                 logger.warning("Sigma counter flush failed", exc_info=True)
     except asyncio.CancelledError:
         return
@@ -122,15 +122,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ws_manager.start_status_task()
 
     sigma_engine: SigmaEngine | None = app.state.engines.sigma_engine
-    sigma_state_store: SigmaRuleStateStore | None = getattr(
-        app.state, "sigma_state_store", None
-    )
+    sigma_state_store: SigmaRuleStateStore | None = getattr(app.state, "sigma_state_store", None)
     flush_task: asyncio.Task[None] | None = None
     if sigma_engine is not None and sigma_state_store is not None:
         await sigma_engine.attach_state_store(sigma_state_store)
-        flush_task = asyncio.create_task(
-            _sigma_flush_loop(sigma_engine, _SIGMA_FLUSH_INTERVAL_S)
-        )
+        flush_task = asyncio.create_task(_sigma_flush_loop(sigma_engine, _SIGMA_FLUSH_INTERVAL_S))
 
     try:
         yield

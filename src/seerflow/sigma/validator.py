@@ -60,13 +60,13 @@ def validate_yaml(text: str) -> SigmaRule:
         rule = SigmaRule.from_yaml(text)
     except SigmaError as exc:
         raise SigmaRuleValidationError(stage="schema", message=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 - pySigma raises various types
+    except Exception as exc:
         raise SigmaRuleValidationError(stage="schema", message=str(exc)) from exc
 
     try:
         seerflow_pipeline().apply(rule)
         compile_rule(rule)
-    except Exception as exc:  # noqa: BLE001 - compile failure surfaces from many places
+    except Exception as exc:
         raise SigmaRuleValidationError(stage="compile", message=str(exc)) from exc
 
     return rule

@@ -189,8 +189,7 @@ async def _migrate_v5_sigma_rule_state(conn: aiosqlite.Connection) -> None:
         )
     """)
     await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_sigma_rule_state_enabled "
-        "ON sigma_rule_state(enabled)"
+        "CREATE INDEX IF NOT EXISTS idx_sigma_rule_state_enabled ON sigma_rule_state(enabled)"
     )
 
 

@@ -30,10 +30,5 @@ def compute_rule_id(rule: SigmaRule) -> str:
         except (ValueError, AttributeError):
             pass
     ls = rule.logsource
-    name = (
-        f"{rule.title or ''}|"
-        f"{ls.category or ''}|"
-        f"{ls.product or ''}|"
-        f"{ls.service or ''}"
-    )
+    name = f"{rule.title or ''}|{ls.category or ''}|{ls.product or ''}|{ls.service or ''}"
     return str(uuid.uuid5(_NAMESPACE_SIGMA_RULE, name))

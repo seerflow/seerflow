@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from seerflow.sigma.engine import SigmaEngine
 from seerflow.sigma.state import SigmaRuleState
 from tests.helpers import make_event
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _YAML = """
 title: TX S151 Counters

@@ -66,9 +66,7 @@ class _SqliteSigmaStateMixin:
 
     async def set_enabled(self, rule_id: str, enabled: bool) -> None:
         now_ns = time.time_ns()
-        await self._conn.execute(
-            _UPSERT_ENABLED_SQL, (rule_id, 1 if enabled else 0, now_ns)
-        )
+        await self._conn.execute(_UPSERT_ENABLED_SQL, (rule_id, 1 if enabled else 0, now_ns))
         await self._conn.commit()
 
     async def increment_counts(

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -98,24 +98,22 @@ def _matches_filters(
         return False
     if source and rule["source"] != source:
         return False
-    if search and search.lower() not in str(rule["title"]).lower():
-        return False
-    return True
+    return not (search and search.lower() not in str(rule["title"]).lower())
 
 
 def _build_summary(rule: dict[str, object], alert_count_24h: int) -> SigmaRuleSummary:
     return SigmaRuleSummary(
-        rule_id=str(rule["rule_id"]),
-        title=str(rule["title"]),
-        description=str(rule["description"]),
-        severity=int(rule["severity"]),  # type: ignore[arg-type]
-        logsource_key=list(rule["logsource_key"]),  # type: ignore[arg-type]
-        attack_tactics=list(rule["attack_tactics"]),  # type: ignore[arg-type]
-        attack_techniques=list(rule["attack_techniques"]),  # type: ignore[arg-type]
-        enabled=bool(rule["enabled"]),
-        source=str(rule["source"]),
-        match_count_lifetime=int(rule["match_count_lifetime"]),  # type: ignore[arg-type]
-        last_fired_ns=rule["last_fired_ns"],  # type: ignore[arg-type]
+        rule_id=cast("str", rule["rule_id"]),
+        title=cast("str", rule["title"]),
+        description=cast("str", rule["description"]),
+        severity=cast("int", rule["severity"]),
+        logsource_key=cast("list[str]", rule["logsource_key"]),
+        attack_tactics=cast("list[str]", rule["attack_tactics"]),
+        attack_techniques=cast("list[str]", rule["attack_techniques"]),
+        enabled=cast("bool", rule["enabled"]),
+        source=cast("str", rule["source"]),
+        match_count_lifetime=cast("int", rule["match_count_lifetime"]),
+        last_fired_ns=cast("int | None", rule["last_fired_ns"]),
         alert_count_24h=alert_count_24h,
     )
 
@@ -162,9 +160,7 @@ async def list_rules(
     total = len(filtered)
     start = (page - 1) * limit
     page_items = filtered[start : start + limit]
-    items = [
-        _build_summary(r, counts_24h.get(str(r["title"]), 0)) for r in page_items
-    ]
+    items = [_build_summary(r, counts_24h.get(str(r["title"]), 0)) for r in page_items]
     return SigmaRuleListResponse(items=items, total=total, page=page, limit=limit)
 
 
@@ -249,15 +245,13 @@ async def upload_rule(
             )
         return SigmaRuleValidationResult(
             valid=True,
-            rule_id=str(meta["rule_id"]),
-            title=str(meta["title"]),
-            logsource_key=list(meta["logsource_key"]),  # type: ignore[arg-type]
+            rule_id=cast("str", meta["rule_id"]),
+            title=cast("str", meta["title"]),
+            logsource_key=cast("list[str]", meta["logsource_key"]),
         )
 
     if upload_dir is None:
-        raise HTTPException(
-            status_code=422, detail="sigma_custom_upload_dir not configured"
-        )
+        raise HTTPException(status_code=422, detail="sigma_custom_upload_dir not configured")
 
     try:
         meta = engine.validate_rule(body.yaml)

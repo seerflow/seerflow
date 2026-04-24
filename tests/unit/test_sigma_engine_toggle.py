@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from seerflow.sigma.engine import SigmaEngine
 from tests.helpers import make_event
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _WHOAMI_YAML = """
 title: Whoami Test S151

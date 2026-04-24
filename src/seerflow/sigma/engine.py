@@ -16,7 +16,6 @@ import threading
 import uuid
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import msgspec.structs
@@ -28,10 +27,11 @@ from seerflow.sigma.bundled import get_bundled_rule_paths
 from seerflow.sigma.ids import compute_rule_id
 from seerflow.sigma.matcher import CompiledRule, compile_rule, match_event
 from seerflow.sigma.pipeline import seerflow_pipeline
-from seerflow.sigma.validator import SigmaRuleValidationError, validate_yaml
+from seerflow.sigma.validator import validate_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
+    from pathlib import Path
 
     from seerflow.models.event import SeerflowEvent
     from seerflow.sigma.state import SigmaRuleStateStore
@@ -105,9 +105,7 @@ class SigmaEngine:
         self._source_kind: dict[str, str] = {}
         self._state_store: SigmaRuleStateStore | None = None
 
-    def load_rules(
-        self, paths: Sequence[Path], *, source_kind: str = "bundled"
-    ) -> None:
+    def load_rules(self, paths: Sequence[Path], *, source_kind: str = "bundled") -> None:
         """Load, compile, and index Sigma rules from YAML file paths.
 
         Invalid rules are logged as warnings and skipped. Rules with a
