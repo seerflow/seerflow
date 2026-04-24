@@ -22,3 +22,16 @@ export const SEVERITY_CLASS: Record<SeverityBucket, string> = {
 export const SEVERITY_LABEL: Record<SeverityBucket, string> = {
   critical: "Critical", high: "High", medium: "Medium", low: "Low",
 };
+
+// Numeric OCSF SeverityLevel labels (0..6). Distinct from SEVERITY_LABEL
+// (keyed by 4 buckets) — the entity-detail severity-minimum ToggleGroup
+// exposes the underlying numeric levels directly.
+export const SEVERITY_NUM_LABEL: Record<number, string> = {
+  0: "Trace",
+  1: "Informational",
+  2: "Notice",
+  3: "Warning",
+  4: "Error",
+  5: "Critical",
+  6: "Fatal",
+};
