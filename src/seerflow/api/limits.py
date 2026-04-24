@@ -1,12 +1,14 @@
-"""Rate limiting + CORS helpers for the Seerflow REST API (S-181).
+"""Rate limiting + CORS helpers for the Seerflow REST API (S-181, hardened in S-185).
 
 This module owns:
 
 * the module-level ``slowapi.Limiter`` placeholder used by route decorators
 * the per-request key function (``_key_func``)
-* the configurable limit-string closures (``list_limit`` / ``detail_limit``)
+* the configurable limit-string closures (``list_limit`` / ``detail_limit`` /
+  ``coverage_limit``)
 * the CORS allowlist resolver (``resolve_allowed_origins``)
 * the per-app ``Limiter`` reconfiguration (``configure_limiter``)
+* the slowapi private-attribute rebind helper (``_rebind_limiter_internals``)
 
 Routes decorate with ``@limiter.limit(list_limit)`` or
 ``@limiter.limit(detail_limit)``; at request time, ``SlowAPIMiddleware``
@@ -14,6 +16,25 @@ resolves to ``request.app.state.limiter`` (built per-app from config by
 ``_install_security_middlewares`` in ``seerflow.api.app``), so the
 module-level ``limiter`` is kept disabled to avoid accidental throttling
 during decoration.
+
+**Single-tenant contract.** Seerflow runs one ``Limiter`` per Python
+process. Route decorators capture the module-level ``limiter`` at
+import time; ``configure_limiter`` mutates its internals rather than
+creating a disconnected instance. Running two ``FastAPI`` apps in the
+same process is supported only in the sense that the **second**
+``configure_limiter`` call wins for subsequent requests across both
+apps — not in the sense of isolated counters. See
+``tests/integration/test_parallel_apps.py`` for the codified
+behaviour. Multi-tenant rate-limit isolation would require rethinking
+the decorator pattern; see the upstream tracking issue linked from the
+S-185 story's Technical Notes for context.
+
+**Coupling to slowapi internals.** The one and only access to private
+slowapi attributes (``_storage``, ``_limiter``) lives inside
+``_rebind_limiter_internals``. If a future slowapi bump renames those
+attributes, that helper raises ``AttributeError`` with a loud log and
+the upper-bound pin in ``pyproject.toml`` (``slowapi<0.2.0``) is the
+first line of defence.
 """
 
 from __future__ import annotations
