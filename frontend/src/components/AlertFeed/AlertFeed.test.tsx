@@ -385,8 +385,10 @@ describe("S-191 T9: REST warm-up schema validation", () => {
         // no score → the `d.score !== undefined` guard skips appendScore.
       } });
     });
-    // Let any pending rAF tick run before asserting the negative case.
-    await new Promise(r => setTimeout(r, 20));
+    // Wait out the rAF tick that wsBus.emitCoalesced scheduled; piggyback on
+    // jsdom's native rAF rather than a fixed-duration timer so a slow runner
+    // cannot flake the negative assertion.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     expect(spy).not.toHaveBeenCalled();
   });
 

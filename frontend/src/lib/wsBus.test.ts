@@ -30,7 +30,10 @@ const eventMsg: WsMessage = {
   },
 };
 
-beforeEach(() => bus._clearAllForTests());
+beforeEach(() => {
+  bus._clearAllForTests();
+  bus._resetFrameBufferForTests();
+});
 
 describe("wsBus", () => {
   it("delivers a matching emit to a subscriber", () => {
@@ -136,6 +139,8 @@ describe("emitCoalesced (S-209)", () => {
   });
 
   it("falls back to synchronous emit when requestAnimationFrame is undefined", () => {
+    // The describe-block afterEach calls vi.unstubAllGlobals(), so the inner
+    // stub override is cleared there; no inline unstub needed.
     vi.stubGlobal("requestAnimationFrame", undefined);
     const spy = vi.fn();
     bus.on("event", spy);
@@ -144,8 +149,6 @@ describe("emitCoalesced (S-209)", () => {
 
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith(eventMsg);
-
-    vi.unstubAllGlobals();
   });
 
   it("defers a single event to the next rAF tick and re-emits as type=event", async () => {
@@ -196,7 +199,9 @@ describe("emitCoalesced (S-209)", () => {
   it("flushes a partial batch and warns once when the frame buffer exceeds the cap", async () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const batchSpy = vi.fn();
+    const eventSpy = vi.fn();
     bus.on("batch", batchSpy);
+    bus.on("event", eventSpy);
 
     // Push 501 events synchronously before the first rAF fires.
     for (let i = 0; i < 501; i++) {
@@ -214,11 +219,16 @@ describe("emitCoalesced (S-209)", () => {
     );
     expect(batchSpy).toHaveBeenCalledTimes(1);
     expect(batchSpy.mock.calls[0][0].events).toHaveLength(500);
+    // The 501st event has not yet flushed; eventSpy must see nothing before rAF.
+    expect(eventSpy).not.toHaveBeenCalled();
 
     await vi.runAllTimersAsync();
 
-    // The 501st event flushes on the next rAF tick as a single event frame.
+    // The 501st event flushes on the next rAF tick as a single `event` frame
+    // (buffer length 1 → single-event branch of flushFrame, not a 1-element batch).
     expect(batchSpy).toHaveBeenCalledTimes(1); // no second batch
+    expect(eventSpy).toHaveBeenCalledTimes(1);
+    expect(eventSpy.mock.calls[0][0].data.event_id).toBe("evt-500");
     warnSpy.mockRestore();
   });
 
