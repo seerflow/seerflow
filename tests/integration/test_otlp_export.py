@@ -98,3 +98,45 @@ class TestOtlpHttpIntegration:
             assert attrs["entity.type"].string_value == "ip"
         finally:
             await runner.cleanup()
+
+
+class TestOtlpTlsConfigPropagation:
+    """SEE-191: verify otlp_tls YAML propagates all the way to OtlpSink._use_tls."""
+
+    def test_yaml_otlp_tls_true_propagates_to_sink(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        from seerflow.config import load_config
+
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            'alerting:\n  otlp_endpoint: "host:4317"\n  otlp_protocol: "grpc"\n  otlp_tls: true\n'
+        )
+        config = load_config(str(yaml_file))
+        assert config.alerting.otlp_tls is True
+
+        sink = OtlpSink(
+            endpoint=config.alerting.otlp_endpoint,
+            protocol=config.alerting.otlp_protocol,
+            export_interval=config.alerting.otlp_export_interval_seconds,
+            tls=config.alerting.otlp_tls,
+        )
+        assert sink._use_tls is True
+
+    def test_yaml_omitted_otlp_tls_defaults_to_auto_detect(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        from seerflow.config import load_config
+
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n"
+            '  otlp_endpoint: "https://collector.example.com:4317"\n'
+            '  otlp_protocol: "grpc"\n'
+        )
+        config = load_config(str(yaml_file))
+        assert config.alerting.otlp_tls is None
+
+        sink = OtlpSink(
+            endpoint=config.alerting.otlp_endpoint,
+            protocol=config.alerting.otlp_protocol,
+            tls=config.alerting.otlp_tls,
+        )
+        # Auto-detect from https:// scheme → TLS on.
+        assert sink._use_tls is True

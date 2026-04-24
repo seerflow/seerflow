@@ -177,10 +177,11 @@ def _resolve_tls(endpoint: str, tls: bool | None) -> bool:
 
     Explicit ``tls`` wins; otherwise auto-detect from scheme.
     Bare ``host:port`` defaults to plaintext for backward compatibility.
+    URL schemes are case-insensitive per RFC 3986 §3.1.
     """
     if tls is not None:
         return tls
-    return endpoint.startswith("https://")
+    return endpoint.lower().startswith("https://")
 
 
 def masked_url(url: str) -> str:
@@ -237,7 +238,7 @@ class OtlpSink:
         self._stop_event: asyncio.Event = asyncio.Event()
         self._grpc_channel: grpc.aio.Channel | None = None
         self._http_session: aiohttp.ClientSession | None = None
-        if tls is False and endpoint.startswith("https://"):
+        if tls is False and endpoint.lower().startswith("https://"):
             _log.warning(
                 "OTLP sink: otlp_tls=False but endpoint scheme is https (%s) "
                 "— scheme/override mismatch, using plaintext",

@@ -659,7 +659,10 @@ class TestOtlpSinkConcurrentEnqueue:
         t = threading.Thread(target=worker)
         t.start()
         await asyncio.to_thread(done.wait)
-        for _ in range(5):
+        # Poll until all scheduled callbacks have drained — more robust than
+        # a fixed-iteration sleep(0) loop on varying asyncio schedulers.
+        deadline = asyncio.get_running_loop().time() + 2.0
+        while sink._pending.qsize() < 100 and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0)
         t.join(timeout=2.0)
         assert sink._pending.qsize() == 100
@@ -825,6 +828,12 @@ class TestResolveTls:
 
         assert _resolve_tls("host:4317", tls=None) is False
 
+    def test_none_with_uppercase_https_scheme_enables_tls(self) -> None:
+        """URL schemes are case-insensitive per RFC 3986 §3.1."""
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("HTTPS://host:4317", tls=None) is True
+
 
 class TestOtlpSinkTlsInit:
     def test_init_accepts_tls_kwarg(self) -> None:
@@ -856,9 +865,13 @@ class TestOtlpSinkTlsInit:
 
         with caplog.at_level(logging.WARNING, logger="seerflow"):
             OtlpSink(endpoint="https://host:4317", protocol="grpc", tls=False)
-        messages = [rec.message for rec in caplog.records]
-        assert any("mismatch" in m.lower() or "otlp_tls=false" in m.lower() for m in messages)
-        assert not any("https://host:4317" in m for m in messages)
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        # Exactly one mismatch warning — guards against silent multi-warn regressions.
+        assert len(warning_records) == 1
+        message = warning_records[0].message
+        assert "mismatch" in message.lower() or "otlp_tls=false" in message.lower()
+        # Endpoint must be masked.
+        assert "https://host:4317" not in message
 
 
 class TestOtlpSinkHttpExhaustsRetries:
