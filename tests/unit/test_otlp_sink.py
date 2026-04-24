@@ -872,6 +872,45 @@ class TestOtlpSinkTlsInit:
         sink = OtlpSink(endpoint="host:4317", protocol="grpc")
         assert sink._use_tls is False
 
+    def test_init_warns_on_bare_host_port_with_tls_unset(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """SEE-191 security review (MED-2): a scheme-less gRPC endpoint with
+        otlp_tls unset silently selects plaintext. Operators must see a warning."""
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="collector.example.com:4317", protocol="grpc")
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_records) == 1
+        message = warning_records[0].message
+        assert "plaintext" in message.lower()
+        assert "otlp_tls: true" in message or "https://" in message
+
+    def test_init_quiet_for_explicit_tls_false_bare_endpoint(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Explicit tls=False on a bare endpoint is an operator choice; no warn."""
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="collector.example.com:4317", protocol="grpc", tls=False)
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    def test_init_quiet_for_explicit_http_scheme(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Explicit http:// scheme is an explicit plaintext choice; no warn."""
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="http://collector.example.com:4317", protocol="grpc")
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
     def test_init_warns_on_https_with_tls_false(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 

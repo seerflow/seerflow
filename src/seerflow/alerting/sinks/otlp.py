@@ -204,6 +204,12 @@ def _resolve_tls(endpoint: str, tls: bool | None) -> bool:
 def masked_url(url: str) -> str:
     """Mask an endpoint URL to avoid logging sensitive paths.
 
+    Returns ``<scheme>://<hostname>/***`` — the hostname is deliberately
+    retained so operators can correlate warnings with their collector,
+    while the path and port are scrubbed. If a deployment's collector
+    FQDN encodes sensitive internal topology, configure log redaction at
+    the log-pipeline layer.
+
     Handles both scheme-prefixed URLs (http://host:port) and bare
     host:port endpoints used by gRPC.
     """
@@ -259,6 +265,23 @@ class OtlpSink:
             _log.warning(
                 "OTLP sink: otlp_tls=False but endpoint scheme is https (%s) "
                 "— scheme/override mismatch, using plaintext",
+                masked_url(endpoint),
+            )
+        elif (
+            protocol == "grpc"
+            and tls is None
+            and endpoint
+            and not self._use_tls
+            and not endpoint.lower().startswith("http://")
+        ):
+            # Bare host:port endpoint, no explicit tls value. Plaintext was
+            # selected by default for backward compatibility (S-049a brainstorm
+            # §2). Warn the operator — a forgotten "https://" prefix on an
+            # otherwise-TLS-capable collector would silently travel in cleartext.
+            _log.warning(
+                "OTLP sink: endpoint %s has no scheme and otlp_tls is unset "
+                "— defaulting to plaintext gRPC. Set otlp_tls: true or use an "
+                "https:// scheme to enable TLS.",
                 masked_url(endpoint),
             )
 
