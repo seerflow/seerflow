@@ -27,6 +27,7 @@ def _make_rule(
     description: str = "",
 ) -> CompiledRule:
     return CompiledRule(
+        rule_id=f"00000000-0000-0000-0000-{abs(hash(name)) % 10**12:012d}",
         rule_name=name,
         description=description,
         severity=severity,

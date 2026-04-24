@@ -159,6 +159,15 @@ def coverage_limit() -> str:
     return _current_coverage_limit
 
 
+def sigma_upload_limit() -> str:
+    """Return the rate limit for ``POST /api/v1/sigma/rules`` (S-151).
+
+    Stricter than ``list_limit`` to bound disk-fill / DoS via uploads.
+    Hardcoded for now; expose via ``SeerflowConfig`` if operator demand surfaces.
+    """
+    return "5/minute"
+
+
 # Module-level singleton — slowapi decorator target. ``configure_limiter``
 # rebinds its storage and enabled flag based on the active app's
 # ``SeerflowConfig``. Starts disabled so that a route imported in

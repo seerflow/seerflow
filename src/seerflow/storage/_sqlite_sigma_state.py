@@ -44,6 +44,10 @@ ON CONFLICT(rule_id) DO UPDATE
 class _SqliteSigmaStateMixin:
     """Mixin providing ``SigmaRuleStateStore`` methods backed by SQLite."""
 
+    # Empty slots so the composed ``SqliteBackend`` keeps its slot discipline
+    # — mirrors ``_SqliteAlertMixin``.
+    __slots__: tuple[str, ...] = ()
+
     _conn: aiosqlite.Connection  # supplied by composing class
 
     async def get_all(self) -> dict[str, SigmaRuleState]:
