@@ -233,7 +233,7 @@ class TestOtlpSinkEnqueue:
         sink = OtlpSink(endpoint="localhost:4317", protocol="grpc", export_interval=5)
         alert = _make_alert()
         sink.enqueue(alert)
-        assert len(sink._pending) == 1
+        assert sink._pending.qsize() == 1
 
     @pytest.mark.asyncio
     async def test_enqueue_drops_when_at_max(self) -> None:
@@ -242,7 +242,7 @@ class TestOtlpSinkEnqueue:
         sink = OtlpSink(endpoint="localhost:4317", protocol="grpc", max_pending=1)
         sink.enqueue(_make_alert())
         sink.enqueue(_make_alert())  # should drop
-        assert len(sink._pending) == 1
+        assert sink._pending.qsize() == 1
 
     @pytest.mark.asyncio
     async def test_enqueue_logs_warning_when_full(self) -> None:
@@ -268,7 +268,7 @@ class TestOtlpSinkBatching:
         sink._send_grpc.assert_called_once()  # type: ignore[union-attr]
         req = sink._send_grpc.call_args[0][0]  # type: ignore[union-attr]
         assert len(req.resource_logs[0].scope_logs[0].log_records) == 3
-        assert len(sink._pending) == 0
+        assert sink._pending.empty()
 
     @pytest.mark.asyncio
     async def test_flush_noop_when_empty(self) -> None:
@@ -502,6 +502,20 @@ class TestNormalizeGrpcEndpoint:
 
         assert _normalize_grpc_endpoint("localhost:4317") == "localhost:4317"
 
+    def test_strips_uppercase_https(self) -> None:
+        """RFC 3986 §3.1: schemes are case-insensitive."""
+        from seerflow.alerting.sinks.otlp import _normalize_grpc_endpoint
+
+        assert (
+            _normalize_grpc_endpoint("HTTPS://collector.example.com:4317")
+            == "collector.example.com:4317"
+        )
+
+    def test_strips_mixed_case_http(self) -> None:
+        from seerflow.alerting.sinks.otlp import _normalize_grpc_endpoint
+
+        assert _normalize_grpc_endpoint("HtTp://localhost:4317") == "localhost:4317"
+
 
 class TestMaskedUrl:
     def test_http_url_masked(self) -> None:
@@ -617,6 +631,300 @@ class TestOtlpSinkGrpcGenericException:
             sink.enqueue(_make_alert())
             await sink._flush()
             mock_log.exception.assert_called_once()
+
+
+class TestOtlpSinkConcurrentEnqueue:
+    @pytest.mark.asyncio
+    async def test_high_volume_sync_enqueue(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", max_pending=2000)
+        for _ in range(1000):
+            sink.enqueue(_make_alert())
+        assert sink._pending.qsize() == 1000
+
+    @pytest.mark.asyncio
+    async def test_queue_full_drops_and_warns(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", max_pending=1)
+        sink.enqueue(_make_alert())
+        with patch("seerflow.alerting.sinks.otlp._log") as mock_log:
+            sink.enqueue(_make_alert())
+            mock_log.warning.assert_called_once()
+        assert sink._pending.qsize() == 1
+
+    @pytest.mark.asyncio
+    async def test_threadsafe_enqueue_via_call_soon_threadsafe(self) -> None:
+        import threading
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        loop = asyncio.get_running_loop()
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", max_pending=500)
+
+        done = threading.Event()
+
+        def worker() -> None:
+            for _ in range(100):
+                loop.call_soon_threadsafe(sink.enqueue, _make_alert())
+            done.set()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        await asyncio.to_thread(done.wait)
+        # Poll until all scheduled callbacks have drained — more robust than
+        # a fixed-iteration sleep(0) loop on varying asyncio schedulers.
+        deadline = asyncio.get_running_loop().time() + 2.0
+        while sink._pending.qsize() < 100 and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0)
+        t.join(timeout=2.0)
+        assert sink._pending.qsize() == 100
+
+    @pytest.mark.asyncio
+    async def test_flush_drains_queue(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc")
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+        for i in range(3):
+            sink.enqueue(_make_alert(rule_name=f"rule-{i}"))
+        await sink._flush()
+        assert sink._pending.empty()
+        sink._send_grpc.assert_called_once()  # type: ignore[attr-defined]
+        req = sink._send_grpc.call_args[0][0]  # type: ignore[attr-defined]
+        assert len(req.resource_logs[0].scope_logs[0].log_records) == 3
+
+
+class TestOtlpSinkFastShutdown:
+    @pytest.mark.asyncio
+    async def test_stop_exits_within_one_second_even_with_long_interval(self) -> None:
+        import time
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", export_interval=60)
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+
+        run_task = asyncio.create_task(sink.run())
+        await asyncio.sleep(0.05)
+
+        start = time.monotonic()
+        await sink.stop()
+        await asyncio.wait_for(run_task, timeout=2.0)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0, f"stop() took {elapsed:.3f}s; should be < 1s"
+
+    @pytest.mark.asyncio
+    async def test_stop_is_idempotent(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", export_interval=60)
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+
+        await sink.stop()
+        await sink.stop()
+        assert sink._stop_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_final_flush_runs_even_if_stop_set_before_run(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", export_interval=60)
+        sink._send_grpc = AsyncMock()  # type: ignore[method-assign]
+        sink.enqueue(_make_alert())
+
+        await sink.stop()
+        await asyncio.wait_for(sink.run(), timeout=2.0)
+
+        sink._send_grpc.assert_called_once()  # type: ignore[attr-defined]
+
+
+class TestOtlpSinkGrpcTls:
+    @pytest.mark.asyncio
+    async def test_grpc_uses_secure_channel_when_tls_true(self) -> None:
+        import grpc as _grpc
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", tls=True)
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel) as secure,
+            patch.object(grpc.aio, "insecure_channel") as insecure,
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        secure.assert_called_once()
+        insecure.assert_not_called()
+        args, _kwargs = secure.call_args
+        assert args[0] == "host:4317"
+        assert isinstance(args[1], _grpc.ChannelCredentials)
+
+    @pytest.mark.asyncio
+    async def test_grpc_uses_insecure_channel_when_tls_false(self) -> None:
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", tls=False)
+
+        with (
+            patch.object(grpc.aio, "secure_channel") as secure,
+            patch.object(grpc.aio, "insecure_channel", return_value=mock_channel) as insecure,
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        insecure.assert_called_once_with("host:4317")
+        secure.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_grpc_auto_tls_from_https_scheme(self) -> None:
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="https://collector.example.com:4317", protocol="grpc")
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel) as secure,
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        secure.assert_called_once()
+        target = secure.call_args[0][0]
+        assert target == "collector.example.com:4317"
+
+
+class TestResolveTls:
+    def test_explicit_true_wins(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("http://host:4317", tls=True) is True
+
+    def test_explicit_false_wins(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("https://host:4317", tls=False) is False
+
+    def test_none_with_https_scheme_enables_tls(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("https://host:4317", tls=None) is True
+
+    def test_none_with_http_scheme_disables_tls(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("http://host:4317", tls=None) is False
+
+    def test_none_with_bare_host_port_disables_tls(self) -> None:
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("host:4317", tls=None) is False
+
+    def test_none_with_uppercase_https_scheme_enables_tls(self) -> None:
+        """URL schemes are case-insensitive per RFC 3986 §3.1."""
+        from seerflow.alerting.sinks.otlp import _resolve_tls
+
+        assert _resolve_tls("HTTPS://host:4317", tls=None) is True
+
+
+class TestOtlpSinkTlsInit:
+    def test_init_accepts_tls_kwarg(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(
+            endpoint="https://host:4317",
+            protocol="grpc",
+            tls=True,
+        )
+        assert sink._use_tls is True
+
+    def test_init_auto_detects_tls_from_https_scheme(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="https://host:4317", protocol="grpc")
+        assert sink._use_tls is True
+
+    def test_init_defaults_plaintext_for_bare_endpoint(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc")
+        assert sink._use_tls is False
+
+    def test_init_warns_on_bare_host_port_with_tls_unset(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """SEE-191 security review (MED-2): a scheme-less gRPC endpoint with
+        otlp_tls unset silently selects plaintext. Operators must see a warning."""
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="collector.example.com:4317", protocol="grpc")
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_records) == 1
+        message = warning_records[0].message
+        assert "plaintext" in message.lower()
+        assert "otlp_tls: true" in message or "https://" in message
+
+    def test_init_quiet_for_explicit_tls_false_bare_endpoint(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Explicit tls=False on a bare endpoint is an operator choice; no warn."""
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="collector.example.com:4317", protocol="grpc", tls=False)
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    def test_init_quiet_for_explicit_http_scheme(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Explicit http:// scheme is an explicit plaintext choice; no warn."""
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="http://collector.example.com:4317", protocol="grpc")
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    def test_init_warns_on_https_with_tls_false(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(endpoint="https://host:4317", protocol="grpc", tls=False)
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        # Exactly one mismatch warning — guards against silent multi-warn regressions.
+        assert len(warning_records) == 1
+        message = warning_records[0].message
+        assert "mismatch" in message.lower() or "otlp_tls=false" in message.lower()
+        # Endpoint must be masked.
+        assert "https://host:4317" not in message
 
 
 class TestOtlpSinkHttpExhaustsRetries:

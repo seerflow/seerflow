@@ -184,6 +184,7 @@ class AlertingConfig:
     otlp_endpoint: str = ""
     otlp_protocol: Literal["grpc", "http"] = "grpc"
     otlp_export_interval_seconds: int = 5
+    otlp_tls: bool | None = None
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

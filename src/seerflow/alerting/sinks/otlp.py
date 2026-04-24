@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.metadata
 import logging
+
+# ``QueueEmpty``/``QueueFull`` are hoisted to module-level names so that tests
+# which patch ``seerflow.alerting.sinks.otlp.asyncio`` (to mock ``sleep`` in the
+# gRPC/HTTP retry loops) do not accidentally mask the exception classes used in
+# the ``_flush`` / ``enqueue`` except clauses. Sibling sinks (pagerduty,
+# dispatcher, receivers/manager) use the qualified ``asyncio.QueueFull`` form
+# because their tests do not patch ``asyncio`` at all.
+from asyncio import QueueEmpty, QueueFull
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
@@ -163,15 +172,43 @@ def build_export_request(alerts: list[Alert]) -> ExportLogsServiceRequest:
 
 
 def _normalize_grpc_endpoint(endpoint: str) -> str:
-    """Strip http:// or https:// scheme for gRPC channels (they take host:port)."""
+    """Strip http:// or https:// scheme for gRPC channels (they take host:port).
+
+    Case-insensitive per RFC 3986 §3.1 so that uppercase or mixed-case
+    schemes parse identically to the canonical lowercase form.
+    """
+    lowered = endpoint.lower()
     for prefix in ("https://", "http://"):
-        if endpoint.startswith(prefix):
+        if lowered.startswith(prefix):
             return endpoint[len(prefix) :]
     return endpoint
 
 
+def _resolve_tls(endpoint: str, tls: bool | None) -> bool:
+    """Resolve effective TLS usage for a gRPC OTLP endpoint.
+
+    Explicit ``tls`` wins; otherwise auto-detect from scheme.
+    Bare ``host:port`` defaults to plaintext for backward compatibility.
+    URL schemes are case-insensitive per RFC 3986 §3.1.
+
+    HTTP callers ignore the resolved value — the aiohttp POST honors whatever
+    scheme the endpoint string carries. Only ``_send_grpc`` consults
+    ``self._use_tls`` to choose between ``secure_channel`` and
+    ``insecure_channel``.
+    """
+    if tls is not None:
+        return tls
+    return endpoint.lower().startswith("https://")
+
+
 def masked_url(url: str) -> str:
     """Mask an endpoint URL to avoid logging sensitive paths.
+
+    Returns ``<scheme>://<hostname>/***`` — the hostname is deliberately
+    retained so operators can correlate warnings with their collector,
+    while the path and port are scrubbed. If a deployment's collector
+    FQDN encodes sensitive internal topology, configure log redaction at
+    the log-pipeline layer.
 
     Handles both scheme-prefixed URLs (http://host:port) and bare
     host:port endpoints used by gRPC.
@@ -212,34 +249,83 @@ class OtlpSink:
         protocol: Literal["grpc", "http"],
         export_interval: int = 5,
         max_pending: int = 10_000,
+        *,
+        tls: bool | None = None,
     ) -> None:
         self._endpoint = endpoint
         self._protocol = protocol
         self._export_interval = export_interval
         self._max_pending = max_pending
-        self._pending: list[Alert] = []
-        self._running = True
+        self._use_tls = _resolve_tls(endpoint, tls)
+        self._pending: asyncio.Queue[Alert] = asyncio.Queue(maxsize=max_pending)
+        self._stop_event: asyncio.Event = asyncio.Event()
         self._grpc_channel: grpc.aio.Channel | None = None
         self._http_session: aiohttp.ClientSession | None = None
+        if tls is False and endpoint.lower().startswith("https://"):
+            _log.warning(
+                "OTLP sink: otlp_tls=False but endpoint scheme is https (%s) "
+                "— scheme/override mismatch, using plaintext",
+                masked_url(endpoint),
+            )
+        elif (
+            protocol == "grpc"
+            and tls is None
+            and endpoint
+            and not self._use_tls
+            and not endpoint.lower().startswith("http://")
+        ):
+            # Bare host:port endpoint, no explicit tls value. Plaintext was
+            # selected by default for backward compatibility (S-049a brainstorm
+            # §2). Warn the operator — a forgotten "https://" prefix on an
+            # otherwise-TLS-capable collector would silently travel in cleartext.
+            _log.warning(
+                "OTLP sink: endpoint %s has no scheme and otlp_tls is unset "
+                "— defaulting to plaintext gRPC. Set otlp_tls: true or use an "
+                "https:// scheme to enable TLS.",
+                masked_url(endpoint),
+            )
 
     def enqueue(self, alert: Alert) -> None:
-        """Add an alert to the pending batch. Drops with warning if at max."""
-        if len(self._pending) >= self._max_pending:
-            _log.warning("OTLP sink pending list full — dropping alert %s", alert.alert_id)
-            return
-        self._pending.append(alert)
+        """Add an alert to the pending queue. Drops with warning if full."""
+        try:
+            self._pending.put_nowait(alert)
+        except QueueFull:
+            _log.warning(
+                "OTLP sink pending queue full — dropping alert %s",
+                alert.alert_id,
+            )
 
     async def run(self) -> None:
-        """Background loop: sleep for interval, then flush pending batch."""
-        while self._running:
-            await asyncio.sleep(self._export_interval)
+        """Background loop: wait for interval or stop signal, then flush.
+
+        Two exit paths are covered:
+
+        1. Graceful ``stop()`` — ``_stop_event.wait()`` returns, the in-loop
+           ``_flush()`` drains, the ``while`` condition re-checks
+           ``is_set() is True`` and exits; the ``finally`` ``_flush`` then runs
+           once more as a no-op (queue is already empty).
+        2. ``CancelledError`` during ``_stop_event.wait()`` — the ``while`` body
+           is skipped, the exception propagates to ``finally`` where we drain
+           any alerts enqueued between the last flush and cancellation.
+
+        The redundant no-op flush on the graceful path is intentional: it
+        preserves the "nothing is lost after the last loop iteration"
+        invariant without extra state.
+        """
+        try:
+            while not self._stop_event.is_set():
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        self._stop_event.wait(),
+                        timeout=self._export_interval,
+                    )
+                await self._flush()
+        finally:
             await self._flush()
-        # Final flush on shutdown
-        await self._flush()
 
     async def stop(self) -> None:
-        """Signal the sink to stop. run() will flush and exit."""
-        self._running = False
+        """Signal the sink to stop. ``run()`` will flush and exit."""
+        self._stop_event.set()
 
     async def close(self) -> None:
         """Close transport resources."""
@@ -251,11 +337,15 @@ class OtlpSink:
             self._http_session = None
 
     async def _flush(self) -> None:
-        """Swap out the pending list and send as a single batch."""
-        if not self._pending:
+        """Drain the pending queue and send as a single batch."""
+        batch: list[Alert] = []
+        while True:
+            try:
+                batch.append(self._pending.get_nowait())
+            except QueueEmpty:
+                break
+        if not batch:
             return
-        batch = self._pending
-        self._pending = []
         batch_size = len(batch)
         try:
             request = build_export_request(batch)
@@ -275,7 +365,11 @@ class OtlpSink:
 
         if self._grpc_channel is None:
             target = _normalize_grpc_endpoint(self._endpoint)
-            self._grpc_channel = grpc.aio.insecure_channel(target)
+            if self._use_tls:
+                creds = grpc.ssl_channel_credentials()
+                self._grpc_channel = grpc.aio.secure_channel(target, creds)
+            else:
+                self._grpc_channel = grpc.aio.insecure_channel(target)
         stub = LogsServiceStub(self._grpc_channel)  # type: ignore[no-untyped-call]
         for attempt in range(self._MAX_RETRIES):
             try:

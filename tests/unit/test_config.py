@@ -1257,6 +1257,44 @@ class TestWebhookConfigParsing:
             _build_alerting({"otlp_export_interval_seconds": -1})
 
 
+class TestOtlpTlsConfig:
+    def test_otlp_tls_true_accepted(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_tls": True})
+        assert result.otlp_tls is True
+
+    def test_otlp_tls_false_accepted(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_tls": False})
+        assert result.otlp_tls is False
+
+    def test_otlp_tls_omitted_defaults_to_none(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_tls is None
+
+    def test_otlp_tls_explicit_null_is_none(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_tls": None})
+        assert result.otlp_tls is None
+
+    def test_otlp_tls_string_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls"):
+            _build_alerting({"otlp_tls": "true"})
+
+    def test_otlp_tls_int_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls"):
+            _build_alerting({"otlp_tls": 1})
+
+
 class TestWebSocketConfig:
     def test_default_ws_fields(self) -> None:
         from seerflow.config import SeerflowConfig

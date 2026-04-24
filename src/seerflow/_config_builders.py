@@ -744,7 +744,9 @@ def _validate_pagerduty_key(data: dict[str, Any]) -> str:
     return str(key)
 
 
-def _validate_otlp_settings(data: dict[str, Any]) -> tuple[str, Literal["grpc", "http"], int]:
+def _validate_otlp_settings(
+    data: dict[str, Any],
+) -> tuple[str, Literal["grpc", "http"], int, bool | None]:
     endpoint = data.get("otlp_endpoint", "")
     if not isinstance(endpoint, str):
         raise ConfigError(
@@ -765,7 +767,12 @@ def _validate_otlp_settings(data: dict[str, Any]) -> tuple[str, Literal["grpc", 
         raise ConfigError(
             f"alerting.otlp_export_interval_seconds must be an integer >= 1, got {interval!r}"
         )
-    return endpoint, protocol, interval
+    tls_raw = data.get("otlp_tls")
+    if tls_raw is not None and not isinstance(tls_raw, bool):
+        raise ConfigError(
+            f"alerting.otlp_tls must be a boolean or null, got {type(tls_raw).__name__}"
+        )
+    return endpoint, protocol, interval, tls_raw
 
 
 def _collect_quiet_hours(
@@ -849,7 +856,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     default_routing = _build_default_routing(
         data.get("default_routing"), known_channels, has_rules=bool(routing_rules)
     )
-    otlp_endpoint, otlp_protocol, otlp_interval = _validate_otlp_settings(data)
+    otlp_endpoint, otlp_protocol, otlp_interval, otlp_tls = _validate_otlp_settings(data)
 
     quiet_hours: list[tuple[str, QuietHours]] = list(
         _collect_quiet_hours(webhooks, webhook_targets)
@@ -876,6 +883,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         otlp_endpoint=otlp_endpoint,
         otlp_protocol=otlp_protocol,
         otlp_export_interval_seconds=otlp_interval,
+        otlp_tls=otlp_tls,
     )
 
 
