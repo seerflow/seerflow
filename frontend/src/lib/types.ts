@@ -295,3 +295,23 @@ export interface SigmaRuleFilter {
   enabledOnly: boolean;
   source: SigmaRuleSource | null;
 }
+
+// S-060.F1: risk-history types.
+export type RiskBucket = {
+  // Serialized as a string on the wire for JS bigint safety (S-199 pattern).
+  bucket_start_ns: string;
+  points: number;
+  alert_count: number;
+  top_rule_name: string;
+};
+
+export type RiskHistoryMeta = {
+  range: TimelineRange;
+  resolution: "1m" | "5m" | "15m" | "1h";
+  alert_count_truncated: boolean;
+};
+
+export type RiskHistoryResponse = {
+  meta: RiskHistoryMeta;
+  items: RiskBucket[];
+};
