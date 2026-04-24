@@ -35,9 +35,10 @@ class TestRiskBucketResponse:
             alert_count=0,
             top_rule_name="",
         )
-        payload = json.loads(bucket.model_dump_json())
+        raw_json = bucket.model_dump_json()
+        payload = json.loads(raw_json)
         assert payload["top_rule_name"] == ""
-        assert "null" not in payload
+        assert '"top_rule_name":null' not in raw_json
 
     def test_negative_points_rejected(self) -> None:
         with pytest.raises(ValidationError):

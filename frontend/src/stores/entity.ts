@@ -187,7 +187,7 @@ export const useEntityStore = create<State>((set, get) => ({
     if (!uuid) return;
     _riskAbort?.abort();
     const ctrl = new AbortController();
-    set({ _riskAbort: ctrl, riskHistoryLoading: true, riskHistoryError: null });
+    set({ _riskAbort: ctrl, riskHistoryLoading: true, riskHistoryError: null, riskHistory: [] });
     try {
       const res = await api.get<RiskHistoryResponse>(
         `/api/v1/entities/${uuid}/risk-history?range=${encodeURIComponent(range)}`,

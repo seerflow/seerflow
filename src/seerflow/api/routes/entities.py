@@ -12,7 +12,6 @@ import logging
 import math
 import time
 import uuid as _uuid_mod
-from collections.abc import Sequence  # noqa: TC003 — runtime use in _bucket_alerts signature
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Final, Literal
 
@@ -41,7 +40,6 @@ from seerflow.api.schemas import (
     RiskHistoryMetaResponse,
     RiskHistoryResponse,
 )
-from seerflow.models.alert import Alert  # noqa: TC001 — runtime use in _bucket_alerts signature
 from seerflow.models.entity import (
     generate_domain_id,
     generate_host_id,
@@ -53,8 +51,9 @@ from seerflow.models.query import AlertQuery, EventQuery, TimeRange
 from seerflow.storage.protocols import EntityStore  # noqa: TC001
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
+    from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
 
 _log = logging.getLogger(__name__)
@@ -84,7 +83,17 @@ def _uuid_for_domain(value: str) -> str:
 DEFAULT_TIMELINE_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000  # 24h
 _MAX_TIMESTAMP_NS = 2**63 - 1  # SQLite int64 ceiling (~year 2262)
 
-_ALERT_QUERY_LIMIT: Final[int] = 10_000  # S-060.F1: per-request alert scan ceiling.
+# Hard ceiling preventing runaway scans on high-alert entities.
+_ALERT_QUERY_LIMIT: Final[int] = 10_000
+
+
+@dataclass(slots=True)
+class _Acc:
+    points: float = 0.0
+    alert_count: int = 0
+    max_score: float = -1.0
+    max_ts_ns: int = 0
+    top_rule_name: str = ""
 
 
 def _bucket_alerts(
@@ -106,17 +115,11 @@ def _bucket_alerts(
     first_bucket = (start_ns // res_ns) * res_ns
     bucket_count = math.ceil((now_ns - first_bucket) / res_ns)
 
-    @dataclass(slots=True)
-    class _Acc:
-        points: float = 0.0
-        alert_count: int = 0
-        max_score: float = -1.0
-        max_ts_ns: int = 0
-        top_rule_name: str = ""
-
     buckets: dict[int, _Acc] = {}
     for a in alerts:
         key = (a.timestamp_ns // res_ns) * res_ns
+        if key < first_bucket or key >= first_bucket + bucket_count * res_ns:
+            continue
         acc = buckets.setdefault(key, _Acc())
         acc.points += a.risk_score
         acc.alert_count += 1
@@ -329,7 +332,7 @@ async def get_entity_risk_history(
     )
 
     items = _bucket_alerts(
-        list(alert_page.items),
+        alert_page.items,
         now_ns=now_ns,
         range_ns=range_ns,
         res_ns=res_ns,
