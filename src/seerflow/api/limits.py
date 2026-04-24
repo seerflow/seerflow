@@ -19,6 +19,7 @@ during decoration.
 from __future__ import annotations
 
 import ipaddress
+import logging
 from typing import TYPE_CHECKING
 
 from slowapi import Limiter
@@ -28,6 +29,44 @@ from seerflow.config import ConfigError, SeerflowConfig
 
 if TYPE_CHECKING:
     from starlette.requests import Request
+
+logger = logging.getLogger(__name__)
+
+_SLOWAPI_INTERNAL_ATTRS = ("_storage", "_limiter")
+
+
+def _rebind_limiter_internals(old: Limiter, new: Limiter) -> None:
+    """Copy slowapi-internal storage and engine references from *new* onto *old* (S-185).
+
+    The module-level ``limiter`` instance is captured by route decorators
+    at import time; we cannot swap the reference, only mutate its
+    internals. This helper is the **single** place in the codebase that
+    reaches into private slowapi attributes, so an upstream rename
+    surfaces here in exactly one diff.
+
+    Raises :class:`AttributeError` with a loud log message if slowapi has
+    renamed or removed either attribute — so a dependency bump fails in
+    CI rather than silently running with stale state. Paired with the
+    ``slowapi<0.2.0`` upper bound in ``pyproject.toml`` as defence in
+    depth.
+    """
+    for attr in _SLOWAPI_INTERNAL_ATTRS:
+        if not hasattr(new, attr) or not hasattr(old, attr):
+            import slowapi as _slowapi
+
+            version = getattr(_slowapi, "__version__", "unknown")
+            logger.error(
+                "slowapi.Limiter is missing private attribute %r (version=%s). "
+                "S-185 relies on this attribute to rebind per-app storage. "
+                "Review configure_limiter against the installed slowapi API.",
+                attr,
+                version,
+            )
+            raise AttributeError(
+                f"slowapi.Limiter has no private attribute {attr!r} "
+                f"(installed version {version}); S-185 rebind contract broken"
+            )
+        setattr(old, attr, getattr(new, attr))
 
 
 def _is_public_ip(value: str) -> bool:

@@ -141,3 +141,20 @@ class TestLimitClosures:
         defaults = SeerflowConfig()
         assert list_limit_fn() == defaults.api_list_rate_limit
         assert detail_limit() == defaults.api_detail_rate_limit
+
+
+class TestRebindLimiterInternals:
+    """S-185: the single helper that touches slowapi private attributes."""
+
+    def test_swaps_storage_and_limiter_references(self) -> None:
+        from slowapi import Limiter
+
+        from seerflow.api.limits import _rebind_limiter_internals
+
+        old = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
+        new = Limiter(key_func=_key_func, storage_uri="memory://", enabled=True)
+
+        _rebind_limiter_internals(old, new)
+
+        assert old._storage is new._storage
+        assert old._limiter is new._limiter
