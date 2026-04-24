@@ -219,7 +219,7 @@ describe("EntityDetail sizing-contract alignment (S-060.F2)", () => {
   it("timeline wrapper uses h-full min-h-0 flex flex-col", () => {
     useEntityStore.setState({ selectedEntityUuid: UUID, selectedEntityType: "user", selectedEntityValue: "alice" });
     const { container } = render(<EntityDetail />);
-    const wrapper = container.querySelector(".rounded-md.border");
+    const wrapper = container.querySelector("div.overflow-hidden.rounded-md.border");
     expect(wrapper).not.toBeNull();
     expect(wrapper).toHaveClass("h-full");
     expect(wrapper).toHaveClass("min-h-0");
