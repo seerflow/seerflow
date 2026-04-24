@@ -158,3 +158,26 @@ class TestRebindLimiterInternals:
 
         assert old._storage is new._storage
         assert old._limiter is new._limiter
+
+    def test_raises_attribute_error_with_loud_log_if_storage_removed(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from slowapi import Limiter
+
+        from seerflow.api.limits import _rebind_limiter_internals
+
+        old = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
+        new = Limiter(key_func=_key_func, storage_uri="memory://", enabled=True)
+
+        del new._storage
+
+        with caplog.at_level(logging.ERROR, logger="seerflow.api.limits"):
+            with pytest.raises(AttributeError, match="_storage"):
+                _rebind_limiter_internals(old, new)
+
+        assert any(
+            "slowapi.Limiter is missing private attribute" in record.message
+            for record in caplog.records
+        )
