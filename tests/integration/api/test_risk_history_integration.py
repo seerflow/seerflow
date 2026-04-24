@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from seerflow.api.anomaly_timeline import RESOLUTION_NS
 from seerflow.api.app import create_api_app
+from seerflow.config import SeerflowConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 
@@ -101,3 +102,54 @@ class TestRiskHistoryIntegration:
         resp = client.get(f"/api/v1/entities/{e1}/risk-history?range=1h")
         body = resp.json()
         assert all(b["points"] == 0.0 for b in body["items"])
+
+    async def test_rate_limit_returns_429(self, backend: SqliteBackend) -> None:
+        """Exceeding list_limit returns 429.
+
+        Mirrors the S-181 pattern from ``tests/integration/test_api_rate_limit.py``:
+        build a dedicated ``TestClient`` with ``api_rate_limit_enabled=True`` and
+        a tight ``api_list_rate_limit`` so the third request trips the limiter.
+        The module-level autouse ``_reset_api_limiter`` fixture in
+        ``tests/conftest.py`` guarantees counters do not leak across tests.
+        """
+        cfg = SeerflowConfig(
+            api_rate_limit_enabled=True,
+            api_list_rate_limit="2/minute",
+            api_detail_rate_limit="100/minute",
+            api_coverage_rate_limit="100/minute",
+            api_allowed_origins=("http://localhost:3000",),
+        )
+        app = create_api_app(
+            log_store=backend, alert_store=backend, entity_store=backend, config=cfg
+        )
+        rl_client = TestClient(app)
+
+        entity = str(uuid.uuid4())
+        url = f"/api/v1/entities/{entity}/risk-history?range=1h"
+        assert rl_client.get(url).status_code == 200
+        assert rl_client.get(url).status_code == 200
+        r3 = rl_client.get(url)
+        assert r3.status_code == 429, f"Expected 429 after burst, got {r3.status_code}"
+        assert "retry-after" in {k.lower() for k in r3.headers}
+
+    async def test_truncation_flag_when_over_limit(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        """meta.alert_count_truncated is True when >10_000 alerts match."""
+        res_ns = RESOLUTION_NS["1m"]
+        now_bucket = (time.time_ns() // res_ns) * res_ns
+        entity = str(uuid.uuid5(uuid.NAMESPACE_DNS, "truncation-flood"))
+        # Write > 10_000 alerts for one entity inside the 1h window.
+        for i in range(10_050):
+            await backend.write_alert(
+                _alert_at(
+                    now_bucket - (i % 59 + 1) * res_ns - i,
+                    entity=entity,
+                    risk=0.1,
+                    rule="flood",
+                ),
+                dedup_window_ns=0,
+            )
+        resp = client.get(f"/api/v1/entities/{entity}/risk-history?range=1h&resolution=1m")
+        assert resp.status_code == 200
+        assert resp.json()["meta"]["alert_count_truncated"] is True
