@@ -173,9 +173,11 @@ class TestRebindLimiterInternals:
 
         del new._storage
 
-        with caplog.at_level(logging.ERROR, logger="seerflow.api.limits"):
-            with pytest.raises(AttributeError, match="_storage"):
-                _rebind_limiter_internals(old, new)
+        with (
+            caplog.at_level(logging.ERROR, logger="seerflow.api.limits"),
+            pytest.raises(AttributeError, match="_storage"),
+        ):
+            _rebind_limiter_internals(old, new)
 
         assert any(
             "slowapi.Limiter is missing private attribute" in record.message
