@@ -8,6 +8,9 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -29,6 +32,7 @@ from seerflow.api.routes import (
     entities,
     events,
     health,
+    sigma,
     stats,
 )
 from seerflow.api.ws import ConnectionManager
@@ -40,6 +44,7 @@ if TYPE_CHECKING:
     from seerflow.config import SeerflowConfig
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
+    from seerflow.sigma.state import SigmaRuleStateStore
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
     from seerflow.ueba.engine import UEBAEngine
     from seerflow.ueba.store import BaselineStore
@@ -88,13 +93,52 @@ def _build_ws_manager(
     )
 
 
+_SIGMA_FLUSH_INTERVAL_S = 60.0
+
+
+_logger = logging.getLogger(__name__)
+
+
+async def _sigma_flush_loop(engine: SigmaEngine, interval_s: float) -> None:
+    """Background task that flushes accumulated match counters periodically.
+
+    Cancellation is the normal exit path (lifespan shutdown). Any unexpected
+    exception is logged but does not propagate — the loop is best-effort
+    observability, not a correctness invariant.
+    """
+    try:
+        while True:
+            await asyncio.sleep(interval_s)
+            try:
+                await engine.flush_counters()
+            except Exception:
+                _logger.warning("Sigma counter flush failed", exc_info=True)
+    except asyncio.CancelledError:
+        return
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the WebSocket status task on startup and shut down cleanly."""
     app.state.ws_manager.start_status_task()
+
+    sigma_engine: SigmaEngine | None = app.state.engines.sigma_engine
+    sigma_state_store: SigmaRuleStateStore | None = getattr(app.state, "sigma_state_store", None)
+    flush_task: asyncio.Task[None] | None = None
+    if sigma_engine is not None and sigma_state_store is not None:
+        await sigma_engine.attach_state_store(sigma_state_store)
+        flush_task = asyncio.create_task(_sigma_flush_loop(sigma_engine, _SIGMA_FLUSH_INTERVAL_S))
+
     try:
         yield
     finally:
+        if flush_task is not None:
+            flush_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await flush_task
+            if sigma_engine is not None:
+                with contextlib.suppress(Exception):
+                    await sigma_engine.flush_counters()
         await app.state.ws_manager.shutdown()
 
 
@@ -173,6 +217,7 @@ def _register_routes(app: FastAPI) -> None:
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
     app.include_router(anomaly.router, prefix=_API_PREFIX)
+    app.include_router(sigma.router, prefix=_API_PREFIX)
     app.include_router(ws_module.router, prefix=_API_PREFIX)
 
 
@@ -186,6 +231,7 @@ def create_api_app(
     correlation_rules: Sequence[CorrelationRule] = (),
     baseline_store: BaselineStore | None = None,
     ueba_engine: UEBAEngine | None = None,
+    sigma_state_store: SigmaRuleStateStore | None = None,
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -227,6 +273,7 @@ def create_api_app(
     app.state.pipeline_metrics_provider = None
     app.state.baseline_store = baseline_store
     app.state.ueba_engine = ueba_engine
+    app.state.sigma_state_store = sigma_state_store
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
     app.state.anomaly_timeline_ring = AnomalyTimelineRing()
     app.state.ws_manager = ws_manager or _build_ws_manager(

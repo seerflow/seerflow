@@ -14,7 +14,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def discover_custom_rules(dirs: Sequence[str]) -> list[Path]:
+def discover_custom_rules(
+    dirs: Sequence[str],
+    *,
+    upload_dir: Path | None = None,
+) -> list[Path]:
     """Validate directories and collect .yml rule file paths.
 
     For each directory in *dirs*:
@@ -24,6 +28,10 @@ def discover_custom_rules(dirs: Sequence[str]) -> list[Path]:
     - Log info for symlinks (follows them)
     - Recurse into subdirectories
     - Collect all ``.yml`` files (``.yaml`` is not supported)
+
+    If *upload_dir* is provided and exists, its ``.yml`` files are appended
+    to the result regardless of ``dirs`` membership (S-151 — UI uploads
+    survive restart without operator config wiring).
 
     Returns a sorted list of ``Path`` objects.
     """
@@ -64,4 +72,14 @@ def discover_custom_rules(dirs: Sequence[str]) -> list[Path]:
             logger.info("No .yml files in custom sigma rules dir: %s", dir_path)
         paths.extend(yml_files)
 
-    return sorted(paths)
+    if upload_dir is not None and upload_dir.is_dir():
+        try:
+            paths.extend(upload_dir.rglob("*.yml"))
+        except OSError:
+            logger.warning(
+                "Error reading sigma_custom_upload_dir: %s — skipping",
+                upload_dir,
+                exc_info=True,
+            )
+
+    return sorted(set(paths))

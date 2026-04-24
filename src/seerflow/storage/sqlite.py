@@ -28,6 +28,7 @@ from seerflow.storage._sqlite_alerts import (
     _build_alert_query,  # re-exported for backwards compatibility with tests
     _SqliteAlertMixin,
 )
+from seerflow.storage._sqlite_sigma_state import _SqliteSigmaStateMixin
 
 __all__ = ["_INSERT_ALERT_SQL", "SqliteBackend", "TemplateInfo", "_build_alert_query"]
 
@@ -386,7 +387,7 @@ class WriteBuffer:
 # ---------------------------------------------------------------------------
 
 
-class SqliteBackend(_SqliteAlertMixin):
+class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
     """SQLite storage backend implementing LogStore.write_events."""
 
     __slots__ = ("_closed", "_conn", "_entity_graph", "_write_buffer")

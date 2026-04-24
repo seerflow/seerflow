@@ -348,6 +348,7 @@ class TestMatcherCoverage:
         mock_rule = MagicMock()
         mock_rule.detection.parsed_condition = []
         cr = CompiledRule(
+            rule_id="00000000-0000-0000-0000-000000000000",
             rule_name="test",
             description="",
             severity=SeverityLevel.INFORMATIONAL,
@@ -388,3 +389,23 @@ class TestAttackTagValidation:
             cr = compile_rule(rule)
         assert "not_a_real_tactic" in caplog.text
         assert "not_a_real_tactic" in cr.attack_tactics
+
+
+def test_compiled_rule_has_rule_id() -> None:
+    """S-151: CompiledRule carries a stable UUID rule_id."""
+    from sigma.rule import SigmaRule
+
+    from seerflow.sigma.matcher import compile_rule
+
+    rule = SigmaRule.from_yaml(
+        """
+title: Has ID
+logsource: {product: linux, category: process_creation}
+detection:
+  sel: {Image: '/x'}
+  condition: sel
+"""
+    )
+    compiled = compile_rule(rule)
+    assert isinstance(compiled.rule_id, str)
+    assert len(compiled.rule_id) == 36

@@ -327,3 +327,60 @@ class AttackCoverageResponse(BaseModel):
     window_until: str
     tactics: list[AttackCoverageTactic]
     summary: AttackCoverageSummary
+
+
+# ---------------------------------------------------------------------------
+# Sigma rules management (S-151)
+# ---------------------------------------------------------------------------
+
+
+class SigmaRuleSummary(BaseModel):
+    """One row in the Sigma rules table."""
+
+    rule_id: str
+    title: str
+    description: str = ""
+    severity: int
+    logsource_key: list[str]
+    attack_tactics: list[str]
+    attack_techniques: list[str]
+    enabled: bool
+    source: str
+    match_count_lifetime: int
+    last_fired_ns: int | None = None
+    alert_count_24h: int = 0
+
+
+class SigmaRuleDetail(SigmaRuleSummary):
+    """Single rule view including raw YAML source."""
+
+    yaml_source: str
+
+
+class SigmaRuleListResponse(BaseModel):
+    items: list[SigmaRuleSummary]
+    total: int
+    page: int
+    limit: int
+
+
+class SigmaRuleToggleRequest(BaseModel):
+    enabled: bool
+
+
+class SigmaRuleUploadRequest(BaseModel):
+    yaml: str = Field(..., max_length=65_536)
+
+
+class SigmaRuleValidationResult(BaseModel):
+    """Outcome of dry-run validation. ``valid=False`` carries error fields."""
+
+    valid: bool
+    rule_id: str | None = None
+    title: str | None = None
+    logsource_key: list[str] | None = None
+    stage: Literal["yaml", "schema", "compile"] | None = None
+    message: str | None = None
+    line: int | None = None
+    column: int | None = None
+    field: str | None = None
