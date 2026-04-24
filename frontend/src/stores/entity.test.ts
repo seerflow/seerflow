@@ -66,7 +66,11 @@ describe("entityStore.selectEntity + refresh", () => {
     await useEntityStore.getState().selectEntity(UUID);
     mockedGet.mockClear();
     await useEntityStore.getState().setRange("6h");
-    expect(mockedGet).toHaveBeenCalledTimes(1);
+    // S-060.F1: setRange now refetches both timeline and risk-history.
+    const timelineCalls = mockedGet.mock.calls.filter((c) =>
+      String(c[0]).includes("/timeline"),
+    );
+    expect(timelineCalls).toHaveLength(1);
   });
 });
 
@@ -228,5 +232,63 @@ describe("entityStore error and filter paths", () => {
     } finally {
       Storage.prototype.setItem = orig;
     }
+  });
+});
+
+describe("entityStore.fetchRiskHistory (S-060.F1)", () => {
+  beforeEach(() => {
+    useEntityStore.getState().clearSelection();
+  });
+
+  it("populates riskHistory on success", async () => {
+    mockedGet.mockResolvedValueOnce({
+      meta: { range: "1h", resolution: "1m", alert_count_truncated: false },
+      items: [
+        { bucket_start_ns: "0", points: 1.2, alert_count: 2, top_rule_name: "r" },
+      ],
+    });
+    useEntityStore.setState({
+      selectedEntityUuid: "11111111-1111-1111-1111-111111111111",
+      range: "1h",
+    });
+    await useEntityStore.getState().fetchRiskHistory();
+    const s = useEntityStore.getState();
+    expect(s.riskHistory).toHaveLength(1);
+    expect(s.riskHistoryLoading).toBe(false);
+    expect(s.riskHistoryError).toBeNull();
+    expect(mockedGet).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/entities/11111111-1111-1111-1111-111111111111/risk-history?range=1h",
+      ),
+      expect.any(Object),
+    );
+  });
+
+  it("no-ops when no entity is selected", async () => {
+    useEntityStore.setState({ selectedEntityUuid: null });
+    await useEntityStore.getState().fetchRiskHistory();
+    expect(mockedGet).not.toHaveBeenCalled();
+  });
+
+  it("sets error state on fetch failure", async () => {
+    mockedGet.mockRejectedValueOnce(new Error("boom"));
+    useEntityStore.setState({
+      selectedEntityUuid: "22222222-2222-2222-2222-222222222222",
+      range: "1h",
+    });
+    await useEntityStore.getState().fetchRiskHistory();
+    const s = useEntityStore.getState();
+    expect(s.riskHistoryError).not.toBeNull();
+    expect(s.riskHistoryLoading).toBe(false);
+  });
+
+  it("clearSelection resets riskHistory to []", () => {
+    useEntityStore.setState({
+      riskHistory: [
+        { bucket_start_ns: "0", points: 1, alert_count: 1, top_rule_name: "r" },
+      ],
+    });
+    useEntityStore.getState().clearSelection();
+    expect(useEntityStore.getState().riskHistory).toEqual([]);
   });
 });
