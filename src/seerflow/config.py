@@ -148,6 +148,10 @@ class DetectionConfig:
     weights_template_volume: float = 0.15
     weights_entity_volume: float = 0.15
     sigma_rules_dirs: tuple[str, ...] = ()  # wired into pipeline startup when Sigma is integrated
+    # S-151: directory where the dashboard upload UI persists custom Sigma rules.
+    # Always discovered at startup regardless of ``sigma_rules_dirs`` so uploaded
+    # rules survive restart without operator config gymnastics.
+    sigma_custom_upload_dir: str | None = None
     attack_mappings: tuple[dict[str, Any], ...] = ()
     graph_structural: GraphStructuralConfig = field(default_factory=GraphStructuralConfig)
     kill_chain: KillChainConfig = field(default_factory=KillChainConfig)

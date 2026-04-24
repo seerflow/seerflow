@@ -177,11 +177,29 @@ async def _migrate_v4_feedback_events(conn: aiosqlite.Connection) -> None:
     )
 
 
+async def _migrate_v5_sigma_rule_state(conn: aiosqlite.Connection) -> None:
+    """Migration 5: per-rule Sigma state — enabled flag + match counters (S-151)."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS sigma_rule_state (
+            rule_id              TEXT    PRIMARY KEY,
+            enabled              INTEGER NOT NULL DEFAULT 1,
+            match_count_lifetime INTEGER NOT NULL DEFAULT 0,
+            last_fired_ns        INTEGER,
+            updated_at_ns        INTEGER NOT NULL
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sigma_rule_state_enabled "
+        "ON sigma_rule_state(enabled)"
+    )
+
+
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     1: _migrate_v1_bootstrap,
     2: _migrate_v2_graph_edges,
     3: _migrate_v3_mitre_junctions,
     4: _migrate_v4_feedback_events,
+    5: _migrate_v5_sigma_rule_state,
 }
 
 

@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import enum
 import logging
+import threading
 import uuid
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import msgspec.structs
@@ -21,14 +25,16 @@ from sigma.rule import SigmaRule
 from seerflow.models.alert import Alert
 from seerflow.models.entity import infer_entity_type, primary_entity_value
 from seerflow.sigma.bundled import get_bundled_rule_paths
+from seerflow.sigma.ids import compute_rule_id
 from seerflow.sigma.matcher import CompiledRule, compile_rule, match_event
 from seerflow.sigma.pipeline import seerflow_pipeline
+from seerflow.sigma.validator import SigmaRuleValidationError, validate_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
-    from pathlib import Path
 
     from seerflow.models.event import SeerflowEvent
+    from seerflow.sigma.state import SigmaRuleStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +66,17 @@ def _event_to_dict(event: SeerflowEvent) -> dict[str, object]:
     return d
 
 
+@dataclass(frozen=True)
+class SigmaRuleCollisionError(Exception):
+    """Raised when ``add_rule`` produces a ``rule_id`` already loaded."""
+
+    rule_id: str
+    existing_source: str
+
+    def __str__(self) -> str:
+        return f"rule_id {self.rule_id} already loaded (source={self.existing_source})"
+
+
 class SigmaEngine:
     """Sigma rule evaluation engine with logsource-indexed dispatch.
 
@@ -68,17 +85,34 @@ class SigmaEngine:
         engine = SigmaEngine()
         engine.load_rules([Path("rules/whoami.yml")])
         alerts = engine.evaluate(event)
+
+    Mutation safety
+    ---------------
+    ``set_enabled`` and ``add_rule`` mutate via copy-on-write under a
+    ``threading.Lock``. The hot ``evaluate`` path is sync and reads through
+    a single attribute access, so readers always see a coherent snapshot.
     """
 
     def __init__(self) -> None:
         self._index: dict[tuple[str, str, str], list[CompiledRule]] = {}
         self._rule_count: int = 0
         self._pipeline = seerflow_pipeline()
+        self._disabled_rule_ids: frozenset[str] = frozenset()
+        self._mutation_lock = threading.Lock()
+        self._match_counts: Counter[str] = Counter()
+        self._last_fired_ns: dict[str, int] = {}
+        self._yaml_source: dict[str, str] = {}
+        self._source_kind: dict[str, str] = {}
+        self._state_store: SigmaRuleStateStore | None = None
 
-    def load_rules(self, paths: Sequence[Path]) -> None:
+    def load_rules(
+        self, paths: Sequence[Path], *, source_kind: str = "bundled"
+    ) -> None:
         """Load, compile, and index Sigma rules from YAML file paths.
 
-        Invalid rules are logged as warnings and skipped.
+        Invalid rules are logged as warnings and skipped. Rules with a
+        ``rule_id`` already present in the index are skipped (first-loaded
+        wins) and a WARNING is logged — see :class:`SigmaRuleCollisionError`.
 
         Security: callers must ensure paths are within a trusted directory.
         This method does not enforce path boundaries — it reads whatever
@@ -87,10 +121,20 @@ class SigmaEngine:
         """
         for path in paths:
             try:
-                rule = SigmaRule.from_yaml(path.read_text())
+                yaml_text = path.read_text()
+                rule = SigmaRule.from_yaml(yaml_text)
                 self._pipeline.apply(rule)
                 compiled = compile_rule(rule)
+                if compiled.rule_id in self._yaml_source:
+                    logger.warning(
+                        "Skipping Sigma rule with duplicate rule_id %s (path=%s)",
+                        compiled.rule_id,
+                        path,
+                    )
+                    continue
                 self._index.setdefault(compiled.logsource_key, []).append(compiled)
+                self._yaml_source[compiled.rule_id] = yaml_text
+                self._source_kind[compiled.rule_id] = source_kind
                 self._rule_count += 1
             except Exception:
                 logger.warning("Failed to load Sigma rule: %s", path, exc_info=True)
@@ -152,12 +196,19 @@ class SigmaEngine:
         if not candidates:
             return []
 
+        # Snapshot the disabled set once so the loop sees a coherent view
+        # even if a concurrent toggle swaps the reference mid-iteration.
+        disabled = self._disabled_rule_ids
         event_dict = _event_to_dict(event)
         alerts: list[Alert] = []
 
         for compiled in candidates:
+            if compiled.rule_id in disabled:
+                continue
             try:
                 if match_event(compiled, event_dict):
+                    self._match_counts[compiled.rule_id] += 1
+                    self._last_fired_ns[compiled.rule_id] = event.timestamp_ns
                     alerts.append(_create_sigma_alert(compiled, event))
             except Exception:
                 logger.warning(
@@ -188,6 +239,125 @@ class SigmaEngine:
         """
         for rules in self._index.values():
             yield from rules
+
+    # ------------------------------------------------------------------
+    # S-151: runtime mutation API (toggle, list, validate, add)
+    # ------------------------------------------------------------------
+
+    def set_enabled(self, rule_id: str, enabled: bool) -> None:
+        """Enable or disable *rule_id* atomically (copy-on-write).
+
+        Unknown ``rule_id`` is a no-op — callers are expected to validate
+        membership separately if they care.
+        """
+        with self._mutation_lock:
+            current = self._disabled_rule_ids
+            if enabled and rule_id in current:
+                self._disabled_rule_ids = current - {rule_id}
+            elif not enabled and rule_id not in current:
+                self._disabled_rule_ids = current | {rule_id}
+
+    def list_rules(self) -> list[dict[str, object]]:
+        """Return a snapshot of every loaded rule with stats + flags."""
+        out: list[dict[str, object]] = []
+        disabled = self._disabled_rule_ids
+        for rule in self.iter_compiled_rules():
+            out.append(
+                {
+                    "rule_id": rule.rule_id,
+                    "title": rule.rule_name,
+                    "description": rule.description,
+                    "severity": int(rule.severity.value),
+                    "logsource_key": list(rule.logsource_key),
+                    "attack_tactics": list(rule.attack_tactics),
+                    "attack_techniques": list(rule.attack_techniques),
+                    "enabled": rule.rule_id not in disabled,
+                    "source": self._source_kind.get(rule.rule_id, "bundled"),
+                    "yaml_source": self._yaml_source.get(rule.rule_id, ""),
+                    "match_count_lifetime": int(self._match_counts[rule.rule_id]),
+                    "last_fired_ns": self._last_fired_ns.get(rule.rule_id),
+                }
+            )
+        return out
+
+    def validate_rule(self, yaml_text: str) -> dict[str, object]:
+        """Parse + compile *yaml_text* without persisting.
+
+        Returns parsed metadata. Raises :class:`SigmaRuleValidationError`
+        on failure (caller decides how to surface it).
+        """
+        rule = validate_yaml(yaml_text)
+        return {
+            "rule_id": compute_rule_id(rule),
+            "title": rule.title or "",
+            "logsource_key": [
+                rule.logsource.category or "",
+                rule.logsource.product or "",
+                rule.logsource.service or "",
+            ],
+        }
+
+    def add_rule(
+        self,
+        yaml_text: str,
+        persist_path: Path,
+        *,
+        source_kind: str = "custom_uploaded",
+    ) -> str:
+        """Validate, persist, index, and return the new ``rule_id``.
+
+        Raises :class:`SigmaRuleValidationError` (no persistence) on bad YAML.
+        Raises :class:`SigmaRuleCollisionError` (no persistence) if the
+        derived ``rule_id`` is already loaded — first-loaded wins.
+        """
+        rule = validate_yaml(yaml_text)
+        rid = compute_rule_id(rule)
+
+        with self._mutation_lock:
+            if rid in self._yaml_source:
+                raise SigmaRuleCollisionError(
+                    rule_id=rid,
+                    existing_source=self._source_kind.get(rid, "bundled"),
+                )
+            persist_path.parent.mkdir(parents=True, exist_ok=True)
+            persist_path.write_text(yaml_text)
+
+            compiled = compile_rule(rule)
+            new_index = {k: list(v) for k, v in self._index.items()}
+            new_index.setdefault(compiled.logsource_key, []).append(compiled)
+            self._index = new_index
+            self._rule_count += 1
+            self._yaml_source[rid] = yaml_text
+            self._source_kind[rid] = source_kind
+
+        return rid
+
+    async def attach_state_store(self, store: SigmaRuleStateStore) -> None:
+        """Hydrate enabled flags + counters from *store* and remember it."""
+        self._state_store = store
+        states = await store.get_all()
+        disabled = {sid for sid, s in states.items() if not s.enabled}
+        with self._mutation_lock:
+            self._disabled_rule_ids = frozenset(disabled)
+        for rid, s in states.items():
+            self._match_counts[rid] = s.match_count_lifetime
+            if s.last_fired_ns is not None:
+                self._last_fired_ns[rid] = s.last_fired_ns
+
+    async def flush_counters(self) -> None:
+        """Persist accumulated match counters to the state store and reset.
+
+        No-op when no state store is attached or counters are empty.
+        """
+        if self._state_store is None or not self._match_counts:
+            return
+        deltas: dict[str, tuple[int, int]] = {
+            rid: (n, self._last_fired_ns.get(rid, 0))
+            for rid, n in self._match_counts.items()
+            if n > 0
+        }
+        await self._state_store.increment_counts(deltas)
+        self._match_counts.clear()
 
 
 def _create_sigma_alert(compiled: CompiledRule, event: SeerflowEvent) -> Alert:
