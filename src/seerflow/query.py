@@ -447,7 +447,13 @@ async def run_query_health(args: argparse.Namespace) -> None:
         ensemble = DetectionEnsemble(config.detection)
         await ensemble.load_all_state(storage)
         health = ensemble.get_health()
-    finally:
+    # Broad catch: storage backend raises unknown types (sqlite3.Error, OSError,
+    # backend-specific) at the CLI boundary — friendly-message them here.
+    except Exception as exc:
+        await storage.close()
+        print(f"Error loading ensemble state: {exc}", file=sys.stderr)
+        sys.exit(1)
+    else:
         await storage.close()
 
     if args.json:
