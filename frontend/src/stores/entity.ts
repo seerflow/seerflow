@@ -184,7 +184,7 @@ export const useEntityStore = create<State>((set, get) => ({
 
   fetchRiskHistory: async () => {
     const { selectedEntityUuid: uuid, range, _riskAbort } = get();
-    if (!uuid) return;
+    if (!uuid || !isValidEntityUuid(uuid)) return;
     _riskAbort?.abort();
     const ctrl = new AbortController();
     set({ _riskAbort: ctrl, riskHistoryLoading: true, riskHistoryError: null, riskHistory: [] });
