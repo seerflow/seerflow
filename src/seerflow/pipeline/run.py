@@ -374,6 +374,7 @@ async def _run_with_config(config: SeerflowConfig) -> None:
             endpoint=config.alerting.otlp_endpoint,
             protocol=config.alerting.otlp_protocol,
             export_interval=config.alerting.otlp_export_interval_seconds,
+            tls=config.alerting.otlp_tls,
         )
         _otlp_task = asyncio.create_task(otlp_sink.run())
         _log.info(
