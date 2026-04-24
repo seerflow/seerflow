@@ -14,12 +14,18 @@ import time
 import uuid as _uuid_mod
 from collections.abc import Sequence  # noqa: TC003 — runtime use in _bucket_alerts signature
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Final
+from typing import TYPE_CHECKING, Annotated, Final, Literal
 
 import msgspec
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from seerflow.api.anomaly_timeline import (
+    RANGE_NS,
+    RESOLUTION_NS,
+    allowed_resolutions,
+    default_resolution,
+)
 from seerflow.api.deps import (
     StorageDeps,
     get_storage,
@@ -32,6 +38,8 @@ from seerflow.api.schemas import (
     EntityTimelineResponse,
     EventResponse,
     RiskBucketResponse,
+    RiskHistoryMetaResponse,
+    RiskHistoryResponse,
 )
 from seerflow.models.alert import Alert  # noqa: TC001 — runtime use in _bucket_alerts signature
 from seerflow.models.entity import (
@@ -41,7 +49,7 @@ from seerflow.models.entity import (
     generate_user_id,
     normalize_username,
 )
-from seerflow.models.query import EventQuery, TimeRange
+from seerflow.models.query import AlertQuery, EventQuery, TimeRange
 from seerflow.storage.protocols import EntityStore  # noqa: TC001
 
 if TYPE_CHECKING:
@@ -158,6 +166,13 @@ _ENTITY_FIELDS: tuple[tuple[str, str, Callable[[str], str]], ...] = (
 )
 
 
+RangeArg = Annotated[Literal["1h", "6h", "24h", "7d"], Query(description="Window size")]
+ResolutionArg = Annotated[
+    Literal["1m", "5m", "15m", "1h"] | None,
+    Query(description="Bucket size (defaults to smallest allowed)"),
+]
+
+
 def _extract_entities(events: list[SeerflowEvent]) -> list[EntitySearchResult]:
     """Extract unique entity references from events, stamping UUIDs."""
     seen: set[tuple[str, str]] = set()
@@ -270,6 +285,65 @@ async def get_entity_timeline(
         events=[EventResponse.from_event(e) for e in events],
         related=[EntityRelationResponse.from_relation(r) for r in related],
         total=len(events),
+    )
+
+
+@router.get(
+    "/entities/{entity_uuid}/risk-history",
+    response_model=RiskHistoryResponse,
+    responses={
+        422: {"description": "Invalid UUID / range / resolution"},
+        429: {"description": "Rate limit exceeded"},
+    },
+)
+@limiter.limit(list_limit)
+async def get_entity_risk_history(
+    request: Request,
+    entity_uuid: _uuid_mod.UUID,
+    storage: Storage,
+    range: RangeArg = "1h",  # noqa: A002 -- matches public query param name
+    resolution: ResolutionArg = None,
+) -> RiskHistoryResponse:
+    """Return a bucketed risk-score series for an entity (S-060.F1)."""
+    resolved_resolution = resolution or default_resolution(range)
+    if resolved_resolution not in allowed_resolutions(range):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"resolution {resolved_resolution!r} not allowed for range {range!r}"
+            ),
+        )
+
+    range_ns = RANGE_NS[range]
+    res_ns = RESOLUTION_NS[resolved_resolution]
+    # Align ``now_ns`` to the resolution boundary so the helper yields exactly
+    # ``range_ns / res_ns`` dense buckets (mirrors anomaly_timeline.query's
+    # ``end_idx_aligned`` behaviour).
+    now_ns = (time.time_ns() // res_ns) * res_ns
+    entity_uuid_str = str(entity_uuid)
+
+    alert_page = await storage.alert_store.query_alerts(
+        AlertQuery(
+            entity_uuid=entity_uuid_str,
+            time_range=TimeRange(start_ns=now_ns - range_ns, end_ns=now_ns),
+            limit=_ALERT_QUERY_LIMIT,
+        )
+    )
+
+    items = _bucket_alerts(
+        list(alert_page.items),
+        now_ns=now_ns,
+        range_ns=range_ns,
+        res_ns=res_ns,
+    )
+
+    return RiskHistoryResponse(
+        meta=RiskHistoryMetaResponse(
+            range=range,
+            resolution=resolved_resolution,
+            alert_count_truncated=alert_page.total > len(alert_page.items),
+        ),
+        items=items,
     )
 
 

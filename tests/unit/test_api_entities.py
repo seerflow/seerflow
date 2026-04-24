@@ -498,3 +498,81 @@ class TestBucketAlerts:
         now_ns = range_ns
         items = _bucket_alerts([], now_ns=now_ns, range_ns=range_ns, res_ns=res_ns)
         assert len(items) == 96
+
+
+class TestEntityRiskHistory:
+    """Tests for GET /api/v1/entities/{uuid}/risk-history (S-060.F1)."""
+
+    @pytest.fixture
+    def alert_store(self) -> AsyncMock:
+        store = AsyncMock()
+        store.query_alerts.return_value = Page(items=[], total=0, page=1, limit=10_000)
+        return store
+
+    @pytest.fixture
+    def client(self, alert_store: AsyncMock) -> TestClient:
+        app = FastAPI()
+        app.state.storage = StorageDeps(
+            log_store=AsyncMock(), alert_store=alert_store, entity_store=AsyncMock()
+        )
+        app.include_router(router, prefix="/api/v1")
+        return TestClient(app)
+
+    def test_happy_path_returns_zero_filled_series(self, client: TestClient) -> None:
+        uuid_str = str(uuid.uuid4())
+        resp = client.get(
+            f"/api/v1/entities/{uuid_str}/risk-history?range=1h&resolution=1m"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["meta"] == {
+            "range": "1h",
+            "resolution": "1m",
+            "alert_count_truncated": False,
+        }
+        assert len(body["items"]) == 60
+        assert all(b["points"] == 0.0 for b in body["items"])
+        assert all(b["top_rule_name"] == "" for b in body["items"])
+        assert all(isinstance(b["bucket_start_ns"], str) for b in body["items"])
+
+    def test_default_resolution_is_smallest_for_range(self, client: TestClient) -> None:
+        uuid_str = str(uuid.uuid4())
+        resp = client.get(f"/api/v1/entities/{uuid_str}/risk-history?range=24h")
+        assert resp.status_code == 200
+        assert resp.json()["meta"]["resolution"] == "5m"
+
+    def test_invalid_resolution_for_range_returns_422(self, client: TestClient) -> None:
+        uuid_str = str(uuid.uuid4())
+        resp = client.get(
+            f"/api/v1/entities/{uuid_str}/risk-history?range=1h&resolution=1h"
+        )
+        assert resp.status_code == 422
+        assert "not allowed" in resp.json()["detail"]
+
+    def test_invalid_range_returns_422(self, client: TestClient) -> None:
+        uuid_str = str(uuid.uuid4())
+        resp = client.get(f"/api/v1/entities/{uuid_str}/risk-history?range=99d")
+        assert resp.status_code == 422
+
+    def test_malformed_uuid_returns_422(self, client: TestClient) -> None:
+        resp = client.get("/api/v1/entities/not-a-uuid/risk-history?range=1h")
+        assert resp.status_code == 422
+
+    def test_entity_uuid_passed_as_string(
+        self, client: TestClient, alert_store: AsyncMock
+    ) -> None:
+        uuid_str = str(uuid.uuid4())
+        client.get(f"/api/v1/entities/{uuid_str}/risk-history?range=1h")
+        q = alert_store.query_alerts.await_args.args[0]
+        assert q.entity_uuid == uuid_str
+        assert isinstance(q.entity_uuid, str)
+
+    def test_truncation_flag_surfaces(
+        self, client: TestClient, alert_store: AsyncMock
+    ) -> None:
+        uuid_str = str(uuid.uuid4())
+        alert_store.query_alerts.return_value = Page(
+            items=[], total=10_001, page=1, limit=10_000
+        )
+        resp = client.get(f"/api/v1/entities/{uuid_str}/risk-history?range=1h")
+        assert resp.json()["meta"]["alert_count_truncated"] is True
