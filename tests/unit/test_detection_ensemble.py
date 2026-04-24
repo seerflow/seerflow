@@ -1434,6 +1434,44 @@ class TestRunQueryHealth:
         captured = capsys.readouterr()
         assert "Error connecting to storage: no db" in captured.err
 
+    @pytest.mark.asyncio
+    async def test_load_all_state_error_prints_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """S-212: ensemble.load_all_state failure prints to stderr, exits 1, closes storage."""
+        from argparse import Namespace
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.query import run_query_health
+
+        mock_storage = AsyncMock()
+        mock_storage.load_state = AsyncMock(return_value=None)
+        mock_storage.close = AsyncMock()
+
+        with (
+            patch("seerflow.config.load_config") as mock_cfg,
+            patch(
+                "seerflow.query.connect_storage",
+                new_callable=AsyncMock,
+            ) as mock_connect,
+            patch(
+                "seerflow.detection.ensemble.DetectionEnsemble.load_all_state",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("corrupt manifest"),
+            ),
+            pytest.raises(SystemExit, match="1"),
+        ):
+            mock_cfg.return_value.detection = DetectionConfig(hw_seasonal_period=10)
+            mock_cfg.return_value.storage = None
+            mock_connect.return_value = mock_storage
+
+            args = Namespace(config=None, json=False)
+            await run_query_health(args)
+
+        captured = capsys.readouterr()
+        assert "Error loading ensemble state: corrupt manifest" in captured.err
+        mock_storage.close.assert_awaited_once()
+
 
 class TestWarmupAmplification:
     """S-161: Amplification should not be diluted by warmup channels."""
