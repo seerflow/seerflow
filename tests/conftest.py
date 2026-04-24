@@ -33,11 +33,17 @@ def _reset_api_limiter() -> Iterator[None]:
     """
     from seerflow.api.limits import _rebind_limiter_internals
 
-    fresh = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
-    _limits.limiter.enabled = False
-    _rebind_limiter_internals(_limits.limiter, fresh)
-    defaults = SeerflowConfig()
-    _limits._current_list_limit = defaults.api_list_rate_limit
-    _limits._current_detail_limit = defaults.api_detail_rate_limit
-    _limits._current_coverage_limit = defaults.api_coverage_rate_limit
+    def _reset() -> None:
+        fresh = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
+        _rebind_limiter_internals(_limits.limiter, fresh)
+        _limits.limiter.enabled = False
+        defaults = SeerflowConfig()
+        _limits._current_list_limit = defaults.api_list_rate_limit
+        _limits._current_detail_limit = defaults.api_detail_rate_limit
+        _limits._current_coverage_limit = defaults.api_coverage_rate_limit
+
+    _reset()
     yield
+    # Symmetric teardown: leave the singleton clean for any consumer outside
+    # the pytest lifecycle (REPL reuse, --co resume) that may run after.
+    _reset()

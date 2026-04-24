@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from unittest.mock import MagicMock
 
@@ -170,8 +171,6 @@ class TestRebindLimiterInternals:
         being copied from (``new``). A partial implementation change in the
         helper that only checked one side would be caught here.
         """
-        import logging
-
         from slowapi import Limiter
 
         from seerflow.api.limits import _rebind_limiter_internals

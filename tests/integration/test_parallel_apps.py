@@ -34,7 +34,14 @@ def _build(backend: SqliteBackend, **overrides: object) -> TestClient:
 
 
 class TestParallelApps:
-    """Codify the single-tenant contract documented in seerflow.api.limits."""
+    """Codify the single-tenant contract documented in seerflow.api.limits.
+
+    Methods are ``async def`` because the shared ``backend`` fixture
+    (``tests/integration/conftest.py::backend``) is an ``AsyncIterator``.
+    pytest-asyncio (``asyncio_mode = "auto"``) requires the consuming
+    test to be coroutine-shaped for correct fixture injection even
+    though ``TestClient`` itself is synchronous.
+    """
 
     async def test_second_app_config_wins_for_subsequent_requests(
         self, backend: SqliteBackend

@@ -41,6 +41,8 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING
 
 from slowapi import Limiter
@@ -53,7 +55,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SLOWAPI_INTERNAL_ATTRS = ("_storage", "_limiter")
+
+def _installed_slowapi_version() -> str:
+    """Return the installed ``slowapi`` version string for diagnostics, or a sentinel."""
+    try:
+        return _pkg_version("slowapi")
+    except PackageNotFoundError:  # pragma: no cover — slowapi is a required dep
+        return "unknown"
 
 
 def _rebind_limiter_internals(old: Limiter, new: Limiter) -> None:
@@ -62,32 +70,43 @@ def _rebind_limiter_internals(old: Limiter, new: Limiter) -> None:
     The module-level ``limiter`` instance is captured by route decorators
     at import time; we cannot swap the reference, only mutate its
     internals. This helper is the **single** place in the codebase that
-    reaches into private slowapi attributes, so an upstream rename
-    surfaces here in exactly one diff.
+    reaches into private slowapi attributes (``_storage``, ``_limiter``),
+    so an upstream rename surfaces here in exactly one diff.
 
-    Raises :class:`AttributeError` with a loud log message if slowapi has
-    renamed or removed either attribute — so a dependency bump fails in
-    CI rather than silently running with stale state. Paired with the
-    ``slowapi<0.2.0`` upper bound in ``pyproject.toml`` as defence in
-    depth.
+    Raises :class:`AttributeError` with a loud log message (naming every
+    missing attribute and the installed slowapi version via
+    ``importlib.metadata``) if slowapi has renamed or removed either
+    attribute — so a dependency bump fails in CI rather than silently
+    running with stale state. Paired with the ``slowapi<0.2.0`` upper
+    bound in ``pyproject.toml`` as defence in depth.
+
+    The mutation is two separate attribute assignments; under CPython's
+    GIL this is safe within a process, but a caller reaching into
+    ``old`` between the two assignments would observe a half-rebound
+    state. In practice ``configure_limiter`` is only invoked once per
+    app during startup, before routes accept traffic, so the window
+    cannot be observed.
     """
-    for attr in _SLOWAPI_INTERNAL_ATTRS:
-        if not hasattr(new, attr) or not hasattr(old, attr):
-            import slowapi as _slowapi
-
-            version = getattr(_slowapi, "__version__", "unknown")
-            logger.error(
-                "slowapi.Limiter is missing private attribute %r (version=%s). "
-                "S-185 relies on this attribute to rebind per-app storage. "
-                "Review configure_limiter against the installed slowapi API.",
-                attr,
-                version,
-            )
-            raise AttributeError(
-                f"slowapi.Limiter has no private attribute {attr!r} "
-                f"(installed version {version}); S-185 rebind contract broken"
-            )
-        setattr(old, attr, getattr(new, attr))
+    missing = [
+        attr
+        for attr in ("_storage", "_limiter")
+        if not hasattr(new, attr) or not hasattr(old, attr)
+    ]
+    if missing:
+        version = _installed_slowapi_version()
+        logger.error(
+            "slowapi.Limiter is missing private attribute(s) %r (version=%s). "
+            "S-185 relies on these attributes to rebind per-app storage. "
+            "Review configure_limiter against the installed slowapi API.",
+            missing,
+            version,
+        )
+        raise AttributeError(
+            f"slowapi.Limiter has no private attribute(s) {missing!r} "
+            f"(installed version {version}); S-185 rebind contract broken"
+        )
+    old._storage = new._storage
+    old._limiter = new._limiter
 
 
 def _is_public_ip(value: str) -> bool:
@@ -166,6 +185,8 @@ def configure_limiter(config: SeerflowConfig) -> None:
     has renamed or removed its private ``_storage`` / ``_limiter``
     attributes (see that helper's docstring).
     """
+    global _current_list_limit, _current_detail_limit, _current_coverage_limit
+
     if config.api_rate_limit_redis_url:
         try:
             import redis  # noqa: F401
@@ -190,7 +211,6 @@ def configure_limiter(config: SeerflowConfig) -> None:
     _rebind_limiter_internals(limiter, fresh)
     limiter.enabled = config.api_rate_limit_enabled
 
-    global _current_list_limit, _current_detail_limit, _current_coverage_limit
     _current_list_limit = config.api_list_rate_limit
     _current_detail_limit = config.api_detail_rate_limit
     _current_coverage_limit = config.api_coverage_rate_limit
