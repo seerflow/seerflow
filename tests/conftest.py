@@ -27,13 +27,17 @@ def _reset_api_limiter() -> Iterator[None]:
 
     Without this, a test that enables rate limiting leaks its
     in-memory counters into the next test. Execution is global so the
-    fix must also be global.
+    fix must also be global. S-185 routes the internal-attribute rebind
+    through the same helper production uses, so a slowapi internal
+    rename fails in tests too.
     """
+    from seerflow.api.limits import _rebind_limiter_internals
+
     fresh = Limiter(key_func=_key_func, storage_uri="memory://", enabled=False)
     _limits.limiter.enabled = False
-    _limits.limiter._storage = fresh._storage
-    _limits.limiter._limiter = fresh._limiter
+    _rebind_limiter_internals(_limits.limiter, fresh)
     defaults = SeerflowConfig()
     _limits._current_list_limit = defaults.api_list_rate_limit
     _limits._current_detail_limit = defaults.api_detail_rate_limit
+    _limits._current_coverage_limit = defaults.api_coverage_rate_limit
     yield
