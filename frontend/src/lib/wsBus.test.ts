@@ -215,7 +215,7 @@ describe("emitCoalesced (S-209)", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
       "wsBus.rAF buffer overflow",
-      { dropped: 500 }
+      { flushed: 500 }
     );
     expect(batchSpy).toHaveBeenCalledTimes(1);
     expect(batchSpy.mock.calls[0][0].events).toHaveLength(500);

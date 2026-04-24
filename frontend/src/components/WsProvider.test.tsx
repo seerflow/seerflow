@@ -20,6 +20,12 @@ class FakeSocket {
 beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeSocket as unknown as typeof WebSocket);
   bus._clearAllForTests();
+  // S-209: WsProvider routes inbound frames through wsBus.emitCoalesced, which
+  // buffers `type: "event"` messages until the next rAF tick. Existing tests in
+  // this file only exercise `status`/`__status` frames (synchronous passthrough)
+  // so no current test depends on the reset, but leaving the buffer unreset is
+  // a latent trap for future `event`-dispatching tests.
+  bus._resetFrameBufferForTests();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
