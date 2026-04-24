@@ -520,9 +520,7 @@ class TestEntityRiskHistory:
 
     def test_happy_path_returns_zero_filled_series(self, client: TestClient) -> None:
         uuid_str = str(uuid.uuid4())
-        resp = client.get(
-            f"/api/v1/entities/{uuid_str}/risk-history?range=1h&resolution=1m"
-        )
+        resp = client.get(f"/api/v1/entities/{uuid_str}/risk-history?range=1h&resolution=1m")
         assert resp.status_code == 200
         body = resp.json()
         assert body["meta"] == {
@@ -543,9 +541,7 @@ class TestEntityRiskHistory:
 
     def test_invalid_resolution_for_range_returns_422(self, client: TestClient) -> None:
         uuid_str = str(uuid.uuid4())
-        resp = client.get(
-            f"/api/v1/entities/{uuid_str}/risk-history?range=1h&resolution=1h"
-        )
+        resp = client.get(f"/api/v1/entities/{uuid_str}/risk-history?range=1h&resolution=1h")
         assert resp.status_code == 422
         assert "not allowed" in resp.json()["detail"]
 
@@ -567,12 +563,8 @@ class TestEntityRiskHistory:
         assert q.entity_uuid == uuid_str
         assert isinstance(q.entity_uuid, str)
 
-    def test_truncation_flag_surfaces(
-        self, client: TestClient, alert_store: AsyncMock
-    ) -> None:
+    def test_truncation_flag_surfaces(self, client: TestClient, alert_store: AsyncMock) -> None:
         uuid_str = str(uuid.uuid4())
-        alert_store.query_alerts.return_value = Page(
-            items=[], total=10_001, page=1, limit=10_000
-        )
+        alert_store.query_alerts.return_value = Page(items=[], total=10_001, page=1, limit=10_000)
         resp = client.get(f"/api/v1/entities/{uuid_str}/risk-history?range=1h")
         assert resp.json()["meta"]["alert_count_truncated"] is True

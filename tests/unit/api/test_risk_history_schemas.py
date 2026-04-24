@@ -1,4 +1,5 @@
 """Tests for RiskHistory Pydantic schemas (S-060.F1)."""
+
 from __future__ import annotations
 
 import json
@@ -40,22 +41,16 @@ class TestRiskBucketResponse:
 
     def test_negative_points_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            RiskBucketResponse(
-                bucket_start_ns=0, points=-0.1, alert_count=0, top_rule_name=""
-            )
+            RiskBucketResponse(bucket_start_ns=0, points=-0.1, alert_count=0, top_rule_name="")
 
     def test_negative_alert_count_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            RiskBucketResponse(
-                bucket_start_ns=0, points=0.0, alert_count=-1, top_rule_name=""
-            )
+            RiskBucketResponse(bucket_start_ns=0, points=0.0, alert_count=-1, top_rule_name="")
 
 
 class TestRiskHistoryMetaResponse:
     def test_truncation_flag_roundtrips(self) -> None:
-        meta = RiskHistoryMetaResponse(
-            range="24h", resolution="15m", alert_count_truncated=True
-        )
+        meta = RiskHistoryMetaResponse(range="24h", resolution="15m", alert_count_truncated=True)
         payload = json.loads(meta.model_dump_json())
         assert payload == {
             "range": "24h",
@@ -67,13 +62,9 @@ class TestRiskHistoryMetaResponse:
 class TestRiskHistoryResponse:
     def test_envelope_shape(self) -> None:
         resp = RiskHistoryResponse(
-            meta=RiskHistoryMetaResponse(
-                range="1h", resolution="1m", alert_count_truncated=False
-            ),
+            meta=RiskHistoryMetaResponse(range="1h", resolution="1m", alert_count_truncated=False),
             items=[
-                RiskBucketResponse(
-                    bucket_start_ns=0, points=0.0, alert_count=0, top_rule_name=""
-                ),
+                RiskBucketResponse(bucket_start_ns=0, points=0.0, alert_count=0, top_rule_name=""),
             ],
         )
         payload = json.loads(resp.model_dump_json())

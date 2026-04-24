@@ -309,9 +309,7 @@ async def get_entity_risk_history(
     if resolved_resolution not in allowed_resolutions(range):
         raise HTTPException(
             status_code=422,
-            detail=(
-                f"resolution {resolved_resolution!r} not allowed for range {range!r}"
-            ),
+            detail=(f"resolution {resolved_resolution!r} not allowed for range {range!r}"),
         )
 
     range_ns = RANGE_NS[range]
