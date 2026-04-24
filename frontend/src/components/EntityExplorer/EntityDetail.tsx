@@ -1,9 +1,9 @@
 import { useEntityStore } from "@/stores/entity";
-import { useAlertStore } from "@/stores/alerts";
 import { navigateToEntity } from "@/lib/hash";
 import { EntityTimelineList } from "./EntityTimelineList";
 import { RelatedEntitiesPanel } from "./RelatedEntitiesPanel";
 import { EntityGraph } from "./EntityGraph";
+import { RiskSparkline } from "./RiskSparkline";
 import type { TimelineRange } from "@/lib/types";
 
 const RANGES: TimelineRange[] = ["1h", "6h", "24h", "7d"];
@@ -16,11 +16,9 @@ export function EntityDetail() {
   const total = useEntityStore((s) => s.total);
   const loading = useEntityStore((s) => s.loading);
   const setRange = useEntityStore((s) => s.setRange);
-  const alerts = useAlertStore((s) => s.alerts);
-
-  const risk = uuid
-    ? alerts.filter((a) => a.entity_uuid === uuid).reduce((s, a) => s + a.risk_score, 0)
-    : 0;
+  const riskHistory = useEntityStore((s) => s.riskHistory);
+  const riskHistoryLoading = useEntityStore((s) => s.riskHistoryLoading);
+  const riskHistoryError = useEntityStore((s) => s.riskHistoryError);
 
   const selectedType = useEntityStore((s) => s.selectedEntityType);
   const selectedValue = useEntityStore((s) => s.selectedEntityValue);
@@ -39,12 +37,13 @@ export function EntityDetail() {
       <header className="flex items-baseline gap-3">
         <h2 className="font-mono text-lg">{focalLabel}</h2>
         <span className="text-xs text-muted-foreground">…{uuid.slice(-12)}</span>
-        <span
-          className="ml-auto rounded border px-2 py-0.5 text-xs"
-          title="Derived from current alert feed — full history in a follow-up story"
-        >
-          Risk {Math.round(risk)}
-        </span>
+        <RiskSparkline
+          data={riskHistory}
+          loading={riskHistoryLoading}
+          error={riskHistoryError}
+          range={range}
+          label={focalLabel}
+        />
       </header>
       <div className="flex gap-2" role="toolbar" aria-label="Time range">
         {RANGES.map((r) => (
