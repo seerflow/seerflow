@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Moon, Sun, Shield } from "lucide-react";
+import { Moon, Sun, Shield, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useThemeStore } from "@/stores/theme";
 import wordmarkLight from "@/assets/wordmark-light.svg";
@@ -7,12 +7,13 @@ import wordmarkDark from "@/assets/wordmark-dark.svg";
 import { EntitySearch } from "@/components/EntityExplorer/EntitySearch";
 import { EntityDetail } from "@/components/EntityExplorer/EntityDetail";
 import { AttackHeatmap } from "@/components/AttackHeatmap/AttackHeatmap";
+import { SigmaRulesPage } from "@/components/SigmaRules/SigmaRulesPage";
 import { WsProvider } from "@/components/WsProvider";
 import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { DashboardGrid } from "@/components/DashboardGrid/DashboardGrid";
 import { AddWidgetMenu } from "@/components/DashboardGrid/AddWidgetMenu";
 import { ResetLayoutButton } from "@/components/DashboardGrid/ResetLayoutButton";
-import { hashHasEntity, hashHasCoverage } from "@/lib/hash";
+import { hashHasEntity, hashHasCoverage, hashHasSigmaRules } from "@/lib/hash";
 import { useEntityStore } from "@/stores/entity";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -44,6 +45,7 @@ export default function App() {
 
   const showEntity = hashHasEntity(hash);
   const showCoverage = hashHasCoverage(hash);
+  const showSigmaRules = hashHasSigmaRules(hash);
 
   return (
     <WsProvider>
@@ -53,6 +55,9 @@ export default function App() {
           <EntitySearch />
           <AddWidgetMenu />
           <ResetLayoutButton />
+          <Button variant="ghost" size="icon" aria-label="Sigma rules" onClick={() => { window.location.hash = "sigma-rules"; }}>
+            <BookOpen className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" onClick={() => { window.location.hash = "coverage"; }}>
             <Shield className="h-5 w-5" />
           </Button>
@@ -66,6 +71,8 @@ export default function App() {
             <EntityDetail />
           ) : showCoverage ? (
             <AttackHeatmap />
+          ) : showSigmaRules ? (
+            <SigmaRulesPage />
           ) : (
             <DashboardGrid />
           )}

@@ -1,0 +1,129 @@
+// S-151: Side panel showing full rule details (Monaco YAML viewer + ATT&CK).
+import { useEffect, useState } from "react";
+
+import { getSigmaRule } from "@/lib/sigmaRulesApi";
+import type { SigmaRuleDetail } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+
+import { MonacoYamlEditor } from "./MonacoYamlEditor";
+import { severityLabel } from "./severity";
+
+function attackUrl(technique: string): string {
+  // T1059.001 -> T1059/001 (MITRE URL convention)
+  const id = technique.toUpperCase().replace(".", "/");
+  return `https://attack.mitre.org/techniques/${id}/`;
+}
+
+interface Props {
+  ruleId: string;
+  onClose: () => void;
+}
+
+export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
+  const [rule, setRule] = useState<SigmaRuleDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setRule(null);
+    setError(null);
+    void getSigmaRule(ruleId)
+      .then((r) => {
+        if (alive) setRule(r);
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [ruleId]);
+
+  if (error) {
+    return (
+      <aside className="w-[480px] shrink-0 border-l p-4 text-sm text-destructive">
+        Failed to load rule: {error}
+        <div className="mt-3">
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </aside>
+    );
+  }
+
+  if (!rule) {
+    return (
+      <aside className="w-[480px] shrink-0 border-l p-4 text-sm text-muted-foreground">
+        Loading rule…
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="w-[480px] shrink-0 border-l overflow-y-auto p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-base font-semibold">{rule.title}</h2>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close detail panel">
+          Close
+        </Button>
+      </div>
+
+      <p className="mb-4 text-sm text-muted-foreground">
+        {rule.description || "No description."}
+      </p>
+
+      <dl className="mb-3 space-y-1 text-xs">
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted-foreground">Severity</dt>
+          <dd>
+            <Badge variant="outline">{severityLabel(rule.severity)}</Badge>
+          </dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted-foreground">Logsource</dt>
+          <dd className="font-mono">
+            {rule.logsource_key.filter(Boolean).join(" / ") || "—"}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted-foreground">Source</dt>
+          <dd className="font-mono">{rule.source}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted-foreground">Lifetime matches</dt>
+          <dd className="font-mono tabular-nums">{rule.match_count_lifetime}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted-foreground">24h alerts</dt>
+          <dd className="font-mono tabular-nums">{rule.alert_count_24h}</dd>
+        </div>
+      </dl>
+
+      {rule.attack_techniques.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1">
+          {rule.attack_techniques.map((t) => (
+            <a
+              key={t}
+              className="text-xs underline"
+              href={attackUrl(t)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t.toUpperCase()}
+            </a>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded border">
+        <MonacoYamlEditor
+          value={rule.yaml_source}
+          readOnly
+          height="320px"
+        />
+      </div>
+    </aside>
+  );
+}
