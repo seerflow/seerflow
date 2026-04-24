@@ -155,15 +155,16 @@ def configure_limiter(config: SeerflowConfig) -> None:
         storage_uri = "memory://"
 
     # Rebuild internal storage + rate-limit engine so repeated calls in
-    # the same process (tests) do not leak counters between apps.
+    # the same process (tests) do not leak counters between apps. All
+    # coupling to slowapi internals is isolated in
+    # _rebind_limiter_internals — see its docstring for the rationale.
     fresh = Limiter(
         key_func=_key_func,
         storage_uri=storage_uri,
         enabled=config.api_rate_limit_enabled,
     )
     limiter.enabled = config.api_rate_limit_enabled
-    limiter._storage = fresh._storage
-    limiter._limiter = fresh._limiter
+    _rebind_limiter_internals(limiter, fresh)
 
     global _current_list_limit, _current_detail_limit, _current_coverage_limit
     _current_list_limit = config.api_list_rate_limit
