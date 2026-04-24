@@ -25,4 +25,19 @@ describe("RelatedEntitiesPanel", () => {
     render(<RelatedEntitiesPanel related={[]} onNavigate={() => {}} />);
     expect(screen.getByText(/No related entities/i)).toBeInTheDocument();
   });
+
+  // S-060.F2 — lock-in: render must not mutate the input array.
+  it("does not mutate the input related[] array", () => {
+    const related = [
+      rel({ relation_type: "authenticated_from", entity_uuid: "u1", entity_value: "alice" }),
+      rel({ relation_type: "authenticated_from", entity_uuid: "u2", entity_value: "10.0.0.5" }),
+      rel({ relation_type: "logged_into", entity_uuid: "u3", entity_value: "web-01" }),
+    ];
+    const sameRef = related;
+    const snapshot = JSON.parse(JSON.stringify(related));
+    render(<RelatedEntitiesPanel related={related} onNavigate={() => {}} />);
+    expect(related).toBe(sameRef);
+    expect(related).toEqual(snapshot);
+    expect(related).toHaveLength(3);
+  });
 });

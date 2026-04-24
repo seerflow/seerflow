@@ -17,15 +17,13 @@ export function RelatedEntitiesPanel({ related, onNavigate }: Props) {
   if (related.length === 0) {
     return <div className="p-3 text-sm text-muted-foreground">No related entities for this entity.</div>;
   }
-  const groups = new Map<string, EntityRelation[]>();
-  for (const r of related) {
-    const k = r.relation_type;
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(r);
-  }
+  const groups = related.reduce<Record<string, EntityRelation[]>>(
+    (acc, r) => ({ ...acc, [r.relation_type]: [...(acc[r.relation_type] ?? []), r] }),
+    {},
+  );
   return (
     <aside aria-label="Related entities" className="flex flex-col gap-3">
-      {[...groups.entries()].map(([rt, rows]) => (
+      {Object.entries(groups).map(([rt, rows]) => (
         <section key={rt}>
           <header className="mb-1 text-xs font-semibold uppercase text-muted-foreground">
             {humanize(rt)} <span className="ml-1 text-muted-foreground/70">({rows.length})</span>
