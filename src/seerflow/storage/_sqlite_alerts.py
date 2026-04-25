@@ -201,6 +201,13 @@ class _SqliteAlertMixin:
         driven from the matching junction table so the composite
         ``(tactic|technique, timestamp_ns DESC)`` index satisfies both the
         predicate and the ORDER BY without scanning the ``alerts`` table.
+
+        The parent-technique rollup path (e.g. ``technique=T1053``) is the
+        exception: it can match multiple junction rows per alert, so it adds
+        ``GROUP BY a.dedup_key ORDER BY MAX(...)`` to dedup. That pays one
+        ``TEMP B-TREE`` for the GROUP BY but keeps the index seek on the
+        predicate. Exact-technique and tactic-only paths keep the original
+        index-driven plan with no temp B-trees.
         """
         where, params = _build_alert_query(filters)
 

@@ -89,11 +89,17 @@ def format_technique(tid: str) -> str:
 def parent_technique(tid: str) -> str:
     """Return the parent technique ID for a sub-technique, or the input unchanged.
 
+    Defensive: invalid input is returned as-is so internal callers
+    (``_collect_tag_pairs``, ``_build_alert_query``) do not need a second
+    validation pass. Untrusted external input is gated upstream by
+    ``is_valid_technique`` at the route boundary; this helper itself is safe
+    to call on any string.
+
     Examples:
         ``T1053.005`` -> ``T1053``
         ``T1053``     -> ``T1053``
         ``t1053.005`` -> ``T1053``
-        ``garbage``   -> ``garbage`` (caller validates with ``is_valid_technique``)
+        ``garbage``   -> ``garbage``
     """
     if not tid:
         return tid
