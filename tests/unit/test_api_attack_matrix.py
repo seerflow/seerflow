@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from seerflow.api.attack import (
     CellData,
+    _collect_tag_pairs,
     build_matrix,
     collect_alert_cells,
     collect_correlation_cells,
@@ -295,3 +296,32 @@ def test_merge_rule_data_combines_counts_and_names() -> None:
     cell = merged[("persistence", "T1053")]
     assert cell.count == 3
     assert cell.rule_names == ("r1", "r2", "r3")
+
+
+class TestCollectTagPairsRollup:
+    def test_subtechnique_rolls_into_parent(self) -> None:
+        cells: dict[tuple[str, str], CellData] = {}
+        _collect_tag_pairs(("persistence",), ("T1053.005",), cells, "rule_a")
+        assert cells == {("persistence", "T1053"): CellData(count=1, rule_names=("rule_a",))}
+
+    def test_parent_and_sub_on_same_rule_dedups(self) -> None:
+        cells: dict[tuple[str, str], CellData] = {}
+        _collect_tag_pairs(("persistence",), ("T1053", "T1053.005"), cells, "rule_a")
+        assert cells == {("persistence", "T1053"): CellData(count=1, rule_names=("rule_a",))}
+
+    def test_two_subs_same_parent_same_rule_dedup(self) -> None:
+        cells: dict[tuple[str, str], CellData] = {}
+        _collect_tag_pairs(("persistence",), ("T1053.005", "T1053.001"), cells, "rule_a")
+        assert cells == {("persistence", "T1053"): CellData(count=1, rule_names=("rule_a",))}
+
+    def test_two_rules_same_parent_accumulate(self) -> None:
+        cells: dict[tuple[str, str], CellData] = {}
+        _collect_tag_pairs(("persistence",), ("T1053.005",), cells, "rule_a")
+        _collect_tag_pairs(("persistence",), ("T1053.001",), cells, "rule_b")
+        assert cells[("persistence", "T1053")].count == 2
+        assert set(cells[("persistence", "T1053")].rule_names) == {"rule_a", "rule_b"}
+
+    def test_lowercase_subtechnique_normalized(self) -> None:
+        cells: dict[tuple[str, str], CellData] = {}
+        _collect_tag_pairs(("persistence",), ("t1053.005",), cells, "rule_a")
+        assert cells == {("persistence", "T1053"): CellData(count=1, rule_names=("rule_a",))}

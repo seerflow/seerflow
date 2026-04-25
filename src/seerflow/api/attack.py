@@ -17,7 +17,7 @@ from seerflow.api.schemas import (
     AttackCoverageSummary,
     AttackCoverageTactic,
 )
-from seerflow.sigma.attack import TACTICS, format_tactic, format_technique
+from seerflow.sigma.attack import TACTICS, format_tactic, format_technique, parent_technique
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -50,17 +50,24 @@ def _collect_tag_pairs(
     """Add rule_name to ``cells`` for every valid (tactic, technique) pair.
 
     Drops empty-string entries and pairs where either tuple is empty.
-    Techniques are normalized with ``format_technique`` before keying.
+    Sub-technique IDs (e.g. ``T1053.005``) are rolled up into their parent
+    (``T1053``); per-call dedup ensures a rule tagged with both parent and
+    sub-technique counts once for the parent cell.
     """
     if not tactics or not techniques:
+        return
+    parents = tuple(
+        dict.fromkeys(
+            parent_technique(format_technique(t)) for t in techniques if t
+        )
+    )
+    if not parents:
         return
     for tactic in tactics:
         if not tactic:
             continue
-        for technique in techniques:
-            if not technique:
-                continue
-            key = (tactic, format_technique(technique))
+        for parent in parents:
+            key = (tactic, parent)
             existing = cells.get(key, CellData())
             cells[key] = existing.add(rule_name)
 
