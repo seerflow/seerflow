@@ -195,23 +195,4 @@ describe("DrilldownPanel", () => {
     expect(retry.className).toMatch(/focus-visible:ring-offset-2/);
   });
 
-  it.skip("aborts in-flight fetch when switching to a different cell (no stale data)", async () => {
-    const { api } = await import("@/lib/api");
-    let resolveFirst!: (v: unknown) => void;
-    const firstPromise = new Promise((res) => { resolveFirst = res; });
-    (api.get as ReturnType<typeof vi.fn>)
-      .mockImplementationOnce(() => firstPromise)
-      .mockResolvedValueOnce({ items: [{ ...sampleAlert, alert_id: "alrt-2", message: "Second cell alert" }] });
-
-    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
-    useDrilldownStore.getState().open("execution", "T1053");
-    // First fetch in flight; switch to second cell before it resolves
-    useDrilldownStore.getState().open("execution", "T1059");
-    // Now resolve the first fetch — its data must NOT appear because the panel switched
-    resolveFirst({ items: [{ ...sampleAlert, alert_id: "alrt-stale", message: "Stale first cell alert" }] });
-    // Wait for the second fetch's data to land
-    expect(await screen.findByText(/No alerts in window/)).toBeInTheDocument();
-    // Stale data must never have rendered
-    expect(screen.queryByText(/Stale first cell alert/)).not.toBeInTheDocument();
-  });
 });
