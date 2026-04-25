@@ -113,7 +113,12 @@ async function request<T>(path: string, init: RequestInit, opts?: GetOpts): Prom
     const res = await fetch(`${BASE}${path}`, init);
     const text = await res.text();
     const parsed = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text;
-    if (!res.ok) throw new ApiError(res.status, (parsed && typeof parsed === "object" && "detail" in parsed) ? String(parsed.detail) : text);
+    if (!res.ok) {
+      const raw = (parsed && typeof parsed === "object" && "detail" in parsed) ? String(parsed.detail) : text;
+      const { display, debug } = sanitizeDetail(res.status, raw);
+      if (display !== debug) logger.error(`ApiError ${res.status}: ${debug}`);
+      throw new ApiError(res.status, display, debug);
+    }
     const body = (typeof parsed === "object" && parsed !== null && hasBigintMarker(parsed))
       ? reviveBigintTimestamps(parsed)
       : parsed;

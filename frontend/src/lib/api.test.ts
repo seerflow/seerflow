@@ -39,7 +39,8 @@ describe("api", () => {
     await expect(api.get("/api/v1/thing")).rejects.toMatchObject({
       name: "ApiError",
       status: 500,
-      detail: "boom",
+      detail: ApiError.GENERIC_5XX,
+      debugDetail: "boom",
     });
   });
 
@@ -49,6 +50,35 @@ describe("api", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(422);
     expect((err as ApiError).detail).toBe("nope");
+  });
+
+  it("5xx response surfaces generic message + preserves raw on debugDetail", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ detail: 'Traceback ... File "/srv/app.py", line 1' }),
+      { status: 500, headers: { "content-type": "application/json" } },
+    ));
+    let caught: unknown;
+    try { await api.get("/api/v1/anything"); } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as ApiError;
+    expect(err.status).toBe(500);
+    expect(err.detail).toBe(ApiError.GENERIC_5XX);
+    expect(err.message).toBe(`500 ${ApiError.GENERIC_5XX}`);
+    expect(err.debugDetail).toContain("Traceback");
+  });
+
+  it("4xx response with >200-char detail truncates display but keeps debug full", async () => {
+    const long = "x".repeat(400);
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ detail: long }),
+      { status: 422, headers: { "content-type": "application/json" } },
+    ));
+    let caught: unknown;
+    try { await api.get("/api/v1/anything"); } catch (e) { caught = e; }
+    const err = caught as ApiError;
+    expect(err.detail).toHaveLength(200);
+    expect(err.detail.endsWith("…")).toBe(true);
+    expect(err.debugDetail).toBe(long);
   });
 });
 
