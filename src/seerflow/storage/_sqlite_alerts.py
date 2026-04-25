@@ -225,11 +225,15 @@ class _SqliteAlertMixin:
         # user values are bound exclusively via params.
         # The technique=parent rollup path is the only path where one alert can
         # have multiple matching junction rows (one for the parent and one per
-        # sub-technique). Gate the dedup work behind that branch so the existing
-        # tactic-only and exact-technique paths keep their index-driven ORDER
-        # BY plan from SEE-199 (no extra TEMP B-TREE for GROUP BY).
-        needs_dedup = filters.technique is not None and "." not in format_technique(
-            filters.technique
+        # sub-technique). When tactic is also set, the driver is alert_tactics
+        # and the technique becomes a correlated EXISTS — each alert appears
+        # at most once already. Gate the dedup work to the bare parent-rollup
+        # branch so all other paths keep their index-driven ORDER BY plan from
+        # SEE-199 (no extra TEMP B-TREE for GROUP BY).
+        needs_dedup = (
+            filters.tactic is None
+            and filters.technique is not None
+            and "." not in format_technique(filters.technique)
         )
         count_select = "COUNT(DISTINCT a.dedup_key)" if needs_dedup else "COUNT(*)"
         count_sql = f"SELECT {count_select} FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608

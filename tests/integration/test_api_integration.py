@@ -319,6 +319,54 @@ class TestAlertsIntegration:
         assert body["total"] == 1
         assert [item["alert_id"] for item in body["items"]] == ["both-tags"]
 
+    async def test_filter_by_tactic_and_parent_technique_combined(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        # When tactic + parent-technique are combined, the driver is
+        # alert_tactics and the technique predicate is a correlated EXISTS.
+        # Each alert appears at most once even with rollup, so the result
+        # set must be correct without dedup overhead.
+        a_match = Alert(
+            alert_id="combo-match",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053.005",),
+            dedup_key="combo:match",
+        )
+        a_wrong_tactic = Alert(
+            alert_id="combo-wrong-tactic",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_001,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("execution",),
+            mitre_techniques=("T1053.005",),
+            dedup_key="combo:wrong-tactic",
+        )
+        await backend.write_alert(a_match, dedup_window_ns=0)
+        await backend.write_alert(a_wrong_tactic, dedup_window_ns=0)
+
+        resp = client.get(
+            "/api/v1/alerts", params={"tactic": "persistence", "technique": "T1053"}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["alert_id"] == "combo-match"
+
 
 class TestHealthIntegration:
     """Health endpoint with real app."""
