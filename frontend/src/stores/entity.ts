@@ -231,7 +231,9 @@ export const useEntityStore = create<State>((set, get) => ({
       if (ctl.signal.aborted) return;
       const nextDiscovered = Array.from(
         new Set([...get().discoveredSourceTypes, ...resp.events.map((e) => e.source_type)]),
-      ).sort();
+      )
+        .sort()
+        .slice(0, 200);
       set({
         events: resp.events,
         related: resp.related,
