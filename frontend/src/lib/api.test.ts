@@ -53,6 +53,7 @@ describe("api", () => {
   });
 
   it("5xx response surfaces generic message + preserves raw on debugDetail", async () => {
+    const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
     fetchMock.mockResolvedValueOnce(new Response(
       JSON.stringify({ detail: 'Traceback ... File "/srv/app.py", line 1' }),
       { status: 500, headers: { "content-type": "application/json" } },
@@ -65,9 +66,13 @@ describe("api", () => {
     expect(err.detail).toBe(ApiError.GENERIC_5XX);
     expect(err.message).toBe(`500 ${ApiError.GENERIC_5XX}`);
     expect(err.debugDetail).toContain("Traceback");
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(errSpy.mock.calls[0]?.[0]).toContain("Traceback");
+    errSpy.mockRestore();
   });
 
   it("4xx response with >200-char detail truncates display but keeps debug full", async () => {
+    const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
     const long = "x".repeat(400);
     fetchMock.mockResolvedValueOnce(new Response(
       JSON.stringify({ detail: long }),
@@ -79,6 +84,19 @@ describe("api", () => {
     expect(err.detail).toHaveLength(200);
     expect(err.detail.endsWith("…")).toBe(true);
     expect(err.debugDetail).toBe(long);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    errSpy.mockRestore();
+  });
+
+  it("4xx ≤200 chars does NOT emit logger.error (display === debug)", async () => {
+    const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ detail: "tactic must be one of: collection, persistence" }),
+      { status: 422, headers: { "content-type": "application/json" } },
+    ));
+    await expect(api.get("/api/v1/anything")).rejects.toBeInstanceOf(ApiError);
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });
 
