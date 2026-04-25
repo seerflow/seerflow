@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, ApiError, __walker } from "./api";
+import { api, ApiError, sanitizeDetail, __walker } from "./api";
 import { logger } from "./logger";
 import { AlertSchema } from "./schemas";
 import * as metrics from "./validationMetrics";
@@ -249,5 +249,40 @@ describe("api schema opt-in", () => {
     await expect(
       api.get("/api/v1/alerts?limit=50", { schema: AlertSchema, itemsKey: "items" }),
     ).rejects.toThrow(/response-schema-fail/);
+  });
+});
+
+describe("sanitizeDetail", () => {
+  it("5xx JSON detail → generic display, raw debug", () => {
+    const out = sanitizeDetail(500, 'Traceback (most recent call last)\n  File "/srv/app.py", line 42 ...');
+    expect(out.display).toBe(ApiError.GENERIC_5XX);
+    expect(out.debug).toContain("Traceback");
+  });
+  it("5xx plain-text body → generic display, raw debug", () => {
+    const out = sanitizeDetail(503, "upstream timeout");
+    expect(out.display).toBe(ApiError.GENERIC_5XX);
+    expect(out.debug).toBe("upstream timeout");
+  });
+  it("4xx ≤200 chars → unchanged display, same as debug", () => {
+    const out = sanitizeDetail(422, "tactic must be one of: collection, persistence, …");
+    expect(out.display).toBe("tactic must be one of: collection, persistence, …");
+    expect(out.debug).toBe(out.display);
+  });
+  it("4xx >200 chars → truncated display, full debug", () => {
+    const long = "x".repeat(500);
+    const out = sanitizeDetail(400, long);
+    expect(out.display).toHaveLength(200);                 // 199 chars + "…"
+    expect(out.display.endsWith("…")).toBe(true);
+    expect(out.display.startsWith("xxx")).toBe(true);
+    expect(out.debug).toBe(long);
+  });
+  it("status 0 (network / schema-fail) → pass-through, no sanitisation", () => {
+    const out = sanitizeDetail(0, "response-schema-fail: items[3] invalid");
+    expect(out.display).toBe("response-schema-fail: items[3] invalid");
+    expect(out.debug).toBe(out.display);
+  });
+  it("3xx redirects (defensive) → pass-through", () => {
+    const out = sanitizeDetail(301, "moved");
+    expect(out.display).toBe("moved");
   });
 });
