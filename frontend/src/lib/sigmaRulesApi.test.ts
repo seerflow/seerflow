@@ -127,4 +127,21 @@ describe("toggleSigmaRule", () => {
     );
     await expect(toggleSigmaRule("rid", false)).rejects.toThrow(/rule not found/);
   });
+
+  it("sanitises 5xx detail to GENERIC_5XX, preserves raw on debugDetail", async () => {
+    const { ApiError } = await import("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'Traceback ... File "/srv/app.py", line 1' }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    let caught: unknown;
+    try { await toggleSigmaRule("rid", false); } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as InstanceType<typeof ApiError>;
+    expect(err.status).toBe(500);
+    expect(err.detail).toBe(ApiError.GENERIC_5XX);
+    expect(err.debugDetail).toContain("Traceback");
+  });
 });

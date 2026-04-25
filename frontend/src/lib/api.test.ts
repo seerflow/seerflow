@@ -34,7 +34,7 @@ describe("api", () => {
     await expect(api.get("/api/v1/alerts")).rejects.toBeInstanceOf(ApiError);
   });
 
-  it("throws ApiError with raw text body when non-JSON error response (S-204 AC-2)", async () => {
+  it("non-JSON 5xx error: display sanitised to GENERIC_5XX, raw text preserved on debugDetail (S-204 AC-2 + S-215)", async () => {
     fetchMock.mockResolvedValueOnce(new Response("boom", {status: 500, headers: {"content-type": "text/plain"}}));
     await expect(api.get("/api/v1/thing")).rejects.toMatchObject({
       name: "ApiError",
