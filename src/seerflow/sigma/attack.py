@@ -84,3 +84,26 @@ def is_valid_technique(value: str) -> bool:
 def format_technique(tid: str) -> str:
     """Normalize a technique ID to uppercase (e.g., "t1033" -> "T1033")."""
     return tid.upper()
+
+
+def parent_technique(tid: str) -> str:
+    """Return the parent technique ID for a sub-technique, or the input unchanged.
+
+    Defensive: invalid input is returned as-is so internal callers
+    (``_collect_tag_pairs``, ``_build_alert_query``) do not need a second
+    validation pass. Untrusted external input is gated upstream by
+    ``is_valid_technique`` at the route boundary; this helper itself is safe
+    to call on any string.
+
+    Examples:
+        ``T1053.005`` -> ``T1053``
+        ``T1053``     -> ``T1053``
+        ``t1053.005`` -> ``T1053``
+        ``garbage``   -> ``garbage``
+    """
+    if not tid:
+        return tid
+    normalized = format_technique(tid)
+    if not _TECHNIQUE_PATTERN.match(normalized):
+        return tid
+    return normalized.split(".", 1)[0]

@@ -11,11 +11,9 @@ import type { MergedTactic } from "./types";
 /**
  * Merge API coverage response with the static ATT&CK catalog.
  *
- * Known limitation: the static catalog contains only top-level technique IDs
- * (e.g. T1053). Sub-technique IDs returned by the backend (e.g. T1053.005)
- * will not match any catalog entry and render as gap cells even when rules
- * cover them. This is a known gap tracked for future iteration — rolling up
- * sub-techniques into parents at the backend is the preferred fix.
+ * The static catalog stays parent-only by contract (no sub-technique entries).
+ * The backend rolls sub-technique IDs (e.g. T1053.005) into their parent
+ * (T1053) before returning, so every cell here matches a catalog entry.
  */
 function mergeCatalog(apiData: AttackCoverageResponse): MergedTactic[] {
   const cellMap = new Map<

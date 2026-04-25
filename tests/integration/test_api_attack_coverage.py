@@ -77,3 +77,50 @@ class TestAttackCoverageIntegration:
         body = response.json()
         discovery = next(t for t in body["tactics"] if t["tactic"] == "discovery")
         assert discovery["techniques"][0]["alert_count"] == 10_000
+
+    async def test_subtechnique_alerts_roll_into_parent_cell(self, backend: SqliteBackend) -> None:
+        a_parent = Alert(
+            alert_id="rollup-parent",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053",),
+            dedup_key="rollup:parent",
+        )
+        a_sub = Alert(
+            alert_id="rollup-sub",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_001,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053.005",),
+            dedup_key="rollup:sub",
+        )
+        await backend.write_alert(a_parent, dedup_window_ns=0)
+        await backend.write_alert(a_sub, dedup_window_ns=0)
+
+        app = create_api_app(log_store=backend, alert_store=backend)
+        client = TestClient(app)
+        response = client.get("/api/v1/attack/coverage")
+        assert response.status_code == 200
+        body = response.json()
+
+        persistence = next(t for t in body["tactics"] if t["tactic"] == "persistence")
+        techniques = {c["technique"]: c for c in persistence["techniques"]}
+        assert "T1053" in techniques
+        assert "T1053.005" not in techniques
+        assert techniques["T1053"]["alert_count"] == 2
+        assert techniques["T1053"]["detected"] is True

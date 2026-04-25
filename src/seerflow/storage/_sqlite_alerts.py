@@ -63,17 +63,33 @@ def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
         clauses.append("at.tactic = ?")
         params.append(filters.tactic)
     if filters.technique is not None:
-        # If tactic is also set, the driver is alert_tactics so technique
-        # becomes a correlated EXISTS on alert_techniques. Otherwise the
-        # driver is alert_techniques and we filter directly on atq.technique.
-        if filters.tactic is not None:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM alert_techniques atq2 "
-                "WHERE atq2.dedup_key = a.dedup_key AND atq2.technique = ?)"
-            )
+        technique = format_technique(filters.technique)
+        if "." in technique:
+            # Sub-technique: exact match (backward compatible).
+            if filters.tactic is not None:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM alert_techniques atq2 "
+                    "WHERE atq2.dedup_key = a.dedup_key AND atq2.technique = ?)"
+                )
+            else:
+                clauses.append("atq.technique = ?")
+            params.append(technique)
         else:
-            clauses.append("atq.technique = ?")
-        params.append(format_technique(filters.technique))
+            # Parent technique: roll sub-techniques in via equality-or-range.
+            # ``LIKE 'parent.%'`` does NOT use the technique index under
+            # SQLite's default ``case_sensitive_like = OFF``; range bounds do.
+            lo = f"{technique}."
+            hi = f"{technique}/"  # '/' is the next ASCII codepoint after '.'.
+            if filters.tactic is not None:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM alert_techniques atq2 "
+                    "WHERE atq2.dedup_key = a.dedup_key "
+                    "AND (atq2.technique = ? "
+                    "OR (atq2.technique > ? AND atq2.technique < ?)))"
+                )
+            else:
+                clauses.append("(atq.technique = ? OR (atq.technique > ? AND atq.technique < ?))")
+            params.extend([technique, lo, hi])
     where = " AND ".join(clauses) if clauses else "1=1"
     return where, params
 
@@ -185,6 +201,13 @@ class _SqliteAlertMixin:
         driven from the matching junction table so the composite
         ``(tactic|technique, timestamp_ns DESC)`` index satisfies both the
         predicate and the ORDER BY without scanning the ``alerts`` table.
+
+        The parent-technique rollup path (e.g. ``technique=T1053``) is the
+        exception: it can match multiple junction rows per alert, so it adds
+        ``GROUP BY a.dedup_key ORDER BY MAX(...)`` to dedup. That pays one
+        ``TEMP B-TREE`` for the GROUP BY but keeps the index seek on the
+        predicate. Exact-technique and tactic-only paths keep the original
+        index-driven plan with no temp B-trees.
         """
         where, params = _build_alert_query(filters)
 
@@ -200,16 +223,36 @@ class _SqliteAlertMixin:
 
         # driver, where, order_col are assembled from hardcoded SQL fragments;
         # user values are bound exclusively via params.
-        count_sql = f"SELECT COUNT(*) FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
+        # The technique=parent rollup path is the only path where one alert can
+        # have multiple matching junction rows (one for the parent and one per
+        # sub-technique). When tactic is also set, the driver is alert_tactics
+        # and the technique becomes a correlated EXISTS — each alert appears
+        # at most once already. Gate the dedup work to the bare parent-rollup
+        # branch so all other paths keep their index-driven ORDER BY plan from
+        # SEE-199 (no extra TEMP B-TREE for GROUP BY).
+        needs_dedup = (
+            filters.tactic is None
+            and filters.technique is not None
+            and "." not in format_technique(filters.technique)
+        )
+        count_select = "COUNT(DISTINCT a.dedup_key)" if needs_dedup else "COUNT(*)"
+        count_sql = f"SELECT {count_select} FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
         async with await self._conn.execute(count_sql, params) as cursor:
             row = await cursor.fetchone()
             total = row[0] if row else 0
 
         offset = (filters.page - 1) * filters.limit
-        data_sql = (
-            f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
-            f"ORDER BY {order_col} DESC LIMIT ? OFFSET ?"
-        )
+        if needs_dedup:
+            data_sql = (
+                f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
+                f"GROUP BY a.dedup_key ORDER BY MAX({order_col}) DESC "
+                f"LIMIT ? OFFSET ?"
+            )
+        else:
+            data_sql = (
+                f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
+                f"ORDER BY {order_col} DESC LIMIT ? OFFSET ?"
+            )
         async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
             rows = await cursor.fetchall()
         items = tuple(
