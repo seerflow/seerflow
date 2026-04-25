@@ -32,6 +32,7 @@ export function RelatedEntitiesPanel({ related, onNavigate }: Props) {
             {rows.map((r) => (
               <li key={r.entity_uuid}>
                 <button
+                  type="button"
                   onClick={() => onNavigate(r.entity_uuid)}
                   className="flex w-full items-center gap-2 rounded px-2 py-1 text-sm hover:bg-accent"
                 >

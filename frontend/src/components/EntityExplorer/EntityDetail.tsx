@@ -108,6 +108,7 @@ export function EntityDetail() {
         {RANGES.map((r) => (
           <button
             key={r}
+            type="button"
             aria-pressed={range === r}
             onClick={() => void setRange(r)}
             className={`rounded px-2 py-1 text-xs ${range === r ? "bg-primary text-primary-foreground" : "border"}`}
