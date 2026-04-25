@@ -63,17 +63,36 @@ def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
         clauses.append("at.tactic = ?")
         params.append(filters.tactic)
     if filters.technique is not None:
-        # If tactic is also set, the driver is alert_tactics so technique
-        # becomes a correlated EXISTS on alert_techniques. Otherwise the
-        # driver is alert_techniques and we filter directly on atq.technique.
-        if filters.tactic is not None:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM alert_techniques atq2 "
-                "WHERE atq2.dedup_key = a.dedup_key AND atq2.technique = ?)"
-            )
+        technique = format_technique(filters.technique)
+        if "." in technique:
+            # Sub-technique: exact match (backward compatible).
+            if filters.tactic is not None:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM alert_techniques atq2 "
+                    "WHERE atq2.dedup_key = a.dedup_key AND atq2.technique = ?)"
+                )
+            else:
+                clauses.append("atq.technique = ?")
+            params.append(technique)
         else:
-            clauses.append("atq.technique = ?")
-        params.append(format_technique(filters.technique))
+            # Parent technique: roll sub-techniques in via equality-or-range.
+            # ``LIKE 'parent.%'`` does NOT use the technique index under
+            # SQLite's default ``case_sensitive_like = OFF``; range bounds do.
+            lo = f"{technique}."
+            hi = f"{technique}/"  # '/' is the next ASCII codepoint after '.'.
+            if filters.tactic is not None:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM alert_techniques atq2 "
+                    "WHERE atq2.dedup_key = a.dedup_key "
+                    "AND (atq2.technique = ? "
+                    "OR (atq2.technique > ? AND atq2.technique < ?)))"
+                )
+            else:
+                clauses.append(
+                    "(atq.technique = ? "
+                    "OR (atq.technique > ? AND atq.technique < ?))"
+                )
+            params.extend([technique, lo, hi])
     where = " AND ".join(clauses) if clauses else "1=1"
     return where, params
 
