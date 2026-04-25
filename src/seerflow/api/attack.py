@@ -56,11 +56,7 @@ def _collect_tag_pairs(
     """
     if not tactics or not techniques:
         return
-    parents = tuple(
-        dict.fromkeys(
-            parent_technique(format_technique(t)) for t in techniques if t
-        )
-    )
+    parents = tuple(dict.fromkeys(parent_technique(format_technique(t)) for t in techniques if t))
     if not parents:
         return
     for tactic in tactics:

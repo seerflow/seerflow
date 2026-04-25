@@ -88,10 +88,7 @@ def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
                     "OR (atq2.technique > ? AND atq2.technique < ?)))"
                 )
             else:
-                clauses.append(
-                    "(atq.technique = ? "
-                    "OR (atq.technique > ? AND atq.technique < ?))"
-                )
+                clauses.append("(atq.technique = ? OR (atq.technique > ? AND atq.technique < ?))")
             params.extend([technique, lo, hi])
     where = " AND ".join(clauses) if clauses else "1=1"
     return where, params

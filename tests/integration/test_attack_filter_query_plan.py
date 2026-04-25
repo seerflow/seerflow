@@ -12,9 +12,7 @@ if TYPE_CHECKING:
 
 @pytest.mark.integration
 class TestAttackFilterQueryPlan:
-    async def test_parent_technique_uses_covering_index(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_parent_technique_uses_covering_index(self, backend: SqliteBackend) -> None:
         sql = (
             "SELECT a.data, a.dedup_count "
             "FROM alert_techniques AS atq JOIN alerts a "

@@ -78,9 +78,7 @@ class TestAttackCoverageIntegration:
         discovery = next(t for t in body["tactics"] if t["tactic"] == "discovery")
         assert discovery["techniques"][0]["alert_count"] == 10_000
 
-    async def test_subtechnique_alerts_roll_into_parent_cell(
-        self, backend: SqliteBackend
-    ) -> None:
+    async def test_subtechnique_alerts_roll_into_parent_cell(self, backend: SqliteBackend) -> None:
         a_parent = Alert(
             alert_id="rollup-parent",
             alert_type="sigma",
