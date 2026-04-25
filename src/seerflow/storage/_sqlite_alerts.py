@@ -216,7 +216,10 @@ class _SqliteAlertMixin:
 
         # driver, where, order_col are assembled from hardcoded SQL fragments;
         # user values are bound exclusively via params.
-        count_sql = f"SELECT COUNT(*) FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
+        # COUNT and items dedupe on a.dedup_key so the technique=parent rollup
+        # path (where one alert can have multiple matching junction rows for
+        # the parent + sub-technique) returns each alert exactly once.
+        count_sql = f"SELECT COUNT(DISTINCT a.dedup_key) FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
         async with await self._conn.execute(count_sql, params) as cursor:
             row = await cursor.fetchone()
             total = row[0] if row else 0
@@ -224,7 +227,7 @@ class _SqliteAlertMixin:
         offset = (filters.page - 1) * filters.limit
         data_sql = (
             f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
-            f"ORDER BY {order_col} DESC LIMIT ? OFFSET ?"
+            f"GROUP BY a.dedup_key ORDER BY MAX({order_col}) DESC LIMIT ? OFFSET ?"
         )
         async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
             rows = await cursor.fetchall()

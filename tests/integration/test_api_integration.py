@@ -290,6 +290,35 @@ class TestAlertsIntegration:
         assert body["total"] == 1
         assert body["items"][0]["alert_id"] == "bc-sub"
 
+    async def test_filter_by_parent_technique_dedups_parent_and_sub_on_same_alert(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        # Alert tagged with BOTH parent T1053 and sub T1053.005 must be
+        # returned exactly once when filtered by the parent (not twice, once
+        # for each junction-table row).
+        a_both = Alert(
+            alert_id="both-tags",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053", "T1053.005"),
+            dedup_key="both:1",
+        )
+        await backend.write_alert(a_both, dedup_window_ns=0)
+
+        resp = client.get("/api/v1/alerts", params={"technique": "T1053"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert [item["alert_id"] for item in body["items"]] == ["both-tags"]
+
 
 class TestHealthIntegration:
     """Health endpoint with real app."""
