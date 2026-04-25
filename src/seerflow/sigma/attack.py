@@ -84,3 +84,20 @@ def is_valid_technique(value: str) -> bool:
 def format_technique(tid: str) -> str:
     """Normalize a technique ID to uppercase (e.g., "t1033" -> "T1033")."""
     return tid.upper()
+
+
+def parent_technique(tid: str) -> str:
+    """Return the parent technique ID for a sub-technique, or the input unchanged.
+
+    Examples:
+        ``T1053.005`` -> ``T1053``
+        ``T1053``     -> ``T1053``
+        ``t1053.005`` -> ``T1053``
+        ``garbage``   -> ``garbage`` (caller validates with ``is_valid_technique``)
+    """
+    if not tid:
+        return tid
+    normalized = format_technique(tid)
+    if not _TECHNIQUE_PATTERN.match(normalized):
+        return tid
+    return normalized.split(".", 1)[0]

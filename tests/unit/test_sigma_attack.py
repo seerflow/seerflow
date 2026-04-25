@@ -10,6 +10,7 @@ from seerflow.sigma.attack import (
     format_tactic,
     format_technique,
     is_valid_tactic,
+    parent_technique,
     resolve_tactic,
 )
 
@@ -84,3 +85,26 @@ def test_resolve_tactic_accepts_name_and_id_case_insensitive(value: str, expecte
 @pytest.mark.parametrize("value", ["", "not_a_tactic", "TA9999", "tailgating"])
 def test_resolve_tactic_returns_none_for_unknown(value: str) -> None:
     assert resolve_tactic(value) is None
+
+
+class TestParentTechnique:
+    def test_subtechnique_returns_parent(self) -> None:
+        assert parent_technique("T1053.005") == "T1053"
+
+    def test_parent_returns_self(self) -> None:
+        assert parent_technique("T1053") == "T1053"
+
+    def test_lowercase_subtechnique_normalized(self) -> None:
+        assert parent_technique("t1053.005") == "T1053"
+
+    def test_lowercase_parent_normalized(self) -> None:
+        assert parent_technique("t1053") == "T1053"
+
+    def test_invalid_input_returned_unchanged(self) -> None:
+        assert parent_technique("garbage") == "garbage"
+
+    def test_empty_input_returned_unchanged(self) -> None:
+        assert parent_technique("") == ""
+
+    def test_three_digit_subtechnique_suffix(self) -> None:
+        assert parent_technique("T1059.003") == "T1059"
