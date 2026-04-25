@@ -359,9 +359,7 @@ class TestAlertsIntegration:
         await backend.write_alert(a_match, dedup_window_ns=0)
         await backend.write_alert(a_wrong_tactic, dedup_window_ns=0)
 
-        resp = client.get(
-            "/api/v1/alerts", params={"tactic": "persistence", "technique": "T1053"}
-        )
+        resp = client.get("/api/v1/alerts", params={"tactic": "persistence", "technique": "T1053"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] == 1
