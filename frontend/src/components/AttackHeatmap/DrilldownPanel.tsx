@@ -176,7 +176,7 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
                   <button
                     type="button"
                     onClick={handleRetry}
-                    className="rounded border px-2 py-1 text-xs"
+                    className="rounded border px-2 py-1 text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     Retry
                   </button>

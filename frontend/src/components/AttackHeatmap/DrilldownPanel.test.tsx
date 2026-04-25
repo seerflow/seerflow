@@ -184,6 +184,17 @@ describe("DrilldownPanel", () => {
     await waitFor(() => expect(useDrilldownStore.getState().openCell).toBeNull());
   });
 
+  it("Retry button carries the design-token focus ring", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("boom"));
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const retry = await screen.findByRole("button", { name: /retry/i });
+    expect(retry.className).toMatch(/focus-visible:ring-2/);
+    expect(retry.className).toMatch(/focus-visible:ring-ring/);
+    expect(retry.className).toMatch(/focus-visible:ring-offset-2/);
+  });
+
   it.skip("aborts in-flight fetch when switching to a different cell (no stale data)", async () => {
     const { api } = await import("@/lib/api");
     let resolveFirst!: (v: unknown) => void;
