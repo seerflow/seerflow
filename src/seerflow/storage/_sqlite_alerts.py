@@ -216,19 +216,32 @@ class _SqliteAlertMixin:
 
         # driver, where, order_col are assembled from hardcoded SQL fragments;
         # user values are bound exclusively via params.
-        # COUNT and items dedupe on a.dedup_key so the technique=parent rollup
-        # path (where one alert can have multiple matching junction rows for
-        # the parent + sub-technique) returns each alert exactly once.
-        count_sql = f"SELECT COUNT(DISTINCT a.dedup_key) FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
+        # The technique=parent rollup path is the only path where one alert can
+        # have multiple matching junction rows (one for the parent and one per
+        # sub-technique). Gate the dedup work behind that branch so the existing
+        # tactic-only and exact-technique paths keep their index-driven ORDER
+        # BY plan from SEE-199 (no extra TEMP B-TREE for GROUP BY).
+        needs_dedup = filters.technique is not None and "." not in format_technique(
+            filters.technique
+        )
+        count_select = "COUNT(DISTINCT a.dedup_key)" if needs_dedup else "COUNT(*)"
+        count_sql = f"SELECT {count_select} FROM {driver} WHERE {where}"  # noqa: S608  # nosec B608
         async with await self._conn.execute(count_sql, params) as cursor:
             row = await cursor.fetchone()
             total = row[0] if row else 0
 
         offset = (filters.page - 1) * filters.limit
-        data_sql = (
-            f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
-            f"GROUP BY a.dedup_key ORDER BY MAX({order_col}) DESC LIMIT ? OFFSET ?"
-        )
+        if needs_dedup:
+            data_sql = (
+                f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
+                f"GROUP BY a.dedup_key ORDER BY MAX({order_col}) DESC "
+                f"LIMIT ? OFFSET ?"
+            )
+        else:
+            data_sql = (
+                f"SELECT a.data, a.dedup_count FROM {driver} WHERE {where} "  # noqa: S608  # nosec B608
+                f"ORDER BY {order_col} DESC LIMIT ? OFFSET ?"
+            )
         async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
             rows = await cursor.fetchall()
         items = tuple(
