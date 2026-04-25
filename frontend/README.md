@@ -220,7 +220,7 @@ The spec uses `stubRestAlerts` + `stubWebSocket` from
 - Click any technique cell to open a side panel listing the rules that cover the technique and the most recent 20 alerts that matched it within the current coverage window (default last 30 days, taken straight from the `/api/v1/attack/coverage` response).
 - Clicking an alert row in the panel closes the panel, sets the selected alert in the Alert Feed widget, and navigates back to the dashboard grid (`#`). If the Alert Feed widget is not currently mounted in the grid, the panel surfaces an inline note — add the widget once to inspect future selections.
 - The panel keeps an in-memory cache keyed by `(tactic, technique, since, until)`. Reopening the same cell within a session does not refetch.
-- **Known gap:** sub-techniques (e.g. `T1053.005`) are not rolled up into their parent technique today. Clicking a parent cell may show "0 alerts" while sub-technique alerts exist. Tracked for a separate backend story.
+- Sub-technique alerts (e.g. `T1053.005`) are rolled up into their parent technique cell (`T1053`) by the backend, so a parent cell shows the union of direct hits and sub-technique hits. The static catalog stays parent-only by contract.
 
 ## Deferred dependencies (YAGNI)
 
