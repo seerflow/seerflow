@@ -398,3 +398,44 @@ describe("entityStore.restoreFromHash does NOT reset filter keys (S-060.F2)", ()
     expect(s.severityMin).toBe(3);
   });
 });
+
+describe("entityStore.restoreFromHash discoveredSourceTypes cache reset (S-060.F2)", () => {
+  const UUID_B = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+  it("clears discoveredSourceTypes when crossing entity boundaries", async () => {
+    useEntityStore.setState({
+      selectedEntityUuid: UUID,
+      discoveredSourceTypes: ["syslog", "auth"],
+    });
+    mockedGet.mockResolvedValueOnce({
+      entity_uuid: UUID_B,
+      events: [{ source_type: "k8s" } as never],
+      related: [],
+      total: 1,
+    });
+    await useEntityStore
+      .getState()
+      .restoreFromHash(`#entity=${UUID_B}&range=24h`);
+    const s = useEntityStore.getState();
+    expect(s.selectedEntityUuid).toBe(UUID_B);
+    expect(s.discoveredSourceTypes).toEqual(["k8s"]);
+  });
+
+  it("preserves discoveredSourceTypes for same-entity hash restore (e.g. range chip change)", async () => {
+    useEntityStore.setState({
+      selectedEntityUuid: UUID,
+      discoveredSourceTypes: ["auth", "syslog"],
+    });
+    mockedGet.mockResolvedValueOnce({
+      entity_uuid: UUID,
+      events: [{ source_type: "syslog" } as never],
+      related: [],
+      total: 1,
+    });
+    await useEntityStore
+      .getState()
+      .restoreFromHash(`#entity=${UUID}&range=1h`);
+    const s = useEntityStore.getState();
+    expect(s.discoveredSourceTypes).toEqual(["auth", "syslog"]);
+  });
+});

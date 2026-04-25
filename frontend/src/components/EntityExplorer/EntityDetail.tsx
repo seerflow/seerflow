@@ -15,14 +15,12 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { entitySourceColor } from "@/lib/entitySourceColor";
 import { SEVERITY_NUM_LABEL } from "@/lib/severity";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/useToast";
 import { Copy } from "lucide-react";
 import type { TimelineRange } from "@/lib/types";
 
 const RANGES: TimelineRange[] = ["1h", "6h", "24h", "7d"];
 const SEVERITY_LEVELS = [0, 1, 2, 3, 4, 5, 6] as const;
-const SUCCESS_MS = 3000;
-const ERROR_MS = 5000;
 
 export function EntityDetail() {
   const uuid = useEntityStore((s) => s.selectedEntityUuid);
@@ -44,6 +42,8 @@ export function EntityDetail() {
   const selectedType = useEntityStore((s) => s.selectedEntityType);
   const selectedValue = useEntityStore((s) => s.selectedEntityValue);
 
+  const toast = useToast();
+
   function navigate(toUuid: string) {
     navigateToEntity(toUuid);
   }
@@ -52,9 +52,9 @@ export function EntityDetail() {
     if (!uuid) return;
     try {
       await navigator.clipboard.writeText(uuid);
-      toast.success("Copied UUID", { duration: SUCCESS_MS });
+      toast.success("Copied UUID");
     } catch {
-      toast.error("Copy failed", { duration: ERROR_MS });
+      toast.error("Copy failed");
     }
   }
 
