@@ -189,6 +189,107 @@ class TestAlertsIntegration:
         assert body["total"] == 1
         assert body["items"][0]["alert_id"] == "int-tech-a1"
 
+    async def test_filter_by_parent_technique_rolls_subs_in(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        a_parent = Alert(
+            alert_id="rollup-parent-flt",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053",),
+            dedup_key="rollup-flt:parent",
+        )
+        a_sub = Alert(
+            alert_id="rollup-sub-flt",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_001,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053.005",),
+            dedup_key="rollup-flt:sub",
+        )
+        a_other = Alert(
+            alert_id="other-flt",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_002,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1059",),
+            dedup_key="rollup-flt:other",
+        )
+        await backend.write_alert(a_parent, dedup_window_ns=0)
+        await backend.write_alert(a_sub, dedup_window_ns=0)
+        await backend.write_alert(a_other, dedup_window_ns=0)
+
+        resp = client.get("/api/v1/alerts", params={"technique": "T1053"})
+        assert resp.status_code == 200
+        body = resp.json()
+        ids = {item["alert_id"] for item in body["items"]}
+        assert ids == {"rollup-parent-flt", "rollup-sub-flt"}
+        assert body["total"] == 2
+
+    async def test_filter_by_subtechnique_exact_match_backward_compat(
+        self, client: TestClient, backend: SqliteBackend
+    ) -> None:
+        a_parent = Alert(
+            alert_id="bc-parent",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053",),
+            dedup_key="bc:parent",
+        )
+        a_sub = Alert(
+            alert_id="bc-sub",
+            alert_type="sigma",
+            timestamp_ns=1_775_736_000_000_000_001,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="test",
+            description="",
+            entity_uuid="e1",
+            entity_value="1.2.3.4",
+            entity_type="ip",
+            contributing_events=(),
+            mitre_tactics=("persistence",),
+            mitre_techniques=("T1053.005",),
+            dedup_key="bc:sub",
+        )
+        await backend.write_alert(a_parent, dedup_window_ns=0)
+        await backend.write_alert(a_sub, dedup_window_ns=0)
+
+        resp = client.get("/api/v1/alerts", params={"technique": "T1053.005"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["alert_id"] == "bc-sub"
+
 
 class TestHealthIntegration:
     """Health endpoint with real app."""
