@@ -15,9 +15,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import Path as FPath
 from fastapi.responses import JSONResponse
 
 from seerflow.api.deps import (
@@ -28,9 +29,11 @@ from seerflow.api.deps import (
 )
 from seerflow.api.limits import limiter, list_limit, sigma_upload_limit
 from seerflow.api.schemas import (
+    PaginatedResponse,
     SigmaRuleDetail,
-    SigmaRuleListResponse,
     SigmaRuleSummary,
+    SigmaRuleTimelineBucket,
+    SigmaRuleTimelineResponse,
     SigmaRuleToggleRequest,
     SigmaRuleUploadRequest,
     SigmaRuleValidationResult,
@@ -52,10 +55,22 @@ Engines = Annotated[DetectionEngines, Depends(get_engines)]
 # bounded scan beats N per-rule round-trips; AlertStore enforces 10000 cap.
 _ALERT_SCAN_LIMIT = 10_000
 
+# Timeline bucket size + count. The endpoint returns exactly 24 hourly
+# buckets across the trailing 24h window; both are pinned today (only
+# ``bucket="hour"`` and ``window="24h"`` accepted) and externalised here
+# so a future v2 extension does not duplicate magic numbers.
+_HOUR_NS: int = 3600 * 1_000_000_000
+_TIMELINE_BUCKET_COUNT: int = 24
+
 # Operator upload ceiling. 5 uploads/min for a year is ~2.5M rules; the
 # bundled set is ~60. 1000 leaves ample room for legitimate growth and
 # bounds disk fill if rate-limit is bypassed.
 _MAX_CUSTOM_UPLOADS = 1000
+
+# severity_in cardinality cap. The OTel severity scale defines 24 levels
+# (0 reserved + 1-24); 25 leaves headroom for "0" while bounding the
+# per-request parse loop so a pathological client cannot DOS the filter.
+_MAX_SEVERITY_IN = 25
 
 
 def _require_engine(engines: DetectionEngines) -> SigmaEngine:
@@ -82,11 +97,47 @@ async def _alert_counts_24h(storage: StorageDeps) -> dict[str, int]:
     return counts
 
 
+def _parse_severity_in(values: list[str] | None) -> list[int] | None:
+    """Parse repeated ``severity_in`` query values into a bounded int list.
+
+    Empty strings are treated as a no-op (so ``?severity_in=`` does not
+    narrow). Anything outside the SeverityLevel range (0-24, mirroring the
+    OTel severity scale used elsewhere in the API) is rejected with 422
+    rather than silently dropped, so client bugs surface loudly.
+    """
+    if not values:
+        return None
+    if len(values) > _MAX_SEVERITY_IN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"severity_in accepts at most {_MAX_SEVERITY_IN} values",
+        )
+    parsed: list[int] = []
+    for raw in values:
+        token = raw.strip()
+        if not token:
+            continue
+        try:
+            sev = int(token)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"severity_in: invalid integer {raw!r}",
+            ) from exc
+        if sev < 0 or sev > 24:
+            raise HTTPException(
+                status_code=422,
+                detail=f"severity_in: {sev} out of range [0, 24]",
+            )
+        parsed.append(sev)
+    return parsed or None
+
+
 def _matches_filters(
     rule: dict[str, object],
     *,
     category: str | None,
-    severity: int | None,
+    severity_in: list[int] | None,
     logsource_product: str | None,
     enabled: bool | None,
     source: str | None,
@@ -95,7 +146,7 @@ def _matches_filters(
     ls_key = cast("list[str]", rule["logsource_key"])
     if category and (not ls_key or ls_key[0] != category):
         return False
-    if severity is not None and rule["severity"] != severity:
+    if severity_in and rule["severity"] not in severity_in:
         return False
     if logsource_product and (len(ls_key) < 2 or ls_key[1] != logsource_product):
         return False
@@ -130,7 +181,7 @@ def _build_detail(rule: dict[str, object], alert_count_24h: int) -> SigmaRuleDet
     )
 
 
-@router.get("/rules", response_model=SigmaRuleListResponse)
+@router.get("/rules", response_model=PaginatedResponse[SigmaRuleSummary])
 @limiter.limit(list_limit)
 async def list_rules(
     request: Request,
@@ -139,15 +190,25 @@ async def list_rules(
     page: Annotated[int, Query(ge=1, le=10_000)] = 1,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     category: Annotated[str | None, Query(max_length=64)] = None,
-    severity: Annotated[int | None, Query(ge=0, le=24)] = None,
+    severity_in: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "Filter rules whose severity is in this set. "
+                "Repeat the param: ?severity_in=4&severity_in=5. "
+                "Empty value = no filter."
+            ),
+        ),
+    ] = None,
     logsource_product: Annotated[str | None, Query(max_length=64)] = None,
     enabled: Annotated[bool | None, Query()] = None,
     source: Annotated[str | None, Query(max_length=32)] = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
-) -> SigmaRuleListResponse:
+) -> PaginatedResponse[SigmaRuleSummary]:
     """Return loaded Sigma rules with filters and per-rule 24h alert counts."""
     engine = _require_engine(engines)
     counts_24h = await _alert_counts_24h(storage)
+    parsed_severity_in = _parse_severity_in(severity_in)
     all_rules = engine.list_rules()
     filtered = [
         r
@@ -155,7 +216,7 @@ async def list_rules(
         if _matches_filters(
             r,
             category=category,
-            severity=severity,
+            severity_in=parsed_severity_in,
             logsource_product=logsource_product,
             enabled=enabled,
             source=source,
@@ -166,43 +227,101 @@ async def list_rules(
     start = (page - 1) * limit
     page_items = filtered[start : start + limit]
     items = [_build_summary(r, counts_24h.get(str(r["title"]), 0)) for r in page_items]
-    return SigmaRuleListResponse(items=items, total=total, page=page, limit=limit)
+    return PaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+        has_next=(page * limit) < total,
+    )
 
 
 @router.get("/rules/{rule_id}", response_model=SigmaRuleDetail)
 @limiter.limit(list_limit)
 async def get_rule(
     request: Request,
-    rule_id: str,
+    rule_id: Annotated[str, FPath(max_length=36)],
     storage: Storage,
     engines: Engines,
 ) -> SigmaRuleDetail:
     engine = _require_engine(engines)
-    rule = next((r for r in engine.list_rules() if r["rule_id"] == rule_id), None)
+    rule = engine.get_rule(rule_id)
     if rule is None:
         raise HTTPException(status_code=404, detail="rule not found")
     counts_24h = await _alert_counts_24h(storage)
     return _build_detail(rule, counts_24h.get(str(rule["title"]), 0))
 
 
+@router.get(
+    "/rules/{rule_id}/timeline",
+    response_model=SigmaRuleTimelineResponse,
+)
+@limiter.limit(list_limit)
+async def get_rule_timeline(
+    request: Request,
+    rule_id: Annotated[str, FPath(max_length=36)],
+    storage: Storage,
+    engines: Engines,
+    bucket: Annotated[Literal["hour"], Query()] = "hour",
+    window: Annotated[Literal["24h"], Query()] = "24h",
+) -> SigmaRuleTimelineResponse:
+    """Return a dense 24-hour, 1-bucket-per-hour firing trend for *rule_id*.
+
+    ``bucket`` and ``window`` are typed as single-value ``Literal``s today;
+    keeping them as query params (rather than dropping them) lets a future
+    v2 widen the enum without breaking the URL shape. The returned grid is
+    always exactly 24 buckets, ascending, with zero-count buckets filled
+    in client-side-friendly form so the dashboard sparkline never has to
+    densify itself. Returns 404 only when the rule id is not loaded by
+    the engine; an empty alert window is a 200 with 24 zero buckets.
+    """
+    engine = _require_engine(engines)
+    rule = engine.get_rule(rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="rule not found")
+    now_ns = int(datetime.now(UTC).timestamp() * 1_000_000_000)
+    # snap "now" up to the next hour boundary so the 24-bucket grid covers
+    # 24 complete hours [end_ns - 24h, end_ns) — no partial trailing cell
+    end_ns = -(-now_ns // _HOUR_NS) * _HOUR_NS  # ceil-divide
+    start_ns = end_ns - _TIMELINE_BUCKET_COUNT * _HOUR_NS
+    rows = await storage.alert_store.count_alerts_bucketed(
+        alert_type="sigma",
+        # title doubles as rule_name on the alerts table (see _rule_to_summary invariant)
+        rule_name=cast("str", rule["title"]),
+        time_range=TimeRange(start_ns=start_ns, end_ns=end_ns),
+        bucket_ns=_HOUR_NS,
+    )
+    counts = dict(rows)
+    grid = [
+        SigmaRuleTimelineBucket(
+            bucket_start_ns=start_ns + i * _HOUR_NS,
+            count=counts.get(start_ns + i * _HOUR_NS, 0),
+        )
+        for i in range(_TIMELINE_BUCKET_COUNT)
+    ]
+    return SigmaRuleTimelineResponse(buckets=grid)
+
+
 @router.patch("/rules/{rule_id}", response_model=SigmaRuleDetail)
 @limiter.limit(list_limit)
 async def patch_rule(
     request: Request,
-    rule_id: str,
+    rule_id: Annotated[str, FPath(max_length=36)],
     body: SigmaRuleToggleRequest,
     storage: Storage,
     engines: Engines,
 ) -> SigmaRuleDetail:
     """Toggle ``enabled`` on a single rule. Idempotent. 404 if not loaded."""
     engine = _require_engine(engines)
-    if not any(r["rule_id"] == rule_id for r in engine.list_rules()):
+    if engine.get_rule(rule_id) is None:
         raise HTTPException(status_code=404, detail="rule not found")
     engine.set_enabled(rule_id, body.enabled)
     state_store = getattr(request.app.state, "sigma_state_store", None)
     if state_store is not None:
         await state_store.set_enabled(rule_id, body.enabled)
-    rule = next(r for r in engine.list_rules() if r["rule_id"] == rule_id)
+    rule = engine.get_rule(rule_id)
+    if rule is None:  # pragma: no cover - rule cannot disappear mid-request
+        raise HTTPException(status_code=404, detail="rule not found")
     counts_24h = await _alert_counts_24h(storage)
     return _build_detail(rule, counts_24h.get(str(rule["title"]), 0))
 
@@ -300,7 +419,9 @@ async def upload_rule(
             detail=f"failed to persist rule: {exc.strerror or exc}",
         ) from exc
 
-    rule = next(r for r in engine.list_rules() if r["rule_id"] == rid)
+    rule = engine.get_rule(rid)
+    if rule is None:  # pragma: no cover - add_rule guarantees presence
+        raise HTTPException(status_code=500, detail="rule disappeared after add")
     counts_24h = await _alert_counts_24h(storage)
     return JSONResponse(
         status_code=201,

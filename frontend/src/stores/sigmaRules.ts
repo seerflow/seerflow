@@ -20,7 +20,7 @@ const INITIAL_FILTER: SigmaRuleFilter = {
   search: "",
   category: null,
   logsource_product: null,
-  severity: null,
+  severity_in: [],
   enabledOnly: false,
   source: null,
 };
@@ -43,7 +43,10 @@ function buildListParams(f: SigmaRuleFilter): ListParams {
     search: f.search || undefined,
     category: f.category || undefined,
     logsource_product: f.logsource_product || undefined,
-    severity: f.severity ?? undefined,
+    // S-154 (T8): empty array → omit query param entirely; buildQuery in
+    // sigmaRulesApi already enforces this, but passing `undefined` here keeps
+    // the contract obvious at the call site.
+    severity_in: f.severity_in.length > 0 ? f.severity_in : undefined,
     enabled: f.enabledOnly ? true : undefined,
     source: f.source || undefined,
   };

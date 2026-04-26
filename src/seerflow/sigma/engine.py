@@ -109,6 +109,7 @@ class SigmaEngine:
         self._last_fired_ns: dict[str, int] = {}
         self._yaml_source: dict[str, str] = {}
         self._source_kind: dict[str, str] = {}
+        self._compiled_by_id: dict[str, CompiledRule] = {}
         self._state_store: SigmaRuleStateStore | None = None
 
     def load_rules(self, paths: Sequence[Path], *, source_kind: str = "bundled") -> None:
@@ -123,6 +124,8 @@ class SigmaEngine:
         paths are given. Use S-030's validated rule loading for user-supplied
         rule directories.
         """
+        # load_rules runs at startup (single caller, no concurrent access);
+        # _mutation_lock not required here. Use add_rule for runtime mutations.
         for path in paths:
             try:
                 yaml_text = path.read_text()
@@ -139,6 +142,7 @@ class SigmaEngine:
                 self._index.setdefault(compiled.logsource_key, []).append(compiled)
                 self._yaml_source[compiled.rule_id] = yaml_text
                 self._source_kind[compiled.rule_id] = source_kind
+                self._compiled_by_id[compiled.rule_id] = compiled
                 self._rule_count += 1
             except Exception:
                 logger.warning("Failed to load Sigma rule: %s", path, exc_info=True)
@@ -267,6 +271,37 @@ class SigmaEngine:
             elif not enabled and rule_id not in current:
                 self._disabled_rule_ids = current | {rule_id}
 
+    def _rule_to_summary(
+        self,
+        rule: CompiledRule,
+        *,
+        disabled: frozenset[str],
+        count: int,
+        fired: int | None,
+    ) -> dict[str, object]:
+        """Project a CompiledRule + runtime stats into the public snapshot dict.
+
+        Single source of truth for the per-row shape returned by both
+        :meth:`list_rules` and :meth:`get_rule`. Drift between the two
+        projections is caught by ``test_get_rule_matches_list_rules_row_for_same_id``.
+        """
+        return {
+            "rule_id": rule.rule_id,
+            # Invariant: rule_name (title) is the cross-system join key — alerts
+            # table stores rule_name and the timeline endpoint correlates by it.
+            "title": rule.rule_name,
+            "description": rule.description,
+            "severity": int(rule.severity.value),
+            "logsource_key": list(rule.logsource_key),
+            "attack_tactics": list(rule.attack_tactics),
+            "attack_techniques": list(rule.attack_techniques),
+            "enabled": rule.rule_id not in disabled,
+            "source": self._source_kind.get(rule.rule_id, "bundled"),
+            "yaml_source": self._yaml_source.get(rule.rule_id, ""),
+            "match_count_lifetime": int(count),
+            "last_fired_ns": fired,
+        }
+
     def list_rules(self) -> list[dict[str, object]]:
         """Return a snapshot of every loaded rule with stats + flags."""
         out: list[dict[str, object]] = []
@@ -280,22 +315,35 @@ class SigmaEngine:
             fired_snap = dict(self._last_fired_ns)
         for rule in self.iter_compiled_rules():
             out.append(
-                {
-                    "rule_id": rule.rule_id,
-                    "title": rule.rule_name,
-                    "description": rule.description,
-                    "severity": int(rule.severity.value),
-                    "logsource_key": list(rule.logsource_key),
-                    "attack_tactics": list(rule.attack_tactics),
-                    "attack_techniques": list(rule.attack_techniques),
-                    "enabled": rule.rule_id not in disabled,
-                    "source": self._source_kind.get(rule.rule_id, "bundled"),
-                    "yaml_source": self._yaml_source.get(rule.rule_id, ""),
-                    "match_count_lifetime": int(counts_snap.get(rule.rule_id, 0)),
-                    "last_fired_ns": fired_snap.get(rule.rule_id),
-                }
+                self._rule_to_summary(
+                    rule,
+                    disabled=disabled,
+                    count=int(counts_snap.get(rule.rule_id, 0)),
+                    fired=fired_snap.get(rule.rule_id),
+                )
             )
         return out
+
+    def get_rule(self, rule_id: str) -> dict[str, object] | None:
+        """O(1) lookup for a single rule's snapshot dict.
+
+        Backed by ``_compiled_by_id`` for true O(1) access — no scan of
+        ``iter_compiled_rules()``. Mirrors the per-row shape of
+        :meth:`list_rules`. Returns ``None`` when the rule is unknown.
+        """
+        with self._mutation_lock:
+            disabled = self._disabled_rule_ids
+            count = self._match_counts.get(rule_id, 0)
+            fired = self._last_fired_ns.get(rule_id)
+        rule = self._compiled_by_id.get(rule_id)
+        if rule is None:
+            return None
+        return self._rule_to_summary(
+            rule,
+            disabled=disabled,
+            count=int(count),
+            fired=fired,
+        )
 
     def validate_rule(self, yaml_text: str) -> dict[str, object]:
         """Parse + compile *yaml_text* without persisting.
@@ -372,6 +420,7 @@ class SigmaEngine:
             self._rule_count += 1
             self._yaml_source[rid] = yaml_text
             self._source_kind[rid] = source_kind
+            self._compiled_by_id[rid] = compiled
 
         return rid
 

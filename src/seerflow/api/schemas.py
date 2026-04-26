@@ -386,13 +386,6 @@ class SigmaRuleDetail(SigmaRuleSummary):
     yaml_source: str
 
 
-class SigmaRuleListResponse(BaseModel):
-    items: list[SigmaRuleSummary]
-    total: int
-    page: int
-    limit: int
-
-
 class SigmaRuleToggleRequest(BaseModel):
     enabled: bool
 
@@ -413,3 +406,27 @@ class SigmaRuleValidationResult(BaseModel):
     line: int | None = None
     column: int | None = None
     field: str | None = None
+
+
+class SigmaRuleTimelineBucket(BaseModel):
+    """One hourly bucket in the per-rule firing timeline."""
+
+    bucket_start_ns: int = Field(..., description="UTC ns at the start of the bucket")
+    count: int = Field(..., ge=0)
+
+    @field_serializer("bucket_start_ns", when_used="json")
+    def _serialize_bucket_start_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199).
+
+        FE valibot schema expects ``v.bigint()`` post-revival, but the
+        ``BIGINT_KEYS`` walker in ``frontend/src/lib/api.ts`` only revives
+        when the wire value is a JSON string. Without this serializer the
+        sparkline silently fails to render for every rule.
+        """
+        return str(v)
+
+
+class SigmaRuleTimelineResponse(BaseModel):
+    """Dense 24-bucket grid for a single Sigma rule's last-24h firing trend."""
+
+    buckets: list[SigmaRuleTimelineBucket]

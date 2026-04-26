@@ -14,6 +14,8 @@ from seerflow.sigma.engine import SigmaEngine
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fastapi import FastAPI
+
     from seerflow.storage.sqlite import SqliteBackend
 
 
@@ -273,3 +275,155 @@ def test_disabled_state_persists_across_app_restart(
         listed = c2.get("/api/v1/sigma/rules").json()["items"]
         target = next(r for r in listed if r["rule_id"] == rid)
         assert target["enabled"] is False
+
+
+_MULTI_SEVERITY_RULES = [
+    (
+        "high",
+        """
+title: Sigma S154 High Severity Rule
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel:
+    message|contains: 's154-high-token'
+  condition: sel
+level: high
+""",
+    ),
+    (
+        "critical",
+        """
+title: Sigma S154 Critical Severity Rule
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel:
+    message|contains: 's154-critical-token'
+  condition: sel
+level: critical
+""",
+    ),
+    (
+        "medium",
+        """
+title: Sigma S154 Medium Severity Rule
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel:
+    message|contains: 's154-medium-token'
+  condition: sel
+level: medium
+""",
+    ),
+]
+
+
+@pytest.fixture
+def app_with_multi_severity(
+    backend: SqliteBackend,
+    upload_dir: Path,
+    tmp_path: Path,
+) -> FastAPI:
+    """App fixture seeded with rules at severity 3 (medium), 4 (high), 5 (critical)."""
+    cfg = SeerflowConfig(detection=DetectionConfig(sigma_custom_upload_dir=str(upload_dir)))
+    engine = SigmaEngine()
+    paths = []
+    for slug, yaml_text in _MULTI_SEVERITY_RULES:
+        p = tmp_path / f"sev-{slug}.yml"
+        p.write_text(yaml_text)
+        paths.append(p)
+    engine.load_rules(paths)
+    return create_api_app(
+        log_store=backend,
+        alert_store=backend,
+        config=cfg,
+        sigma_engine=engine,
+        sigma_state_store=backend,
+    )
+
+
+def test_list_rules_severity_in_multiple(app_with_multi_severity: FastAPI) -> None:
+    """severity_in repeated query param accepts multiple severities."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?severity_in=4&severity_in=5&limit=200")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items, "fixture must seed at least one severity 4 or 5 rule"
+        assert all(it["severity"] in (4, 5) for it in items)
+
+
+def test_list_rules_severity_in_empty_is_no_filter(app_with_multi_severity: FastAPI) -> None:
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?limit=500")
+        baseline = resp.json()["total"]
+        resp2 = client.get("/api/v1/sigma/rules?severity_in=&limit=500")
+        assert resp2.status_code == 200
+        assert resp2.json()["total"] == baseline
+
+
+def test_list_rules_severity_param_removed(app_with_multi_severity: FastAPI) -> None:
+    """Single ?severity= must no longer narrow the list (param dropped)."""
+    with TestClient(app_with_multi_severity) as client:
+        resp_with = client.get("/api/v1/sigma/rules?severity=3&limit=500")
+        resp_without = client.get("/api/v1/sigma/rules?limit=500")
+        assert resp_with.json()["total"] == resp_without.json()["total"]
+
+
+def test_list_rules_severity_in_rejects_non_integer(app_with_multi_severity: FastAPI) -> None:
+    """Non-integer ``severity_in`` token must surface as 422, not silent drop."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?severity_in=foo")
+        assert resp.status_code == 422
+
+
+def test_list_rules_severity_in_rejects_out_of_range(app_with_multi_severity: FastAPI) -> None:
+    """Severity outside the OTel [0, 24] band must surface as 422."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?severity_in=99")
+        assert resp.status_code == 422
+
+
+def test_list_rules_severity_in_rejects_too_many_values(app_with_multi_severity: FastAPI) -> None:
+    """severity_in with > _MAX_SEVERITY_IN repetitions must short-circuit to 422."""
+    qs = "&".join(f"severity_in={i % 25}" for i in range(30))
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get(f"/api/v1/sigma/rules?{qs}")
+        assert resp.status_code == 422
+
+
+def test_list_rules_response_envelope_has_has_next(app_with_multi_severity: FastAPI) -> None:
+    """List envelope must expose has_next so pagination matches PaginatedResponse[T]."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?page=1&limit=2")
+        body = resp.json()
+        assert {"items", "total", "page", "limit", "has_next"} <= set(body.keys())
+        assert isinstance(body["has_next"], bool)
+
+
+def test_list_rules_has_next_true_on_first_page(app_with_multi_severity: FastAPI) -> None:
+    """has_next must be True when total > page*limit (first page, fixture has 3 rules)."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?page=1&limit=1")
+        body = resp.json()
+        assert body["total"] >= 2  # sanity: fixture seeded enough rules
+        assert body["has_next"] is True
+
+
+def test_list_rules_has_next_false_on_last_page(app_with_multi_severity: FastAPI) -> None:
+    """has_next must be False when requesting a page past the last."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?page=999&limit=10")
+        body = resp.json()
+        assert body["has_next"] is False
+
+
+def test_rule_id_path_param_rejects_oversized_value(app_with_sigma) -> None:  # type: ignore[no-untyped-def]
+    client = TestClient(app_with_sigma)
+    over = "x" * 100
+    resp = client.get(f"/api/v1/sigma/rules/{over}")
+    assert resp.status_code == 422

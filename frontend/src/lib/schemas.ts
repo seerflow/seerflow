@@ -252,11 +252,29 @@ export const SigmaRuleDetailSchema = v.object({
   yaml_source: v.pipe(v.string(), v.maxLength(65_536)),
 });
 
-export const SigmaRuleListResponseSchema = v.object({
-  items: v.pipe(v.array(SigmaRuleSummarySchema), v.maxLength(500)),
-  total: v.pipe(v.number(), v.integer(), v.minValue(0)),
-  page: v.pipe(v.number(), v.integer(), v.minValue(1)),
-  limit: v.pipe(v.number(), v.integer(), v.minValue(1)),
+// Reuses the shared PaginatedResponseSchema(T) factory for envelope
+// consistency with every other paginated REST response (alerts, feedback,
+// entities). The factory's items cap is 1000; we narrow it to 500 here
+// since the backend `list_rules` route caps `limit` at 500.
+export const SigmaRuleListResponseSchema = v.pipe(
+  PaginatedResponseSchema(SigmaRuleSummarySchema),
+  v.check(
+    (r) => r.items.length <= 500,
+    "items length exceeds Sigma rules cap (500)",
+  ),
+);
+
+// S-154 (T8): /sigma/rules/{rule_id}/timeline?bucket=hour&window=24h.
+// `bucket_start_ns` is revived to bigint at the api.ts boundary
+// (BIGINT_KEYS includes the field), so this schema runs against a
+// post-revival shape and can use v.bigint() directly.
+export const SigmaRuleTimelineBucketSchema = v.object({
+  bucket_start_ns: v.bigint(),
+  count: v.pipe(v.number(), v.integer(), v.minValue(0)),
+});
+
+export const SigmaRuleTimelineResponseSchema = v.object({
+  buckets: v.pipe(v.array(SigmaRuleTimelineBucketSchema), v.maxLength(24)),
 });
 
 export const SigmaRuleValidationStageSchema = v.picklist([
@@ -284,6 +302,12 @@ export type SigmaRuleListResponseInfer = v.InferOutput<
 >;
 export type SigmaRuleValidationResultInfer = v.InferOutput<
   typeof SigmaRuleValidationResultSchema
+>;
+export type SigmaRuleTimelineBucketInfer = v.InferOutput<
+  typeof SigmaRuleTimelineBucketSchema
+>;
+export type SigmaRuleTimelineResponseInfer = v.InferOutput<
+  typeof SigmaRuleTimelineResponseSchema
 >;
 
 // ---------------------------------------------------------------------------

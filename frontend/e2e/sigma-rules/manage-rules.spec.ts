@@ -55,7 +55,25 @@ async function stubSigmaRoutes(page: Page) {
           total: 1,
           page: 1,
           limit: 100,
+          has_next: false,
         }),
+      });
+      return;
+    }
+
+    const timelineMatch = url.pathname.match(
+      /\/api\/v1\/sigma\/rules\/([^/]+)\/timeline$/,
+    );
+    if (method === "GET" && timelineMatch) {
+      const HOUR_NS = 3_600_000_000_000;
+      const buckets = Array.from({ length: 24 }, (_, i) => ({
+        bucket_start_ns: String(BigInt(i) * BigInt(HOUR_NS)),
+        count: 0,
+      }));
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ buckets }),
       });
       return;
     }
