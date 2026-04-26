@@ -8,18 +8,28 @@ export interface MockGetOpts {
   signal?: AbortSignal;
 }
 
+// 4-param signature mirrors `frontend/src/lib/api.ts::ApiError`
+// (status, detail, debugDetail?, cause?) so passing the real ApiError
+// class as `ApiErrorClass` is type-compatible.
 export class DefaultMockApiError extends Error {
   status: number;
+  debugDetail?: string;
   cause: unknown;
-  constructor(status: number, message: string, cause?: unknown) {
-    super(message);
+  constructor(status: number, detail: string, debugDetail?: string, cause?: unknown) {
+    super(detail);
     this.name = "ApiError";
     this.status = status;
+    this.debugDetail = debugDetail;
     this.cause = cause;
   }
 }
 
-type ErrorCtor = new (status: number, message: string, cause?: unknown) => Error;
+type ErrorCtor = new (
+  status: number,
+  detail: string,
+  debugDetail?: string,
+  cause?: unknown,
+) => Error;
 
 export function applySchemaValidation<T>(
   body: T,
@@ -64,7 +74,11 @@ export function applySchemaValidation<T>(
 }
 
 export interface CreateApiMockOptions {
-  fetchMock?: (method: "GET", path: string, opts?: MockGetOpts) => unknown | Promise<unknown>;
+  // `createApiMock` itself only ever invokes this with "GET". The wider
+  // union exists so user code that routes its own POST calls through the
+  // same vi.fn (e.g. `postImpl: (...a) => fetchMock("POST", ...a)`) keeps
+  // a uniform call signature.
+  fetchMock?: (method: "GET" | "POST", path: string, opts?: MockGetOpts) => unknown | Promise<unknown>;
   defaultGetResponse?: unknown;
   postImpl?: (...args: unknown[]) => unknown;
   ApiErrorClass?: ErrorCtor;

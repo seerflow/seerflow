@@ -68,13 +68,16 @@ describe("createApiMock", () => {
     expect(typeof def.api.post).toBe("function");
     const override = vi.fn().mockReturnValue("ok");
     const withOverride = createApiMock({ postImpl: override });
-    expect(withOverride.api.post()).toBe("ok");
+    expect(withOverride.api.post("/x", { y: 1 })).toBe("ok");
+    expect(override).toHaveBeenCalledTimes(1);
+    expect(override).toHaveBeenCalledWith("/x", { y: 1 });
   });
 
-  it("exports DefaultMockApiError with status/cause props", () => {
-    const e = new DefaultMockApiError(0, "msg", { foo: 1 });
+  it("exports DefaultMockApiError with status/detail/debugDetail/cause props", () => {
+    const e = new DefaultMockApiError(0, "msg", "debug-info", { foo: 1 });
     expect(e.status).toBe(0);
     expect(e.message).toBe("msg");
+    expect(e.debugDetail).toBe("debug-info");
     expect(e.cause).toEqual({ foo: 1 });
     expect(e.name).toBe("ApiError");
   });
