@@ -196,14 +196,13 @@ describe("emitCoalesced (S-209)", () => {
     ]);
   });
 
-  it("flushes a partial batch and warns once when the frame buffer exceeds the cap", async () => {
+  it("on a single overflow event, flushes inline AND defers the warn until flushFrame (S-210)", async () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const batchSpy = vi.fn();
     const eventSpy = vi.fn();
     bus.on("batch", batchSpy);
     bus.on("event", eventSpy);
 
-    // Push 501 events synchronously before the first rAF fires.
     for (let i = 0; i < 501; i++) {
       bus.emitCoalesced({
         ...eventMsg,
@@ -211,24 +210,46 @@ describe("emitCoalesced (S-209)", () => {
       });
     }
 
-    // Overflow triggers an immediate partial flush; the 501st event lands on a fresh buffer.
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "wsBus.rAF buffer overflow",
-      { flushed: 500 }
-    );
+    // Inline 500-event flush still happens at the cap, but the warn is now
+    // deferred to the flushFrame tick that emits the batch — not the per-event
+    // overflow branch. So warnSpy must be untouched until rAF fires.
     expect(batchSpy).toHaveBeenCalledTimes(1);
     expect(batchSpy.mock.calls[0][0].events).toHaveLength(500);
-    // The 501st event has not yet flushed; eventSpy must see nothing before rAF.
-    expect(eventSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
 
     await vi.runAllTimersAsync();
 
-    // The 501st event flushes on the next rAF tick as a single `event` frame
-    // (buffer length 1 → single-event branch of flushFrame, not a 1-element batch).
-    expect(batchSpy).toHaveBeenCalledTimes(1); // no second batch
-    expect(eventSpy).toHaveBeenCalledTimes(1);
-    expect(eventSpy.mock.calls[0][0].data.event_id).toBe("evt-500");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // Total flushed across the rAF cycle: 500 inline (overflow) + 1 trailing rAF flush.
+    expect(warnSpy).toHaveBeenCalledWith(
+      "wsBus.rAF buffer overflow",
+      { flushed: 501, overflow_count: 1 },
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("accumulates multiple overflows in one tick into a single warn with overflow_count (S-210)", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const batchSpy = vi.fn();
+    bus.on("batch", batchSpy);
+
+    // 1500 events trigger overflow at 501 and again at 1001 → overflow_count=2.
+    for (let i = 0; i < 1500; i++) {
+      bus.emitCoalesced({
+        ...eventMsg,
+        data: { ...eventMsg.data, event_id: `evt-${i}` },
+      });
+    }
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(batchSpy).toHaveBeenCalledTimes(2);
+
+    await vi.runAllTimersAsync();
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toBe("wsBus.rAF buffer overflow");
+    // Trace: 1500 events → 2 inline overflow flushes of 500 each + 500 trailing
+    // rAF flush = 1500 total flushed across the cycle.
+    expect(warnSpy.mock.calls[0][1]).toMatchObject({ flushed: 1500, overflow_count: 2 });
     warnSpy.mockRestore();
   });
 
@@ -253,7 +274,8 @@ describe("emitCoalesced (S-209)", () => {
     // loop we observe exactly one inline batch (500 events) + one pending rAF.
     expect(batchSpy).toHaveBeenCalledTimes(1);
     expect(batchSpy.mock.calls[0][0].events).toHaveLength(500);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // S-210: the warn is now deferred to flushFrame, so no warn fires inline.
+    expect(warnSpy).not.toHaveBeenCalled();
 
     await vi.runAllTimersAsync();
 
@@ -262,6 +284,9 @@ describe("emitCoalesced (S-209)", () => {
     expect(batchSpy).toHaveBeenCalledTimes(2);
     expect(batchSpy.mock.calls[1][0].events).toHaveLength(500);
     expect(eventSpy).not.toHaveBeenCalled();
+    // S-210: a single summary warn fires at flush time, covering the one
+    // overflow that occurred in the synchronous burst.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
 
     warnSpy.mockRestore();
   });

@@ -13,12 +13,40 @@ const handlers = new Map<WsType, Set<AnyHandler>>();
 
 let rafFrameBuffer: LiveEvent[] = [];
 let rafScheduled = false;
+let overflowCount = 0;
+let flushedInCycle = 0;
 const RAF_BUFFER_MAX = 500;
 
-function flushFrame(): void {
-  rafScheduled = false;
+function flushFrame(fromRaf = false): void {
+  if (fromRaf) {
+    rafScheduled = false;
+  }
   const events = rafFrameBuffer;
   rafFrameBuffer = [];
+  // Always tally what we just flushed so the rAF-cycle summary reports the
+  // true total (inline overflow flushes + the trailing rAF flush). Without
+  // this, `flushed` in the summary warn would only report the residual buffer
+  // at rAF time and miss the 500-event inline batches entirely.
+  flushedInCycle += events.length;
+  // Only the rAF-scheduled flush consumes the cycle accumulators. Inline
+  // overflow flushes leave both intact so they accumulate across the tick and
+  // are reported once when the rAF callback finally runs.
+  const overflows = fromRaf ? overflowCount : 0;
+  const flushed = fromRaf ? flushedInCycle : 0;
+  if (fromRaf) {
+    overflowCount = 0;
+    flushedInCycle = 0;
+  }
+  if (events.length === 0 && overflows === 0) return;
+  if (overflows > 0) {
+    // S-210: collapse N per-overflow warns into a single summary at flush time.
+    // `flushed` is the total event count across the entire rAF cycle (inline
+    // overflow batches + trailing rAF flush), not the residual buffer length.
+    logger.warn("wsBus.rAF buffer overflow", {
+      flushed,
+      overflow_count: overflows,
+    });
+  }
   if (events.length === 0) return;
   if (events.length === 1) {
     emit({ type: "event", data: events[0] });
@@ -81,17 +109,19 @@ export function emitCoalesced(msg: WsMessage): void {
     return;
   }
   if (rafFrameBuffer.length >= RAF_BUFFER_MAX) {
-    logger.warn("wsBus.rAF buffer overflow", { flushed: rafFrameBuffer.length });
+    overflowCount += 1;
     flushFrame();
   }
   rafFrameBuffer.push(msg.data);
   if (!rafScheduled) {
     rafScheduled = true;
-    requestAnimationFrame(flushFrame);
+    requestAnimationFrame(() => flushFrame(true));
   }
 }
 
 export function _resetFrameBufferForTests(): void {
   rafFrameBuffer = [];
   rafScheduled = false;
+  overflowCount = 0;
+  flushedInCycle = 0;
 }
