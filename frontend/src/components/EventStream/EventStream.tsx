@@ -173,6 +173,10 @@ export function EventStream(): JSX.Element {
             ))}
           </div>
         ) : (
+          // jsdom has no layout engine, so @tanstack/react-virtual never
+          // produces items in unit tests — useFallback stays true and this
+          // branch is unreachable. Covered by Playwright E2E in a real browser.
+          /* v8 ignore start */
           <div style={{ height: rv.getTotalSize(), position: "relative" }}>
             {virtualItems.map((vi) => {
               const e = visible[vi.index];
@@ -188,6 +192,7 @@ export function EventStream(): JSX.Element {
               );
             })}
           </div>
+          /* v8 ignore stop */
         )}
       </div>
     </section>
