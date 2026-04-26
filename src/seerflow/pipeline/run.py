@@ -25,6 +25,7 @@ from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
 from seerflow.ueba.engine import UEBAEngine
 from seerflow.ueba.store import BaselineStore
+from seerflow.web import DEFAULT_DIST
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -369,6 +370,11 @@ async def _run_with_config(
         config.health_bind_address,
         config.dashboard_port,
     )
+    if not (DEFAULT_DIST / "index.html").is_file():
+        _log.info(
+            "Dashboard bundle missing — run 'cd frontend && npm run build' to "
+            "enable the UI. API and WebSocket are still available at /api/v1/*."
+        )
 
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000

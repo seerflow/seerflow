@@ -64,3 +64,16 @@ class TestPortInUse:
         src = inspect.getsource(run_mod)
         assert "EADDRINUSE" in src or "errno.EADDRINUSE" in src
         assert "dashboard_port" in src
+
+
+class TestDistMissingHint:
+    """``_run_with_config`` logs a hint when the React bundle is absent."""
+
+    def test_hint_string_present_in_source(self) -> None:
+        import inspect
+
+        from seerflow.pipeline import run as run_mod
+
+        src = inspect.getsource(run_mod._run_with_config)
+        assert "npm run build" in src
+        assert "Dashboard bundle missing" in src
