@@ -249,6 +249,21 @@ Use `uv build --wheel`, not plain `uv build`, because the default
 flow builds an sdist first and the gitignored `web/dist/` does not
 make it into the sdist.
 
+## Airgap deployments
+
+The Monaco YAML editor (used by the Sigma rules detail panel) is bundled
+locally — it does not fetch the Monaco runtime from a CDN. When serving the
+SPA behind a strict Content-Security-Policy, the minimum directives required
+are:
+
+```
+script-src 'self';
+worker-src 'self' blob:;
+```
+
+The `blob:` worker source is required because Vite materialises Monaco
+language workers as Blob URLs at runtime.
+
 ## Known gaps (deferred)
 
 - **CSP headers** — the inline theme-bootstrap script in `index.html`
