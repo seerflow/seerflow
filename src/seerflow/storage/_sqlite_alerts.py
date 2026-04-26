@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
     from seerflow.models._types import FeedbackType
     from seerflow.models.feedback import FeedbackOrigin
-    from seerflow.models.query import AlertQuery
+    from seerflow.models.query import AlertQuery, TimeRange
 
 _log = logging.getLogger(__name__)
 
@@ -338,6 +338,46 @@ class _SqliteAlertMixin:
         if row is None:
             return None
         return msgspec.msgpack.decode(row[0], type=Alert)
+
+    async def count_alerts_bucketed(
+        self,
+        *,
+        alert_type: str,
+        rule_name: str,
+        time_range: TimeRange,
+        bucket_ns: int,
+    ) -> list[tuple[int, int]]:
+        """Return ``(bucket_start_ns, count)`` pairs for ``alert_type``+``rule_name``.
+
+        Buckets are produced by floor-dividing ``timestamp_ns`` by
+        ``bucket_ns``. The query uses a half-open ``[start_ns, end_ns)``
+        window so adjacent ranges concatenate without double counting.
+        Empty buckets are omitted; the caller is responsible for densifying
+        the grid.
+        """
+        if bucket_ns <= 0:
+            raise ValueError(f"bucket_ns must be positive, got {bucket_ns}")
+        sql = (
+            "SELECT (timestamp_ns / ?) * ? AS bucket, COUNT(*) "
+            "FROM alerts "
+            "WHERE alert_type = ? "
+            "  AND rule_name = ? "
+            "  AND timestamp_ns >= ? "
+            "  AND timestamp_ns <  ? "
+            "GROUP BY bucket "
+            "ORDER BY bucket"
+        )
+        params = (
+            bucket_ns,
+            bucket_ns,
+            alert_type,
+            rule_name,
+            time_range.start_ns,
+            time_range.end_ns,
+        )
+        async with await self._conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return [(int(b), int(c)) for b, c in rows]
 
     async def get_feedback_stats(self) -> dict[str, int]:
         """Return feedback counts: tp, fp, total."""

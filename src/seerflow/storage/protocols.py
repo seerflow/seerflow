@@ -76,6 +76,20 @@ class AlertStore(Protocol):  # pragma: no cover
 
     async def get_alert_by_id(self, alert_id: str) -> Alert | None: ...
 
+    async def count_alerts_bucketed(
+        self,
+        *,
+        alert_type: str,
+        rule_name: str,
+        time_range: TimeRange,
+        bucket_ns: int,
+    ) -> list[tuple[int, int]]:
+        """Return ``(bucket_start_ns, count)`` pairs grouped by floor-divided
+        ``timestamp_ns / bucket_ns``. Buckets with zero matches are omitted —
+        the caller is responsible for densifying the grid.
+        """
+        ...
+
     async def get_feedback_stats(self) -> dict[str, int]: ...
 
     async def append_feedback_event(
