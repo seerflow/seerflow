@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import logging
 import ssl as _ssl
 import sys
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
+import uvicorn
 
 from seerflow import __version__
 from seerflow.api.app import create_api_app
@@ -88,6 +90,24 @@ async def _build_channel_session_and_router(
         quiet_hours_by_channel=dict(alerting.quiet_hours_by_channel),
     )
     return session, router
+
+
+async def _serve_or_hint(server: uvicorn.Server, port: int) -> None:
+    """Run the uvicorn server and emit a helpful hint on EADDRINUSE.
+
+    The error is re-raised so the calling task surfaces a non-zero exit
+    via ``asyncio.wait(..., FIRST_COMPLETED)`` (S-217).
+    """
+    try:
+        await server.serve()
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            _log.error(
+                "Dashboard port %d already in use; set dashboard_port to a free "
+                "port in seerflow.yaml or stop the conflicting process.",
+                port,
+            )
+        raise
 
 
 async def _run_with_config(
@@ -309,7 +329,6 @@ async def _run_with_config(
     # Mount FastAPI dashboard + REST + WebSocket on dashboard_port via
     # uvicorn (S-217). The legacy aiohttp ``health_app`` was deleted —
     # the FastAPI ``/api/v1/health`` route mirrors its contract.
-    import uvicorn
 
     # Shared between handler.broadcast_alert(...) and the FastAPI
     # WebSocket route — one ConnectionManager per process so frames
@@ -341,7 +360,10 @@ async def _run_with_config(
         access_log=False,
     )
     server = uvicorn.Server(uvicorn_config)
-    server_task = asyncio.create_task(server.serve(), name="seerflow.api.server")
+    server_task = asyncio.create_task(
+        _serve_or_hint(server, config.dashboard_port),
+        name="seerflow.api.server",
+    )
     _log.info(
         "Dashboard listening on http://%s:%d/",
         config.health_bind_address,

@@ -51,3 +51,16 @@ class TestServeFastapi:
         assert "make_api_app(" in src
         assert "uvicorn.Server" in src
         assert "create_health_app" not in src  # legacy aiohttp path removed
+
+
+class TestPortInUse:
+    """``_run_with_config`` surfaces a clear hint when port is in use."""
+
+    def test_helpful_message_appears_in_module_source(self) -> None:
+        import inspect
+
+        from seerflow.pipeline import run as run_mod
+
+        src = inspect.getsource(run_mod)
+        assert "EADDRINUSE" in src or "errno.EADDRINUSE" in src
+        assert "dashboard_port" in src
