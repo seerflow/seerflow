@@ -546,18 +546,20 @@ async def _run_with_config(
             await pd_session.close()
         if otlp_sink is not None:
             await otlp_sink.stop()
-        if _otlp_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await _otlp_task
-        if otlp_sink is not None:
+            if _otlp_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await _otlp_task
             await otlp_sink.close()
         if webhook_session is not None:
             await webhook_session.close()
         # Stop uvicorn so _lifespan can drain WebSocket frames before
         # the storage handle is released. ``server_task`` is created in
-        # the new sibling-task layout introduced by S-217.
+        # the new sibling-task layout introduced by S-217. Suppress
+        # ``TimeoutError`` as well as ``CancelledError`` so a slow uvicorn
+        # shutdown never strands ``storage.close()`` (would leave the
+        # SQLite WAL open).
         server.should_exit = True
-        with contextlib.suppress(asyncio.CancelledError):
+        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
             await asyncio.wait_for(server_task, timeout=10)
         await storage.close()
         _log.info("Seerflow stopped")

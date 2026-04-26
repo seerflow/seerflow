@@ -28,14 +28,18 @@ class TestSharedConnectionManager:
 
     def test_make_handler_receives_ws_manager(self) -> None:
         import inspect
+        import re
 
         from seerflow.pipeline import run as run_mod
 
         src = inspect.getsource(run_mod._run_with_config)
         # A single ConnectionManager is built and passed to make_handler.
-        # The construction may carry kwargs (e.g. alert_store=storage) so
-        # match the call site rather than the bare ``ConnectionManager()``.
-        assert "ws_manager = ConnectionManager(" in src
+        # The construction may carry kwargs (e.g. alert_store=storage); use a
+        # whitespace-tolerant pattern so a future ruff format pass won't
+        # silently break this assertion.
+        assert re.search(r"ws_manager\s*=\s*ConnectionManager\s*\(", src), (
+            "expected `ws_manager = ConnectionManager(...)` in _run_with_config source"
+        )
         assert "ws_manager=ws_manager" in src
 
 

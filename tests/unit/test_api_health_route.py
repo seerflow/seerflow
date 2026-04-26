@@ -25,8 +25,14 @@ def _make_app(health_state: dict[str, str]) -> FastAPI:
 def _make_app_with_extras(
     *,
     ensemble: object | None,
-    alert_store: object | None,
+    alert_store: object | None = None,
 ) -> FastAPI:
+    """Build a minimal app for health-route tests.
+
+    ``alert_store`` defaults to a stub returning empty feedback stats — the
+    route now relies on the contract that ``StorageDeps.alert_store`` is
+    always present (matches the ``create_api_app`` factory signature).
+    """
     app = FastAPI()
     app.state.health_state = {"pipeline": "running", "storage": "connected"}
     app.state.engines = DetectionEngines(
@@ -34,6 +40,9 @@ def _make_app_with_extras(
         correlation_rules=(),
         ensemble=ensemble,
     )
+    if alert_store is None:
+        alert_store = MagicMock()
+        alert_store.get_feedback_stats = AsyncMock(return_value={})
     app.state.storage = StorageDeps(log_store=MagicMock(), alert_store=alert_store)
     app.include_router(router, prefix="/api/v1")
     return app
@@ -79,8 +88,10 @@ class TestHealthEndpointExtras:
         assert body["detection"] == {"detectors": 4, "models_loaded": 7}
         assert body["feedback"] == {"tp": 1, "fp": 2}
 
-    def test_omits_extras_when_deps_missing(self) -> None:
-        client = TestClient(_make_app_with_extras(ensemble=None, alert_store=None))
+    def test_detection_is_none_when_ensemble_missing(self) -> None:
+        """When no ``DetectionEnsemble`` is wired, ``detection`` falls back to ``None``;
+        ``feedback`` always populates because ``alert_store`` is non-Optional by contract."""
+        client = TestClient(_make_app_with_extras(ensemble=None))
         body = client.get("/api/v1/health").json()
         assert body["detection"] is None
-        assert body["feedback"] is None
+        assert body["feedback"] == {}

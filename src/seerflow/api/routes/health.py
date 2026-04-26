@@ -47,9 +47,9 @@ async def get_health(
     detection: dict[str, Any] | None = (
         engines.ensemble.get_health() if engines.ensemble is not None else None
     )
-    feedback: dict[str, int] | None = None
-    if storage.alert_store is not None:
-        feedback = await storage.alert_store.get_feedback_stats()
+    # ``StorageDeps.alert_store`` is non-Optional by contract (matches the
+    # ``create_api_app`` factory signature), so feedback is always populated.
+    feedback: dict[str, int] = await storage.alert_store.get_feedback_stats()
 
     return HealthResponse(
         status=status,
