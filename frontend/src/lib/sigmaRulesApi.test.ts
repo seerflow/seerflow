@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   getSigmaRules,
   getSigmaRule,
+  getSigmaRuleTimeline,
   toggleSigmaRule,
   validateSigmaRule,
   uploadSigmaRule,
@@ -88,6 +89,45 @@ describe("getSigmaRules", () => {
     });
     const out = await getSigmaRules();
     expect(out.has_next).toBe(true);
+  });
+
+  it("buildQuery repeats severity_in for each value", async () => {
+    mockedGet.mockResolvedValueOnce({ items: [], total: 0, page: 1, limit: 100 });
+    await getSigmaRules({ severity_in: [3, 4] });
+    const callPath = mockedGet.mock.calls[0][0] as string;
+    expect(callPath.startsWith("/api/v1/sigma/rules?")).toBe(true);
+    const qs = callPath.slice(callPath.indexOf("?") + 1);
+    const params = new URLSearchParams(qs);
+    expect(params.getAll("severity_in")).toEqual(["3", "4"]);
+  });
+
+  it("buildQuery omits severity_in when the array is empty", async () => {
+    mockedGet.mockResolvedValueOnce({ items: [], total: 0, page: 1, limit: 100 });
+    await getSigmaRules({ severity_in: [] });
+    const callPath = mockedGet.mock.calls[0][0] as string;
+    expect(callPath).toBe("/api/v1/sigma/rules");
+  });
+});
+
+describe("getSigmaRuleTimeline", () => {
+  beforeEach(() => mockedGet.mockReset());
+
+  it("calls /timeline with bucket=hour&window=24h and encodes the rule id", async () => {
+    mockedGet.mockResolvedValueOnce({ buckets: [] });
+    await getSigmaRuleTimeline("r/1");
+    expect(mockedGet).toHaveBeenCalledWith(
+      "/api/v1/sigma/rules/r%2F1/timeline?bucket=hour&window=24h",
+      expect.objectContaining({ schema: expect.anything() }),
+    );
+  });
+
+  it("returns the parsed response", async () => {
+    mockedGet.mockResolvedValueOnce({
+      buckets: [{ bucket_start_ns: 1n, count: 2 }],
+    });
+    const out = await getSigmaRuleTimeline("rid");
+    expect(out.buckets).toHaveLength(1);
+    expect(out.buckets[0].count).toBe(2);
   });
 });
 

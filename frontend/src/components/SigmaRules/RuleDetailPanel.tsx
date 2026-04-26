@@ -1,12 +1,17 @@
 // S-151: Side panel showing full rule details (Monaco YAML viewer + ATT&CK).
+// S-154 (T8): mounts a 24h hourly-firing sparkline next to the 24h alert
+// metric. Sparkline failures (network/schema) are silenced — the rest of
+// the panel still renders so a flaky timeline endpoint can't break the
+// detail view.
 import { useEffect, useState } from "react";
 
-import { getSigmaRule } from "@/lib/sigmaRulesApi";
-import type { SigmaRuleDetail } from "@/lib/types";
+import { getSigmaRule, getSigmaRuleTimeline } from "@/lib/sigmaRulesApi";
+import type { SigmaRuleDetail, SigmaRuleTimelineResponse } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 import { MonacoYamlEditor } from "./MonacoYamlEditor";
+import { RuleSparkline } from "./RuleSparkline";
 import { severityLabel } from "./severity";
 
 // MITRE technique IDs follow T#### or T####.### (sub-technique). Reject
@@ -30,6 +35,7 @@ interface Props {
 export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
   const [rule, setRule] = useState<SigmaRuleDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<SigmaRuleTimelineResponse | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -41,6 +47,24 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
       })
       .catch((e: unknown) => {
         if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [ruleId]);
+
+  // Independent fetch from the rule detail so a slow/erroring timeline
+  // endpoint cannot block the YAML view. Failures fall back to "no
+  // sparkline rendered" — see comment in `getSigmaRuleTimeline`.
+  useEffect(() => {
+    let alive = true;
+    setTimeline(null);
+    void getSigmaRuleTimeline(ruleId)
+      .then((t) => {
+        if (alive) setTimeline(t);
+      })
+      .catch(() => {
+        // Silent: the metric row still shows the count without the chart.
       });
     return () => {
       alive = false;
@@ -104,7 +128,14 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
         </div>
         <div className="flex justify-between gap-2">
           <dt className="text-muted-foreground">24h alerts</dt>
-          <dd className="font-mono tabular-nums">{rule.alert_count_24h}</dd>
+          <dd className="flex items-center gap-2 font-mono tabular-nums">
+            <span>{rule.alert_count_24h}</span>
+            {timeline ? (
+              <span className="text-muted-foreground" data-testid="rule-sparkline">
+                <RuleSparkline buckets={timeline.buckets} />
+              </span>
+            ) : null}
+          </dd>
         </div>
       </dl>
 

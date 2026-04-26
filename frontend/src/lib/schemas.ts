@@ -260,6 +260,19 @@ export const SigmaRuleListResponseSchema = v.object({
   has_next: v.boolean(),
 });
 
+// S-154 (T8): /sigma/rules/{rule_id}/timeline?bucket=hour&window=24h.
+// `bucket_start_ns` is revived to bigint at the api.ts boundary
+// (BIGINT_KEYS includes the field), so this schema runs against a
+// post-revival shape and can use v.bigint() directly.
+export const SigmaRuleTimelineBucketSchema = v.object({
+  bucket_start_ns: v.bigint(),
+  count: v.pipe(v.number(), v.integer(), v.minValue(0)),
+});
+
+export const SigmaRuleTimelineResponseSchema = v.object({
+  buckets: v.pipe(v.array(SigmaRuleTimelineBucketSchema), v.maxLength(24)),
+});
+
 export const SigmaRuleValidationStageSchema = v.picklist([
   "yaml",
   "schema",
@@ -285,6 +298,12 @@ export type SigmaRuleListResponseInfer = v.InferOutput<
 >;
 export type SigmaRuleValidationResultInfer = v.InferOutput<
   typeof SigmaRuleValidationResultSchema
+>;
+export type SigmaRuleTimelineBucketInfer = v.InferOutput<
+  typeof SigmaRuleTimelineBucketSchema
+>;
+export type SigmaRuleTimelineResponseInfer = v.InferOutput<
+  typeof SigmaRuleTimelineResponseSchema
 >;
 
 // ---------------------------------------------------------------------------

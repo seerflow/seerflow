@@ -292,9 +292,24 @@ export interface SigmaRuleFilter {
   search: string;
   category: string | null;
   logsource_product: string | null;
-  severity: number | null;
+  // S-154 (T8): replaces single `severity` with multi-value `severity_in`.
+  // Empty array = no filter; emitted to the backend as repeated
+  // `?severity_in=N` query params (or omitted entirely when empty).
+  severity_in: number[];
   enabledOnly: boolean;
   source: SigmaRuleSource | null;
+}
+
+// S-154 (T8): 24-bucket dense hourly grid returned by
+// GET /api/v1/sigma/rules/{rule_id}/timeline. `bucket_start_ns` is revived
+// to bigint at the api.ts boundary (BIGINT_KEYS includes the field).
+export interface SigmaRuleTimelineBucket {
+  bucket_start_ns: bigint;
+  count: number;
+}
+
+export interface SigmaRuleTimelineResponse {
+  buckets: SigmaRuleTimelineBucket[];
 }
 
 // S-060.F1: risk-history types.

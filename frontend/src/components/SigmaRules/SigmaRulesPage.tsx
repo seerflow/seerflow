@@ -45,6 +45,7 @@ export function SigmaRulesPage(): JSX.Element {
 
         <FilterBar
           initialSearch={filter.search}
+          initialSeverityIn={filter.severity_in}
           onChange={(patch) => useSigmaRulesStore.getState().setFilter(patch)}
         />
 
@@ -82,9 +83,12 @@ export function SigmaRulesPage(): JSX.Element {
       <UploadRuleDialog
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
-        onSaved={() => {
+        onSaved={(ruleId) => {
           toast.success("Rule uploaded");
           void useSigmaRulesStore.getState().load();
+          // S-154 (T8): auto-select the freshly-uploaded rule so the detail
+          // panel pops open without a second click.
+          useSigmaRulesStore.getState().select(ruleId);
         }}
       />
     </section>

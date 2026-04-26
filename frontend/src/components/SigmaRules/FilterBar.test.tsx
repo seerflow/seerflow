@@ -39,18 +39,23 @@ describe("FilterBar", () => {
     expect(onChange).toHaveBeenCalledWith({ enabledOnly: true });
   });
 
-  it("severity select coerces value to number; empty -> null", () => {
+  it("emits severity_in as the union of checked boxes", () => {
     const onChange = vi.fn();
     render(<FilterBar onChange={onChange} />);
-    fireEvent.change(screen.getByLabelText(/filter by severity/i), {
-      target: { value: "4" },
-    });
-    expect(onChange).toHaveBeenCalledWith({ severity: 4 });
+    fireEvent.click(screen.getByLabelText("critical"));
+    fireEvent.click(screen.getByLabelText("high"));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ severity_in: [5, 4] }),
+    );
+  });
 
-    fireEvent.change(screen.getByLabelText(/filter by severity/i), {
-      target: { value: "" },
-    });
-    expect(onChange).toHaveBeenCalledWith({ severity: null });
+  it("unchecking removes the value from severity_in (empty array on full clear)", () => {
+    const onChange = vi.fn();
+    render(<FilterBar initialSeverityIn={[5]} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText("critical"));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ severity_in: [] }),
+    );
   });
 
   it("logsource product select fires with null for All", () => {
