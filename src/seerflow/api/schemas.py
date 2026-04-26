@@ -386,13 +386,6 @@ class SigmaRuleDetail(SigmaRuleSummary):
     yaml_source: str
 
 
-class SigmaRuleListResponse(BaseModel):
-    items: list[SigmaRuleSummary]
-    total: int
-    page: int
-    limit: int
-
-
 class SigmaRuleToggleRequest(BaseModel):
     enabled: bool
 

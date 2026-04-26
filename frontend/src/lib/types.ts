@@ -273,6 +273,7 @@ export interface SigmaRuleListResponse {
   total: number;
   page: number;
   limit: number;
+  has_next: boolean;
 }
 
 export interface SigmaRuleValidationResult {

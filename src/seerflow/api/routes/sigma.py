@@ -28,8 +28,8 @@ from seerflow.api.deps import (
 )
 from seerflow.api.limits import limiter, list_limit, sigma_upload_limit
 from seerflow.api.schemas import (
+    PaginatedResponse,
     SigmaRuleDetail,
-    SigmaRuleListResponse,
     SigmaRuleSummary,
     SigmaRuleTimelineBucket,
     SigmaRuleTimelineResponse,
@@ -180,7 +180,7 @@ def _build_detail(rule: dict[str, object], alert_count_24h: int) -> SigmaRuleDet
     )
 
 
-@router.get("/rules", response_model=SigmaRuleListResponse)
+@router.get("/rules", response_model=PaginatedResponse[SigmaRuleSummary])
 @limiter.limit(list_limit)
 async def list_rules(
     request: Request,
@@ -203,7 +203,7 @@ async def list_rules(
     enabled: Annotated[bool | None, Query()] = None,
     source: Annotated[str | None, Query(max_length=32)] = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
-) -> SigmaRuleListResponse:
+) -> PaginatedResponse[SigmaRuleSummary]:
     """Return loaded Sigma rules with filters and per-rule 24h alert counts."""
     engine = _require_engine(engines)
     counts_24h = await _alert_counts_24h(storage)
@@ -226,7 +226,13 @@ async def list_rules(
     start = (page - 1) * limit
     page_items = filtered[start : start + limit]
     items = [_build_summary(r, counts_24h.get(str(r["title"]), 0)) for r in page_items]
-    return SigmaRuleListResponse(items=items, total=total, page=page, limit=limit)
+    return PaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+        has_next=(page * limit) < total,
+    )
 
 
 @router.get("/rules/{rule_id}", response_model=SigmaRuleDetail)

@@ -392,3 +392,12 @@ def test_list_rules_severity_in_rejects_too_many_values(app_with_multi_severity)
     with TestClient(app_with_multi_severity) as client:
         resp = client.get(f"/api/v1/sigma/rules?{qs}")
         assert resp.status_code == 422
+
+
+def test_list_rules_response_envelope_has_has_next(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """List envelope must expose has_next so pagination matches PaginatedResponse[T]."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?page=1&limit=2")
+        body = resp.json()
+        assert {"items", "total", "page", "limit", "has_next"} <= set(body.keys())
+        assert isinstance(body["has_next"], bool)

@@ -64,6 +64,18 @@ describe("getSigmaRules", () => {
     const callPath = mockedGet.mock.calls[0][0] as string;
     expect(callPath).toBe("/api/v1/sigma/rules");
   });
+
+  it("parses has_next in the list envelope", async () => {
+    mockedGet.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 50,
+      has_next: false,
+    });
+    const out = await getSigmaRules();
+    expect(out.has_next).toBe(false);
+  });
 });
 
 describe("getSigmaRule", () => {

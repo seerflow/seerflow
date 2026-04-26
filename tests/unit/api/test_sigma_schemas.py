@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from seerflow.api.schemas import (
+    PaginatedResponse,
     SigmaRuleDetail,
-    SigmaRuleListResponse,
     SigmaRuleSummary,
     SigmaRuleToggleRequest,
     SigmaRuleUploadRequest,
@@ -69,5 +69,6 @@ def test_validation_result_valid_shape() -> None:
 
 
 def test_list_response_shape() -> None:
-    r = SigmaRuleListResponse(items=[], total=0, page=1, limit=100)
+    r = PaginatedResponse[SigmaRuleSummary](items=[], total=0, page=1, limit=100, has_next=False)
     assert r.total == 0
+    assert r.has_next is False

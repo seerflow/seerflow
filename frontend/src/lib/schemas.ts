@@ -257,6 +257,7 @@ export const SigmaRuleListResponseSchema = v.object({
   total: v.pipe(v.number(), v.integer(), v.minValue(0)),
   page: v.pipe(v.number(), v.integer(), v.minValue(1)),
   limit: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  has_next: v.boolean(),
 });
 
 export const SigmaRuleValidationStageSchema = v.picklist([
