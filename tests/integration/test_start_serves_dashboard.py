@@ -97,17 +97,16 @@ def test_ws_receives_alert_broadcast() -> None:
 
     test_alert = _make_alert()
 
-    with TestClient(app) as client:
-        with client.websocket_connect("/api/v1/ws") as ws:
-            ws_manager.broadcast_alert(test_alert)
-            # Frames are msgspec-encoded bytes (see api/ws.py::_send_bytes).
-            raw = ws.receive_bytes()
-            payload = msgspec.json.decode(raw)
-            # ConnectionManager sends single alerts as {"type":"alert","data":{...}}
-            # and batches as {"type":"alert_batch","alerts":[{...}]}; cover both.
-            if payload.get("type") == "alert_batch":
-                ids = [a["alert_id"] for a in payload["alerts"]]
-            else:
-                assert payload.get("type") == "alert"
-                ids = [payload["data"]["alert_id"]]
-            assert test_alert.alert_id in ids
+    with TestClient(app) as client, client.websocket_connect("/api/v1/ws") as ws:
+        ws_manager.broadcast_alert(test_alert)
+        # Frames are msgspec-encoded bytes (see api/ws.py::_send_bytes).
+        raw = ws.receive_bytes()
+        payload = msgspec.json.decode(raw)
+        # ConnectionManager sends single alerts as {"type":"alert","data":{...}}
+        # and batches as {"type":"alert_batch","alerts":[{...}]}; cover both.
+        if payload.get("type") == "alert_batch":
+            ids = [a["alert_id"] for a in payload["alerts"]]
+        else:
+            assert payload.get("type") == "alert"
+            ids = [payload["data"]["alert_id"]]
+        assert test_alert.alert_id in ids

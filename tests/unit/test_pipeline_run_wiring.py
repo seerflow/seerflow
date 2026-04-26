@@ -97,9 +97,7 @@ class TestShutdownOrder:
         idx_storage_close = src.rfind("await storage.close()")
         assert idx_should_exit != -1, "uvicorn shutdown signal missing"
         assert idx_storage_close != -1, "storage.close() missing"
-        assert idx_should_exit < idx_storage_close, (
-            "uvicorn must stop before storage.close()"
-        )
+        assert idx_should_exit < idx_storage_close, "uvicorn must stop before storage.close()"
 
     def test_uses_asyncio_wait_first_completed(self) -> None:
         import inspect
