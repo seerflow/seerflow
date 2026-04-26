@@ -370,3 +370,25 @@ def test_list_rules_severity_param_removed(app_with_multi_severity) -> None:  # 
         resp_with = client.get("/api/v1/sigma/rules?severity=3&limit=500")
         resp_without = client.get("/api/v1/sigma/rules?limit=500")
         assert resp_with.json()["total"] == resp_without.json()["total"]
+
+
+def test_list_rules_severity_in_rejects_non_integer(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """Non-integer ``severity_in`` token must surface as 422, not silent drop."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?severity_in=foo")
+        assert resp.status_code == 422
+
+
+def test_list_rules_severity_in_rejects_out_of_range(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """Severity outside the OTel [0, 24] band must surface as 422."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?severity_in=99")
+        assert resp.status_code == 422
+
+
+def test_list_rules_severity_in_rejects_too_many_values(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """severity_in with > _MAX_SEVERITY_IN repetitions must short-circuit to 422."""
+    qs = "&".join(f"severity_in={i % 25}" for i in range(30))
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get(f"/api/v1/sigma/rules?{qs}")
+        assert resp.status_code == 422

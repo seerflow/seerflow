@@ -66,6 +66,11 @@ _TIMELINE_BUCKET_COUNT: int = 24
 # bounds disk fill if rate-limit is bypassed.
 _MAX_CUSTOM_UPLOADS = 1000
 
+# severity_in cardinality cap. The OTel severity scale defines 24 levels
+# (0 reserved + 1-24); 25 leaves headroom for "0" while bounding the
+# per-request parse loop so a pathological client cannot DOS the filter.
+_MAX_SEVERITY_IN = 25
+
 
 def _require_engine(engines: DetectionEngines) -> SigmaEngine:
     if engines.sigma_engine is None:
@@ -101,6 +106,11 @@ def _parse_severity_in(values: list[str] | None) -> list[int] | None:
     """
     if not values:
         return None
+    if len(values) > _MAX_SEVERITY_IN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"severity_in accepts at most {_MAX_SEVERITY_IN} values",
+        )
     parsed: list[int] = []
     for raw in values:
         token = raw.strip()
@@ -179,7 +189,16 @@ async def list_rules(
     page: Annotated[int, Query(ge=1, le=10_000)] = 1,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     category: Annotated[str | None, Query(max_length=64)] = None,
-    severity_in: Annotated[list[str] | None, Query()] = None,
+    severity_in: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "Filter rules whose severity is in this set. "
+                "Repeat the param: ?severity_in=4&severity_in=5. "
+                "Empty value = no filter."
+            ),
+        ),
+    ] = None,
     logsource_product: Annotated[str | None, Query(max_length=64)] = None,
     enabled: Annotated[bool | None, Query()] = None,
     source: Annotated[str | None, Query(max_length=32)] = None,
