@@ -22,9 +22,17 @@ uv sync
 # Copy and edit the example config
 cp seerflow.example.yaml seerflow.yaml
 
-# Start the pipeline
+# Start the pipeline (also serves the React dashboard)
 uv run python -m seerflow start
+# → React dashboard:  http://127.0.0.1:8080/
+# → REST API:         http://127.0.0.1:8080/api/v1/
+# → WebSocket stream: ws://127.0.0.1:8080/api/v1/ws
 ```
+
+A single `seerflow start` boots the receivers, detection engines, and the
+FastAPI dashboard on `dashboard_port` (default `8080`). No second uvicorn
+process is required — the wheel ships the built React assets and the CLI
+mounts them via the same FastAPI app that exposes `/api/v1/*`.
 
 ### Command Line
 

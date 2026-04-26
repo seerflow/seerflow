@@ -13,6 +13,10 @@ wheel bundles the built assets.
 
 ## Scripts
 
+> In packaged / production use, the React bundle is served by `seerflow start`
+> from `src/seerflow/web/dist/` — no separate Node process is needed at
+> runtime. `npm run dev` is for frontend hot-reload during development only.
+
 - `npm ci` — install exact dependency versions
 - `npm run dev` — Vite dev server on port 5173 with `/api` proxy to
   `127.0.0.1:8080` (HTTP and WebSocket). Run `seerflow start`
