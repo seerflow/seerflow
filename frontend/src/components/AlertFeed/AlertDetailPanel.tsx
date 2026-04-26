@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Alert, AlertDetail, FeedbackEvent, FeedbackHistoryResponse } from "@/lib/types";
 import { api, ApiError } from "@/lib/api";
-import { AlertDetailSchema } from "@/lib/schemas";
+import { AlertDetailSchema, FeedbackEventSchema } from "@/lib/schemas";
 import { Button } from "@/components/ui/button";
 import { logger } from "@/lib/logger";
 import { submitFeedback } from "@/lib/feedback";
@@ -35,9 +35,14 @@ export function AlertDetailPanel({ alert }: Props): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    // `submitted_at_ns` is revived to bigint inside `api.get` (see BIGINT_KEYS
-    // in lib/api.ts) — no manual conversion needed here.
-    api.get<FeedbackHistoryResponse>(`/api/v1/alerts/${alert.alert_id}/feedback`)
+    // S-210: schema opt-in catches malformed history rows. `itemsKey: "items"`
+    // engages the per-row drop branch in api.ts::request — invalid rows are
+    // dropped and a per-alert metric `rest:/api/v1/alerts/<alert_id>/feedback`
+    // increments via incrementDropped().
+    api.get<FeedbackHistoryResponse>(
+      `/api/v1/alerts/${alert.alert_id}/feedback`,
+      { schema: FeedbackEventSchema, itemsKey: "items" },
+    )
       .then(p => { if (!cancelled) setHistory(p.items); })
       .catch((e: unknown) => { if (!cancelled) logger.warn("history load failed", e); });
     return () => { cancelled = true; };
