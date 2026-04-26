@@ -76,6 +76,18 @@ describe("getSigmaRules", () => {
     const out = await getSigmaRules();
     expect(out.has_next).toBe(false);
   });
+
+  it("round-trips has_next: true", async () => {
+    mockedGet.mockResolvedValueOnce({
+      items: [],
+      total: 100,
+      page: 1,
+      limit: 50,
+      has_next: true,
+    });
+    const out = await getSigmaRules();
+    expect(out.has_next).toBe(true);
+  });
 });
 
 describe("getSigmaRule", () => {

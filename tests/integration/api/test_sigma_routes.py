@@ -401,3 +401,20 @@ def test_list_rules_response_envelope_has_has_next(app_with_multi_severity) -> N
         body = resp.json()
         assert {"items", "total", "page", "limit", "has_next"} <= set(body.keys())
         assert isinstance(body["has_next"], bool)
+
+
+def test_list_rules_has_next_true_on_first_page(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """has_next must be True when total > page*limit (first page, fixture has 3 rules)."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?page=1&limit=1")
+        body = resp.json()
+        assert body["total"] >= 2  # sanity: fixture seeded enough rules
+        assert body["has_next"] is True
+
+
+def test_list_rules_has_next_false_on_last_page(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """has_next must be False when requesting a page past the last."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?page=999&limit=10")
+        body = resp.json()
+        assert body["has_next"] is False
