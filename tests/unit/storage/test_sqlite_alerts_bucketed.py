@@ -98,3 +98,43 @@ async def test_count_alerts_bucketed_empty_returns_empty_list(
         bucket_ns=HOUR_NS,
     )
     assert rows == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_count_alerts_bucketed_raises_on_non_positive_bucket(
+    sqlite_storage: SqliteBackend,
+) -> None:
+    tr = TimeRange(start_ns=0, end_ns=HOUR_NS)
+    with pytest.raises(ValueError):
+        await sqlite_storage.count_alerts_bucketed(
+            alert_type="sigma",
+            rule_name="any",
+            time_range=tr,
+            bucket_ns=0,
+        )
+    with pytest.raises(ValueError):
+        await sqlite_storage.count_alerts_bucketed(
+            alert_type="sigma",
+            rule_name="any",
+            time_range=tr,
+            bucket_ns=-1,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_count_alerts_bucketed_half_open_window_boundaries(
+    sqlite_storage: SqliteBackend,
+) -> None:
+    base = 1_761_350_400_000_000_000  # arbitrary aligned hour
+    # Alert at exactly start_ns must be included; alert at exactly end_ns excluded.
+    await sqlite_storage.write_alert(_alert(base))
+    await sqlite_storage.write_alert(_alert(base + HOUR_NS))
+    rows = await sqlite_storage.count_alerts_bucketed(
+        alert_type="sigma",
+        rule_name="Suspicious PowerShell",
+        time_range=TimeRange(start_ns=base, end_ns=base + HOUR_NS),
+        bucket_ns=HOUR_NS,
+    )
+    assert rows == [(base, 1)]

@@ -349,6 +349,8 @@ class _SqliteAlertMixin:
     ) -> list[tuple[int, int]]:
         """Return ``(bucket_start_ns, count)`` pairs for ``alert_type``+``rule_name``.
 
+        Assumes non-negative ``timestamp_ns`` (all Seerflow timestamps are Unix ns).
+
         Buckets are produced by floor-dividing ``timestamp_ns`` by
         ``bucket_ns``. The query uses a half-open ``[start_ns, end_ns)``
         window so adjacent ranges concatenate without double counting.
