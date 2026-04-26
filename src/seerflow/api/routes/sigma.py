@@ -178,7 +178,7 @@ async def get_rule(
     engines: Engines,
 ) -> SigmaRuleDetail:
     engine = _require_engine(engines)
-    rule = next((r for r in engine.list_rules() if r["rule_id"] == rule_id), None)
+    rule = engine.get_rule(rule_id)
     if rule is None:
         raise HTTPException(status_code=404, detail="rule not found")
     counts_24h = await _alert_counts_24h(storage)
@@ -196,13 +196,15 @@ async def patch_rule(
 ) -> SigmaRuleDetail:
     """Toggle ``enabled`` on a single rule. Idempotent. 404 if not loaded."""
     engine = _require_engine(engines)
-    if not any(r["rule_id"] == rule_id for r in engine.list_rules()):
+    if engine.get_rule(rule_id) is None:
         raise HTTPException(status_code=404, detail="rule not found")
     engine.set_enabled(rule_id, body.enabled)
     state_store = getattr(request.app.state, "sigma_state_store", None)
     if state_store is not None:
         await state_store.set_enabled(rule_id, body.enabled)
-    rule = next(r for r in engine.list_rules() if r["rule_id"] == rule_id)
+    rule = engine.get_rule(rule_id)
+    if rule is None:  # pragma: no cover - rule cannot disappear mid-request
+        raise HTTPException(status_code=404, detail="rule not found")
     counts_24h = await _alert_counts_24h(storage)
     return _build_detail(rule, counts_24h.get(str(rule["title"]), 0))
 
@@ -300,7 +302,9 @@ async def upload_rule(
             detail=f"failed to persist rule: {exc.strerror or exc}",
         ) from exc
 
-    rule = next(r for r in engine.list_rules() if r["rule_id"] == rid)
+    rule = engine.get_rule(rid)
+    if rule is None:  # pragma: no cover - add_rule guarantees presence
+        raise HTTPException(status_code=500, detail="rule disappeared after add")
     counts_24h = await _alert_counts_24h(storage)
     return JSONResponse(
         status_code=201,

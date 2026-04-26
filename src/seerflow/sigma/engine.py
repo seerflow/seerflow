@@ -297,6 +297,35 @@ class SigmaEngine:
             )
         return out
 
+    def get_rule(self, rule_id: str) -> dict[str, object] | None:
+        """O(1) lookup for a single rule's snapshot dict.
+
+        Mirrors the per-row shape of :meth:`list_rules`. Returns ``None``
+        when the rule is unknown.
+        """
+        with self._mutation_lock:
+            disabled = self._disabled_rule_ids
+            count = self._match_counts.get(rule_id, 0)
+            fired = self._last_fired_ns.get(rule_id)
+        for rule in self.iter_compiled_rules():
+            if rule.rule_id != rule_id:
+                continue
+            return {
+                "rule_id": rule.rule_id,
+                "title": rule.rule_name,
+                "description": rule.description,
+                "severity": int(rule.severity.value),
+                "logsource_key": list(rule.logsource_key),
+                "attack_tactics": list(rule.attack_tactics),
+                "attack_techniques": list(rule.attack_techniques),
+                "enabled": rule.rule_id not in disabled,
+                "source": self._source_kind.get(rule.rule_id, "bundled"),
+                "yaml_source": self._yaml_source.get(rule.rule_id, ""),
+                "match_count_lifetime": int(count),
+                "last_fired_ns": fired,
+            }
+        return None
+
     def validate_rule(self, yaml_text: str) -> dict[str, object]:
         """Parse + compile *yaml_text* without persisting.
 
