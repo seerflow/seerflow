@@ -413,3 +413,16 @@ class SigmaRuleValidationResult(BaseModel):
     line: int | None = None
     column: int | None = None
     field: str | None = None
+
+
+class SigmaRuleTimelineBucket(BaseModel):
+    """One hourly bucket in the per-rule firing timeline."""
+
+    bucket_start_ns: int = Field(..., description="UTC ns at the start of the bucket")
+    count: int = Field(..., ge=0)
+
+
+class SigmaRuleTimelineResponse(BaseModel):
+    """Dense 24-bucket grid for a single Sigma rule's last-24h firing trend."""
+
+    buckets: list[SigmaRuleTimelineBucket]

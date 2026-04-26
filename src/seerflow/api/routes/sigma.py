@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -31,6 +31,8 @@ from seerflow.api.schemas import (
     SigmaRuleDetail,
     SigmaRuleListResponse,
     SigmaRuleSummary,
+    SigmaRuleTimelineBucket,
+    SigmaRuleTimelineResponse,
     SigmaRuleToggleRequest,
     SigmaRuleUploadRequest,
     SigmaRuleValidationResult,
@@ -51,6 +53,13 @@ Engines = Annotated[DetectionEngines, Depends(get_engines)]
 # 24h alert-count window scan ceiling. Mirrors attack/coverage: a single
 # bounded scan beats N per-rule round-trips; AlertStore enforces 10000 cap.
 _ALERT_SCAN_LIMIT = 10_000
+
+# Timeline bucket size + count. The endpoint returns exactly 24 hourly
+# buckets across the trailing 24h window; both are pinned today (only
+# ``bucket="hour"`` and ``window="24h"`` accepted) and externalised here
+# so a future v2 extension does not duplicate magic numbers.
+_HOUR_NS: int = 3600 * 1_000_000_000
+_TIMELINE_BUCKET_COUNT: int = 24
 
 # Operator upload ceiling. 5 uploads/min for a year is ~2.5M rules; the
 # bundled set is ~60. 1000 leaves ample room for legitimate growth and
@@ -183,6 +192,53 @@ async def get_rule(
         raise HTTPException(status_code=404, detail="rule not found")
     counts_24h = await _alert_counts_24h(storage)
     return _build_detail(rule, counts_24h.get(str(rule["title"]), 0))
+
+
+@router.get(
+    "/rules/{rule_id}/timeline",
+    response_model=SigmaRuleTimelineResponse,
+)
+@limiter.limit(list_limit)
+async def get_rule_timeline(
+    request: Request,
+    rule_id: str,
+    storage: Storage,
+    engines: Engines,
+    bucket: Annotated[Literal["hour"], Query()] = "hour",
+    window: Annotated[Literal["24h"], Query()] = "24h",
+) -> SigmaRuleTimelineResponse:
+    """Return a dense 24-hour, 1-bucket-per-hour firing trend for *rule_id*.
+
+    ``bucket`` and ``window`` are typed as single-value ``Literal``s today;
+    keeping them as query params (rather than dropping them) lets a future
+    v2 widen the enum without breaking the URL shape. The returned grid is
+    always exactly 24 buckets, ascending, with zero-count buckets filled
+    in client-side-friendly form so the dashboard sparkline never has to
+    densify itself. Returns 404 only when the rule id is not loaded by
+    the engine; an empty alert window is a 200 with 24 zero buckets.
+    """
+    engine = _require_engine(engines)
+    rule = engine.get_rule(rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="rule_not_found")
+    end_ns = int(datetime.now(UTC).timestamp() * 1_000_000_000)
+    start_ns = end_ns - _TIMELINE_BUCKET_COUNT * _HOUR_NS
+    rows = await storage.alert_store.count_alerts_bucketed(
+        alert_type="sigma",
+        rule_name=cast("str", rule["title"]),
+        time_range=TimeRange(start_ns=start_ns, end_ns=end_ns),
+        bucket_ns=_HOUR_NS,
+    )
+    counts = dict(rows)
+    aligned_start = (start_ns // _HOUR_NS) * _HOUR_NS
+    grid = [
+        SigmaRuleTimelineBucket(
+            bucket_start_ns=aligned_start + i * _HOUR_NS,
+            count=counts.get(aligned_start + i * _HOUR_NS, 0),
+        )
+        for i in range(_TIMELINE_BUCKET_COUNT)
+    ]
+    return SigmaRuleTimelineResponse(buckets=grid)
 
 
 @router.patch("/rules/{rule_id}", response_model=SigmaRuleDetail)
