@@ -37,10 +37,22 @@ class TestSharedConnectionManager:
         # The construction may carry kwargs (e.g. alert_store=storage); use a
         # whitespace-tolerant pattern so a future ruff format pass won't
         # silently break this assertion.
-        assert re.search(r"ws_manager\s*=\s*ConnectionManager\s*\(", src), (
-            "expected `ws_manager = ConnectionManager(...)` in _run_with_config source"
+        # The shared ConnectionManager is built by ``create_api_app`` (via
+        # ``_build_ws_manager``) and read back from ``app.state.ws_manager``;
+        # the same instance is then passed to ``make_handler`` so frames
+        # broadcast inside the pipeline reach the FastAPI WS route.
+        assert "api_app.state.ws_manager" in src, (
+            "expected `ws_manager` to be sourced from `api_app.state.ws_manager`"
         )
-        assert "ws_manager=ws_manager" in src
+        assert re.search(r"ws_manager\s*=\s*ws_manager\b", src), (
+            "expected `ws_manager=ws_manager` kwarg in make_handler call"
+        )
+        # And the factory must be called with ``ws_manager=None`` so it
+        # builds the manager via ``_build_ws_manager`` (CSWSH-safe path).
+        assert re.search(r"ws_manager\s*=\s*None\b", src), (
+            "expected `ws_manager=None` in make_api_app call so the factory "
+            "constructs a config-aware ConnectionManager via _build_ws_manager"
+        )
 
 
 class TestServeFastapi:

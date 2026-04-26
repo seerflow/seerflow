@@ -17,7 +17,6 @@ import uvicorn
 
 from seerflow import __version__
 from seerflow.api.app import create_api_app
-from seerflow.api.ws import ConnectionManager
 from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
@@ -33,6 +32,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from seerflow.alerting.router import NotificationRouter
+    from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
 
 _log = logging.getLogger("seerflow")
@@ -93,12 +93,17 @@ async def _build_channel_session_and_router(
     return session, router
 
 
-async def _serve_or_hint(server: uvicorn.Server, port: int) -> None:
+async def _serve_or_hint(server: uvicorn.Server, host: str, port: int) -> None:
     """Run the uvicorn server and emit a helpful hint on EADDRINUSE.
 
-    The error is re-raised so the calling task surfaces a non-zero exit
-    via ``asyncio.wait(..., FIRST_COMPLETED)`` (S-217).
+    Logs ``Dashboard listening`` once uvicorn has reported it is started
+    (``server.started`` flips after the listening socket binds), so users
+    do not see a misleading "listening" line followed by an EADDRINUSE
+    error a moment later. The error is re-raised so the calling task
+    surfaces a non-zero exit via ``asyncio.wait(..., FIRST_COMPLETED)``
+    (S-217).
     """
+    ready_task = asyncio.create_task(_log_when_started(server, host, port))
     try:
         await server.serve()
     except OSError as exc:
@@ -109,6 +114,17 @@ async def _serve_or_hint(server: uvicorn.Server, port: int) -> None:
                 port,
             )
         raise
+    finally:
+        ready_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ready_task
+
+
+async def _log_when_started(server: uvicorn.Server, host: str, port: int) -> None:
+    """Emit a single info log line once uvicorn finishes binding."""
+    while not server.started:
+        await asyncio.sleep(0.05)
+    _log.info("Dashboard listening on http://%s:%d/", host, port)
 
 
 async def _run_with_config(
@@ -330,11 +346,13 @@ async def _run_with_config(
     # Mount FastAPI dashboard + REST + WebSocket on dashboard_port via
     # uvicorn (S-217). The legacy aiohttp ``health_app`` was deleted —
     # the FastAPI ``/api/v1/health`` route mirrors its contract.
-
-    # Shared between handler.broadcast_alert(...) and the FastAPI
-    # WebSocket route — one ConnectionManager per process so frames
-    # produced by detection reach connected browser clients.
-    ws_manager = ConnectionManager(alert_store=storage)
+    #
+    # ``ws_manager`` is intentionally left as ``None`` so the factory
+    # builds it via ``_build_ws_manager(...)``, which honours every
+    # ``config.ws_*`` field (including the CSWSH ``allowed_origins``
+    # check). After ``create_api_app`` returns, read the constructed
+    # manager off ``app.state`` and reuse it for ``make_handler`` so
+    # the pipeline and the FastAPI route share the same fan-out.
 
     health_state: dict[str, str] = {"pipeline": "running", "storage": "connected"}
     api_app = make_api_app(
@@ -342,7 +360,7 @@ async def _run_with_config(
         alert_store=storage,
         entity_store=storage,
         config=config,
-        ws_manager=ws_manager,
+        ws_manager=None,
         sigma_engine=sigma_engine,
         correlation_rules=tuple(correlation_rules),
         baseline_store=baseline_store,
@@ -351,6 +369,7 @@ async def _run_with_config(
         health_state=health_state,
         ensemble=ensemble,
     )
+    ws_manager: ConnectionManager = api_app.state.ws_manager
     uvicorn_config = uvicorn.Config(
         app=api_app,
         host=config.health_bind_address,
@@ -362,13 +381,8 @@ async def _run_with_config(
     )
     server = uvicorn.Server(uvicorn_config)
     server_task = asyncio.create_task(
-        _serve_or_hint(server, config.dashboard_port),
+        _serve_or_hint(server, config.health_bind_address, config.dashboard_port),
         name="seerflow.api.server",
-    )
-    _log.info(
-        "Dashboard listening on http://%s:%d/",
-        config.health_bind_address,
-        config.dashboard_port,
     )
     if not (DEFAULT_DIST / "index.html").is_file():
         _log.info(
@@ -495,6 +509,23 @@ async def _run_with_config(
         pipeline_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await pipeline_task
+    # Surface any exception the survivor task raised after the wait
+    # returned, otherwise it would silently become an "unhandled exception
+    # in Task" warning at GC time. ``CancelledError`` is the expected exit
+    # for the cancelled survivor, so it is skipped.
+    for _peer_task in (pipeline_task, server_task):
+        if not _peer_task.done() or _peer_task.cancelled():
+            continue
+        try:
+            _peer_exc = _peer_task.exception()
+        except asyncio.CancelledError:  # pragma: no cover — defensive
+            continue
+        if _peer_exc is not None:
+            _log.warning(
+                "Background task %s exited with exception",
+                _peer_task.get_name(),
+                exc_info=_peer_exc,
+            )
 
     try:
         # Flush remaining template metadata.
