@@ -15,6 +15,7 @@ import aiohttp
 import aiohttp.web
 
 from seerflow import __version__
+from seerflow.api.app import create_api_app
 from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
@@ -24,6 +25,10 @@ from seerflow.ueba.engine import UEBAEngine
 from seerflow.ueba.store import BaselineStore
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from fastapi import FastAPI
+
     from seerflow.alerting.router import NotificationRouter
     from seerflow.config import AlertingConfig
 
@@ -85,8 +90,17 @@ async def _build_channel_session_and_router(
     return session, router
 
 
-async def _run_with_config(config: SeerflowConfig) -> None:
-    """Run the pipeline with a pre-built config."""
+async def _run_with_config(
+    config: SeerflowConfig,
+    *,
+    make_api_app: Callable[..., FastAPI] = create_api_app,
+) -> None:
+    """Run the pipeline with a pre-built config.
+
+    ``make_api_app`` is a test seam (S-217) so unit tests can stub the
+    FastAPI factory without spinning up real uvicorn. Production callers
+    should leave the default in place.
+    """
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
