@@ -87,7 +87,11 @@ jobs:
           tool: 'pytest'
           output-file-path: benchmark-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
+          # auto-push requires a gh-pages branch that doesn't exist on this
+          # repo — disabled until the branch is provisioned. Benchmark data
+          # is still parsed for each run; alert comments on PRs continue
+          # to work via the github-token.
+          auto-push: false
           alert-threshold: '110%'
           comment-on-alert: true
           fail-on-alert: false
