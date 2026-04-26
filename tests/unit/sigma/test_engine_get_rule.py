@@ -37,3 +37,11 @@ def test_get_rule_reflects_set_enabled_state() -> None:
     fetched = engine.get_rule(sample["rule_id"])
     assert fetched is not None
     assert fetched["enabled"] is False
+
+
+@pytest.mark.unit
+def test_get_rule_matches_list_rules_row_for_same_id() -> None:
+    engine = _bundled_engine()
+    sample = engine.list_rules()[0]
+    fetched = engine.get_rule(sample["rule_id"])
+    assert fetched == sample
