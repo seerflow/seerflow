@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import Path as FPath
 from fastapi.responses import JSONResponse
 
 from seerflow.api.deps import (
@@ -239,7 +240,7 @@ async def list_rules(
 @limiter.limit(list_limit)
 async def get_rule(
     request: Request,
-    rule_id: str,
+    rule_id: Annotated[str, FPath(max_length=36)],
     storage: Storage,
     engines: Engines,
 ) -> SigmaRuleDetail:
@@ -258,7 +259,7 @@ async def get_rule(
 @limiter.limit(list_limit)
 async def get_rule_timeline(
     request: Request,
-    rule_id: str,
+    rule_id: Annotated[str, FPath(max_length=36)],
     storage: Storage,
     engines: Engines,
     bucket: Annotated[Literal["hour"], Query()] = "hour",
@@ -305,7 +306,7 @@ async def get_rule_timeline(
 @limiter.limit(list_limit)
 async def patch_rule(
     request: Request,
-    rule_id: str,
+    rule_id: Annotated[str, FPath(max_length=36)],
     body: SigmaRuleToggleRequest,
     storage: Storage,
     engines: Engines,

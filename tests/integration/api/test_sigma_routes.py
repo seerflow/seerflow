@@ -420,3 +420,10 @@ def test_list_rules_has_next_false_on_last_page(app_with_multi_severity: FastAPI
         resp = client.get("/api/v1/sigma/rules?page=999&limit=10")
         body = resp.json()
         assert body["has_next"] is False
+
+
+def test_rule_id_path_param_rejects_oversized_value(app_with_sigma) -> None:  # type: ignore[no-untyped-def]
+    client = TestClient(app_with_sigma)
+    over = "x" * 100
+    resp = client.get(f"/api/v1/sigma/rules/{over}")
+    assert resp.status_code == 422
