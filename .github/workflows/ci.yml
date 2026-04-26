@@ -80,17 +80,18 @@ jobs:
           " >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      # Benchmark history publishing is disabled until a gh-pages branch is
+      # provisioned on the repo. The github-action-benchmark step always
+      # fetches `gh-pages` (even with auto-push: false) to compare against
+      # historical data, and the missing branch makes it fail. Re-enable
+      # this step once gh-pages exists.
       - name: Store benchmark result
-        if: github.ref == 'refs/heads/dev' && matrix.python-version == '3.11'
+        if: false
         uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c  # v1.9.0
         with:
           tool: 'pytest'
           output-file-path: benchmark-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # auto-push requires a gh-pages branch that doesn't exist on this
-          # repo — disabled until the branch is provisioned. Benchmark data
-          # is still parsed for each run; alert comments on PRs continue
-          # to work via the github-token.
           auto-push: false
           alert-threshold: '110%'
           comment-on-alert: true
