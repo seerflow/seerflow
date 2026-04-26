@@ -10,30 +10,11 @@ import { AlertSchema, validateOrDropItem } from "@/lib/schemas";
 import * as validationMetrics from "@/lib/validationMetrics";
 import { useAnomalyStore } from "@/stores/anomaly";
 
-const fetchMock = vi.fn();
-vi.mock("@/lib/api", () => ({
-  api: {
-    get: async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
-      const res = await fetchMock("GET", path, opts);
-      // Mimic api.ts::request: when schema+itemsKey provided, validate each
-      // item with the shared `validateOrDropItem` so invalid rows are dropped
-      // and `rest:<path-without-query>` counters are incremented.
-      if (opts?.schema && opts?.itemsKey && res && typeof res === "object") {
-        const kind = `rest:${path.split("?")[0]}`;
-        const raw = (res as Record<string, unknown>)[opts.itemsKey];
-        if (Array.isArray(raw)) {
-          const items = raw
-            .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
-            .filter((x): x is NonNullable<typeof x> => x !== null);
-          return { ...(res as Record<string, unknown>), [opts.itemsKey]: items };
-        }
-      }
-      return res;
-    },
-    post: vi.fn(),
-  },
-  ApiError: class ApiError extends Error {},
-}));
+const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
+vi.mock("@/lib/api", async () => {
+  const { createApiMock } = await import("@/test/helpers/apiMock");
+  return createApiMock({ fetchMock });
+});
 
 class MockWS {
   static last: MockWS | null = null;

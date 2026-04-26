@@ -6,32 +6,15 @@ import { useEventStore, MAX_EVENTS } from "@/stores/events";
 import * as wsBus from "@/lib/wsBus";
 import { _resetForTests } from "@/lib/wsFilter";
 import { api } from "@/lib/api";
-import { validateOrDropItem } from "@/lib/schemas";
 import type { LiveEvent } from "@/lib/types";
+import { applySchemaValidation } from "@/test/helpers/apiMock";
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    get: vi.fn(async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
-      const res: Record<string, unknown> = { items: [], total: 0, page: 1, limit: 100, has_next: false };
-      // Mimic api.ts::request: when schema+itemsKey provided, validate each
-      // item with the shared `validateOrDropItem` so invalid rows are dropped
-      // and `rest:<path-without-query>` counters are incremented.
-      if (opts?.schema && opts?.itemsKey) {
-        const kind = `rest:${path.split("?")[0]}`;
-        const raw = res[opts.itemsKey];
-        if (Array.isArray(raw)) {
-          const items = raw
-            .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
-            .filter((x): x is NonNullable<typeof x> => x !== null);
-          return { ...res, [opts.itemsKey]: items };
-        }
-      }
-      return res;
-    }),
-    post: vi.fn(),
-  },
-  ApiError: class ApiError extends Error {},
-}));
+vi.mock("@/lib/api", async () => {
+  const { createApiMock } = await import("@/test/helpers/apiMock");
+  return createApiMock({
+    defaultGetResponse: { items: [], total: 0, page: 1, limit: 100, has_next: false },
+  });
+});
 
 function ev(i: number, over: Partial<LiveEvent> = {}): LiveEvent {
   return {
@@ -251,21 +234,8 @@ describe("S-191 T10: REST warm-up schema validation", () => {
     };
     // severity_id 999 fails LiveEventSchema (OCSF 0..6).
     const invalidFixture = { ...validFixture, event_id: "bad", severity_id: 999 };
-    (api.get as ReturnType<typeof vi.fn>).mockImplementationOnce(
-      async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
-        const res: Record<string, unknown> = { items: [validFixture, invalidFixture] };
-        if (opts?.schema && opts?.itemsKey) {
-          const kind = `rest:${path.split("?")[0]}`;
-          const raw = res[opts.itemsKey];
-          if (Array.isArray(raw)) {
-            const items = raw
-              .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
-              .filter((x): x is NonNullable<typeof x> => x !== null);
-            res[opts.itemsKey] = items;
-          }
-        }
-        return res;
-      },
+    (api.get as ReturnType<typeof vi.fn>).mockImplementationOnce(async (path, opts) =>
+      applySchemaValidation({ items: [validFixture, invalidFixture] }, path, opts),
     );
 
     render(<WsProvider><EventStream /></WsProvider>);

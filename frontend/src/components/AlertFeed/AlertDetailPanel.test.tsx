@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AlertDetailPanel } from "./AlertDetailPanel";
 import type { Alert, AlertDetail } from "@/lib/types";
 import { useAlertStore } from "@/stores/alerts";
-import { validateOrDropItem } from "@/lib/schemas";
 
 const base: Alert = {
   alert_id: "a1", timestamp_ns: 1n, alert_type: "sigma", rule_name: "r",
@@ -12,56 +11,13 @@ const base: Alert = {
   mitre_techniques: ["T1078"], dedup_count: 1, source_type: "syslog",
 };
 
-const fetchMock = vi.fn();
+const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 vi.mock("@/lib/api", async () => {
-  const valibot = await import("valibot");
-  class MockApiError extends Error {
-    status: number;
-    cause: unknown;
-    constructor(status: number, message: string, cause?: unknown) {
-      super(message);
-      this.status = status;
-      this.cause = cause;
-    }
-  }
-  return {
-    api: {
-      // Mimic api.ts::request for both branches:
-      //   - scalar-schema (no itemsKey): run `v.safeParse(schema, body)` and
-      //     throw ApiError(0, "response-schema-fail: …") on violation.
-      //   - schema + itemsKey === "items": iterate raw[itemsKey] and per-row
-      //     drop invalid entries (S-210 — mirrors EventStream.test.tsx).
-      get: async (path: string, opts?: { schema?: unknown; itemsKey?: string }) => {
-        const res = await fetchMock("GET", path, opts);
-        if (opts?.schema && opts?.itemsKey === "items") {
-          const list = (res as Record<string, unknown>)[opts.itemsKey];
-          if (Array.isArray(list)) {
-            const kind = `rest:${path.split("?")[0]}`;
-            const items = list
-              .map(item => validateOrDropItem(opts.schema as Parameters<typeof validateOrDropItem>[0], item, kind))
-              .filter((x): x is NonNullable<typeof x> => x !== null);
-            return { ...(res as object), [opts.itemsKey]: items };
-          }
-        }
-        if (opts?.schema && !opts?.itemsKey) {
-          const parsed = valibot.safeParse(
-            opts.schema as Parameters<typeof valibot.safeParse>[0],
-            res,
-          );
-          if (!parsed.success) {
-            throw new MockApiError(
-              0,
-              `response-schema-fail: ${parsed.issues.map(i => i.message).join("; ")}`,
-            );
-          }
-          return parsed.output;
-        }
-        return res;
-      },
-      post: (...a: unknown[]) => fetchMock("POST", ...a),
-    },
-    ApiError: MockApiError,
-  };
+  const { createApiMock } = await import("@/test/helpers/apiMock");
+  return createApiMock({
+    fetchMock,
+    postImpl: (...a: unknown[]) => fetchMock("POST", ...a),
+  });
 });
 
 const submitMock = vi.fn();
