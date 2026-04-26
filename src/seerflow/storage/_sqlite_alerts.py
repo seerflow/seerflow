@@ -347,16 +347,7 @@ class _SqliteAlertMixin:
         time_range: TimeRange,
         bucket_ns: int,
     ) -> list[tuple[int, int]]:
-        """Return ``(bucket_start_ns, count)`` pairs for ``alert_type``+``rule_name``.
-
-        Assumes non-negative ``timestamp_ns`` (all Seerflow timestamps are Unix ns).
-
-        Buckets are produced by floor-dividing ``timestamp_ns`` by
-        ``bucket_ns``. The query uses a half-open ``[start_ns, end_ns)``
-        window so adjacent ranges concatenate without double counting.
-        Empty buckets are omitted; the caller is responsible for densifying
-        the grid.
-        """
+        """See :class:`AlertStore.count_alerts_bucketed` Protocol for the contract."""
         if bucket_ns <= 0:
             raise ValueError(f"bucket_ns must be positive, got {bucket_ns}")
         sql = (

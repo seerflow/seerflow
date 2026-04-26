@@ -14,7 +14,9 @@ import type {
   SigmaRuleDetail,
   SigmaRuleListResponse,
   SigmaRuleSource,
+  SigmaRuleTimelineBucketSpan,
   SigmaRuleTimelineResponse,
+  SigmaRuleTimelineWindow,
   SigmaRuleValidationResult,
 } from "./types";
 
@@ -104,9 +106,11 @@ export async function uploadSigmaRule(yaml: string): Promise<SigmaRuleDetail> {
 export async function getSigmaRuleTimeline(
   ruleId: string,
   signal?: AbortSignal,
+  bucket: SigmaRuleTimelineBucketSpan = "hour",
+  window: SigmaRuleTimelineWindow = "24h",
 ): Promise<SigmaRuleTimelineResponse> {
   return api.get<SigmaRuleTimelineResponse>(
-    `/api/v1/sigma/rules/${encodeURIComponent(ruleId)}/timeline?bucket=hour&window=24h`,
+    `/api/v1/sigma/rules/${encodeURIComponent(ruleId)}/timeline?bucket=${bucket}&window=${window}`,
     { schema: SigmaRuleTimelineResponseSchema, signal },
   );
 }

@@ -285,6 +285,7 @@ async def get_rule_timeline(
     start_ns = end_ns - _TIMELINE_BUCKET_COUNT * _HOUR_NS
     rows = await storage.alert_store.count_alerts_bucketed(
         alert_type="sigma",
+        # title doubles as rule_name on the alerts table (see _rule_to_summary invariant)
         rule_name=cast("str", rule["title"]),
         time_range=TimeRange(start_ns=start_ns, end_ns=end_ns),
         bucket_ns=_HOUR_NS,

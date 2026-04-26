@@ -124,6 +124,8 @@ class SigmaEngine:
         paths are given. Use S-030's validated rule loading for user-supplied
         rule directories.
         """
+        # load_rules runs at startup (single caller, no concurrent access);
+        # _mutation_lock not required here. Use add_rule for runtime mutations.
         for path in paths:
             try:
                 yaml_text = path.read_text()
@@ -285,6 +287,8 @@ class SigmaEngine:
         """
         return {
             "rule_id": rule.rule_id,
+            # Invariant: rule_name (title) is the cross-system join key — alerts
+            # table stores rule_name and the timeline endpoint correlates by it.
             "title": rule.rule_name,
             "description": rule.description,
             "severity": int(rule.severity.value),

@@ -312,6 +312,12 @@ export interface SigmaRuleTimelineResponse {
   buckets: SigmaRuleTimelineBucket[];
 }
 
+// Bucket/window enums for the timeline endpoint. Both are currently single-
+// valued; widening the union in a v2 will surface an unhandled `case` to
+// every caller via TS exhaustiveness rather than failing silently.
+export type SigmaRuleTimelineBucketSpan = "hour";
+export type SigmaRuleTimelineWindow = "24h";
+
 // S-060.F1: risk-history types.
 export type RiskBucket = {
   // Serialized as a string on the wire for JS bigint safety (S-199 pattern).

@@ -19,6 +19,8 @@ from seerflow.sigma.engine import SigmaEngine
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fastapi import FastAPI
+
     from seerflow.storage.sqlite import SqliteBackend
 
 
@@ -55,7 +57,7 @@ def app_with_sigma(
     backend: SqliteBackend,
     engine_with_one_rule: SigmaEngine,
     upload_dir: Path,
-):
+) -> FastAPI:
     cfg = SeerflowConfig(detection=DetectionConfig(sigma_custom_upload_dir=str(upload_dir)))
     return create_api_app(
         log_store=backend,
@@ -103,7 +105,7 @@ class _FrozenDatetime:
 
 
 def test_timeline_returns_24_buckets_with_zero_fill(
-    app_with_sigma,  # type: ignore[no-untyped-def]
+    app_with_sigma: FastAPI,
     backend: SqliteBackend,
     engine_with_one_rule: SigmaEngine,
     monkeypatch: pytest.MonkeyPatch,
@@ -147,7 +149,7 @@ def test_timeline_returns_24_buckets_with_zero_fill(
 
 
 def test_timeline_unknown_rule_id_404(
-    app_with_sigma,  # type: ignore[no-untyped-def]
+    app_with_sigma: FastAPI,
 ) -> None:
     with TestClient(app_with_sigma) as client:
         resp = client.get("/api/v1/sigma/rules/does-not-exist/timeline")
@@ -155,7 +157,7 @@ def test_timeline_unknown_rule_id_404(
 
 
 def test_timeline_empty_returns_24_zero_buckets(
-    app_with_sigma,  # type: ignore[no-untyped-def]
+    app_with_sigma: FastAPI,
     engine_with_one_rule: SigmaEngine,
 ) -> None:
     rid = engine_with_one_rule.list_rules()[0]["rule_id"]
@@ -165,3 +167,29 @@ def test_timeline_empty_returns_24_zero_buckets(
         body = resp.json()
         assert len(body["buckets"]) == 24
         assert all(b["count"] == 0 for b in body["buckets"])
+
+
+def test_timeline_bucket_start_ns_serialized_as_string(
+    app_with_sigma: FastAPI,
+    engine_with_one_rule: SigmaEngine,
+) -> None:
+    """JSON wire value must be a string for FE bigint revival (S-199 pattern).
+
+    The frontend BIGINT_KEYS walker only revives ``bucket_start_ns`` to a
+    JS bigint when the wire value is a JSON string; a raw JSON number would
+    be left as a JS ``number`` and crash the valibot ``v.bigint()`` check
+    silently dropping the sparkline. Asserting the exact wire shape here
+    locks in the contract.
+    """
+    rid = engine_with_one_rule.list_rules()[0]["rule_id"]
+    with TestClient(app_with_sigma) as client:
+        resp = client.get(f"/api/v1/sigma/rules/{rid}/timeline")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        for b in body["buckets"]:
+            assert isinstance(b["bucket_start_ns"], str), (
+                f"bucket_start_ns must be JSON string, got {type(b['bucket_start_ns']).__name__}"
+            )
+            assert b["bucket_start_ns"].isdigit(), (
+                f"bucket_start_ns must be digits-only string, got {b['bucket_start_ns']!r}"
+            )
