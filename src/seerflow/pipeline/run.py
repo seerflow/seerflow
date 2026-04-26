@@ -471,12 +471,30 @@ async def _run_with_config(
         ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
         ws_manager=ws_manager,
     )
-    await pipeline.run(handler)
+    # Run pipeline + uvicorn server as sibling tasks (S-217). The first
+    # to complete (or fail) wakes the wait so we can drain both cleanly.
+    pipeline_task = asyncio.create_task(pipeline.run(handler), name="seerflow.pipeline")
+
+    try:
+        done, _pending = await asyncio.wait(
+            {pipeline_task, server_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            task.result()  # surfaces exceptions raised inside either task
+    except KeyboardInterrupt:  # pragma: no cover — handled by signal path
+        _log.info("Interrupt received — shutting down")
 
     # Cancel the rule reloader on shutdown
     reload_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await reload_task
+
+    # Cancel the pipeline task if uvicorn died first (or vice versa).
+    if not pipeline_task.done():
+        pipeline_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pipeline_task
 
     try:
         # Flush remaining template metadata.

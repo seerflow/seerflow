@@ -77,3 +77,35 @@ class TestDistMissingHint:
         src = inspect.getsource(run_mod._run_with_config)
         assert "npm run build" in src
         assert "Dashboard bundle missing" in src
+
+
+class TestShutdownOrder:
+    """Pipeline + uvicorn run as siblings; uvicorn stops before storage."""
+
+    def test_finally_block_stops_server_before_storage_close(self) -> None:
+        import inspect
+
+        from seerflow.pipeline import run as run_mod
+
+        src = inspect.getsource(run_mod._run_with_config)
+
+        idx_should_exit = src.find("server.should_exit = True")
+        # ``storage.close`` appears twice: once in the early build_pipeline
+        # error path (start-up failure) and once in the cleanup finally
+        # block. The shutdown ordering invariant only applies to the
+        # cleanup-path occurrence — use the last index.
+        idx_storage_close = src.rfind("await storage.close()")
+        assert idx_should_exit != -1, "uvicorn shutdown signal missing"
+        assert idx_storage_close != -1, "storage.close() missing"
+        assert idx_should_exit < idx_storage_close, (
+            "uvicorn must stop before storage.close()"
+        )
+
+    def test_uses_asyncio_wait_first_completed(self) -> None:
+        import inspect
+
+        from seerflow.pipeline import run as run_mod
+
+        src = inspect.getsource(run_mod._run_with_config)
+        assert "FIRST_COMPLETED" in src
+        assert "pipeline_task" in src
