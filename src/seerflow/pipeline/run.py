@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
-import aiohttp.web
 
 from seerflow import __version__
 from seerflow.api.app import create_api_app
@@ -307,22 +306,44 @@ async def _run_with_config(
     )
     reload_task = asyncio.create_task(reloader.watch())
 
-    # Start health endpoint server on dashboard_port
-    from seerflow.api.health import _STORAGE_KEY, create_health_app
+    # Mount FastAPI dashboard + REST + WebSocket on dashboard_port via
+    # uvicorn (S-217). The legacy aiohttp ``health_app`` was deleted —
+    # the FastAPI ``/api/v1/health`` route mirrors its contract.
+    import uvicorn
 
-    health_state = {"pipeline": "running", "storage": "connected"}
-    health_app = create_health_app(state=health_state)
-    health_app[_STORAGE_KEY] = storage
-    health_runner = aiohttp.web.AppRunner(health_app)
-    await health_runner.setup()
-    health_site = aiohttp.web.TCPSite(
-        health_runner,
-        config.health_bind_address,
-        config.dashboard_port,
+    # Shared between handler.broadcast_alert(...) and the FastAPI
+    # WebSocket route — one ConnectionManager per process so frames
+    # produced by detection reach connected browser clients.
+    ws_manager = ConnectionManager(alert_store=storage)
+
+    health_state: dict[str, str] = {"pipeline": "running", "storage": "connected"}
+    api_app = make_api_app(
+        log_store=storage,
+        alert_store=storage,
+        entity_store=storage,
+        config=config,
+        ws_manager=ws_manager,
+        sigma_engine=sigma_engine,
+        correlation_rules=tuple(correlation_rules),
+        baseline_store=baseline_store,
+        ueba_engine=ueba_engine,
+        sigma_state_store=storage,
+        health_state=health_state,
+        ensemble=ensemble,
     )
-    await health_site.start()
+    uvicorn_config = uvicorn.Config(
+        app=api_app,
+        host=config.health_bind_address,
+        port=config.dashboard_port,
+        loop="asyncio",
+        lifespan="on",
+        log_config=None,
+        access_log=False,
+    )
+    server = uvicorn.Server(uvicorn_config)
+    server_task = asyncio.create_task(server.serve(), name="seerflow.api.server")
     _log.info(
-        "Health endpoint listening on %s:%d",
+        "Dashboard listening on http://%s:%d/",
         config.health_bind_address,
         config.dashboard_port,
     )
@@ -398,11 +419,6 @@ async def _run_with_config(
             config.alerting.otlp_protocol,
             config.alerting.otlp_export_interval_seconds,
         )
-
-    # Shared between handler.broadcast_alert(...) and the FastAPI app's
-    # WebSocket route so frames produced by detection reach connected
-    # browser clients (S-217). One instance per process.
-    ws_manager = ConnectionManager(alert_store=storage)
 
     handler = make_handler(
         ensemble,
@@ -491,7 +507,12 @@ async def _run_with_config(
             await otlp_sink.close()
         if webhook_session is not None:
             await webhook_session.close()
-        await health_runner.cleanup()
+        # Stop uvicorn so _lifespan can drain WebSocket frames before
+        # the storage handle is released. ``server_task`` is created in
+        # the new sibling-task layout introduced by S-217.
+        server.should_exit = True
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(server_task, timeout=10)
         await storage.close()
         _log.info("Seerflow stopped")
 

@@ -37,3 +37,17 @@ class TestSharedConnectionManager:
         # match the call site rather than the bare ``ConnectionManager()``.
         assert "ws_manager = ConnectionManager(" in src
         assert "ws_manager=ws_manager" in src
+
+
+class TestServeFastapi:
+    """``_run_with_config`` mounts FastAPI via uvicorn, not aiohttp."""
+
+    def test_make_api_app_called_in_source(self) -> None:
+        import inspect
+
+        from seerflow.pipeline import run as run_mod
+
+        src = inspect.getsource(run_mod._run_with_config)
+        assert "make_api_app(" in src
+        assert "uvicorn.Server" in src
+        assert "create_health_app" not in src  # legacy aiohttp path removed
