@@ -1,10 +1,25 @@
 const BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 
 export class ApiError extends Error {
-  constructor(public status: number, public detail: string, public cause?: unknown) {
+  static readonly GENERIC_5XX = "Server error — please retry";
+  constructor(
+    public status: number,
+    public detail: string,
+    public debugDetail?: string,
+    public cause?: unknown,
+  ) {
     super(`${status} ${detail}`);
     this.name = "ApiError";
   }
+}
+
+export function sanitizeDetail(status: number, raw: string): { display: string; debug: string } {
+  if (status >= 500) return { display: ApiError.GENERIC_5XX, debug: raw };
+  if (status >= 400) {
+    const display = raw.length > 200 ? raw.slice(0, 199) + "…" : raw;
+    return { display, debug: raw };
+  }
+  return { display: raw, debug: raw };
 }
 
 import * as v from "valibot";
@@ -98,7 +113,12 @@ async function request<T>(path: string, init: RequestInit, opts?: GetOpts): Prom
     const res = await fetch(`${BASE}${path}`, init);
     const text = await res.text();
     const parsed = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text;
-    if (!res.ok) throw new ApiError(res.status, (parsed && typeof parsed === "object" && "detail" in parsed) ? String(parsed.detail) : text);
+    if (!res.ok) {
+      const raw = (parsed && typeof parsed === "object" && "detail" in parsed) ? String(parsed.detail) : text;
+      const { display, debug } = sanitizeDetail(res.status, raw);
+      if (display !== debug) logger.error(`ApiError ${res.status}: ${debug}`);
+      throw new ApiError(res.status, display, debug);
+    }
     const body = (typeof parsed === "object" && parsed !== null && hasBigintMarker(parsed))
       ? reviveBigintTimestamps(parsed)
       : parsed;
@@ -124,7 +144,7 @@ async function request<T>(path: string, init: RequestInit, opts?: GetOpts): Prom
     return body as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    throw new ApiError(0, e instanceof Error ? e.message : String(e), e);
+    throw new ApiError(0, e instanceof Error ? e.message : String(e), undefined, e);
   }
 }
 

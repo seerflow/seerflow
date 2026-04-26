@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, ApiError, __walker } from "./api";
+import { api, ApiError, sanitizeDetail, __walker } from "./api";
 import { logger } from "./logger";
 import { AlertSchema } from "./schemas";
 import * as metrics from "./validationMetrics";
@@ -34,12 +34,13 @@ describe("api", () => {
     await expect(api.get("/api/v1/alerts")).rejects.toBeInstanceOf(ApiError);
   });
 
-  it("throws ApiError with raw text body when non-JSON error response (S-204 AC-2)", async () => {
+  it("non-JSON 5xx error: display sanitised to GENERIC_5XX, raw text preserved on debugDetail (S-204 AC-2 + S-215)", async () => {
     fetchMock.mockResolvedValueOnce(new Response("boom", {status: 500, headers: {"content-type": "text/plain"}}));
     await expect(api.get("/api/v1/thing")).rejects.toMatchObject({
       name: "ApiError",
       status: 500,
-      detail: "boom",
+      detail: ApiError.GENERIC_5XX,
+      debugDetail: "boom",
     });
   });
 
@@ -49,6 +50,53 @@ describe("api", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(422);
     expect((err as ApiError).detail).toBe("nope");
+  });
+
+  it("5xx response surfaces generic message + preserves raw on debugDetail", async () => {
+    const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ detail: 'Traceback ... File "/srv/app.py", line 1' }),
+      { status: 500, headers: { "content-type": "application/json" } },
+    ));
+    let caught: unknown;
+    try { await api.get("/api/v1/anything"); } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(ApiError);
+    const err = caught as ApiError;
+    expect(err.status).toBe(500);
+    expect(err.detail).toBe(ApiError.GENERIC_5XX);
+    expect(err.message).toBe(`500 ${ApiError.GENERIC_5XX}`);
+    expect(err.debugDetail).toContain("Traceback");
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(errSpy.mock.calls[0]?.[0]).toContain("Traceback");
+    errSpy.mockRestore();
+  });
+
+  it("4xx response with >200-char detail truncates display but keeps debug full", async () => {
+    const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+    const long = "x".repeat(400);
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ detail: long }),
+      { status: 422, headers: { "content-type": "application/json" } },
+    ));
+    let caught: unknown;
+    try { await api.get("/api/v1/anything"); } catch (e) { caught = e; }
+    const err = caught as ApiError;
+    expect(err.detail).toHaveLength(200);
+    expect(err.detail.endsWith("…")).toBe(true);
+    expect(err.debugDetail).toBe(long);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    errSpy.mockRestore();
+  });
+
+  it("4xx ≤200 chars does NOT emit logger.error (display === debug)", async () => {
+    const errSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ detail: "tactic must be one of: collection, persistence" }),
+      { status: 422, headers: { "content-type": "application/json" } },
+    ));
+    await expect(api.get("/api/v1/anything")).rejects.toBeInstanceOf(ApiError);
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });
 
@@ -249,5 +297,40 @@ describe("api schema opt-in", () => {
     await expect(
       api.get("/api/v1/alerts?limit=50", { schema: AlertSchema, itemsKey: "items" }),
     ).rejects.toThrow(/response-schema-fail/);
+  });
+});
+
+describe("sanitizeDetail", () => {
+  it("5xx JSON detail → generic display, raw debug", () => {
+    const out = sanitizeDetail(500, 'Traceback (most recent call last)\n  File "/srv/app.py", line 42 ...');
+    expect(out.display).toBe(ApiError.GENERIC_5XX);
+    expect(out.debug).toContain("Traceback");
+  });
+  it("5xx plain-text body → generic display, raw debug", () => {
+    const out = sanitizeDetail(503, "upstream timeout");
+    expect(out.display).toBe(ApiError.GENERIC_5XX);
+    expect(out.debug).toBe("upstream timeout");
+  });
+  it("4xx ≤200 chars → unchanged display, same as debug", () => {
+    const out = sanitizeDetail(422, "tactic must be one of: collection, persistence, …");
+    expect(out.display).toBe("tactic must be one of: collection, persistence, …");
+    expect(out.debug).toBe(out.display);
+  });
+  it("4xx >200 chars → truncated display, full debug", () => {
+    const long = "x".repeat(500);
+    const out = sanitizeDetail(400, long);
+    expect(out.display).toHaveLength(200);                 // 199 chars + "…"
+    expect(out.display.endsWith("…")).toBe(true);
+    expect(out.display.startsWith("xxx")).toBe(true);
+    expect(out.debug).toBe(long);
+  });
+  it("status 0 (network / schema-fail) → pass-through, no sanitisation", () => {
+    const out = sanitizeDetail(0, "response-schema-fail: items[3] invalid");
+    expect(out.display).toBe("response-schema-fail: items[3] invalid");
+    expect(out.debug).toBe(out.display);
+  });
+  it("3xx redirects (defensive) → pass-through", () => {
+    const out = sanitizeDetail(301, "moved");
+    expect(out.display).toBe("moved");
   });
 });

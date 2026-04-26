@@ -54,7 +54,7 @@ export function TechniqueCell({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onBlur={() => setHovered(false)}
-      className={`${cls} relative h-6 w-6 cursor-pointer rounded-sm border-0 bg-transparent p-0 m-0 appearance-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500`}
+      className={`${cls} relative h-6 w-6 cursor-pointer rounded-sm border-0 bg-transparent p-0 m-0 appearance-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
     >
       {hovered && (
         <div

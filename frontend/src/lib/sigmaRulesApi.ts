@@ -3,7 +3,8 @@
 // Each helper validates the response body via the corresponding valibot
 // schema; failures throw ApiError with the schema diagnostic so the UI
 // surfaces "we got a malformed response" rather than crashing on a typo.
-import { api, ApiError } from "./api";
+import { api, ApiError, sanitizeDetail } from "./api";
+import { logger } from "./logger";
 import {
   SigmaRuleDetailSchema,
   SigmaRuleListResponseSchema,
@@ -79,11 +80,13 @@ export async function toggleSigmaRule(
     // fall through with raw text
   }
   if (!res.ok) {
-    const detail =
+    const raw =
       parsed && typeof parsed === "object" && "detail" in parsed
         ? String((parsed as { detail: unknown }).detail)
         : text;
-    throw new ApiError(res.status, detail);
+    const { display, debug } = sanitizeDetail(res.status, raw);
+    if (display !== debug) logger.error(`ApiError ${res.status}: ${debug}`);
+    throw new ApiError(res.status, display, debug);
   }
   const result = (await import("valibot")).safeParse(SigmaRuleDetailSchema, parsed);
   if (!result.success) {

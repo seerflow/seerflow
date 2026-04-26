@@ -109,4 +109,18 @@ describe("TechniqueCell", () => {
     fireEvent.click(btn);
     expect(screen.queryByText(/sigma_rule_a/)).not.toBeInTheDocument();
   });
+
+  it("uses design-token focus ring (no hardcoded outline color)", () => {
+    render(
+      <TechniqueCell
+        tactic="execution" technique="T1053" name="Scheduled Task/Job"
+        ruleCount={1} alertCount={0} ruleNames={["rule-a"]} covered={true} detected={false}
+      />,
+    );
+    const btn = screen.getByRole("button");
+    expect(btn.className).toMatch(/focus-visible:ring-2/);
+    expect(btn.className).toMatch(/focus-visible:ring-ring/);
+    expect(btn.className).toMatch(/focus-visible:ring-offset-2/);
+    expect(btn.className).not.toMatch(/focus-visible:outline-blue-500/);
+  });
 });
