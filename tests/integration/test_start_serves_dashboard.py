@@ -82,6 +82,53 @@ async def test_dashboard_root_and_health() -> None:
         assert body["detection"] is None
 
 
+def test_ws_factory_path_rejects_unapproved_origin() -> None:
+    """Defence-in-depth: when ``ws_manager=None`` is passed to ``create_api_app``
+    (the production path used by ``seerflow start``), the factory must build a
+    config-aware ``ConnectionManager`` via ``_build_ws_manager`` whose Origin
+    allowlist closes the WS route to non-allowlisted browser clients.
+
+    Catches future regressions where someone short-circuits the factory and
+    constructs the manager with the no-allowlist default again (the S-217
+    review HIGH that this test is explicitly designed to backstop).
+    """
+    from starlette.websockets import WebSocketDisconnect
+
+    from seerflow.config import (
+        AlertingConfig,
+        DetectionConfig,
+        SeerflowConfig,
+        StorageConfig,
+        UEBAConfig,
+    )
+
+    config = SeerflowConfig(
+        storage=StorageConfig(),
+        receivers=(),
+        detection=DetectionConfig(),
+        alerting=AlertingConfig(),
+        ueba=UEBAConfig(),
+        dashboard_port=8080,
+    )
+    app = create_api_app(
+        log_store=MagicMock(),
+        alert_store=_stub_alert_store(),
+        ws_manager=None,
+        config=config,
+        health_state={"pipeline": "running", "storage": "connected"},
+    )
+
+    with (
+        TestClient(app) as client,
+        pytest.raises(WebSocketDisconnect),
+        client.websocket_connect(
+            "/api/v1/ws",
+            headers={"origin": "http://evil.example.com"},
+        ),
+    ):
+        pass
+
+
 def test_ws_receives_alert_broadcast() -> None:
     """AC3 + AC8 — alert broadcast on the shared ConnectionManager reaches a WS client."""
     ws_manager = ConnectionManager(
