@@ -21,3 +21,19 @@ class TestMakeApiAppSeam:
         from seerflow.pipeline import run as run_mod
 
         assert "make_api_app" in run_mod._run_with_config.__code__.co_varnames
+
+
+class TestSharedConnectionManager:
+    """One ``ConnectionManager`` shared by handler and FastAPI app."""
+
+    def test_make_handler_receives_ws_manager(self) -> None:
+        import inspect
+
+        from seerflow.pipeline import run as run_mod
+
+        src = inspect.getsource(run_mod._run_with_config)
+        # A single ConnectionManager is built and passed to make_handler.
+        # The construction may carry kwargs (e.g. alert_store=storage) so
+        # match the call site rather than the bare ``ConnectionManager()``.
+        assert "ws_manager = ConnectionManager(" in src
+        assert "ws_manager=ws_manager" in src

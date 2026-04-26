@@ -16,6 +16,7 @@ import aiohttp.web
 
 from seerflow import __version__
 from seerflow.api.app import create_api_app
+from seerflow.api.ws import ConnectionManager
 from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
@@ -398,6 +399,11 @@ async def _run_with_config(
             config.alerting.otlp_export_interval_seconds,
         )
 
+    # Shared between handler.broadcast_alert(...) and the FastAPI app's
+    # WebSocket route so frames produced by detection reach connected
+    # browser clients (S-217). One instance per process.
+    ws_manager = ConnectionManager(alert_store=storage)
+
     handler = make_handler(
         ensemble,
         storage,
@@ -419,6 +425,7 @@ async def _run_with_config(
         baseline_store=baseline_store,
         ueba_engine=ueba_engine,
         ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
+        ws_manager=ws_manager,
     )
     await pipeline.run(handler)
 
