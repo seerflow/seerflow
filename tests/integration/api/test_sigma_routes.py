@@ -273,3 +273,100 @@ def test_disabled_state_persists_across_app_restart(
         listed = c2.get("/api/v1/sigma/rules").json()["items"]
         target = next(r for r in listed if r["rule_id"] == rid)
         assert target["enabled"] is False
+
+
+_MULTI_SEVERITY_RULES = [
+    (
+        "high",
+        """
+title: Sigma S154 High Severity Rule
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel:
+    message|contains: 's154-high-token'
+  condition: sel
+level: high
+""",
+    ),
+    (
+        "critical",
+        """
+title: Sigma S154 Critical Severity Rule
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel:
+    message|contains: 's154-critical-token'
+  condition: sel
+level: critical
+""",
+    ),
+    (
+        "medium",
+        """
+title: Sigma S154 Medium Severity Rule
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel:
+    message|contains: 's154-medium-token'
+  condition: sel
+level: medium
+""",
+    ),
+]
+
+
+@pytest.fixture
+def app_with_multi_severity(
+    backend: SqliteBackend,
+    upload_dir: Path,
+    tmp_path: Path,
+):
+    """App fixture seeded with rules at severity 3 (medium), 4 (high), 5 (critical)."""
+    cfg = SeerflowConfig(detection=DetectionConfig(sigma_custom_upload_dir=str(upload_dir)))
+    engine = SigmaEngine()
+    paths = []
+    for slug, yaml_text in _MULTI_SEVERITY_RULES:
+        p = tmp_path / f"sev-{slug}.yml"
+        p.write_text(yaml_text)
+        paths.append(p)
+    engine.load_rules(paths)
+    return create_api_app(
+        log_store=backend,
+        alert_store=backend,
+        config=cfg,
+        sigma_engine=engine,
+        sigma_state_store=backend,
+    )
+
+
+def test_list_rules_severity_in_multiple(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """severity_in repeated query param accepts multiple severities."""
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?severity_in=4&severity_in=5&limit=200")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items, "fixture must seed at least one severity 4 or 5 rule"
+        assert all(it["severity"] in (4, 5) for it in items)
+
+
+def test_list_rules_severity_in_empty_is_no_filter(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    with TestClient(app_with_multi_severity) as client:
+        resp = client.get("/api/v1/sigma/rules?limit=500")
+        baseline = resp.json()["total"]
+        resp2 = client.get("/api/v1/sigma/rules?severity_in=&limit=500")
+        assert resp2.status_code == 200
+        assert resp2.json()["total"] == baseline
+
+
+def test_list_rules_severity_param_removed(app_with_multi_severity) -> None:  # type: ignore[no-untyped-def]
+    """Single ?severity= must no longer narrow the list (param dropped)."""
+    with TestClient(app_with_multi_severity) as client:
+        resp_with = client.get("/api/v1/sigma/rules?severity=3&limit=500")
+        resp_without = client.get("/api/v1/sigma/rules?limit=500")
+        assert resp_with.json()["total"] == resp_without.json()["total"]

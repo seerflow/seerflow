@@ -91,11 +91,42 @@ async def _alert_counts_24h(storage: StorageDeps) -> dict[str, int]:
     return counts
 
 
+def _parse_severity_in(values: list[str] | None) -> list[int] | None:
+    """Parse repeated ``severity_in`` query values into a bounded int list.
+
+    Empty strings are treated as a no-op (so ``?severity_in=`` does not
+    narrow). Anything outside the SeverityLevel range (0-24, mirroring the
+    OTel severity scale used elsewhere in the API) is rejected with 422
+    rather than silently dropped, so client bugs surface loudly.
+    """
+    if not values:
+        return None
+    parsed: list[int] = []
+    for raw in values:
+        token = raw.strip()
+        if not token:
+            continue
+        try:
+            sev = int(token)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"severity_in: invalid integer {raw!r}",
+            ) from exc
+        if sev < 0 or sev > 24:
+            raise HTTPException(
+                status_code=422,
+                detail=f"severity_in: {sev} out of range [0, 24]",
+            )
+        parsed.append(sev)
+    return parsed or None
+
+
 def _matches_filters(
     rule: dict[str, object],
     *,
     category: str | None,
-    severity: int | None,
+    severity_in: list[int] | None,
     logsource_product: str | None,
     enabled: bool | None,
     source: str | None,
@@ -104,7 +135,7 @@ def _matches_filters(
     ls_key = cast("list[str]", rule["logsource_key"])
     if category and (not ls_key or ls_key[0] != category):
         return False
-    if severity is not None and rule["severity"] != severity:
+    if severity_in and rule["severity"] not in severity_in:
         return False
     if logsource_product and (len(ls_key) < 2 or ls_key[1] != logsource_product):
         return False
@@ -148,7 +179,7 @@ async def list_rules(
     page: Annotated[int, Query(ge=1, le=10_000)] = 1,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     category: Annotated[str | None, Query(max_length=64)] = None,
-    severity: Annotated[int | None, Query(ge=0, le=24)] = None,
+    severity_in: Annotated[list[str] | None, Query()] = None,
     logsource_product: Annotated[str | None, Query(max_length=64)] = None,
     enabled: Annotated[bool | None, Query()] = None,
     source: Annotated[str | None, Query(max_length=32)] = None,
@@ -157,6 +188,7 @@ async def list_rules(
     """Return loaded Sigma rules with filters and per-rule 24h alert counts."""
     engine = _require_engine(engines)
     counts_24h = await _alert_counts_24h(storage)
+    parsed_severity_in = _parse_severity_in(severity_in)
     all_rules = engine.list_rules()
     filtered = [
         r
@@ -164,7 +196,7 @@ async def list_rules(
         if _matches_filters(
             r,
             category=category,
-            severity=severity,
+            severity_in=parsed_severity_in,
             logsource_product=logsource_product,
             enabled=enabled,
             source=source,
