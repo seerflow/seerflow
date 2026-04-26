@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
     from seerflow.config import SeerflowConfig
+    from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.sigma.state import SigmaRuleStateStore
@@ -232,6 +233,8 @@ def create_api_app(
     baseline_store: BaselineStore | None = None,
     ueba_engine: UEBAEngine | None = None,
     sigma_state_store: SigmaRuleStateStore | None = None,
+    health_state: dict[str, str] | None = None,
+    ensemble: DetectionEnsemble | None = None,
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -250,6 +253,17 @@ def create_api_app(
             zero rule counts for Sigma rules.
         correlation_rules: Snapshot of correlation rules used by the
             ATT&CK coverage endpoint. Hot reloads are not reflected.
+        baseline_store: Optional UEBA ``BaselineStore``.
+        ueba_engine: Optional UEBA engine.
+        sigma_state_store: Optional Sigma per-rule state store.
+        health_state: Mutable status dict shared with the pipeline. When
+            supplied, the ``/api/v1/health`` route observes live mutations
+            written by the pipeline (S-217). Defaults to a fresh
+            ``{"pipeline": "running", "storage": "connected"}`` dict for
+            tests and direct construction.
+        ensemble: Optional ``DetectionEnsemble`` exposed via
+            ``/api/v1/health`` so the response carries the legacy aiohttp
+            ``detection`` extra (S-217).
     """
     app = FastAPI(
         title="Seerflow API",
@@ -268,13 +282,18 @@ def create_api_app(
     app.state.engines = DetectionEngines(
         sigma_engine=sigma_engine,
         correlation_rules=tuple(correlation_rules),
+        ensemble=ensemble,
     )
     app.state.config = config
     app.state.pipeline_metrics_provider = None
     app.state.baseline_store = baseline_store
     app.state.ueba_engine = ueba_engine
     app.state.sigma_state_store = sigma_state_store
-    app.state.health_state = {"pipeline": "running", "storage": "connected"}
+    app.state.health_state = (
+        health_state
+        if health_state is not None
+        else {"pipeline": "running", "storage": "connected"}
+    )
     app.state.anomaly_timeline_ring = AnomalyTimelineRing()
     app.state.ws_manager = ws_manager or _build_ws_manager(
         alert_store, config, app.state.anomaly_timeline_ring
