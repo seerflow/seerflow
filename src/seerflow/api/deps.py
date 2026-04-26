@@ -15,6 +15,7 @@ from fastapi import Depends, HTTPException, Request
 if TYPE_CHECKING:
     from seerflow.api.anomaly_timeline import AnomalyTimelineRing
     from seerflow.api.metrics import MetricsProvider
+    from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -77,10 +78,15 @@ class DetectionEngines:
     Hot-reloads managed by ``seerflow.correlation.reloader`` are NOT
     reflected here — the snapshot is captured at ``create_api_app`` time.
     Restart the process to refresh rule counts in the coverage API.
+
+    ``ensemble`` (S-217) carries the live ``DetectionEnsemble`` so the
+    health route can mirror the legacy aiohttp contract by calling
+    ``ensemble.get_health()``.
     """
 
     sigma_engine: SigmaEngine | None = None
     correlation_rules: tuple[CorrelationRule, ...] = ()
+    ensemble: DetectionEnsemble | None = None
 
 
 def get_engines(request: Request) -> DetectionEngines:
