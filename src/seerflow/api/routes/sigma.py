@@ -220,8 +220,11 @@ async def get_rule_timeline(
     engine = _require_engine(engines)
     rule = engine.get_rule(rule_id)
     if rule is None:
-        raise HTTPException(status_code=404, detail="rule_not_found")
-    end_ns = int(datetime.now(UTC).timestamp() * 1_000_000_000)
+        raise HTTPException(status_code=404, detail="rule not found")
+    now_ns = int(datetime.now(UTC).timestamp() * 1_000_000_000)
+    # snap "now" up to the next hour boundary so the 24-bucket grid covers
+    # 24 complete hours [end_ns - 24h, end_ns) — no partial trailing cell
+    end_ns = -(-now_ns // _HOUR_NS) * _HOUR_NS  # ceil-divide
     start_ns = end_ns - _TIMELINE_BUCKET_COUNT * _HOUR_NS
     rows = await storage.alert_store.count_alerts_bucketed(
         alert_type="sigma",
@@ -230,11 +233,10 @@ async def get_rule_timeline(
         bucket_ns=_HOUR_NS,
     )
     counts = dict(rows)
-    aligned_start = (start_ns // _HOUR_NS) * _HOUR_NS
     grid = [
         SigmaRuleTimelineBucket(
-            bucket_start_ns=aligned_start + i * _HOUR_NS,
-            count=counts.get(aligned_start + i * _HOUR_NS, 0),
+            bucket_start_ns=start_ns + i * _HOUR_NS,
+            count=counts.get(start_ns + i * _HOUR_NS, 0),
         )
         for i in range(_TIMELINE_BUCKET_COUNT)
     ]

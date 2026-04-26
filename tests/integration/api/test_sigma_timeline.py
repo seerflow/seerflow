@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
+from seerflow.api.routes.sigma import _HOUR_NS as HOUR_NS
 from seerflow.config import DetectionConfig, SeerflowConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
@@ -19,9 +20,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from seerflow.storage.sqlite import SqliteBackend
-
-
-HOUR_NS = 3600 * 1_000_000_000
 
 
 _RULE_YAML = """
@@ -97,6 +95,7 @@ class _FrozenDatetime:
         self._frozen = datetime.fromtimestamp(frozen_ns / 1_000_000_000, tz=UTC)
 
     def now(self, tz: object = None) -> datetime:
+        # now(tz) ignores tz; route always passes UTC
         return self._frozen
 
     def __getattr__(self, name: str) -> object:
