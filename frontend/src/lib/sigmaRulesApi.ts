@@ -3,8 +3,7 @@
 // Each helper validates the response body via the corresponding valibot
 // schema; failures throw ApiError with the schema diagnostic so the UI
 // surfaces "we got a malformed response" rather than crashing on a typo.
-import { api, ApiError, sanitizeDetail } from "./api";
-import { logger } from "./logger";
+import { api } from "./api";
 import {
   SigmaRuleDetailSchema,
   SigmaRuleListResponseSchema,
@@ -62,37 +61,11 @@ export async function toggleSigmaRule(
   ruleId: string,
   enabled: boolean,
 ): Promise<SigmaRuleDetail> {
-  // The shared `api.post` wrapper builds a POST; PATCH must be issued via
-  // raw fetch for now. Mirror the request/respond shape (envelope + valibot
-  // validation) so error handling stays uniform.
-  const path = `/api/v1/sigma/rules/${encodeURIComponent(ruleId)}`;
-  const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
-  const res = await fetch(`${base}${path}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ enabled }),
-  });
-  const text = await res.text();
-  let parsed: unknown = text;
-  try {
-    parsed = text ? JSON.parse(text) : text;
-  } catch {
-    // fall through with raw text
-  }
-  if (!res.ok) {
-    const raw =
-      parsed && typeof parsed === "object" && "detail" in parsed
-        ? String((parsed as { detail: unknown }).detail)
-        : text;
-    const { display, debug } = sanitizeDetail(res.status, raw);
-    if (display !== debug) logger.error(`ApiError ${res.status}: ${debug}`);
-    throw new ApiError(res.status, display, debug);
-  }
-  const result = (await import("valibot")).safeParse(SigmaRuleDetailSchema, parsed);
-  if (!result.success) {
-    throw new ApiError(0, `response-schema-fail: ${result.issues.map((i) => i.message).join("; ")}`);
-  }
-  return result.output as SigmaRuleDetail;
+  return api.patch<SigmaRuleDetail>(
+    `/api/v1/sigma/rules/${encodeURIComponent(ruleId)}`,
+    { enabled },
+    { schema: SigmaRuleDetailSchema },
+  );
 }
 
 export async function validateSigmaRule(

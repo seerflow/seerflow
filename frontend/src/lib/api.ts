@@ -159,4 +159,6 @@ export const api = {
     request<T>(path, { method: "GET", headers: { "Accept": "application/json" }, signal: opts?.signal }, opts),
   post: <T,>(path: string, body: unknown, opts?: GetOpts) =>
     request<T>(path, { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(body) }, opts),
+  patch: <T,>(path: string, body: unknown, opts?: GetOpts) =>
+    request<T>(path, { method: "PATCH", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(body) }, opts),
 };

@@ -12,12 +12,13 @@ vi.mock("./api", async () => {
   const actual = await vi.importActual<typeof import("./api")>("./api");
   return {
     ...actual,
-    api: { get: vi.fn(), post: vi.fn() },
+    api: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
   };
 });
 
 const mockedGet = api.get as unknown as ReturnType<typeof vi.fn>;
 const mockedPost = api.post as unknown as ReturnType<typeof vi.fn>;
+const mockedPatch = api.patch as unknown as ReturnType<typeof vi.fn>;
 
 const sampleSummary = {
   rule_id: "r1",
@@ -123,49 +124,28 @@ describe("validateSigmaRule + uploadSigmaRule", () => {
 });
 
 describe("toggleSigmaRule", () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockReset();
-  });
+  beforeEach(() => mockedPatch.mockReset());
 
-  it("issues PATCH with enabled body and parses response", async () => {
+  it("issues PATCH with enabled body and returns parsed detail", async () => {
     const detail = { ...sampleSummary, yaml_source: "title: T", enabled: false };
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify(detail), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    mockedPatch.mockResolvedValueOnce(detail);
     const result = await toggleSigmaRule("rid", false);
     expect(result.enabled).toBe(false);
-    const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect((init as RequestInit).method).toBe("PATCH");
-    expect((init as RequestInit).body).toContain('"enabled":false');
+    const [path, body, opts] = mockedPatch.mock.calls[0];
+    expect(path).toBe("/api/v1/sigma/rules/rid");
+    expect(body).toEqual({ enabled: false });
+    expect(opts).toEqual(expect.objectContaining({ schema: expect.anything() }));
   });
 
-  it("throws ApiError on non-OK response", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ detail: "rule not found" }), {
-        status: 404,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    await expect(toggleSigmaRule("rid", false)).rejects.toThrow(/rule not found/);
+  it("encodes rule id segments", async () => {
+    mockedPatch.mockResolvedValueOnce({ ...sampleSummary, yaml_source: "title: T" });
+    await toggleSigmaRule("r/1", true);
+    expect(mockedPatch.mock.calls[0][0]).toBe("/api/v1/sigma/rules/r%2F1");
   });
 
-  it("sanitises 5xx detail to GENERIC_5XX, preserves raw on debugDetail", async () => {
+  it("propagates ApiError from api.patch (e.g. 404)", async () => {
     const { ApiError } = await import("./api");
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ detail: 'Traceback ... File "/srv/app.py", line 1' }), {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    let caught: unknown;
-    try { await toggleSigmaRule("rid", false); } catch (e) { caught = e; }
-    expect(caught).toBeInstanceOf(ApiError);
-    const err = caught as InstanceType<typeof ApiError>;
-    expect(err.status).toBe(500);
-    expect(err.detail).toBe(ApiError.GENERIC_5XX);
-    expect(err.debugDetail).toContain("Traceback");
+    mockedPatch.mockRejectedValueOnce(new ApiError(404, "rule not found"));
+    await expect(toggleSigmaRule("rid", false)).rejects.toThrow(/rule not found/);
   });
 });

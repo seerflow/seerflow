@@ -100,6 +100,33 @@ describe("api", () => {
   });
 });
 
+describe("api.patch", () => {
+  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("sends PATCH with JSON body and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const out = await api.patch<{ ok: boolean }>("/x", { a: 1 });
+    expect(out.ok).toBe(true);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("PATCH");
+    expect(init.body).toBe(JSON.stringify({ a: 1 }));
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
+  });
+
+  it("propagates ApiError on non-2xx", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("boom", { status: 422 }));
+    await expect(api.patch("/x", {})).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
 describe("api boundary parsing", () => {
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); __walker.reset(); });
   afterEach(() => { vi.unstubAllGlobals(); });
