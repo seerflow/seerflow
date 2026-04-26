@@ -8,6 +8,9 @@ import {
   parseWsFrame,
   PaginatedResponseSchema,
   validateOrDropItem,
+  FeedbackEventSchema,
+  FeedbackHistoryResponseSchema,
+  NOTE_MAX_LENGTH_FE,
 } from "./schemas";
 import * as metrics from "./validationMetrics";
 import { logger } from "./logger";
@@ -386,5 +389,92 @@ describe("validateOrDropItem", () => {
     const bad = { ...validAlert, severity: 999 };
     expect(validateOrDropItem(AlertSchema, bad, "rest:alert")).toBeNull();
     expect(metrics.getCounters()["rest:alert"]).toBe(1);
+  });
+});
+
+describe("FeedbackEventSchema (S-210)", () => {
+  const valid = {
+    id: 1,
+    feedback: "tp" as const,
+    note: "ok",
+    origin: "cli" as const,
+    submitted_at_ns: 1_700_000_000_000_000_000n,
+  };
+
+  it("accepts a well-formed feedback event", () => {
+    expect(v.safeParse(FeedbackEventSchema, valid).success).toBe(true);
+  });
+
+  it("rejects feedback values outside the picklist", () => {
+    const r = v.safeParse(FeedbackEventSchema, { ...valid, feedback: "maybe" });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects origin values outside the picklist", () => {
+    const r = v.safeParse(FeedbackEventSchema, { ...valid, origin: "slackbot" });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects negative submitted_at_ns", () => {
+    const r = v.safeParse(FeedbackEventSchema, { ...valid, submitted_at_ns: -1n });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects notes longer than NOTE_MAX_LENGTH_FE", () => {
+    const r = v.safeParse(FeedbackEventSchema, {
+      ...valid,
+      note: "x".repeat(NOTE_MAX_LENGTH_FE + 1),
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects negative ids", () => {
+    const r = v.safeParse(FeedbackEventSchema, { ...valid, id: -1 });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("FeedbackHistoryResponseSchema (S-210)", () => {
+  const validItem = {
+    id: 1,
+    feedback: "fp" as const,
+    note: "",
+    origin: "dashboard" as const,
+    submitted_at_ns: 1_700_000_000_000_000_000n,
+  };
+
+  it("accepts a well-formed paginated response", () => {
+    const payload = {
+      items: [validItem],
+      total: 1,
+      page: 1,
+      limit: 50,
+      has_next: false,
+    };
+    expect(v.safeParse(FeedbackHistoryResponseSchema, payload).success).toBe(true);
+  });
+
+  it("rejects when items contains an invalid feedback verdict", () => {
+    const payload = {
+      items: [{ ...validItem, feedback: "garbage" }],
+      total: 1, page: 1, limit: 50, has_next: false,
+    };
+    expect(v.safeParse(FeedbackHistoryResponseSchema, payload).success).toBe(false);
+  });
+
+  it("rejects when limit exceeds the bound", () => {
+    const payload = {
+      items: [validItem],
+      total: 1, page: 1, limit: 10_000, has_next: false,
+    };
+    expect(v.safeParse(FeedbackHistoryResponseSchema, payload).success).toBe(false);
+  });
+
+  it("rejects page = 0 (backend paginates from page >= 1)", () => {
+    const payload = {
+      items: [validItem],
+      total: 1, page: 0, limit: 50, has_next: false,
+    };
+    expect(v.safeParse(FeedbackHistoryResponseSchema, payload).success).toBe(false);
   });
 });

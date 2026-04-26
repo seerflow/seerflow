@@ -285,3 +285,41 @@ export type SigmaRuleListResponseInfer = v.InferOutput<
 export type SigmaRuleValidationResultInfer = v.InferOutput<
   typeof SigmaRuleValidationResultSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Feedback audit log (S-210 — defence-in-depth on top of the walker-level
+// prototype-pollution guard from S-191). NOTE_MAX_LENGTH_FE must stay aligned
+// with src/seerflow/utils/text.py::NOTE_MAX_LENGTH (single-source-of-truth on
+// the backend; FE side is a manual mirror — see S-210 brainstorm rationale).
+// ---------------------------------------------------------------------------
+
+export const NOTE_MAX_LENGTH_FE = 512;
+
+export const FeedbackOriginSchema = v.picklist([
+  "dashboard",
+  "cli",
+  "api",
+] as const);
+
+export const FeedbackVerdictSchema = v.picklist(["tp", "fp"] as const);
+
+export const FeedbackEventSchema = v.object({
+  id: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  feedback: FeedbackVerdictSchema,
+  note: v.pipe(v.string(), v.maxLength(NOTE_MAX_LENGTH_FE)),
+  origin: FeedbackOriginSchema,
+  submitted_at_ns: BigintNsSchema,
+});
+
+export const FeedbackHistoryResponseSchema = v.object({
+  items: v.pipe(v.array(FeedbackEventSchema), v.maxLength(1000)),
+  total: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  page: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  limit: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1000)),
+  has_next: v.boolean(),
+});
+
+export type FeedbackEventInfer = v.InferOutput<typeof FeedbackEventSchema>;
+export type FeedbackHistoryResponseInfer = v.InferOutput<
+  typeof FeedbackHistoryResponseSchema
+>;
