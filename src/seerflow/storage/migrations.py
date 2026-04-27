@@ -193,12 +193,52 @@ async def _migrate_v5_sigma_rule_state(conn: aiosqlite.Connection) -> None:
     )
 
 
+async def _column_exists(conn: aiosqlite.Connection, table: str, column: str) -> bool:
+    async with conn.execute(f"PRAGMA table_info({table})") as cur:  # nosec B608
+        return any(row[1] == column for row in await cur.fetchall())
+
+
+async def _migrate_v6_junction_timestamp_ns(conn: aiosqlite.Connection) -> None:
+    """Migration 6: backfill ``timestamp_ns`` on mitre junction tables for
+    DBs created before the v3 denormalize landed.
+
+    v3 was originally shipped without ``timestamp_ns`` on the junctions; the
+    denormalization was added later and only takes effect for fresh DBs
+    where ``CREATE TABLE`` includes the column. Pre-existing DBs need an
+    explicit ALTER + backfill + reindex so the SQL plan in
+    ``query_alerts`` (ORDER BY ``at.timestamp_ns``) does not blow up with
+    ``no such column``.
+    """
+    for table in ("alert_tactics", "alert_techniques"):
+        if not await _column_exists(conn, table, "timestamp_ns"):
+            await conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN timestamp_ns INTEGER NOT NULL DEFAULT 0"  # nosec B608
+            )
+            await conn.execute(
+                f"UPDATE {table} SET timestamp_ns = ("  # noqa: S608  # nosec B608
+                f"  SELECT a.timestamp_ns FROM alerts a "
+                f"  WHERE a.dedup_key = {table}.dedup_key)"
+            )
+
+    await conn.execute("DROP INDEX IF EXISTS idx_alert_tactics_tactic")
+    await conn.execute("DROP INDEX IF EXISTS idx_alert_techniques_technique")
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alert_tactics_tactic_time "
+        "ON alert_tactics(tactic, timestamp_ns DESC)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alert_techniques_technique_time "
+        "ON alert_techniques(technique, timestamp_ns DESC)"
+    )
+
+
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     1: _migrate_v1_bootstrap,
     2: _migrate_v2_graph_edges,
     3: _migrate_v3_mitre_junctions,
     4: _migrate_v4_feedback_events,
     5: _migrate_v5_sigma_rule_state,
+    6: _migrate_v6_junction_timestamp_ns,
 }
 
 

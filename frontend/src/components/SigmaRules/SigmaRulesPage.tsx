@@ -20,6 +20,7 @@ export function SigmaRulesPage(): JSX.Element {
   const total = useSigmaRulesStore((s) => s.total);
   const selectedRuleId = useSigmaRulesStore((s) => s.selectedRuleId);
   const filter = useSigmaRulesStore((s) => s.filter);
+  const setFilter = useSigmaRulesStore((s) => s.setFilter);
 
   const [uploadOpen, setUploadOpen] = useState(false);
 
@@ -46,7 +47,7 @@ export function SigmaRulesPage(): JSX.Element {
         <FilterBar
           initialSearch={filter.search}
           initialSeverityIn={filter.severity_in}
-          onChange={(patch) => useSigmaRulesStore.getState().setFilter(patch)}
+          onChange={setFilter}
         />
 
         {status === "loading" && (

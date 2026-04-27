@@ -51,17 +51,25 @@ export default function App() {
     <WsProvider>
       <main className="flex flex-col min-h-screen p-6">
         <header className="mb-6 flex items-center justify-between gap-4">
-          <img src={wordmark} alt="Seerflow" className="h-8 w-auto select-none" />
+          <button
+            type="button"
+            aria-label="Home"
+            title="Home — dashboard"
+            onClick={() => { window.location.hash = ""; }}
+            className="cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <img src={wordmark} alt="Seerflow" className="h-8 w-auto select-none" />
+          </button>
           <EntitySearch />
           <AddWidgetMenu />
           <ResetLayoutButton />
-          <Button variant="ghost" size="icon" aria-label="Sigma rules" onClick={() => { window.location.hash = "sigma-rules"; }}>
+          <Button variant="ghost" size="icon" aria-label="Sigma rules" title="Sigma rules — manage detection rules" onClick={() => { window.location.hash = "sigma-rules"; }}>
             <BookOpen className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" onClick={() => { window.location.hash = "coverage"; }}>
+          <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" title="ATT&CK coverage — MITRE technique heatmap" onClick={() => { window.location.hash = "coverage"; }}>
             <Shield className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" aria-label="Toggle theme" onClick={toggle}>
+          <Button variant="ghost" size="icon" aria-label="Toggle theme" title="Toggle theme" onClick={toggle}>
             <Icon className="h-5 w-5" />
           </Button>
         </header>
