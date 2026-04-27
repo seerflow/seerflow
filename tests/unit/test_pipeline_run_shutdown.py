@@ -75,3 +75,25 @@ async def test_sigterm_flips_should_exit_within_50ms() -> None:
         assert pipeline.stops == 1
     finally:
         _remove_handlers(loop)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
+@pytest.mark.asyncio
+async def test_repeated_sigterm_is_idempotent() -> None:
+    pipeline = _FakePipeline()
+    loop = asyncio.get_running_loop()
+    ctx = _install_shutdown_handlers(loop, pipeline)
+    ctx.server = _FakeServer()
+
+    try:
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.01)
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.01)
+
+        assert ctx.server.should_exit is True
+        assert pipeline.stops == 1  # not 2
+        assert ctx.fired is True
+    finally:
+        _remove_handlers(loop)
