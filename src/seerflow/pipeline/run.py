@@ -276,19 +276,9 @@ async def _run_with_config(
     receivers = [sid for sid, r in pipeline.manager._receivers.items() if r.is_healthy()]
     _log.info("Receivers: %s", ", ".join(receivers) if receivers else "none")
 
-    # Graceful shutdown via event (Unix only)
-    _shutdown_task: asyncio.Task[None] | None = None
-    if sys.platform != "win32":  # pragma: no branch
-        import signal
-
-        def _request_shutdown() -> None:  # pragma: no cover — called by OS signal only
-            nonlocal _shutdown_task
-            if _shutdown_task is None:
-                _shutdown_task = asyncio.create_task(pipeline.stop())
-
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, _request_shutdown)
+    # Graceful shutdown — register SIGINT/SIGTERM handlers that will flip uvicorn's
+    # ``should_exit`` flag and stop the pipeline once the server is wired in below.
+    shutdown_ctx = _install_shutdown_handlers(asyncio.get_running_loop(), pipeline)  # noqa: F841
 
     # Load Sigma rules — degrade gracefully if loading fails
     from seerflow.sigma.engine import SigmaEngine

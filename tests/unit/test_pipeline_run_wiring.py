@@ -123,3 +123,15 @@ class TestShutdownOrder:
         src = inspect.getsource(run_mod._run_with_config)
         assert "FIRST_COMPLETED" in src
         assert "pipeline_task" in src
+
+
+class TestSigtermWiresUvicorn:
+    def test_helper_replaces_inline_signal_block(self) -> None:
+        import inspect
+
+        from seerflow.pipeline import run as run_mod
+
+        src = inspect.getsource(run_mod._run_with_config)
+        assert "_install_shutdown_handlers(" in src
+        # The legacy `nonlocal _shutdown_task` pattern must be gone.
+        assert "_shutdown_task" not in src
