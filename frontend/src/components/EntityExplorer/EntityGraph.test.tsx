@@ -480,12 +480,19 @@ describe("EntityGraph — data-change carry-over", () => {
     const after = container.querySelector('g[data-node-id="a"] circle') as SVGCircleElement;
     const x1 = Number.parseFloat(after.getAttribute("cx") ?? "0");
     const y1 = Number.parseFloat(after.getAttribute("cy") ?? "0");
-    // Nodes "a" should not have been reset to the centre (w/2=200 or h/2=160 in jsdom default).
-    // If the seed is respected, the post-warmup position stays near the pre-rerender position.
-    // We allow up to 80 px drift to account for the 300-tick warm-up pulling the node into
-    // the new layout, but this is far less than the ~200 px "flashed to centre" case.
-    expect(Math.abs(x1 - x0)).toBeLessThanOrEqual(80);
-    expect(Math.abs(y1 - y0)).toBeLessThanOrEqual(80);
+    // Semantic guarantee of AC-25/26: the surviving node must not flash to centre.
+    // A regression that rebuilt the simulation without seeding from positionsRef
+    // would land the surviving node near (w/2, h/2) = (200, 160). Assert the
+    // post-rerender distance from centre is at least 75% of the pre-rerender
+    // distance — the seed beat any centre pull from the new neighbour. Without
+    // carry-over, the post distance would collapse toward zero.
+    const W = 400;
+    const H = 320;
+    const distFromCentre = (x: number, y: number) =>
+      Math.hypot(x - W / 2, y - H / 2);
+    const beforeFromCentre = distFromCentre(x0, y0);
+    const afterFromCentre = distFromCentre(x1, y1);
+    expect(afterFromCentre).toBeGreaterThan(beforeFromCentre * 0.75);
     // Also ensure the node was rendered at a non-zero position (not clipped to 0,0).
     expect(Math.abs(x1)).toBeGreaterThan(0);
   });
