@@ -116,6 +116,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
   const [size, setSize] = useState({ w: 400, h: 320 });
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [tip, setTip] = useState<Tip>(null);
+  const [dragKind, setDragKind] = useState<"pan" | "node" | null>(null);
 
   const truncated = related.length > MAX_NODES;
   const rendered = useMemo(
@@ -321,6 +322,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
       startTy: viewRef.current.ty,
       moved: false,
     };
+    setDragKind("pan");
     setTip(null);
   }
 
@@ -350,6 +352,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
         // jsdom no-op
       }
       dragRef.current = { ...noDrag };
+      setDragKind(null);
     }
   }
 
@@ -378,6 +381,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
       startTy: viewRef.current.ty,
       moved: false,
     };
+    setDragKind("node");
     setTip(null);
   }
 
@@ -443,6 +447,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
       // moved flag stays in drag state for the click handler below.
       const movedFlag = drag.moved;
       dragRef.current = { ...noDrag, moved: movedFlag };
+      setDragKind(null);
     }
   }
 
@@ -491,7 +496,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
         aria-label={ariaLabel}
         width={size.w}
         height={size.h}
-        className="flex-1 min-h-0 block cursor-grab"
+        className={`flex-1 min-h-0 block ${dragKind === "pan" ? "cursor-grabbing" : "cursor-grab"}`}
         onPointerDown={onSvgPointerDown}
         onPointerMove={onSvgPointerMove}
         onPointerUp={onSvgPointerUp}
@@ -511,7 +516,29 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
               </g>
             );
           })}
-          <g data-focal-id={focal.uuid}>
+          <g
+            data-focal-id={focal.uuid}
+            onPointerDown={(e) => {
+              // Focal node is not draggable. Absorb the event so the SVG pan handler
+              // does not treat this as a background click-drag.
+              e.stopPropagation();
+            }}
+            onPointerMove={(e) => {
+              if (dragRef.current.kind !== null) return;
+              const wrapper = wrapperRef.current;
+              if (!wrapper) return;
+              const rect = wrapper.getBoundingClientRect();
+              setTip({
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+                type: focal.type,
+                value: focal.label,
+              });
+            }}
+            onPointerLeave={() => {
+              if (dragRef.current.kind === null) setTip(null);
+            }}
+          >
             <circle
               cx={focalPos.x}
               cy={focalPos.y}
