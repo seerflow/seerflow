@@ -26,7 +26,8 @@ class _FakePipeline:
 class _FakeServer:
     """Stand-in exposing only the attribute the shutdown handler touches."""
 
-    should_exit = False
+    def __init__(self) -> None:
+        self.should_exit = False
 
 
 def _remove_handlers(loop: asyncio.AbstractEventLoop) -> None:
@@ -156,3 +157,50 @@ def test_noop_capture_signals_is_inert() -> None:
     silently re-enable uvicorn's handler chain."""
     with _noop_capture_signals() as result:
         assert result is None
+
+
+@pytest.mark.unit
+def test_noop_capture_signals_accepts_self_argument() -> None:
+    """If uvicorn ever calls ``self.capture_signals()`` against the patched
+    instance, Python passes ``self`` as the first positional arg. The no-op
+    must absorb it without ``TypeError`` (covers Py-R #2 finding on PR #209)."""
+    sentinel = object()
+    with _noop_capture_signals(sentinel):
+        pass
+    with _noop_capture_signals(sentinel, kw="value"):
+        pass
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
+@pytest.mark.asyncio
+async def test_pipeline_stop_exception_is_logged_via_done_callback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failing ``pipeline.stop()`` should surface as a WARNING log line
+    rather than an unretrieved-task exception at GC. Pins ECC-CR #6 fix."""
+
+    class _FailingPipeline:
+        async def stop(self) -> None:
+            raise RuntimeError("boom from pipeline.stop")
+
+    pipeline = _FailingPipeline()
+    loop = asyncio.get_running_loop()
+    ctx = _install_shutdown_handlers(loop, pipeline)
+    ctx.server = _FakeServer()
+
+    try:
+        with caplog.at_level("WARNING", logger="seerflow"):
+            os.kill(os.getpid(), signal.SIGTERM)
+            # Give the task time to run + the done_callback to fire.
+            for _ in range(20):
+                await asyncio.sleep(0.005)
+                if ctx.task is not None and ctx.task.done():
+                    break
+
+        assert ctx.task is not None
+        assert ctx.task.done()
+        matches = [r for r in caplog.records if "pipeline.stop() raised" in r.message]
+        assert len(matches) == 1, f"expected exactly 1 warning, got {len(matches)}"
+    finally:
+        _remove_handlers(loop)
