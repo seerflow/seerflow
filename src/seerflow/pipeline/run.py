@@ -9,6 +9,7 @@ import logging
 import ssl as _ssl
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,45 @@ if TYPE_CHECKING:
     from seerflow.config import AlertingConfig
 
 _log = logging.getLogger("seerflow")
+
+
+@dataclass
+class _ShutdownContext:
+    """Mutable state shared between the SIGINT/SIGTERM closure and its caller.
+
+    ``server`` starts as ``None`` and is populated by the caller once the
+    uvicorn ``Server`` has been constructed. The closure tolerates a ``None``
+    ``server`` so a signal that arrives during the registration->server-build
+    window still stops the pipeline (no regression vs. pre-S-218 behaviour).
+    """
+
+    pipeline: object  # PipelineRunner -- kept as object to avoid an import cycle
+    server: object | None = None
+    fired: bool = False
+    task: asyncio.Task[None] | None = None
+
+
+def _install_shutdown_handlers(
+    loop: asyncio.AbstractEventLoop,
+    pipeline: object,
+) -> _ShutdownContext:
+    """Register SIGINT/SIGTERM handlers that flip uvicorn's exit flag and stop the pipeline.
+
+    The handler is registered EARLY (right after the pipeline is built) so a
+    SIGTERM that arrives during dashboard startup still reaches the pipeline.
+    The ``server`` reference is filled in by the caller via the returned
+    ``_ShutdownContext`` once ``uvicorn.Server`` is constructed; the closure
+    tolerates ``ctx.server is None``.
+
+    Uvicorn's ``Server.serve()`` calls ``self.install_signal_handlers()`` by
+    default. Callers MUST set ``server.install_signal_handlers = lambda: None``
+    before scheduling ``server.serve()`` or our chain will be silently
+    overwritten from inside uvicorn's setup.
+    """
+    ctx = _ShutdownContext(pipeline=pipeline)
+    if sys.platform == "win32":  # pragma: no cover -- Windows uses uvicorn defaults
+        return ctx
+    return ctx
 
 
 async def _build_channel_session_and_router(
