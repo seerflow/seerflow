@@ -8,7 +8,11 @@ import time
 
 import pytest
 
-from seerflow.pipeline.run import _install_shutdown_handlers, _ShutdownContext
+from seerflow.pipeline.run import (
+    _install_shutdown_handlers,
+    _noop_capture_signals,
+    _ShutdownContext,
+)
 
 
 class _FakePipeline:
@@ -142,3 +146,13 @@ async def test_sigterm_emits_info_log_once(caplog: pytest.LogCaptureFixture) -> 
         assert len(matches) == 1, f"expected exactly 1 INFO line, got {len(matches)}"
     finally:
         _remove_handlers(loop)
+
+
+@pytest.mark.unit
+def test_noop_capture_signals_is_inert() -> None:
+    """``_noop_capture_signals`` is a context manager that yields nothing
+    and performs no signal-handler installation. Pinning behaviour so a
+    future uvicorn upgrade that changes the signal-capture API does not
+    silently re-enable uvicorn's handler chain."""
+    with _noop_capture_signals() as result:
+        assert result is None
