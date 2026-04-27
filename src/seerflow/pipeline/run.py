@@ -278,7 +278,7 @@ async def _run_with_config(
 
     # Graceful shutdown — register SIGINT/SIGTERM handlers that will flip uvicorn's
     # ``should_exit`` flag and stop the pipeline once the server is wired in below.
-    shutdown_ctx = _install_shutdown_handlers(asyncio.get_running_loop(), pipeline)  # noqa: F841
+    shutdown_ctx = _install_shutdown_handlers(asyncio.get_running_loop(), pipeline)
 
     # Load Sigma rules — degrade gracefully if loading fails
     from seerflow.sigma.engine import SigmaEngine
@@ -425,6 +425,13 @@ async def _run_with_config(
         access_log=False,
     )
     server = uvicorn.Server(uvicorn_config)
+    # Prevent uvicorn from overwriting seerflow's signal handlers from inside
+    # ``Server.serve()`` — seerflow owns the signal chain (see _install_shutdown_handlers).
+    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+    # Wire the live server reference into the shared shutdown context so any
+    # SIGTERM that arrives between handler registration and now (or later)
+    # flips ``should_exit`` synchronously.
+    shutdown_ctx.server = server
     server_task = asyncio.create_task(
         _serve_or_hint(server, config.health_bind_address, config.dashboard_port),
         name="seerflow.api.server",
