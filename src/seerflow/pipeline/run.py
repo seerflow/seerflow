@@ -9,6 +9,7 @@ import logging
 import ssl as _ssl
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,7 +28,8 @@ from seerflow.ueba.store import BaselineStore
 from seerflow.web import DEFAULT_DIST
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
+    from typing import Protocol
 
     from fastapi import FastAPI
 
@@ -35,7 +37,123 @@ if TYPE_CHECKING:
     from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
 
+    class _StoppablePipeline(Protocol):
+        """Subset of the pipeline contract the shutdown closure needs."""
+
+        async def stop(self) -> None: ...
+
+    class _ExitableServer(Protocol):
+        """Subset of ``uvicorn.Server`` the shutdown closure needs."""
+
+        should_exit: bool
+        force_exit: bool
+
+
 _log = logging.getLogger("seerflow")
+
+
+@dataclass
+class _ShutdownContext:
+    """Handler-owned mutable state for the SIGINT/SIGTERM closure.
+
+    Field semantics:
+    - ``pipeline`` — set at construction; the runner whose ``stop()`` the
+      handler schedules.
+    - ``server`` — starts as ``None``; the caller assigns it AFTER
+      ``uvicorn.Server`` is constructed. The closure tolerates ``server is
+      None`` so a signal that arrives during the registration→server-build
+      window still stops the pipeline (no regression vs. pre-S-218 behaviour).
+    - ``fired`` and ``task`` — handler-owned; do NOT write from outside the
+      closure. They guarantee the closure is idempotent on the loop thread.
+    """
+
+    pipeline: _StoppablePipeline
+    server: _ExitableServer | None = None
+    fired: bool = False
+    task: asyncio.Task[None] | None = None
+
+
+@contextlib.contextmanager
+def _noop_capture_signals(*_args: object, **_kwargs: object) -> Generator[None, None, None]:
+    """Replacement for ``uvicorn.Server.capture_signals`` that does nothing.
+
+    Modern uvicorn (>=0.20) installs SIGINT/SIGTERM handlers via this context
+    manager when ``Server.serve()`` runs. Seerflow owns the signal chain via
+    :func:`_install_shutdown_handlers`, so the uvicorn capture is suppressed
+    by patching this no-op onto the bound method. Bypassing uvicorn's
+    ``capture_signals`` also bypasses its LIFO re-raise and double-Ctrl-C
+    ``force_exit`` escalation — seerflow drives shutdown synchronously from
+    its own handler, so neither is needed.
+
+    Accepts arbitrary args so it stays compatible whether uvicorn calls it
+    bound (``server.capture_signals()``) or unbound (``server.capture_signals
+    = _noop_capture_signals`` then ``self.capture_signals()`` — Python passes
+    ``self`` as the first positional arg).
+    """
+    yield
+
+
+def _log_shutdown_task_exception(task: asyncio.Task[None]) -> None:
+    """``add_done_callback`` hook for the ``pipeline.stop()`` task.
+
+    Logs unexpected exceptions at WARNING so a silent failure inside
+    ``pipeline.stop()`` does not become an "unretrieved task" warning at GC
+    time. Cancellation is the expected exit when seerflow itself cancels the
+    task during cleanup; suppress that case.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _log.warning("pipeline.stop() raised during signal handling", exc_info=exc)
+
+
+def _install_shutdown_handlers(
+    loop: asyncio.AbstractEventLoop,
+    pipeline: _StoppablePipeline,
+) -> _ShutdownContext:
+    """Register SIGINT/SIGTERM handlers that flip uvicorn's exit flag and stop the pipeline.
+
+    The handler is registered EARLY (right after the pipeline is built) so a
+    SIGTERM that arrives during dashboard startup still reaches the pipeline.
+    The ``server`` reference is filled in by the caller via the returned
+    ``_ShutdownContext`` once ``uvicorn.Server`` is constructed; the closure
+    tolerates ``ctx.server is None`` (signal arrived too early).
+
+    Uvicorn's ``Server.serve()`` enters ``self.capture_signals()`` by default
+    (the modern equivalent of the legacy ``install_signal_handlers``). Callers
+    MUST replace ``server.capture_signals`` with :func:`_noop_capture_signals`
+    before scheduling ``server.serve()`` or our chain will be silently
+    overwritten from inside uvicorn's setup.
+    """
+    ctx = _ShutdownContext(pipeline=pipeline)
+    if sys.platform == "win32":  # pragma: no cover -- Windows uses uvicorn defaults
+        return ctx
+
+    import signal as _signal
+
+    def _request_shutdown() -> None:
+        if ctx.fired:
+            # Second signal during ongoing shutdown — escalate to uvicorn's
+            # force_exit (skip graceful drain). Restores the Ctrl-C-twice
+            # fast-path that uvicorn's own handler chain would otherwise
+            # provide; lost when seerflow took ownership via
+            # ``capture_signals = _noop_capture_signals``.
+            if ctx.server is not None and not ctx.server.force_exit:
+                _log.warning("Second shutdown signal received — forcing exit")
+                ctx.server.force_exit = True
+            return
+        ctx.fired = True
+        _log.info("Shutdown signal received — draining uvicorn + pipeline")
+        if ctx.server is not None:
+            ctx.server.should_exit = True
+        ctx.task = asyncio.create_task(pipeline.stop())
+        ctx.task.add_done_callback(_log_shutdown_task_exception)
+
+    for sig in (_signal.SIGINT, _signal.SIGTERM):
+        loop.add_signal_handler(sig, _request_shutdown)
+
+    return ctx
 
 
 async def _build_channel_session_and_router(
@@ -221,19 +339,9 @@ async def _run_with_config(
     receivers = [sid for sid, r in pipeline.manager._receivers.items() if r.is_healthy()]
     _log.info("Receivers: %s", ", ".join(receivers) if receivers else "none")
 
-    # Graceful shutdown via event (Unix only)
-    _shutdown_task: asyncio.Task[None] | None = None
-    if sys.platform != "win32":  # pragma: no branch
-        import signal
-
-        def _request_shutdown() -> None:  # pragma: no cover — called by OS signal only
-            nonlocal _shutdown_task
-            if _shutdown_task is None:
-                _shutdown_task = asyncio.create_task(pipeline.stop())
-
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, _request_shutdown)
+    # Graceful shutdown — register SIGINT/SIGTERM handlers that will flip uvicorn's
+    # ``should_exit`` flag and stop the pipeline once the server is wired in below.
+    shutdown_ctx = _install_shutdown_handlers(asyncio.get_running_loop(), pipeline)
 
     # Load Sigma rules — degrade gracefully if loading fails
     from seerflow.sigma.engine import SigmaEngine
@@ -380,6 +488,26 @@ async def _run_with_config(
         access_log=False,
     )
     server = uvicorn.Server(uvicorn_config)
+    # Prevent uvicorn from overwriting seerflow's signal handlers from inside
+    # ``Server.serve()`` — seerflow owns the signal chain (see _install_shutdown_handlers).
+    # Modern uvicorn (>=0.20) uses ``capture_signals()`` instead of the older
+    # ``install_signal_handlers``; replacing it with a no-op context manager
+    # neutralises the override without touching uvicorn's internal state.
+    if not hasattr(server, "capture_signals"):  # pragma: no cover -- uvicorn API changed
+        _log.warning(
+            "uvicorn.Server.capture_signals not found — uvicorn version may have "
+            "changed its signal-install API; seerflow's shutdown handler may be "
+            "overridden by uvicorn's default."
+        )
+    server.capture_signals = _noop_capture_signals  # type: ignore[method-assign]
+    # Wire the live server reference into the shared shutdown context so any
+    # subsequent SIGTERM flips ``should_exit`` synchronously.
+    shutdown_ctx.server = server
+    # Late catch-up — if a SIGTERM already fired during the registration→
+    # server-build window, the closure stopped the pipeline but could not flip
+    # ``should_exit``. Do it now so uvicorn drains as soon as it starts.
+    if shutdown_ctx.fired:
+        server.should_exit = True
     server_task = asyncio.create_task(
         _serve_or_hint(server, config.health_bind_address, config.dashboard_port),
         name="seerflow.api.server",
