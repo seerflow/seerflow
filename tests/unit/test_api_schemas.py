@@ -184,6 +184,27 @@ class TestHealthResponse:
         assert resp.status == "degraded"
 
 
+class TestHealthResponseSchema:
+    """S-217 — extras (detection, feedback) preserve aiohttp contract."""
+
+    def test_extras_optional_and_present_when_supplied(self) -> None:
+        body = HealthResponse(
+            status="healthy",
+            components={"pipeline": "running", "storage": "connected"},
+            detection={"detectors": 4, "models_loaded": 7},
+            feedback={"tp": 12, "fp": 3},
+        )
+        dumped = body.model_dump()
+        assert dumped["detection"] == {"detectors": 4, "models_loaded": 7}
+        assert dumped["feedback"] == {"tp": 12, "fp": 3}
+
+    def test_extras_default_to_none(self) -> None:
+        body = HealthResponse(status="healthy", components={"pipeline": "running"})
+        dumped = body.model_dump()
+        assert dumped["detection"] is None
+        assert dumped["feedback"] is None
+
+
 class TestStatsResponse:
     """Tests for stats response model."""
 

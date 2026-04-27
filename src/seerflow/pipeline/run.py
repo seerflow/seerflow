@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import logging
 import ssl as _ssl
 import sys
@@ -12,9 +13,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
-import aiohttp.web
+import uvicorn
 
 from seerflow import __version__
+from seerflow.api.app import create_api_app
 from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
@@ -22,9 +24,15 @@ from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
 from seerflow.ueba.engine import UEBAEngine
 from seerflow.ueba.store import BaselineStore
+from seerflow.web import DEFAULT_DIST
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from fastapi import FastAPI
+
     from seerflow.alerting.router import NotificationRouter
+    from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
 
 _log = logging.getLogger("seerflow")
@@ -85,8 +93,51 @@ async def _build_channel_session_and_router(
     return session, router
 
 
-async def _run_with_config(config: SeerflowConfig) -> None:
-    """Run the pipeline with a pre-built config."""
+async def _serve_or_hint(server: uvicorn.Server, host: str, port: int) -> None:
+    """Run the uvicorn server and emit a helpful hint on EADDRINUSE.
+
+    Logs ``Dashboard listening`` once uvicorn has reported it is started
+    (``server.started`` flips after the listening socket binds), so users
+    do not see a misleading "listening" line followed by an EADDRINUSE
+    error a moment later. The error is re-raised so the calling task
+    surfaces a non-zero exit via ``asyncio.wait(..., FIRST_COMPLETED)``
+    (S-217).
+    """
+    ready_task = asyncio.create_task(_log_when_started(server, host, port))
+    try:
+        await server.serve()
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            _log.error(
+                "Dashboard port %d already in use; set dashboard_port to a free "
+                "port in seerflow.yaml or stop the conflicting process.",
+                port,
+            )
+        raise
+    finally:
+        ready_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ready_task
+
+
+async def _log_when_started(server: uvicorn.Server, host: str, port: int) -> None:
+    """Emit a single info log line once uvicorn finishes binding."""
+    while not server.started:
+        await asyncio.sleep(0.05)
+    _log.info("Dashboard listening on http://%s:%d/", host, port)
+
+
+async def _run_with_config(
+    config: SeerflowConfig,
+    *,
+    make_api_app: Callable[..., FastAPI] = create_api_app,
+) -> None:
+    """Run the pipeline with a pre-built config.
+
+    ``make_api_app`` is a test seam (S-217) so unit tests can stub the
+    FastAPI factory without spinning up real uvicorn. Production callers
+    should leave the default in place.
+    """
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -292,25 +343,52 @@ async def _run_with_config(config: SeerflowConfig) -> None:
     )
     reload_task = asyncio.create_task(reloader.watch())
 
-    # Start health endpoint server on dashboard_port
-    from seerflow.api.health import _STORAGE_KEY, create_health_app
+    # Mount FastAPI dashboard + REST + WebSocket on dashboard_port via
+    # uvicorn (S-217). The legacy aiohttp ``health_app`` was deleted —
+    # the FastAPI ``/api/v1/health`` route mirrors its contract.
+    #
+    # ``ws_manager`` is intentionally left as ``None`` so the factory
+    # builds it via ``_build_ws_manager(...)``, which honours every
+    # ``config.ws_*`` field (including the CSWSH ``allowed_origins``
+    # check). After ``create_api_app`` returns, read the constructed
+    # manager off ``app.state`` and reuse it for ``make_handler`` so
+    # the pipeline and the FastAPI route share the same fan-out.
 
-    health_state = {"pipeline": "running", "storage": "connected"}
-    health_app = create_health_app(state=health_state)
-    health_app[_STORAGE_KEY] = storage
-    health_runner = aiohttp.web.AppRunner(health_app)
-    await health_runner.setup()
-    health_site = aiohttp.web.TCPSite(
-        health_runner,
-        config.health_bind_address,
-        config.dashboard_port,
+    health_state: dict[str, str] = {"pipeline": "running", "storage": "connected"}
+    api_app = make_api_app(
+        log_store=storage,
+        alert_store=storage,
+        entity_store=storage,
+        config=config,
+        ws_manager=None,
+        sigma_engine=sigma_engine,
+        correlation_rules=tuple(correlation_rules),
+        baseline_store=baseline_store,
+        ueba_engine=ueba_engine,
+        sigma_state_store=storage,
+        health_state=health_state,
+        ensemble=ensemble,
     )
-    await health_site.start()
-    _log.info(
-        "Health endpoint listening on %s:%d",
-        config.health_bind_address,
-        config.dashboard_port,
+    ws_manager: ConnectionManager = api_app.state.ws_manager
+    uvicorn_config = uvicorn.Config(
+        app=api_app,
+        host=config.health_bind_address,
+        port=config.dashboard_port,
+        loop="asyncio",
+        lifespan="on",
+        log_config=None,
+        access_log=False,
     )
+    server = uvicorn.Server(uvicorn_config)
+    server_task = asyncio.create_task(
+        _serve_or_hint(server, config.health_bind_address, config.dashboard_port),
+        name="seerflow.api.server",
+    )
+    if not (DEFAULT_DIST / "index.html").is_file():
+        _log.info(
+            "Dashboard bundle missing — run 'cd frontend && npm run build' to "
+            "enable the UI. API and WebSocket are still available at /api/v1/*."
+        )
 
     _log.info("Pipeline running — Ctrl+C to stop")
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
@@ -405,13 +483,49 @@ async def _run_with_config(config: SeerflowConfig) -> None:
         baseline_store=baseline_store,
         ueba_engine=ueba_engine,
         ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
+        ws_manager=ws_manager,
     )
-    await pipeline.run(handler)
+    # Run pipeline + uvicorn server as sibling tasks (S-217). The first
+    # to complete (or fail) wakes the wait so we can drain both cleanly.
+    pipeline_task = asyncio.create_task(pipeline.run(handler), name="seerflow.pipeline")
+
+    try:
+        done, _pending = await asyncio.wait(
+            {pipeline_task, server_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            task.result()  # surfaces exceptions raised inside either task
+    except KeyboardInterrupt:  # pragma: no cover — handled by signal path
+        _log.info("Interrupt received — shutting down")
 
     # Cancel the rule reloader on shutdown
     reload_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await reload_task
+
+    # Cancel the pipeline task if uvicorn died first (or vice versa).
+    if not pipeline_task.done():
+        pipeline_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pipeline_task
+    # Surface any exception the survivor task raised after the wait
+    # returned, otherwise it would silently become an "unhandled exception
+    # in Task" warning at GC time. ``CancelledError`` is the expected exit
+    # for the cancelled survivor, so it is skipped.
+    for _peer_task in (pipeline_task, server_task):
+        if not _peer_task.done() or _peer_task.cancelled():
+            continue
+        try:
+            _peer_exc = _peer_task.exception()
+        except asyncio.CancelledError:  # pragma: no cover — defensive
+            continue
+        if _peer_exc is not None:
+            _log.warning(
+                "Background task %s exited with exception",
+                _peer_task.get_name(),
+                exc_info=_peer_exc,
+            )
 
     try:
         # Flush remaining template metadata.
@@ -463,14 +577,21 @@ async def _run_with_config(config: SeerflowConfig) -> None:
             await pd_session.close()
         if otlp_sink is not None:
             await otlp_sink.stop()
-        if _otlp_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await _otlp_task
-        if otlp_sink is not None:
+            if _otlp_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await _otlp_task
             await otlp_sink.close()
         if webhook_session is not None:
             await webhook_session.close()
-        await health_runner.cleanup()
+        # Stop uvicorn so _lifespan can drain WebSocket frames before
+        # the storage handle is released. ``server_task`` is created in
+        # the new sibling-task layout introduced by S-217. Suppress
+        # ``TimeoutError`` as well as ``CancelledError`` so a slow uvicorn
+        # shutdown never strands ``storage.close()`` (would leave the
+        # SQLite WAL open).
+        server.should_exit = True
+        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+            await asyncio.wait_for(server_task, timeout=10)
         await storage.close()
         _log.info("Seerflow stopped")
 

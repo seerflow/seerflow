@@ -6,7 +6,7 @@ that wraps a msgspec struct has a ``from_*`` classmethod for conversion.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
@@ -123,10 +123,20 @@ class PaginatedResponse(BaseModel, Generic[_T]):
 
 
 class HealthResponse(BaseModel):
-    """Health check response."""
+    """Health check response.
+
+    ``detection`` and ``feedback`` mirror the legacy aiohttp health
+    contract (S-217): when a ``DetectionEnsemble`` and ``AlertStore``
+    are wired into the FastAPI app, the route populates them with
+    ``ensemble.get_health()`` and ``await alert_store.get_feedback_stats()``
+    respectively. Both default to ``None`` for tests that exercise the
+    legacy minimal envelope.
+    """
 
     status: Literal["healthy", "degraded"]
     components: dict[str, str]
+    detection: dict[str, Any] | None = None
+    feedback: dict[str, int] | None = None
 
 
 class StatsResponse(BaseModel):

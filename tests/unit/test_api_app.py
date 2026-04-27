@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -22,10 +22,23 @@ def _test_config(**overrides: object) -> SeerflowConfig:
     return SeerflowConfig(**defaults)  # type: ignore[arg-type]
 
 
+def _stub_alert_store() -> MagicMock:
+    """Build an AlertStore stub that returns a dict from get_feedback_stats.
+
+    S-217 wired the FastAPI ``/api/v1/health`` route to ``await
+    alert_store.get_feedback_stats()``; bare ``AsyncMock()`` returns
+    another ``AsyncMock`` from method calls, which fails Pydantic
+    validation on the response model.
+    """
+    store = MagicMock()
+    store.get_feedback_stats = AsyncMock(return_value={"tp": 0, "fp": 0})
+    return store
+
+
 def _make_client() -> TestClient:
     app = create_api_app(
         log_store=AsyncMock(),
-        alert_store=AsyncMock(),
+        alert_store=_stub_alert_store(),
         config=_test_config(),
     )
     return TestClient(app)
