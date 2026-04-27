@@ -1,4 +1,4 @@
-import { useEntityStore } from "@/stores/entity";
+import { useEntityStore, selectFocalType } from "@/stores/entity";
 import { navigateToEntity } from "@/lib/hash";
 import { EntityTimelineList } from "./EntityTimelineList";
 import { RelatedEntitiesPanel } from "./RelatedEntitiesPanel";
@@ -39,7 +39,7 @@ export function EntityDetail() {
   const riskHistoryLoading = useEntityStore((s) => s.riskHistoryLoading);
   const riskHistoryError = useEntityStore((s) => s.riskHistoryError);
 
-  const selectedType = useEntityStore((s) => s.selectedEntityType);
+  const focalType = useEntityStore(selectFocalType);
   const selectedValue = useEntityStore((s) => s.selectedEntityValue);
 
   const toast = useToast();
@@ -71,16 +71,13 @@ export function EntityDetail() {
   if (!uuid) return null;
 
   const focalLabel = selectedValue ?? related[0]?.entity_value ?? uuid.slice(0, 8);
-  const focalType = selectedType ?? related[0]?.entity_type ?? "user";
 
   return (
     <section className="flex flex-col gap-3 h-full min-h-0" aria-label="Entity detail">
       <header className="flex items-baseline gap-3">
-        {selectedType ? (
-          <Badge
-            style={{ backgroundColor: entitySourceColor("type:" + selectedType), color: "white" }}
-          >
-            {selectedType.toUpperCase()}
+        {focalType ? (
+          <Badge style={{ backgroundColor: entitySourceColor("type:" + focalType), color: "white" }}>
+            {focalType.toUpperCase()}
           </Badge>
         ) : (
           <Badge variant="outline">—</Badge>
@@ -172,7 +169,7 @@ export function EntityDetail() {
         <RelatedEntitiesPanel related={related} onNavigate={navigate} />
       </div>
       <EntityGraph
-        focal={{ uuid, label: focalLabel, type: focalType }}
+        focal={{ uuid, label: focalLabel, type: focalType ?? "user" }}
         related={related}
         onNavigate={navigate}
       />

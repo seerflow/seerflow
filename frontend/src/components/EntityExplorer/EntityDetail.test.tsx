@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { useEntityStore } from "@/stores/entity";
+import { useEntityStore, selectFocalType } from "@/stores/entity";
 import { api } from "@/lib/api";
 import { EntityDetail } from "./EntityDetail";
 
@@ -225,5 +225,29 @@ describe("EntityDetail sizing-contract alignment (S-060.F2)", () => {
     expect(wrapper).toHaveClass("min-h-0");
     expect(wrapper).toHaveClass("flex");
     expect(wrapper).toHaveClass("flex-col");
+  });
+});
+
+describe("selectFocalType", () => {
+  it("falls back to related[0].entity_type when selectedEntityType is null", () => {
+    const state = {
+      selectedEntityType: null,
+      related: [{ entity_uuid: "x", entity_type: "ip", entity_value: "10.0.0.5", relation_type: "has_ip" }],
+    };
+    expect(selectFocalType(state as Parameters<typeof selectFocalType>[0])).toBe("ip");
+  });
+
+  it("returns null when both sources are unset", () => {
+    expect(
+      selectFocalType({ selectedEntityType: null, related: [] } as Parameters<typeof selectFocalType>[0]),
+    ).toBeNull();
+  });
+
+  it("prefers selectedEntityType when set", () => {
+    const state = {
+      selectedEntityType: "user",
+      related: [{ entity_uuid: "x", entity_type: "ip", entity_value: "10.0.0.5", relation_type: "has_ip" }],
+    };
+    expect(selectFocalType(state as Parameters<typeof selectFocalType>[0])).toBe("user");
   });
 });

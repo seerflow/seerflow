@@ -309,6 +309,16 @@ export const useEntityStore = create<State>((set, get) => ({
   },
 }));
 
+// Pure selector: resolves the focal entity type either from the explicit store field
+// (set when a search result / recent click populates it) or, when the user deep-linked
+// to a UUID not in cache, from the first related entity returned by the timeline fetch.
+// Returns null only during the genuine pre-fetch race window.
+export function selectFocalType(
+  state: Pick<State, "selectedEntityType" | "related">,
+): string | null {
+  return state.selectedEntityType ?? state.related[0]?.entity_type ?? null;
+}
+
 export function currentViewState(): EntityViewState | null {
   const { selectedEntityUuid, range, sourceFilter, severityMin } = useEntityStore.getState();
   if (!selectedEntityUuid) return null;
