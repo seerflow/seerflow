@@ -46,6 +46,7 @@ if TYPE_CHECKING:
         """Subset of ``uvicorn.Server`` the shutdown closure needs."""
 
         should_exit: bool
+        force_exit: bool
 
 
 _log = logging.getLogger("seerflow")
@@ -133,6 +134,14 @@ def _install_shutdown_handlers(
 
     def _request_shutdown() -> None:
         if ctx.fired:
+            # Second signal during ongoing shutdown — escalate to uvicorn's
+            # force_exit (skip graceful drain). Restores the Ctrl-C-twice
+            # fast-path that uvicorn's own handler chain would otherwise
+            # provide; lost when seerflow took ownership via
+            # ``capture_signals = _noop_capture_signals``.
+            if ctx.server is not None and not ctx.server.force_exit:
+                _log.warning("Second shutdown signal received — forcing exit")
+                ctx.server.force_exit = True
             return
         ctx.fired = True
         _log.info("Shutdown signal received — draining uvicorn + pipeline")

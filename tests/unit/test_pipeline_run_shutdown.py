@@ -24,10 +24,11 @@ class _FakePipeline:
 
 
 class _FakeServer:
-    """Stand-in exposing only the attribute the shutdown handler touches."""
+    """Stand-in exposing only the attributes the shutdown handler touches."""
 
     def __init__(self) -> None:
         self.should_exit = False
+        self.force_exit = False
 
 
 def _remove_handlers(loop: asyncio.AbstractEventLoop) -> None:
@@ -98,8 +99,42 @@ async def test_repeated_sigterm_is_idempotent() -> None:
         await asyncio.sleep(0.01)
 
         assert ctx.server.should_exit is True
-        assert pipeline.stops == 1  # not 2
+        assert pipeline.stops == 1  # not 2 — pipeline.stop() must be scheduled exactly once
         assert ctx.fired is True
+        # Second SIGTERM escalates to force_exit (Ctrl-C-twice fast-path).
+        assert ctx.server.force_exit is True
+    finally:
+        _remove_handlers(loop)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
+@pytest.mark.asyncio
+async def test_second_signal_logs_force_exit_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Restores the Ctrl-C-twice fast-path that uvicorn's own handler would
+    provide. Pins CR #6 fix on PR #209."""
+    pipeline = _FakePipeline()
+    loop = asyncio.get_running_loop()
+    ctx = _install_shutdown_handlers(loop, pipeline)
+    ctx.server = _FakeServer()
+
+    try:
+        with caplog.at_level("WARNING", logger="seerflow"):
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.01)
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.01)
+
+        matches = [r for r in caplog.records if "forcing exit" in r.message]
+        assert len(matches) == 1
+        # Third signal must not re-fire the warning.
+        with caplog.at_level("WARNING", logger="seerflow"):
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.01)
+        matches = [r for r in caplog.records if "forcing exit" in r.message]
+        assert len(matches) == 1
     finally:
         _remove_handlers(loop)
 
