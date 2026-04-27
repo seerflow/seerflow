@@ -97,3 +97,26 @@ async def test_repeated_sigterm_is_idempotent() -> None:
         assert ctx.fired is True
     finally:
         _remove_handlers(loop)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
+@pytest.mark.asyncio
+async def test_signal_before_server_wired_does_not_crash() -> None:
+    """SIGTERM in the gap between handler registration and ``server`` construction
+    must still stop the pipeline; ``ctx.server is None`` is tolerated."""
+    pipeline = _FakePipeline()
+    loop = asyncio.get_running_loop()
+    ctx = _install_shutdown_handlers(loop, pipeline)
+    # NOTE: ctx.server intentionally left as None.
+
+    try:
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.01)
+
+        assert ctx.fired is True
+        assert ctx.server is None
+        await asyncio.sleep(0)
+        assert pipeline.stops == 1
+    finally:
+        _remove_handlers(loop)
