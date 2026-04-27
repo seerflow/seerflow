@@ -120,3 +120,25 @@ async def test_signal_before_server_wired_does_not_crash() -> None:
         assert pipeline.stops == 1
     finally:
         _remove_handlers(loop)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
+@pytest.mark.asyncio
+async def test_sigterm_emits_info_log_once(caplog: pytest.LogCaptureFixture) -> None:
+    pipeline = _FakePipeline()
+    loop = asyncio.get_running_loop()
+    ctx = _install_shutdown_handlers(loop, pipeline)
+    ctx.server = _FakeServer()
+
+    try:
+        with caplog.at_level("INFO", logger="seerflow"):
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.01)
+            os.kill(os.getpid(), signal.SIGTERM)  # second, gated by `fired`
+            await asyncio.sleep(0.01)
+
+        matches = [r for r in caplog.records if "Shutdown signal received" in r.message]
+        assert len(matches) == 1, f"expected exactly 1 INFO line, got {len(matches)}"
+    finally:
+        _remove_handlers(loop)

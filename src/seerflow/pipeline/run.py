@@ -82,6 +82,7 @@ def _install_shutdown_handlers(
         if ctx.fired:
             return
         ctx.fired = True
+        _log.info("Shutdown signal received — draining uvicorn + pipeline")
         if ctx.server is not None:
             ctx.server.should_exit = True  # type: ignore[attr-defined]
         ctx.task = asyncio.create_task(pipeline.stop())  # type: ignore[attr-defined]
