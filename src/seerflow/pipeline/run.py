@@ -79,8 +79,9 @@ def _install_shutdown_handlers(
     ``_ShutdownContext`` once ``uvicorn.Server`` is constructed; the closure
     tolerates ``ctx.server is None``.
 
-    Uvicorn's ``Server.serve()`` calls ``self.install_signal_handlers()`` by
-    default. Callers MUST set ``server.install_signal_handlers = lambda: None``
+    Uvicorn's ``Server.serve()`` enters ``self.capture_signals()`` by default
+    (the modern equivalent of the legacy ``install_signal_handlers``). Callers
+    MUST replace ``server.capture_signals`` with :func:`_noop_capture_signals`
     before scheduling ``server.serve()`` or our chain will be silently
     overwritten from inside uvicorn's setup.
     """
