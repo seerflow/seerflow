@@ -43,6 +43,7 @@ dependencies = [
     "river>=0.24.2",
     "slowapi>=0.1.9,<0.2.0",
     "uvicorn>=0.30",
+    "websockets>=13.0",
     "uvloop>=0.22.1; sys_platform != 'win32'",
     "watchfiles>=1.1.1",
 ]

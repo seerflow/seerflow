@@ -344,3 +344,73 @@ async def test_migration_v4_is_idempotent(tmp_path: Path) -> None:
         await run_migrations(conn)
         applied2 = await run_migrations(conn)
         assert applied2 == 0
+
+
+@pytest.mark.asyncio
+async def test_migration_v6_adds_timestamp_ns_to_pre_existing_junctions(
+    tmp_path: Path,
+) -> None:
+    """Pre-v6 DBs have junctions without ``timestamp_ns``; v6 ALTERs + backfills."""
+    db_path = tmp_path / "t.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE alerts (dedup_key TEXT PRIMARY KEY, timestamp_ns INTEGER)"
+        )
+        await conn.execute(
+            "CREATE TABLE alert_tactics ("
+            "  dedup_key TEXT REFERENCES alerts(dedup_key), tactic TEXT, "
+            "  PRIMARY KEY (dedup_key, tactic))"
+        )
+        await conn.execute(
+            "CREATE TABLE alert_techniques ("
+            "  dedup_key TEXT REFERENCES alerts(dedup_key), technique TEXT, "
+            "  PRIMARY KEY (dedup_key, technique))"
+        )
+        await conn.execute("CREATE INDEX idx_alert_tactics_tactic ON alert_tactics(tactic)")
+        await conn.execute(
+            "CREATE INDEX idx_alert_techniques_technique ON alert_techniques(technique)"
+        )
+        await conn.execute(
+            "CREATE TABLE schema_version ("
+            "  version INTEGER NOT NULL UNIQUE, "
+            "  applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        )
+        for v in (1, 2, 3, 4, 5):
+            await conn.execute("INSERT INTO schema_version (version) VALUES (?)", (v,))
+        await conn.execute("INSERT INTO alerts VALUES ('k1', 1234)")
+        await conn.execute("INSERT INTO alert_tactics VALUES ('k1', 'reconnaissance')")
+        await conn.execute("INSERT INTO alert_techniques VALUES ('k1', 't1595')")
+        await conn.commit()
+
+        applied = await run_migrations(conn)
+        assert applied == 1
+        assert await get_schema_version(conn) == 6
+
+        async with conn.execute(
+            "SELECT timestamp_ns FROM alert_tactics WHERE dedup_key='k1'"
+        ) as cur:
+            assert (await cur.fetchone())[0] == 1234
+        async with conn.execute(
+            "SELECT timestamp_ns FROM alert_techniques WHERE dedup_key='k1'"
+        ) as cur:
+            assert (await cur.fetchone())[0] == 1234
+
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='idx_alert_tactics_tactic_time'"
+        ) as cur:
+            assert await cur.fetchone() is not None
+
+
+@pytest.mark.asyncio
+async def test_migration_v6_idempotent_on_fresh_db(tmp_path: Path) -> None:
+    """Fresh DBs already have ``timestamp_ns`` from v3; v6 must be a no-op."""
+    db_path = tmp_path / "t.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE alerts (alert_id TEXT, dedup_key TEXT, timestamp_ns INTEGER, data BLOB)"
+        )
+        await conn.commit()
+        await run_migrations(conn)
+        applied2 = await run_migrations(conn)
+        assert applied2 == 0
