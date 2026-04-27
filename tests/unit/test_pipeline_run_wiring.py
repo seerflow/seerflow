@@ -143,11 +143,17 @@ class TestSigtermWiresUvicorn:
 
         src = inspect.getsource(run_mod._run_with_config)
         idx_server = src.find("server = uvicorn.Server(")
-        idx_suppress = src.find("server.install_signal_handlers = lambda")
+        # Modern uvicorn (>=0.20) uses ``capture_signals`` instead of the
+        # legacy ``install_signal_handlers`` the plan referenced; either form
+        # is acceptable as long as it appears in the suppression slot.
+        idx_suppress = max(
+            src.find("server.capture_signals = "),
+            src.find("server.install_signal_handlers = lambda"),
+        )
         idx_assign = src.find("shutdown_ctx.server = server")
         idx_task = src.find("server_task = asyncio.create_task")
         assert -1 < idx_server < idx_suppress < idx_task, (
-            "install_signal_handlers suppression must appear AFTER server construction "
+            "uvicorn signal-handler suppression must appear AFTER server construction "
             "and BEFORE server_task creation"
         )
         assert -1 < idx_server < idx_assign < idx_task, (

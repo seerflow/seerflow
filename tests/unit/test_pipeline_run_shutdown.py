@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 import time
 
 import pytest
 
-from seerflow.pipeline.run import _ShutdownContext, _install_shutdown_handlers
+from seerflow.pipeline.run import _install_shutdown_handlers, _ShutdownContext
 
 
 class _FakePipeline:
@@ -26,10 +27,9 @@ class _FakeServer:
 
 def _remove_handlers(loop: asyncio.AbstractEventLoop) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
+        with contextlib.suppress(NotImplementedError, ValueError):
+            # pragma: no cover -- Windows / not-set
             loop.remove_signal_handler(sig)
-        except (NotImplementedError, ValueError):  # pragma: no cover -- Windows / not-set
-            pass
 
 
 @pytest.mark.unit

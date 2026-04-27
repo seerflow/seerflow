@@ -28,7 +28,7 @@ from seerflow.ueba.store import BaselineStore
 from seerflow.web import DEFAULT_DIST
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
 
     from fastapi import FastAPI
 
@@ -53,6 +53,18 @@ class _ShutdownContext:
     server: object | None = None
     fired: bool = False
     task: asyncio.Task[None] | None = None
+
+
+@contextlib.contextmanager
+def _noop_capture_signals() -> Generator[None, None, None]:
+    """Replacement for ``uvicorn.Server.capture_signals`` that does nothing.
+
+    Modern uvicorn (>=0.20) installs SIGINT/SIGTERM handlers via this context
+    manager when ``Server.serve()`` runs. Seerflow owns the signal chain via
+    :func:`_install_shutdown_handlers`, so the uvicorn capture is suppressed
+    by patching this no-op onto the bound method.
+    """
+    yield
 
 
 def _install_shutdown_handlers(
@@ -427,7 +439,10 @@ async def _run_with_config(
     server = uvicorn.Server(uvicorn_config)
     # Prevent uvicorn from overwriting seerflow's signal handlers from inside
     # ``Server.serve()`` — seerflow owns the signal chain (see _install_shutdown_handlers).
-    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+    # Modern uvicorn (>=0.20) uses ``capture_signals()`` instead of the older
+    # ``install_signal_handlers``; replacing it with a no-op context manager
+    # neutralises the override without touching uvicorn's internal state.
+    server.capture_signals = _noop_capture_signals  # type: ignore[method-assign]
     # Wire the live server reference into the shared shutdown context so any
     # SIGTERM that arrives between handler registration and now (or later)
     # flips ``should_exit`` synchronously.
