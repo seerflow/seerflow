@@ -32,16 +32,21 @@ def _is_api_path(path: str) -> bool:
     """True when ``path`` (as Starlette hands it to the mount) targets the API.
 
     Starlette strips the mount prefix before invoking ``get_response``,
-    but edge cases leak a leading slash (``//api/...`` from a client) or
-    produce the bare prefix (``/api`` with no trailing slash). Normalize
-    to a lowercase prefix comparison so clients cannot smuggle a JSON
-    endpoint behind the SPA fallback.
+    leaving the bare prefix (``/api`` with no trailing slash) or the
+    full sub-path. Normalize to a lowercase prefix comparison so clients
+    cannot smuggle a JSON endpoint behind the SPA fallback.
 
     Percent-encoded variants (e.g. ``/%61pi/...`` where ``%61`` == 'a',
     or ``/api%2Fv1/...`` where ``%2F`` == '/') are caught by Starlette's
-    own URL canonicalisation, which decodes the path before dispatching
-    the mount. The contract is locked by ``test_static.py``'s bypass
-    test (SEE-245); any future refactor must preserve it.
+    own URL canonicalization, which decodes the path before dispatching
+    the mount. The contract is locked by the bypass test in
+    ``test_static.py`` (SEE-245); any future refactor must preserve it.
+
+    Note: leading-double-slash bypass (``//api/...``) is NOT defended
+    here — Starlette consumes the duplicated prefix during mount
+    routing, so the predicate never sees the ``api/`` segment. Closing
+    that gap needs middleware-level path normalization; tracked as a
+    separate follow-up.
     """
     clean = path.lstrip("/").lower()
     return clean == "api" or clean.startswith("api/")
