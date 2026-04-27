@@ -75,6 +75,20 @@ def _install_shutdown_handlers(
     ctx = _ShutdownContext(pipeline=pipeline)
     if sys.platform == "win32":  # pragma: no cover -- Windows uses uvicorn defaults
         return ctx
+
+    import signal as _signal
+
+    def _request_shutdown() -> None:
+        if ctx.fired:
+            return
+        ctx.fired = True
+        if ctx.server is not None:
+            ctx.server.should_exit = True  # type: ignore[attr-defined]
+        ctx.task = asyncio.create_task(pipeline.stop())  # type: ignore[attr-defined]
+
+    for sig in (_signal.SIGINT, _signal.SIGTERM):
+        loop.add_signal_handler(sig, _request_shutdown)
+
     return ctx
 
 

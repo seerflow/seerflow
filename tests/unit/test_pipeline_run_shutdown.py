@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
+import time
 
 import pytest
 
@@ -13,6 +16,20 @@ class _FakePipeline:
 
     async def stop(self) -> None:
         self.stops += 1
+
+
+class _FakeServer:
+    """Stand-in exposing only the attribute the shutdown handler touches."""
+
+    should_exit = False
+
+
+def _remove_handlers(loop: asyncio.AbstractEventLoop) -> None:
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.remove_signal_handler(sig)
+        except (NotImplementedError, ValueError):  # pragma: no cover -- Windows / not-set
+            pass
 
 
 @pytest.mark.unit
@@ -29,10 +46,32 @@ async def test_install_returns_context_with_pipeline_and_no_server() -> None:
         assert ctx.fired is False
         assert ctx.task is None
     finally:
-        import signal
+        _remove_handlers(loop)
 
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.remove_signal_handler(sig)
-            except (NotImplementedError, ValueError):
-                pass
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
+@pytest.mark.asyncio
+async def test_sigterm_flips_should_exit_within_50ms() -> None:
+    pipeline = _FakePipeline()
+    loop = asyncio.get_running_loop()
+    ctx = _install_shutdown_handlers(loop, pipeline)
+    ctx.server = _FakeServer()
+
+    try:
+        started = time.monotonic()
+        os.kill(os.getpid(), signal.SIGTERM)
+
+        for _ in range(40):
+            await asyncio.sleep(0.005)
+            if ctx.server.should_exit:
+                break
+        elapsed_ms = (time.monotonic() - started) * 1000
+
+        assert ctx.server.should_exit is True
+        assert elapsed_ms < 50, f"SIGTERM-to-should_exit took {elapsed_ms:.1f} ms"
+
+        await asyncio.sleep(0)
+        assert pipeline.stops == 1
+    finally:
+        _remove_handlers(loop)
