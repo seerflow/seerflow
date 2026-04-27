@@ -71,15 +71,26 @@ def test_api_prefix_does_not_get_spa_fallback(tmp_path: Path) -> None:
 def test_api_prefix_bypass_variants_also_return_404(tmp_path: Path) -> None:
     """Bypass attempts must still 404 — not fall back to index.html.
 
-    Covers: bare ``/api`` (no trailing slash), double slash
-    ``//api/...``, and upper-case ``/API/...``.
+    Covers: bare ``/api`` (no trailing slash), upper-case ``/API/...``,
+    and percent-encoded variants (``/%61pi/...`` where ``%61`` == 'a',
+    ``/api%2Fv1/...`` where ``%2F`` == '/'). Locks the API-vs-SPA gate
+    against URL-decoding regressions (SEE-245).
     """
     app = FastAPI()
     mount_dashboard(app, dist_dir=_write_dist(tmp_path))
     client = TestClient(app)
-    for url in ("/api", "/API/v1/x", "/API"):
+    for url in (
+        "/api",
+        "/API/v1/x",
+        "/API",
+        "/%61pi/v1/missing",
+        "/api%2Fv1/missing",
+    ):
         response = client.get(url)
-        assert response.status_code == 404, f"expected 404 for {url!r}, got {response.status_code}"
+        assert response.status_code == 404, (
+            f"expected 404 for {url!r}, got {response.status_code} "
+            f"(body starts with {response.text[:40]!r})"
+        )
 
 
 def test_spa_index_sends_no_cache_header(tmp_path: Path) -> None:
