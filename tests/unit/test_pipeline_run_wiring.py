@@ -13,6 +13,8 @@ The full integration coverage lives in
 
 from __future__ import annotations
 
+from tests.helpers import function_source_text, module_source_text
+
 
 class TestMakeApiAppSeam:
     """``_run_with_config`` accepts an injected ``make_api_app`` factory."""
@@ -27,12 +29,11 @@ class TestSharedConnectionManager:
     """One ``ConnectionManager`` shared by handler and FastAPI app."""
 
     def test_make_handler_receives_ws_manager(self) -> None:
-        import inspect
         import re
 
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod._run_with_config)
+        src = function_source_text(run_mod._run_with_config)
         # A single ConnectionManager is built and passed to make_handler.
         # The construction may carry kwargs (e.g. alert_store=storage); use a
         # whitespace-tolerant pattern so a future ruff format pass won't
@@ -59,11 +60,9 @@ class TestServeFastapi:
     """``_run_with_config`` mounts FastAPI via uvicorn, not aiohttp."""
 
     def test_make_api_app_called_in_source(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod._run_with_config)
+        src = function_source_text(run_mod._run_with_config)
         assert "make_api_app(" in src
         assert "uvicorn.Server" in src
         assert "create_health_app" not in src  # legacy aiohttp path removed
@@ -73,11 +72,9 @@ class TestPortInUse:
     """``_run_with_config`` surfaces a clear hint when port is in use."""
 
     def test_helpful_message_appears_in_module_source(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod)
+        src = module_source_text(run_mod)
         assert "EADDRINUSE" in src or "errno.EADDRINUSE" in src
         assert "dashboard_port" in src
 
@@ -86,11 +83,9 @@ class TestDistMissingHint:
     """``_run_with_config`` logs a hint when the React bundle is absent."""
 
     def test_hint_string_present_in_source(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod._run_with_config)
+        src = function_source_text(run_mod._run_with_config)
         assert "npm run build" in src
         assert "Dashboard bundle missing" in src
 
@@ -99,11 +94,9 @@ class TestShutdownOrder:
     """Pipeline + uvicorn run as siblings; uvicorn stops before storage."""
 
     def test_finally_block_stops_server_before_storage_close(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod._run_with_config)
+        src = function_source_text(run_mod._run_with_config)
 
         idx_should_exit = src.find("server.should_exit = True")
         # ``storage.close`` appears twice: once in the early build_pipeline
@@ -116,32 +109,26 @@ class TestShutdownOrder:
         assert idx_should_exit < idx_storage_close, "uvicorn must stop before storage.close()"
 
     def test_uses_asyncio_wait_first_completed(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod._run_with_config)
+        src = function_source_text(run_mod._run_with_config)
         assert "FIRST_COMPLETED" in src
         assert "pipeline_task" in src
 
 
 class TestSigtermWiresUvicorn:
     def test_helper_replaces_inline_signal_block(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod._run_with_config)
+        src = function_source_text(run_mod._run_with_config)
         assert "_install_shutdown_handlers(" in src
         # The legacy `nonlocal _shutdown_task` pattern must be gone.
         assert "_shutdown_task" not in src
 
     def test_uvicorn_install_signal_handlers_is_suppressed_in_correct_order(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        src = inspect.getsource(run_mod._run_with_config)
+        src = function_source_text(run_mod._run_with_config)
         idx_server = src.find("server = uvicorn.Server(")
         # Modern uvicorn (>=0.20) uses ``capture_signals`` instead of the
         # legacy ``install_signal_handlers`` the plan referenced; either form
@@ -162,10 +149,8 @@ class TestSigtermWiresUvicorn:
         )
 
     def test_helper_sets_should_exit_in_source(self) -> None:
-        import inspect
-
         from seerflow.pipeline import run as run_mod
 
-        helper_src = inspect.getsource(run_mod._install_shutdown_handlers)
+        helper_src = function_source_text(run_mod._install_shutdown_handlers)
         assert "ctx.server.should_exit = True" in helper_src
         assert "asyncio.create_task(pipeline.stop())" in helper_src
