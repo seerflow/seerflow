@@ -16,7 +16,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def test_module_source_text_returns_full_module(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_module_source_text_returns_full_module() -> None:
     from seerflow.pipeline import run as run_mod
     from tests.helpers import module_source_text
 
@@ -25,9 +25,7 @@ def test_module_source_text_returns_full_module(monkeypatch: pytest.MonkeyPatch)
     assert "def _install_shutdown_handlers" in src
 
 
-def test_function_source_text_resolves_method_and_dedents(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_function_source_text_resolves_method_and_dedents() -> None:
     from seerflow.detection.ensemble import DetectionEnsemble
     from tests.helpers import function_source_text
 
@@ -35,6 +33,38 @@ def test_function_source_text_resolves_method_and_dedents(
     # Dedent leaves the ``async def`` at column 0 so the snippet is a
     # standalone parseable module fragment.
     assert src.startswith("async def _load_granular_hw"), src.splitlines()[0]
+
+
+def test_function_source_text_raises_for_class_qualname() -> None:
+    from seerflow.detection.ensemble import DetectionEnsemble
+    from tests.helpers import function_source_text
+
+    with pytest.raises(TypeError, match="resolves to a class"):
+        function_source_text(DetectionEnsemble, qualname="DetectionEnsemble")
+
+
+def test_function_source_text_raises_for_unknown_name() -> None:
+    from seerflow.pipeline import run as run_mod
+    from tests.helpers import function_source_text
+
+    with pytest.raises(ValueError, match="could not resolve"):
+        function_source_text(run_mod._run_with_config, qualname="nonexistent_fn")
+
+
+def test_function_source_text_rejects_locals_qualname() -> None:
+    from seerflow.pipeline import run as run_mod
+    from tests.helpers import function_source_text
+
+    with pytest.raises(TypeError, match="nested"):
+        function_source_text(run_mod._run_with_config, qualname="outer.<locals>.inner")
+
+
+def test_function_source_text_rejects_empty_qualname() -> None:
+    from seerflow.pipeline import run as run_mod
+    from tests.helpers import function_source_text
+
+    with pytest.raises(TypeError, match="empty"):
+        function_source_text(run_mod._run_with_config, qualname="")
 
 
 def test_helpers_survive_inspect_getsource_oserror(
