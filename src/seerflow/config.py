@@ -430,8 +430,8 @@ def load_config(
     ws_fields = _parse_ws_fields(raw)
     api_fields = _parse_api_fields(raw)
 
-    from seerflow._config_builders import _build_threat_intel_config
     from seerflow._config_validation import validate_seerflow_config
+    from seerflow._threat_intel_builders import _build_threat_intel_config
 
     threat_intel = _build_threat_intel_config(raw.get("threat_intel", {}))
 
