@@ -33,6 +33,7 @@ from seerflow.models.entity import (
     sanitize_for_log,
 )
 from seerflow.models.event import AttrValue, SeerflowEvent, SeverityLevel
+from seerflow.models.indicator import Indicator, IndicatorSnapshot, IndicatorType
 from seerflow.models.query import (
     AlertQuery,
     EntityRelation,
@@ -61,6 +62,9 @@ __all__ = [
     "FileEntity",
     "HostEntity",
     "IPEntity",
+    "Indicator",
+    "IndicatorSnapshot",
+    "IndicatorType",
     "Page",
     "ProcessEntity",
     "SecurityEntity",
