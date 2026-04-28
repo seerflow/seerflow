@@ -75,9 +75,7 @@ class TAXIIFeedConsumer:
         last_added: str | None = None
 
         try:
-            async for sdo, last in self._client.get_objects(
-                objects_url, added_after=added_after
-            ):
+            async for sdo, last in self._client.get_objects(objects_url, added_after=added_after):
                 last_added = last or last_added
                 indicators = self._parser.parse(sdo, source_feed=self._cfg.id)
                 indicators = self._filter_expired(indicators)
@@ -113,14 +111,14 @@ class TAXIIFeedConsumer:
         try:
             await asyncio.wait_for(stop.wait(), timeout=jitter)
             return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         while not stop.is_set():
             await self.poll_once()
             try:
                 await asyncio.wait_for(stop.wait(), timeout=float(self.poll_interval_s))
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     # internals -----------------------------------------------------------
@@ -129,15 +127,11 @@ class TAXIIFeedConsumer:
         base = self._cfg.url.rstrip("/")
         return f"{base}/collections/{self._cfg.collection_id}/objects/"
 
-    async def _persist(
-        self, snap: IndicatorSnapshot, *, truncated: int
-    ) -> None:
+    async def _persist(self, snap: IndicatorSnapshot, *, truncated: int) -> None:
         snap_bytes = msgspec.msgpack.encode(snap)
         await self._store.save_state(f"taxii:snapshot:{self._cfg.id}", snap_bytes)
         if snap.cursor is not None:
-            await self._store.save_state(
-                f"taxii:cursor:{self._cfg.id}", snap.cursor.encode()
-            )
+            await self._store.save_state(f"taxii:cursor:{self._cfg.id}", snap.cursor.encode())
         seen_by_type: dict[str, int] = {}
         for ind in snap.indicators:
             seen_by_type[ind.type] = seen_by_type.get(ind.type, 0) + 1
@@ -161,14 +155,10 @@ class TAXIIFeedConsumer:
             return inds
         cutoff_ns = self._clock_ns() - grace_days * 86_400 * 1_000_000_000
         return tuple(
-            ind
-            for ind in inds
-            if ind.valid_until_ns is None or ind.valid_until_ns >= cutoff_ns
+            ind for ind in inds if ind.valid_until_ns is None or ind.valid_until_ns >= cutoff_ns
         )
 
-    def _filter_confidence(
-        self, inds: tuple[Indicator, ...]
-    ) -> tuple[Indicator, ...]:
+    def _filter_confidence(self, inds: tuple[Indicator, ...]) -> tuple[Indicator, ...]:
         floor = self._cfg.confidence_floor
         if floor <= 0:
             return inds

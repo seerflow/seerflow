@@ -12,7 +12,7 @@ snapshot, verify the indicator value round-tripped.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import msgspec
 import pytest
@@ -27,6 +27,9 @@ from seerflow.config import (
 from seerflow.models.indicator import IndicatorSnapshot
 from seerflow.storage import connect_storage
 from seerflow.threat_intel.manager import TAXIIFeedManager
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.mark.asyncio

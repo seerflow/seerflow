@@ -123,8 +123,6 @@ def _resolve_auth(
         u = os.environ.get(auth.username_env)
         p = os.environ.get(auth.password_env)
         if not u or not p:
-            raise RuntimeError(
-                f"env vars {auth.username_env}/{auth.password_env} unset"
-            )
+            raise RuntimeError(f"env vars {auth.username_env}/{auth.password_env} unset")
         return None, aiohttp.BasicAuth(login=u, password=p)
     raise RuntimeError(f"unknown auth kind: {auth.kind}")
