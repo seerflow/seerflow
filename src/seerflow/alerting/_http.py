@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import aiohttp
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 _log = logging.getLogger("seerflow")
 
@@ -20,6 +20,8 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
 # echo the request URL, so scrubbing at the log boundary keeps bot tokens out
 # of operator log streams.
 _SECRET_URL_PATTERNS = (re.compile(r"/bot[^/\s]+/"),)
+
+RetryDecision = Literal["stop", "retry", "default"]
 
 
 def sanitize_body(raw: str, max_len: int = 200) -> str:
@@ -61,12 +63,15 @@ def _build_post_kwargs(
 
 
 async def _handle_response(
-    resp: aiohttp.ClientResponse, masked_for_log: str, attempt: int
+    resp: aiohttp.ClientResponse,
+    body_text: str,
+    masked_for_log: str,
+    attempt: int,
 ) -> bool:
     """Return True when the caller should stop retrying (success or 4xx)."""
     if resp.status < 400:
         return True
-    body = sanitize_body(await resp.text(errors="replace"))
+    body = sanitize_body(body_text)
     if resp.status < 500:
         _log.error(
             "Channel %s returned client error %d - not retrying - response: %s",
@@ -97,6 +102,7 @@ async def post_with_retry(
     auth: aiohttp.BasicAuth | None = None,
     timeout_seconds: float = 10.0,
     data: Any = None,
+    body_inspector: Callable[[int, str], RetryDecision] | None = None,
 ) -> None:
     """POST with exponential backoff.
 
@@ -105,12 +111,36 @@ async def post_with_retry(
     logs - never pass a raw URL that contains secrets.
     When ``data`` is provided, it is sent as form-encoded body; otherwise
     ``payload`` is sent as JSON.
+
+    ``body_inspector`` (optional): callback invoked for every non-2xx response
+    with ``(status, body_text)``. Returns one of:
+
+    - ``"stop"``  - exit retry loop immediately. The inspector owns any logging.
+    - ``"retry"`` - log a warning, sleep the backoff delay, retry.
+    - ``"default"`` - fall through to the standard 4xx-stop / 5xx-retry path.
+
+    Inspector exceptions land in the broad ``except`` block below and trigger a
+    retry attempt (same as a transport error).
     """
     post_kwargs = _build_post_kwargs(timeout_seconds, headers, auth, payload, data)
     for attempt in range(attempts):
         try:
             async with session.post(url, **post_kwargs) as resp:
-                if await _handle_response(resp, masked_for_log, attempt):
+                body_text = await resp.text(errors="replace")
+                if resp.status >= 400 and body_inspector is not None:
+                    decision = body_inspector(resp.status, body_text)
+                    if decision == "stop":
+                        return
+                    if decision == "retry":
+                        _log.warning(
+                            "Channel %s inspector requested retry (attempt %d, status %d)",
+                            masked_for_log,
+                            attempt + 1,
+                            resp.status,
+                        )
+                    elif await _handle_response(resp, body_text, masked_for_log, attempt):
+                        return
+                elif await _handle_response(resp, body_text, masked_for_log, attempt):
                     return
         except Exception as exc:
             # CancelledError is BaseException on Py3.8+ so it still propagates.

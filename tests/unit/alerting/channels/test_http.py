@@ -6,7 +6,7 @@ from typing import Any
 
 import aiohttp
 import pytest
-from aioresponses import aioresponses
+from aioresponses import CallbackResult, aioresponses
 
 from seerflow.alerting._http import post_with_retry
 
@@ -170,11 +170,11 @@ async def test_body_inspector_stop_short_circuits_5xx() -> None:
         del status, body_text
         return "stop"
 
-    def _capture(url: str, **kwargs: Any) -> aioresponses.CallbackResult:
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
         del url, kwargs
         nonlocal call_count
         call_count += 1
-        return aioresponses.CallbackResult(status=503)
+        return CallbackResult(status=503)
 
     with aioresponses() as mock:
         mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
@@ -200,11 +200,11 @@ async def test_body_inspector_default_preserves_4xx_drop() -> None:
         del status, body_text
         return "default"
 
-    def _capture(url: str, **kwargs: Any) -> aioresponses.CallbackResult:
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
         del url, kwargs
         nonlocal call_count
         call_count += 1
-        return aioresponses.CallbackResult(status=400)
+        return CallbackResult(status=400)
 
     with aioresponses() as mock:
         mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
@@ -230,11 +230,11 @@ async def test_body_inspector_default_preserves_5xx_retry() -> None:
         del status, body_text
         return "default"
 
-    def _capture(url: str, **kwargs: Any) -> aioresponses.CallbackResult:
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
         del url, kwargs
         nonlocal call_count
         call_count += 1
-        return aioresponses.CallbackResult(status=503)
+        return CallbackResult(status=503)
 
     with aioresponses() as mock:
         mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
