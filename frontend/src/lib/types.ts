@@ -223,20 +223,11 @@ export interface FeedbackHistoryResponse {
 // propagate automatically when added to `WsMessage`.
 export type WireWsMessage = Exclude<WsMessage, { type: "__status" }>;
 
-// --- S-208: structural type guards for heterogeneous batch envelopes ---
-// Used by AlertFeed / EventStream to discriminate `batch` payloads where the
-// wire envelope carries `events: LiveEvent[] | Alert[]`. Checks are
-// structural on the discriminator id field the widgets already rely on.
-export function isAlert(x: unknown): x is Alert {
-  return (
-    typeof x === "object" &&
-    x !== null &&
-    Object.hasOwn(x, "alert_id") &&
-    typeof (x as { alert_id: unknown }).alert_id === "string" &&
-    !Object.hasOwn(x, "event_id")
-  );
-}
-
+// --- S-208 / S-211: structural type guard for the `batch` envelope. After
+// S-211 narrowed `batch.events` to `LiveEvent[]`, the wire shape is
+// homogeneous and `isLiveEvent` runs as defence-in-depth at the bus level
+// for synthetic / mocked emissions that bypass `parseWsFrame`. The
+// matching `isAlert` guard is gone — `alert_batch` is statically typed.
 export function isLiveEvent(x: unknown): x is LiveEvent {
   return (
     typeof x === "object" &&
