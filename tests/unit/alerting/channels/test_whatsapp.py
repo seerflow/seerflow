@@ -254,9 +254,7 @@ async def test_whatsapp_retries_503_then_succeeds() -> None:
     assert call_count == 2
 
 
-async def _deliver_with_zero_delay(
-    target: WhatsAppTarget, session: aiohttp.ClientSession
-) -> None:
+async def _deliver_with_zero_delay(target: WhatsAppTarget, session: aiohttp.ClientSession) -> None:
     """Run target.deliver(...) with zero-delay backoff inside post_with_retry.
 
     `_post_one` calls the symbol `post_with_retry` it imported at module load,
@@ -273,9 +271,9 @@ async def _deliver_with_zero_delay(
         kwargs["delays"] = (0.0, 0.0, 0.0)
         await original(*args, **kwargs)
 
-    _http.post_with_retry = fast  # type: ignore[assignment]
-    _wa.post_with_retry = fast  # type: ignore[attr-defined]
     try:
+        _http.post_with_retry = fast  # type: ignore[assignment]
+        _wa.post_with_retry = fast  # type: ignore[attr-defined]
         await target.deliver(make_alert(), session=session)
     finally:
         _http.post_with_retry = original  # type: ignore[assignment]
@@ -320,7 +318,8 @@ async def test_whatsapp_three_5xx_exhausts_retries(
 
     assert call_count == 3
     error_lines = [
-        rec for rec in caplog.records
+        rec
+        for rec in caplog.records
         if rec.levelno >= logging.ERROR and "exhausted" in rec.getMessage()
     ]
     assert len(error_lines) == 1

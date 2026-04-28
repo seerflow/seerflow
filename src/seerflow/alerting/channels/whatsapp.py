@@ -8,14 +8,14 @@ from dataclasses import dataclass, field
 from time import monotonic
 from typing import TYPE_CHECKING
 
-import aiohttp
-
 from seerflow.alerting._http import RetryDecision, post_with_retry
 from seerflow.alerting.channels._format import severity_name as _sev_name
 from seerflow.alerting.channels._ratelimit import TokenBucket
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    import aiohttp
 
     from seerflow.models.alert import Alert
 
@@ -103,8 +103,7 @@ class WhatsAppTarget:
 
     def _inspect_response(self, status: int, body_text: str) -> RetryDecision:
         """Open the 5-minute circuit on Meta error code 131026; otherwise defer."""
-        if status < 400:
-            return "default"
+        del status
         try:
             body = json.loads(body_text)
         except (ValueError, TypeError):
