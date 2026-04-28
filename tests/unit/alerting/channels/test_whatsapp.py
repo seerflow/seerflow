@@ -216,3 +216,39 @@ async def test_whatsapp_digest_sends_one_template_with_top_alert() -> None:
     texts = [p["text"] for p in params]
     assert "top" in texts
     assert "CRITICAL" in texts
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_retries_503_then_succeeds() -> None:
+    """Transient 5xx must be retried; the eventual 200 must produce a single delivery."""
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+        rate_per_second=1000.0,
+        burst=1000,
+    )
+    call_count = 0
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return CallbackResult(status=503, payload={})
+        return CallbackResult(status=200, payload={"messages": []})
+
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+            repeat=True,
+        )
+        async with aiohttp.ClientSession() as session:
+            await target.deliver(make_alert(), session=session)
+
+    assert call_count == 2
