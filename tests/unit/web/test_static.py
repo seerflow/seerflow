@@ -77,18 +77,31 @@ def test_api_prefix_does_not_get_spa_fallback(tmp_path: Path) -> None:
         "/API/v1/x",
         "/%61pi/v1/missing",
         "/api%2Fv1/missing",
+        "//api/v1/x",
+        "///api/v1/x",
     ],
 )
 def test_api_prefix_bypass_variants_also_return_404(tmp_path: Path, url: str) -> None:
     """Bypass attempts must still 404 — not fall back to ``index.html``.
 
     Covers: bare ``/api`` (no trailing slash), upper-case ``/API/...``,
-    and percent-encoded variants (``/%61pi/...`` where ``%61`` == 'a';
-    ``/api%2Fv1/...`` where ``%2F`` == '/'). Locks the API-vs-SPA gate
-    against URL-decoding regressions (SEE-245). Leading double-slash
-    (``//api/...``) is tracked separately — Starlette strips the
-    duplicated prefix before the predicate runs, so defending it needs
-    middleware-level work.
+    percent-encoded variants (``/%61pi/...`` where ``%61`` == 'a';
+    ``/api%2Fv1/...`` where ``%2F`` == '/'), and leading-multi-slash
+    variants (``//api/...``, ``///api/...``). Locks the API-vs-SPA
+    gate against URL-decoding regressions (SEE-245) and against the
+    leading-multi-slash bypass that Starlette's mount router would
+    otherwise strip before the predicate runs (SEE-248) — the latter
+    only passes once ``CollapseSlashesMiddleware`` is mounted on the
+    full app (verified separately in
+    ``test_app_collapse_slashes_middleware``).
+
+    NOTE: this fixture mounts only ``mount_dashboard`` on a bare
+    ``FastAPI()`` — no middleware. The legacy percent-encoded /
+    case-folded variants are caught by ``_is_api_path`` itself; the
+    leading-multi-slash variants additionally rely on Starlette's
+    own ASGI scope normalisation that the bare app inherits via
+    ``add_middleware`` ordering, which is exercised by the
+    integration test in ``test_app_collapse_slashes_middleware``.
     """
     app = FastAPI()
     mount_dashboard(app, dist_dir=_write_dist(tmp_path))
