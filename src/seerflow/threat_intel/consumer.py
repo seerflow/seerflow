@@ -57,31 +57,10 @@ class TAXIIFeedConsumer:
     async def poll_once(self) -> IndicatorSnapshot:
         if not self._breaker.allow():
             return self._empty_snapshot_for_open_circuit()
-
         cursor_bytes = await self._store.load_state(f"taxii:cursor:{self._cfg.id}")
         added_after = cursor_bytes.decode() if cursor_bytes else None
-
-        objects_url = self._build_objects_url()
-        cap = self._defaults.max_indicators_per_feed
-        collected: list[Indicator] = []
-        truncated = 0
-        last_added: str | None = None
-
         try:
-            async for sdo, last in self._client.get_objects(objects_url, added_after=added_after):
-                last_added = last or last_added
-                if sdo is None:
-                    # Cursor-only marker emitted by the client for empty pages —
-                    # advance the watermark even when the page has no SDOs.
-                    continue
-                indicators = self._parser.parse(sdo, source_feed=self._cfg.id)
-                indicators = self._filter_expired(indicators)
-                indicators = self._filter_confidence(indicators)
-                for ind in indicators:
-                    if len(collected) >= cap:
-                        truncated += 1
-                        continue
-                    collected.append(ind)
+            collected, truncated, last_added = await self._collect_indicators(added_after)
         except GetWithRetryError as exc:
             self._classify_failure(exc)
             return IndicatorSnapshot(
@@ -90,14 +69,12 @@ class TAXIIFeedConsumer:
                 indicators=(),
                 cursor=added_after,
             )
-
         snap = IndicatorSnapshot(
             feed_id=self._cfg.id,
             fetched_at_ns=self._clock_ns(),
             indicators=tuple(collected),
             cursor=last_added,
         )
-
         # Persist the snapshot+cursor pair atomically vs cancellation so a
         # SIGTERM mid-poll does not leave taxii:snapshot:* and
         # taxii:cursor:* desynchronised on disk.
@@ -105,6 +82,33 @@ class TAXIIFeedConsumer:
         self._breaker.record_success()
         self._metrics.set_circuit_open(self._cfg.id, open_=False)
         return snap
+
+    async def _collect_indicators(
+        self, added_after: str | None
+    ) -> tuple[list[Indicator], int, str | None]:
+        """Walk the client's pagination, parse each SDO, apply filters and
+        truncation cap. Returns ``(collected, truncated, last_added)``.
+        """
+        objects_url = self._build_objects_url()
+        cap = self._defaults.max_indicators_per_feed
+        collected: list[Indicator] = []
+        truncated = 0
+        last_added: str | None = None
+        async for sdo, last in self._client.get_objects(objects_url, added_after=added_after):
+            last_added = last or last_added
+            if sdo is None:
+                # Cursor-only marker emitted by the client for empty pages —
+                # advance the watermark even when the page has no SDOs.
+                continue
+            indicators = self._parser.parse(sdo, source_feed=self._cfg.id)
+            indicators = self._filter_expired(indicators)
+            indicators = self._filter_confidence(indicators)
+            for ind in indicators:
+                if len(collected) >= cap:
+                    truncated += 1
+                    continue
+                collected.append(ind)
+        return collected, truncated, last_added
 
     async def run_forever(self, stop: asyncio.Event) -> None:
         jitter = random.uniform(0.0, float(self._defaults.startup_jitter_s))  # noqa: S311

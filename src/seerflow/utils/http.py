@@ -71,37 +71,15 @@ async def get_with_retry(
                 break
             await _sleep_backoff(attempt, base_delay_s, jitter_pct, url, exc=exc)
             continue
-        # ``result`` is either ``(status, body, headers)`` (return now) or
-        # the integer status of a retryable response (sleep + retry, or
-        # break on final attempt).
         if isinstance(result, tuple):
             return result
         last_status = result
         if attempt >= max_attempts:
             break
-        retry_after = _parse_retry_after(_RETRY_AFTER_HEADER.pop(url, None))
-        delay = (
-            retry_after if retry_after is not None else _backoff(attempt, base_delay_s, jitter_pct)
+        await _sleep_after_retryable(
+            attempt, max_attempts, base_delay_s, jitter_pct, url, status=last_status
         )
-        _log.warning(
-            "get_with_retry: %s -> %s (attempt %d/%d), sleeping %.2fs",
-            url,
-            last_status,
-            attempt,
-            max_attempts,
-            delay,
-        )
-        await asyncio.sleep(delay)
-
-    if last_exc is not None:
-        raise GetWithRetryError(
-            f"GET {url} failed after {max_attempts} attempts; last error: {last_exc!r}",
-            status=None,
-        )
-    raise GetWithRetryError(
-        f"GET {url} failed after {max_attempts} attempts; last status: {last_status}",
-        status=last_status,
-    )
+    raise _exhausted_error(url, max_attempts, last_exc, last_status)
 
 
 # Out-of-band stash for the most recent ``Retry-After`` header so the
@@ -156,6 +134,45 @@ async def _sleep_backoff(
         delay,
     )
     await asyncio.sleep(delay)
+
+
+async def _sleep_after_retryable(
+    attempt: int,
+    max_attempts: int,
+    base_delay_s: float,
+    jitter_pct: float,
+    url: str,
+    *,
+    status: int | None,
+) -> None:
+    retry_after = _parse_retry_after(_RETRY_AFTER_HEADER.pop(url, None))
+    delay = retry_after if retry_after is not None else _backoff(attempt, base_delay_s, jitter_pct)
+    _log.warning(
+        "get_with_retry: %s -> %s (attempt %d/%d), sleeping %.2fs",
+        url,
+        status,
+        attempt,
+        max_attempts,
+        delay,
+    )
+    await asyncio.sleep(delay)
+
+
+def _exhausted_error(
+    url: str,
+    max_attempts: int,
+    last_exc: Exception | None,
+    last_status: int | None,
+) -> GetWithRetryError:
+    if last_exc is not None:
+        return GetWithRetryError(
+            f"GET {url} failed after {max_attempts} attempts; last error: {last_exc!r}",
+            status=None,
+        )
+    return GetWithRetryError(
+        f"GET {url} failed after {max_attempts} attempts; last status: {last_status}",
+        status=last_status,
+    )
 
 
 def _backoff(attempt: int, base_delay_s: float, jitter_pct: float) -> float:
