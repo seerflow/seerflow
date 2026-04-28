@@ -40,7 +40,7 @@ jobs:
         run: uv run bandit -r src/ -c pyproject.toml
 
       - name: Tests with coverage
-        run: uv run pytest --cov=src/seerflow --cov-branch --cov-report=xml --cov-report=term-missing -v
+        run: uv run pytest --cov=src/seerflow --cov-branch --cov-report=xml --cov-report=term-missing --cov-fail-under=95 -v
 
       - name: Coverage summary
         if: success()
