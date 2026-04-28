@@ -1,0 +1,9 @@
+threat_intel:
+  enabled: true
+  default_poll_interval_s: 1800
+  feeds:
+    - id: abuse_ch_threatfox
+      url: https://threatfox.abuse.ch/taxii2/
+      collection_id: threatfox
+      poll_interval_s: 1800
+      confidence_floor: 50

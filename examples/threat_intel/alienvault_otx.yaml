@@ -1,0 +1,12 @@
+threat_intel:
+  enabled: true
+  default_poll_interval_s: 3600
+  feeds:
+    - id: alienvault_otx
+      url: https://otx.alienvault.com/taxii/
+      collection_id: subscribed
+      poll_interval_s: 3600
+      auth:
+        kind: api_key
+        api_key_env: OTX_API_KEY
+        api_key_header: X-OTX-API-KEY
