@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import ast
-import inspect
 import logging
 import math
 import statistics
-import textwrap
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +22,7 @@ from seerflow.detection.ensemble import (
 from seerflow.detection.holtwinters import HoltWintersDetector
 from seerflow.models import SeerflowEvent, SeverityLevel
 from seerflow.storage.sqlite import SqliteBackend
+from tests.helpers import function_source_text
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -2505,7 +2504,7 @@ class TestEnsembleFunctionLength:
     """S-206 AC-1: core loader stays under the project 50-line function cap."""
 
     def test_load_granular_hw_under_fifty_lines(self) -> None:
-        src = textwrap.dedent(inspect.getsource(DetectionEnsemble._load_granular_hw))
+        src = function_source_text(DetectionEnsemble._load_granular_hw)
         tree = ast.parse(src)
         fn = tree.body[0]
         assert isinstance(fn, ast.AsyncFunctionDef), (
