@@ -126,8 +126,10 @@ async def post_with_retry(
     for attempt in range(attempts):
         try:
             async with session.post(url, **post_kwargs) as resp:
+                if resp.status < 400:
+                    return
                 body_text = await resp.text(errors="replace")
-                if resp.status >= 400 and body_inspector is not None:
+                if body_inspector is not None:
                     decision = body_inspector(resp.status, body_text)
                     if decision == "stop":
                         return
