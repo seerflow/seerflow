@@ -308,13 +308,11 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
         )
     if config.expired_grace_days < 0:
         raise ConfigError(
-            f"threat_intel.expired_grace_days must be >= 0, "
-            f"got {config.expired_grace_days!r}"
+            f"threat_intel.expired_grace_days must be >= 0, got {config.expired_grace_days!r}"
         )
     if config.startup_jitter_s < 0:
         raise ConfigError(
-            f"threat_intel.startup_jitter_s must be >= 0, "
-            f"got {config.startup_jitter_s!r}"
+            f"threat_intel.startup_jitter_s must be >= 0, got {config.startup_jitter_s!r}"
         )
 
     # Cheap structural checks first (duplicates, scheme, scalar bounds, auth
@@ -323,9 +321,7 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
     seen_ids: set[str] = set()
     for feed in config.feeds:
         if feed.id in seen_ids:
-            raise ConfigError(
-                f"threat_intel.feeds: duplicate id {feed.id!r}"
-            )
+            raise ConfigError(f"threat_intel.feeds: duplicate id {feed.id!r}")
         seen_ids.add(feed.id)
 
         parsed = urlparse(feed.url)
@@ -336,13 +332,10 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
             )
         if parsed.scheme == "http" and not feed.allow_insecure:
             raise ConfigError(
-                f"threat_intel.feeds[{feed.id}].url must use https unless "
-                "allow_insecure is true"
+                f"threat_intel.feeds[{feed.id}].url must use https unless allow_insecure is true"
             )
         if not parsed.hostname:
-            raise ConfigError(
-                f"threat_intel.feeds[{feed.id}].url must include a hostname"
-            )
+            raise ConfigError(f"threat_intel.feeds[{feed.id}].url must include a hostname")
 
         if feed.poll_interval_s is not None and feed.poll_interval_s < 60:
             raise ConfigError(
@@ -362,9 +355,7 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
                     f"threat_intel.feeds[{feed.id}].auth.api_key_env is required "
                     "when kind='api_key'"
                 )
-            if auth.kind == "basic" and (
-                not auth.username_env or not auth.password_env
-            ):
+            if auth.kind == "basic" and (not auth.username_env or not auth.password_env):
                 raise ConfigError(
                     f"threat_intel.feeds[{feed.id}].auth.username_env and "
                     "password_env are required when kind='basic'"

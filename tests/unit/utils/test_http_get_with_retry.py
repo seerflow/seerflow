@@ -30,9 +30,7 @@ async def test_get_with_retry_retries_on_5xx() -> None:
         m.get(url, status=503)
         m.get(url, status=200, payload={"ok": True})
         async with aiohttp.ClientSession() as s:
-            status, _body, _h = await get_with_retry(
-                s, url, max_attempts=4, base_delay_s=0.001
-            )
+            status, _body, _h = await get_with_retry(s, url, max_attempts=4, base_delay_s=0.001)
         assert status == 200
 
 
@@ -43,9 +41,7 @@ async def test_get_with_retry_honors_retry_after() -> None:
         m.get(url, status=429, headers={"Retry-After": "0"})
         m.get(url, status=200, payload={})
         async with aiohttp.ClientSession() as s:
-            status, _b, _h = await get_with_retry(
-                s, url, max_attempts=3, base_delay_s=0.001
-            )
+            status, _b, _h = await get_with_retry(s, url, max_attempts=3, base_delay_s=0.001)
         assert status == 200
 
 
@@ -66,7 +62,5 @@ async def test_get_with_retry_does_not_retry_on_4xx_other_than_429() -> None:
     with aioresponses() as m:
         m.get(url, status=403)
         async with aiohttp.ClientSession() as s:
-            status, _b, _h = await get_with_retry(
-                s, url, max_attempts=3, base_delay_s=0.001
-            )
+            status, _b, _h = await get_with_retry(s, url, max_attempts=3, base_delay_s=0.001)
         assert status == 403  # caller decides

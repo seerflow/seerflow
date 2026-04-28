@@ -11,9 +11,7 @@ from aioresponses import aioresponses
 from seerflow.threat_intel.client import TAXIIClient
 
 ROOT = "https://taxii.example/taxii2/"
-COLLECTION_OBJECTS = (
-    "https://taxii.example/taxii2/api1/collections/abc/objects/"
-)
+COLLECTION_OBJECTS = "https://taxii.example/taxii2/api1/collections/abc/objects/"
 
 
 @pytest.mark.asyncio
@@ -48,9 +46,7 @@ async def test_get_objects_yields_indicators_across_pages() -> None:
 
             collected: list[dict] = []
             cursor: str | None = None
-            async for sdo, last_added in client.get_objects(
-                COLLECTION_OBJECTS, added_after=None
-            ):
+            async for sdo, last_added in client.get_objects(COLLECTION_OBJECTS, added_after=None):
                 collected.append(sdo)
                 cursor = last_added
 
@@ -65,6 +61,7 @@ async def test_get_objects_sends_added_after_param() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)
         with aioresponses() as m:
+
             def _cb(url, **kwargs):
                 captured["params"] = kwargs.get("params") or {}
                 from aioresponses.core import CallbackResult
@@ -107,10 +104,7 @@ async def test_get_objects_sets_taxii_accept_header() -> None:
             m.get(COLLECTION_OBJECTS, callback=_cb)
             async for _ in client.get_objects(COLLECTION_OBJECTS, added_after=None):
                 pass
-            assert (
-                captured["headers"].get("Accept")
-                == "application/taxii+json;version=2.1"
-            )
+            assert captured["headers"].get("Accept") == "application/taxii+json;version=2.1"
 
 
 @pytest.mark.asyncio

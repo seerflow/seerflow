@@ -58,9 +58,7 @@ class TAXIIMetricsRegistry:
             st.polls_ok_total += 1
             st.last_successful_poll_at_ns = at_ns
             for k, v in indicators_by_type.items():
-                st.indicators_seen_total[k] = (
-                    st.indicators_seen_total.get(k, 0) + v
-                )
+                st.indicators_seen_total[k] = st.indicators_seen_total.get(k, 0) + v
 
     def record_poll_failed(self, feed_id: str, *, auth: bool) -> None:
         with self._lock:

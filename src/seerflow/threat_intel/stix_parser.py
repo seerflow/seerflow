@@ -39,9 +39,7 @@ _HASH_NAME_MAP: dict[str, IndicatorType] = {
 class STIXIndicatorParser:
     """Parser for STIX 2.1 ``indicator`` SDOs."""
 
-    def parse(
-        self, sdo: dict[str, Any], *, source_feed: str
-    ) -> tuple[Indicator, ...]:
+    def parse(self, sdo: dict[str, Any], *, source_feed: str) -> tuple[Indicator, ...]:
         if sdo.get("type") != "indicator":
             return ()
 
@@ -58,9 +56,7 @@ class STIXIndicatorParser:
             tree = _pv.create_pattern_object(pattern, version="2.1")
             leaves = _extract_leaves(tree)
         except Exception as exc:
-            _log.warning(
-                "stix_parser: pattern walk failed id=%s: %r", sdo.get("id"), exc
-            )
+            _log.warning("stix_parser: pattern walk failed id=%s: %r", sdo.get("id"), exc)
             return ()
 
         confidence = int(sdo.get("confidence", 0))
@@ -136,8 +132,7 @@ def _walk_comparison(cmp: Any, leaves: list[tuple[IndicatorType, str]]) -> None:
     obj_type = (getattr(path, "object_type_name", "") or "").lower()
     prop_components = getattr(path, "property_path", None) or []
     prop_strs = tuple(
-        str(getattr(p, "property_name", p)).lower().strip("'\"")
-        for p in prop_components
+        str(getattr(p, "property_name", p)).lower().strip("'\"") for p in prop_components
     )
 
     value = getattr(rhs, "value", None)

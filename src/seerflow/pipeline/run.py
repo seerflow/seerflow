@@ -292,9 +292,7 @@ async def _run_with_config(
             ", ".join(taxii_failed),
         )
     elif config.threat_intel.enabled:
-        _log.info(
-            "Threat intel: %d feed(s) running", len(taxii_manager.feed_ids())
-        )
+        _log.info("Threat intel: %d feed(s) running", len(taxii_manager.feed_ids()))
 
     ensemble = DetectionEnsemble(config.detection)
     try:

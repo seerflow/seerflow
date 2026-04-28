@@ -53,9 +53,7 @@ def test_validator_rejects_http_without_opt_in() -> None:
     raw = {
         "threat_intel": {
             "enabled": True,
-            "feeds": [
-                {"id": "x", "url": "http://insecure.example/taxii/", "collection_id": "c"}
-            ],
+            "feeds": [{"id": "x", "url": "http://insecure.example/taxii/", "collection_id": "c"}],
         }
     }
     cfg = build_seerflow_config(raw)
@@ -101,9 +99,7 @@ def test_validator_disabled_block_skips_validation() -> None:
     raw = {
         "threat_intel": {
             "enabled": False,
-            "feeds": [
-                {"id": "x", "url": "http://insecure.example/", "collection_id": "c"}
-            ],
+            "feeds": [{"id": "x", "url": "http://insecure.example/", "collection_id": "c"}],
         }
     }
     cfg = build_seerflow_config(raw)

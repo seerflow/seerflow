@@ -1212,9 +1212,7 @@ def _build_taxii_auth_config(data: dict[str, Any]) -> TAXIIAuthConfig:
         raise ConfigError("threat_intel.feeds[].auth.api_key_env must be a string or omitted")
     api_key_header = data.get("api_key_header", "Authorization")
     if not isinstance(api_key_header, str) or not api_key_header:
-        raise ConfigError(
-            "threat_intel.feeds[].auth.api_key_header must be a non-empty string"
-        )
+        raise ConfigError("threat_intel.feeds[].auth.api_key_header must be a non-empty string")
     username_env = data.get("username_env")
     if username_env is not None and not isinstance(username_env, str):
         raise ConfigError("threat_intel.feeds[].auth.username_env must be a string or omitted")
@@ -1303,9 +1301,7 @@ def _build_threat_intel_config(data: dict[str, Any]) -> ThreatIntelConfig:
     if not data:
         return ThreatIntelConfig()
     if not isinstance(data, dict):
-        raise ConfigError(
-            f"threat_intel must be a mapping, got {type(data).__name__}"
-        )
+        raise ConfigError(f"threat_intel must be a mapping, got {type(data).__name__}")
 
     enabled = data.get("enabled", False)
     if not isinstance(enabled, bool):
@@ -1315,9 +1311,7 @@ def _build_threat_intel_config(data: dict[str, Any]) -> ThreatIntelConfig:
     if feeds_raw is None:
         feeds_raw = ()
     if not isinstance(feeds_raw, list | tuple):
-        raise ConfigError(
-            f"threat_intel.feeds must be a list, got {type(feeds_raw).__name__}"
-        )
+        raise ConfigError(f"threat_intel.feeds must be a list, got {type(feeds_raw).__name__}")
     feeds = tuple(_build_taxii_feed_config(entry) for entry in feeds_raw)
 
     default_poll = data.get("default_poll_interval_s", 3600)

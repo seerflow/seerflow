@@ -106,7 +106,7 @@ async def get_with_retry(
 
 
 def _backoff(attempt: int, base_delay_s: float, jitter_pct: float) -> float:
-    raw = base_delay_s * (2 ** (attempt - 1))
+    raw: float = base_delay_s * float(2 ** (attempt - 1))
     jitter = raw * jitter_pct * random.random()  # noqa: S311 (jitter only, not crypto)
     return raw + jitter
 
