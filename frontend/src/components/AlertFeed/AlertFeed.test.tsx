@@ -225,6 +225,38 @@ describe("AlertFeed integration", () => {
     expect(MockWS.last!.sent).toEqual([]);
   });
 
+  it("does not ingest alerts arriving under type:'batch' (alerts ship via alert_batch)", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+    // Let the warm-up promise resolve so subsequent bus emissions dispatch
+    // straight through `handleMessage` instead of being parked in the buffer.
+    await new Promise(r => setTimeout(r, 0));
+
+    // bigint timestamp_ns: we bypass parseWsFrame, which is the layer that
+    // would normally coerce the wire string → bigint, so the fixture has to
+    // ship in domain-typed form.
+    const mkAlert = (id: string, rule: string) => ({
+      alert_id: id, timestamp_ns: 1n, alert_type: "ml" as const, rule_name: rule,
+      severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
+      entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
+      dedup_count: 1, source_type: "syslog",
+    });
+    // Bypass parseWsFrame on purpose — the wire schema validates `batch` as
+    // LiveEvent-only and would drop this payload before it reached the bus.
+    // The whole point of this regression test is to prove that AlertFeed's
+    // bus subscription on `"batch"` is what re-introduces alert-shaped frames
+    // via the dead `isAlert(first)` branch in `handleMessage` (AlertFeed.tsx
+    // L73–L82). After Task 2 removes the subscription, the emit becomes a
+    // no-op for AlertFeed and the assertion holds.
+    act(() => {
+      wsBus.emit({ type: "batch", events: [mkAlert("ghost-1", "ghost-rule")] });
+    });
+
+    expect(screen.queryByText("ghost-rule")).toBeNull();
+  });
+
   it("handles alert_batch arrivals", async () => {
     fetchMock.mockResolvedValueOnce({ items: [] });
     renderWithProvider();
