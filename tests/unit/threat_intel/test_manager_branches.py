@@ -147,9 +147,7 @@ def test_resolve_auth_unknown_kind_raises() -> None:
     """
     from typing import cast
 
-    auth = cast(
-        "TAXIIAuthConfig", TAXIIAuthConfig.__new__(TAXIIAuthConfig)
-    )
+    auth = cast("TAXIIAuthConfig", TAXIIAuthConfig.__new__(TAXIIAuthConfig))
     object.__setattr__(auth, "kind", "weird")
     object.__setattr__(auth, "api_key_env", None)
     object.__setattr__(auth, "api_key_header", "Authorization")
