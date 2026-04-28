@@ -62,7 +62,7 @@ def _build_post_kwargs(
     return kwargs
 
 
-async def _handle_response(
+def _handle_response(
     resp: aiohttp.ClientResponse,
     body_text: str,
     masked_for_log: str,
@@ -72,7 +72,8 @@ async def _handle_response(
 
     Pre-condition: ``resp.status >= 400``. The caller (``post_with_retry``)
     short-circuits 2xx responses before this is invoked, so the success branch
-    no longer lives here.
+    no longer lives here. Synchronous because the body is already in hand —
+    the caller reads ``resp.text()`` once and passes the string through.
     """
     body = sanitize_body(body_text)
     if resp.status < 500:
@@ -143,9 +144,9 @@ async def post_with_retry(
                             attempt + 1,
                             resp.status,
                         )
-                    elif await _handle_response(resp, body_text, masked_for_log, attempt):
+                    elif _handle_response(resp, body_text, masked_for_log, attempt):
                         return
-                elif await _handle_response(resp, body_text, masked_for_log, attempt):
+                elif _handle_response(resp, body_text, masked_for_log, attempt):
                     return
         except Exception as exc:
             # CancelledError is BaseException on Py3.8+ so it still propagates.

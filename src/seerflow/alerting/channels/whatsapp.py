@@ -115,7 +115,7 @@ class WhatsAppTarget:
         """
         try:
             body = json.loads(body_text)
-        except (ValueError, TypeError):
+        except ValueError:
             body = {}
         code = (body.get("error") or {}).get("code") if isinstance(body, dict) else None
         if code == _TEMPLATE_NOT_FOUND:
@@ -128,12 +128,15 @@ class WhatsAppTarget:
             )
             return "stop"
         if code is not None and status < 500:
+            # Inspector owns the log: returning "stop" prevents post_with_retry
+            # from also logging the same response body via _handle_response.
             _log.error(
                 "WhatsApp %s: delivery failed status=%d code=%s",
                 self.name,
                 status,
                 code,
             )
+            return "stop"
         return "default"
 
     async def deliver(self, alert: Alert, *, session: aiohttp.ClientSession) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import aiohttp
@@ -14,6 +15,33 @@ from seerflow.alerting.channels.whatsapp import (
 )
 from seerflow.models.event import SeverityLevel
 from tests.unit.alert_factory import make_alert
+
+# --- helpers -----------------------------------------------------------------
+
+
+async def _deliver_with_zero_delay(target: WhatsAppTarget, session: aiohttp.ClientSession) -> None:
+    """Run target.deliver(...) with zero-delay backoff inside post_with_retry.
+
+    `_post_one` calls the symbol `post_with_retry` that was bound at module load
+    in `seerflow.alerting.channels.whatsapp`, so rebinding `_wa.post_with_retry`
+    is sufficient — `_post_one` does not re-import the name on each call.
+    """
+    from seerflow.alerting.channels import whatsapp as _wa
+
+    original = _wa.post_with_retry
+
+    async def fast(*args: Any, **kwargs: Any) -> None:
+        kwargs["delays"] = (0.0, 0.0, 0.0)
+        await original(*args, **kwargs)
+
+    try:
+        _wa.post_with_retry = fast  # type: ignore[attr-defined]
+        await target.deliver(make_alert(), session=session)
+    finally:
+        _wa.post_with_retry = original  # type: ignore[attr-defined]
+
+
+# --- tests -------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -130,7 +158,6 @@ async def test_whatsapp_131026_opens_circuit_for_5_minutes() -> None:
 async def test_whatsapp_non_131026_400_does_not_open_circuit(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    import logging
 
     target = WhatsAppTarget(
         name="w",
@@ -167,6 +194,7 @@ async def test_whatsapp_non_131026_400_does_not_open_circuit(
 
     code_lines = [rec.getMessage() for rec in caplog.records if "code=100" in rec.getMessage()]
     assert len(code_lines) == 2
+    assert target._circuit.open_until == 0.0
 
 
 @pytest.mark.unit
@@ -262,28 +290,6 @@ async def test_whatsapp_retries_503_then_succeeds() -> None:
     assert call_count == 2
 
 
-async def _deliver_with_zero_delay(target: WhatsAppTarget, session: aiohttp.ClientSession) -> None:
-    """Run target.deliver(...) with zero-delay backoff inside post_with_retry.
-
-    `_post_one` calls the symbol `post_with_retry` that was bound at module load
-    in `seerflow.alerting.channels.whatsapp`, so rebinding `_wa.post_with_retry`
-    is sufficient — `_post_one` does not re-import the name on each call.
-    """
-    from seerflow.alerting.channels import whatsapp as _wa
-
-    original = _wa.post_with_retry
-
-    async def fast(*args: Any, **kwargs: Any) -> None:
-        kwargs["delays"] = (0.0, 0.0, 0.0)
-        await original(*args, **kwargs)
-
-    try:
-        _wa.post_with_retry = fast  # type: ignore[attr-defined]
-        await target.deliver(make_alert(), session=session)
-    finally:
-        _wa.post_with_retry = original  # type: ignore[attr-defined]
-
-
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_whatsapp_5xx_with_meta_code_does_not_double_log_error(
@@ -293,7 +299,6 @@ async def test_whatsapp_5xx_with_meta_code_does_not_double_log_error(
     escalated to ERROR by the inspector. ``post_with_retry`` already logs
     WARNING per attempt and ERROR on exhaustion; double-logging at ERROR per
     attempt would trigger operator alert fatigue for transient outages."""
-    import logging
 
     target = WhatsAppTarget(
         name="w",
@@ -332,7 +337,6 @@ async def test_whatsapp_three_5xx_exhausts_retries(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Three 503s in a row exhaust the retry envelope and emit one error log."""
-    import logging
 
     target = WhatsAppTarget(
         name="w",
