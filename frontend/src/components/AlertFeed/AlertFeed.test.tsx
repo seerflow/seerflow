@@ -247,9 +247,9 @@ describe("AlertFeed integration", () => {
     // Bypass parseWsFrame on purpose — the wire schema validates `batch` as
     // LiveEvent-only and would drop this payload before it reached the bus.
     // The whole point of this regression test is to prove that AlertFeed's
-    // bus subscription on `"batch"` is what re-introduces alert-shaped frames
-    // via the dead `isAlert(first)` branch in `handleMessage` (AlertFeed.tsx
-    // L73–L82). After Task 2 removes the subscription, the emit becomes a
+    // bus subscription on `"batch"` no longer re-introduces alert-shaped
+    // frames via a dead `isAlert(first)` branch in `handleMessage` (the
+    // branch + subscription were both removed in S-211). The emit is a
     // no-op for AlertFeed and the assertion holds.
     //
     // Cast: `WsMessage.batch.events` is `LiveEvent[]` after S-211's narrowing.
