@@ -127,7 +127,11 @@ async def test_whatsapp_131026_opens_circuit_for_5_minutes() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_whatsapp_non_131026_400_does_not_open_circuit() -> None:
+async def test_whatsapp_non_131026_400_does_not_open_circuit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
     target = WhatsAppTarget(
         name="w",
         phone_number_id="PID",
@@ -149,6 +153,7 @@ async def test_whatsapp_non_131026_400_does_not_open_circuit() -> None:
             payload={"error": {"code": 100, "message": "other"}},
         )
 
+    caplog.set_level(logging.ERROR, logger="seerflow")
     with aioresponses() as mock:
         mock.post(
             "https://graph.facebook.com/v18.0/PID/messages",
@@ -159,6 +164,9 @@ async def test_whatsapp_non_131026_400_does_not_open_circuit() -> None:
             await target.deliver(make_alert(), session=session)
             await target.deliver(make_alert(), session=session)
         assert count == 2
+
+    code_lines = [rec.getMessage() for rec in caplog.records if "code=100" in rec.getMessage()]
+    assert len(code_lines) == 2
 
 
 @pytest.mark.unit

@@ -102,8 +102,13 @@ class WhatsAppTarget:
         )
 
     def _inspect_response(self, status: int, body_text: str) -> RetryDecision:
-        """Open the 5-minute circuit on Meta error code 131026; otherwise defer."""
-        del status
+        """Open the 5-minute circuit on Meta error code 131026; otherwise defer.
+
+        For non-131026 errors the Meta-specific ``error.code`` is logged here
+        so operators retain the diagnostic field that the original hand-rolled
+        ``_post_one`` exposed before this path was routed through
+        ``post_with_retry`` (which only sees the raw response body).
+        """
         try:
             body = json.loads(body_text)
         except (ValueError, TypeError):
@@ -118,6 +123,13 @@ class WhatsAppTarget:
                 int(_CIRCUIT_OPEN_SECONDS),
             )
             return "stop"
+        if code is not None:
+            _log.error(
+                "WhatsApp %s: delivery failed status=%d code=%s",
+                self.name,
+                status,
+                code,
+            )
         return "default"
 
     async def deliver(self, alert: Alert, *, session: aiohttp.ClientSession) -> None:
