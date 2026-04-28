@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import TYPE_CHECKING
 
-import aiohttp
-
+from seerflow.alerting._http import RetryDecision, post_with_retry, sanitize_body
 from seerflow.alerting.channels._format import severity_name as _sev_name
 from seerflow.alerting.channels._ratelimit import TokenBucket
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    import aiohttp
 
     from seerflow.models.alert import Alert
 
@@ -89,47 +91,59 @@ class WhatsAppTarget:
             return
         await self._bucket.acquire()
         headers = {"Authorization": f"Bearer {self.access_token}"}
-        try:
-            async with session.post(
-                self._url(),
-                json=self._payload_for(alert, to),
-                timeout=aiohttp.ClientTimeout(total=10),
-                allow_redirects=False,
-                headers=headers,
-            ) as resp:
-                if resp.status < 400:
-                    return
-                try:
-                    body = await resp.json()
-                except aiohttp.ContentTypeError:
-                    body = {}
-                code = (body.get("error") or {}).get("code")
-                if code == _TEMPLATE_NOT_FOUND:
-                    self._circuit.open_until = now + _CIRCUIT_OPEN_SECONDS
-                    _log.error(
-                        "WhatsApp %s: template %r not found (131026) — circuit open for %ds",
-                        self.name,
-                        self.template_name,
-                        int(_CIRCUIT_OPEN_SECONDS),
-                    )
-                    return
-                _log.error(
-                    "WhatsApp %s: delivery failed status=%d code=%s",
-                    self.name,
-                    resp.status,
-                    code,
-                )
-        except (aiohttp.ClientError, TimeoutError) as exc:
-            # ``access_token`` sits in the Authorization header, so ``aiohttp``
-            # exception strings should not echo it. Scrub defensively through
-            # the shared helper in case a future aiohttp version changes that.
-            from seerflow.alerting._http import _scrub_secrets
+        await post_with_retry(
+            session,
+            self._url(),
+            self._payload_for(alert, to),
+            masked_for_log=f"whatsapp/{self.name}",
+            headers=headers,
+            timeout_seconds=10.0,
+            body_inspector=self._inspect_response,
+        )
 
-            _log.warning(
-                "WhatsApp %s: transport error %s",
+    def _inspect_response(self, status: int, body_text: str) -> RetryDecision:
+        """Open the 5-minute circuit on Meta error code 131026; otherwise defer.
+
+        For non-131026 4xx responses the Meta-specific ``error.code`` is logged
+        here so operators retain the diagnostic field that the original
+        hand-rolled ``_post_one`` exposed before this path was routed through
+        ``post_with_retry``. 5xx responses are intentionally NOT escalated to
+        ERROR even when they carry a Meta ``code`` field — they will be retried,
+        and ``post_with_retry`` already logs each attempt at WARNING and the
+        final exhaustion at ERROR. Logging here too would triple-log a transient
+        outage at ERROR severity and trigger operator alert fatigue.
+        """
+        try:
+            body = json.loads(body_text)
+        except ValueError:
+            body = {}
+        # Two-step guard: a non-dict ``body["error"]`` (e.g. a list from a
+        # compromised upstream) would otherwise raise AttributeError on the
+        # nested ``.get()`` and convert a terminal 4xx into a retried failure.
+        err = body.get("error") if isinstance(body, dict) else None
+        code = err.get("code") if isinstance(err, dict) else None
+        if code == _TEMPLATE_NOT_FOUND:
+            self._circuit.open_until = self._monotonic() + _CIRCUIT_OPEN_SECONDS
+            _log.error(
+                "WhatsApp %s: template %r not found (131026) - circuit open for %ds",
                 self.name,
-                _scrub_secrets(str(exc)),
+                self.template_name,
+                int(_CIRCUIT_OPEN_SECONDS),
             )
+            return "stop"
+        if code is not None and status < 500:
+            # Inspector owns the log: returning "stop" prevents post_with_retry
+            # from also logging the same response body via _handle_response.
+            # ``code`` is sanitised because a compromised upstream could place
+            # control characters or ANSI escapes in the field.
+            _log.error(
+                "WhatsApp %s: delivery failed status=%d code=%s",
+                self.name,
+                status,
+                sanitize_body(str(code), max_len=64),
+            )
+            return "stop"
+        return "default"
 
     async def deliver(self, alert: Alert, *, session: aiohttp.ClientSession) -> None:
         for to in self.to_numbers:

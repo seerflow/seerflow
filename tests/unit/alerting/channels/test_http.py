@@ -6,9 +6,9 @@ from typing import Any
 
 import aiohttp
 import pytest
-from aioresponses import aioresponses
+from aioresponses import CallbackResult, aioresponses
 
-from seerflow.alerting._http import post_with_retry
+from seerflow.alerting._http import RetryDecision, post_with_retry
 
 
 @pytest.mark.unit
@@ -134,3 +134,211 @@ async def test_post_with_retry_scrubs_telegram_bot_token_from_logs(
     combined = " ".join(rec.getMessage() for rec in caplog.records)
     assert "SECRET" not in combined
     assert "/bot<redacted>/" in combined
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_body_inspector_receives_status_and_body() -> None:
+    """Inspector is called with (status, body_text) for non-2xx responses."""
+    captured: list[tuple[int, str]] = []
+
+    def inspector(status: int, body_text: str) -> RetryDecision:
+        captured.append((status, body_text))
+        return "default"
+
+    with aioresponses() as mock:
+        mock.post("https://x.example/endpoint", status=400, body="oops")
+        async with aiohttp.ClientSession() as session:
+            await post_with_retry(
+                session,
+                "https://x.example/endpoint",
+                {"alert": "x"},
+                masked_for_log="x.example",
+                delays=(0.0,),
+                body_inspector=inspector,
+            )
+
+    assert captured == [(400, "oops")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_body_inspector_stop_short_circuits_5xx() -> None:
+    call_count = 0
+
+    def inspector(status: int, body_text: str) -> RetryDecision:
+        del status, body_text
+        return "stop"
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        return CallbackResult(status=503)
+
+    with aioresponses() as mock:
+        mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
+        async with aiohttp.ClientSession() as session:
+            await post_with_retry(
+                session,
+                "https://x.example/endpoint",
+                {"alert": "x"},
+                masked_for_log="x.example",
+                delays=(0.0, 0.0, 0.0),
+                body_inspector=inspector,
+            )
+
+    assert call_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_body_inspector_default_preserves_4xx_drop() -> None:
+    call_count = 0
+
+    def inspector(status: int, body_text: str) -> RetryDecision:
+        del status, body_text
+        return "default"
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        return CallbackResult(status=400)
+
+    with aioresponses() as mock:
+        mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
+        async with aiohttp.ClientSession() as session:
+            await post_with_retry(
+                session,
+                "https://x.example/endpoint",
+                {"alert": "x"},
+                masked_for_log="x.example",
+                delays=(0.0, 0.0, 0.0),
+                body_inspector=inspector,
+            )
+
+    assert call_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_body_inspector_default_preserves_5xx_retry() -> None:
+    call_count = 0
+
+    def inspector(status: int, body_text: str) -> RetryDecision:
+        del status, body_text
+        return "default"
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        return CallbackResult(status=503)
+
+    with aioresponses() as mock:
+        mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
+        async with aiohttp.ClientSession() as session:
+            await post_with_retry(
+                session,
+                "https://x.example/endpoint",
+                {"alert": "x"},
+                masked_for_log="x.example",
+                attempts=3,
+                delays=(0.0, 0.0, 0.0),
+                body_inspector=inspector,
+            )
+
+    assert call_count == 3
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_body_inspector_not_called_on_2xx() -> None:
+    calls: list[int] = []
+
+    def inspector(status: int, body_text: str) -> RetryDecision:
+        del body_text
+        calls.append(status)
+        return "default"
+
+    with aioresponses() as mock:
+        mock.post("https://x.example/endpoint", status=200)
+        async with aiohttp.ClientSession() as session:
+            await post_with_retry(
+                session,
+                "https://x.example/endpoint",
+                {"alert": "x"},
+                masked_for_log="x.example",
+                delays=(0.0,),
+                body_inspector=inspector,
+            )
+
+    assert calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_body_inspector_retry_continues_to_next_attempt() -> None:
+    """Inspector returning 'retry' on a 4xx must force a retry that would not
+    happen under default semantics."""
+    call_count = 0
+
+    def inspector(status: int, body_text: str) -> RetryDecision:
+        del status, body_text
+        return "retry"
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        return CallbackResult(status=400)
+
+    with aioresponses() as mock:
+        mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
+        async with aiohttp.ClientSession() as session:
+            await post_with_retry(
+                session,
+                "https://x.example/endpoint",
+                {"alert": "x"},
+                masked_for_log="x.example",
+                attempts=3,
+                delays=(0.0, 0.0, 0.0),
+                body_inspector=inspector,
+            )
+
+    assert call_count == 3
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_body_inspector_retry_then_success() -> None:
+    """Inspector forces a retry on attempt 1; attempt 2 succeeds with 200."""
+    call_count = 0
+
+    def inspector(status: int, body_text: str) -> RetryDecision:
+        del status, body_text
+        return "retry"
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return CallbackResult(status=400)
+        return CallbackResult(status=200)
+
+    with aioresponses() as mock:
+        mock.post("https://x.example/endpoint", callback=_capture, repeat=True)
+        async with aiohttp.ClientSession() as session:
+            await post_with_retry(
+                session,
+                "https://x.example/endpoint",
+                {"alert": "x"},
+                masked_for_log="x.example",
+                attempts=3,
+                delays=(0.0, 0.0, 0.0),
+                body_inspector=inspector,
+            )
+
+    assert call_count == 2
