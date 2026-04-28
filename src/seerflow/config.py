@@ -235,6 +235,45 @@ class UEBAConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class TAXIIAuthConfig:
+    """TAXII feed credentials. All secrets sourced from env vars only."""
+
+    kind: Literal["api_key", "basic"]
+    api_key_env: str | None = None
+    api_key_header: str = "Authorization"
+    username_env: str | None = None
+    password_env: str | None = None
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class TAXIIFeedConfig:
+    """One TAXII 2.1 collection to poll."""
+
+    id: str
+    url: str
+    collection_id: str
+    poll_interval_s: int | None = None
+    auth: TAXIIAuthConfig | None = None
+    confidence_floor: int = 0
+    enabled: bool = True
+    allow_insecure: bool = False
+    allow_private_addresses: bool = False
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class ThreatIntelConfig:
+    """Top-level threat-intelligence feed configuration."""
+
+    enabled: bool = False
+    feeds: tuple[TAXIIFeedConfig, ...] = ()
+    default_poll_interval_s: int = 3600
+    request_timeout_s: float = 30.0
+    max_indicators_per_feed: int = 1_000_000
+    expired_grace_days: int = 30
+    startup_jitter_s: int = 30
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class SeerflowConfig:
     """Top-level Seerflow configuration."""
 
@@ -245,6 +284,7 @@ class SeerflowConfig:
     alerting: AlertingConfig = field(default_factory=AlertingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     ueba: UEBAConfig = field(default_factory=UEBAConfig)
+    threat_intel: ThreatIntelConfig = field(default_factory=ThreatIntelConfig)
     dashboard_port: int = 8080
     health_bind_address: str = "127.0.0.1"
     log_level: str = "INFO"
@@ -390,7 +430,12 @@ def load_config(
     ws_fields = _parse_ws_fields(raw)
     api_fields = _parse_api_fields(raw)
 
-    return SeerflowConfig(
+    from seerflow._config_builders import _build_threat_intel_config
+    from seerflow._config_validation import validate_seerflow_config
+
+    threat_intel = _build_threat_intel_config(raw.get("threat_intel", {}))
+
+    cfg = SeerflowConfig(
         storage=_build_storage(raw.get("storage", {})),
         receivers=_build_receivers(raw.get("receivers", {})),
         detection=_build_detection(raw.get("detection", {})),
@@ -398,6 +443,7 @@ def load_config(
         alerting=_build_alerting(raw.get("alerting", {})),
         llm=_build_llm(raw.get("llm", {})),
         ueba=_build_ueba(raw.get("ueba", {})),
+        threat_intel=threat_intel,
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
@@ -416,3 +462,6 @@ def load_config(
         api_coverage_rate_limit=api_fields.api_coverage_rate_limit,
         api_trust_proxy_headers=api_fields.api_trust_proxy_headers,
     )
+
+    validate_seerflow_config(cfg)
+    return cfg

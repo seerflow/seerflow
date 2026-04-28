@@ -42,6 +42,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "river>=0.24.2",
     "slowapi>=0.1.9,<0.2.0",
+    "stix2~=3.0",
     "uvicorn>=0.30",
     "websockets>=13.0",
     "uvloop>=0.22.1; sys_platform != 'win32'",
@@ -137,7 +138,10 @@ ignore_missing_imports = true
 [tool.bandit]
 targets = ["src"]
 exclude_dirs = ["tests"]
-skips = ["B101"]
+# B101 = assert statements (harmless in src). B311 = stdlib `random` (used
+# only for retry-backoff jitter and TAXII startup jitter — never for
+# secrets, tokens, or crypto material).
+skips = ["B101", "B311"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

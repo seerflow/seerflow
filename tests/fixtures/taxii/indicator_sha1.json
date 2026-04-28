@@ -1,0 +1,10 @@
+{
+  "type": "indicator",
+  "spec_version": "2.1",
+  "id": "indicator--00000000-0000-0000-0000-000000000006",
+  "created": "2026-04-01T00:00:00.000Z",
+  "modified": "2026-04-01T00:00:00.000Z",
+  "valid_from": "2026-04-01T00:00:00.000Z",
+  "pattern": "[file:hashes.'SHA-1' = 'da39a3ee5e6b4b0d3255bfef95601890afd80709']",
+  "pattern_type": "stix"
+}

@@ -23,6 +23,7 @@ from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
 from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
+from seerflow.threat_intel import TAXIIFeedManager
 from seerflow.ueba.engine import UEBAEngine
 from seerflow.ueba.store import BaselineStore
 from seerflow.web import DEFAULT_DIST
@@ -275,6 +276,24 @@ async def _run_with_config(
     storage = await connect_storage(config.storage)
     _log.info("Storage: %s", config.storage.sqlite_path)
 
+    # Threat-intel TAXII feed manager (S-067). Constructed unconditionally
+    # so the shutdown path can call ``stop()`` without a None-check; the
+    # ``start()`` call returns ``[]`` immediately when ``threat_intel.enabled``
+    # is False (no aiohttp session opened, no tasks scheduled).
+    taxii_manager = TAXIIFeedManager(
+        config=config.threat_intel,
+        model_store=storage,
+    )
+    taxii_failed = await taxii_manager.start()
+    if taxii_failed:
+        _log.warning(
+            "Threat intel: %d feed(s) failed to start: %s",
+            len(taxii_failed),
+            ", ".join(taxii_failed),
+        )
+    elif config.threat_intel.enabled:
+        _log.info("Threat intel: %d feed(s) running", len(taxii_manager.feed_ids()))
+
     ensemble = DetectionEnsemble(config.detection)
     try:
         loaded = await ensemble.load_all_state(storage)
@@ -332,6 +351,7 @@ async def _run_with_config(
             "  - Ensure ports are not already in use\n"
             "  - Verify receiver settings in seerflow.yaml"
         )
+        await taxii_manager.stop()
         await storage.close()
         sys.exit(1)
 
@@ -613,6 +633,18 @@ async def _run_with_config(
         ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
         ws_manager=ws_manager,
     )
+    # Wire the live pipeline metrics provider for /api/v1/stats (S-067 ext).
+    # ``taxii_registry`` is supplied so the route can surface per-feed counters
+    # whenever ``threat_intel.enabled`` is True; otherwise the registry is
+    # empty and the route emits ``taxii=None``.
+    from seerflow.api.metrics import build_pipeline_metrics_provider
+
+    api_app.state.pipeline_metrics_provider = build_pipeline_metrics_provider(
+        handler,
+        ensemble,
+        time.monotonic(),
+        taxii_registry=taxii_manager.metrics,
+    )
     # Run pipeline + uvicorn server as sibling tasks (S-217). The first
     # to complete (or fail) wakes the wait so we can drain both cleanly.
     pipeline_task = asyncio.create_task(pipeline.run(handler), name="seerflow.pipeline")
@@ -720,6 +752,13 @@ async def _run_with_config(
         server.should_exit = True
         with contextlib.suppress(asyncio.CancelledError, TimeoutError):
             await asyncio.wait_for(server_task, timeout=10)
+        # Stop TAXII feed manager BEFORE storage.close() so an in-flight
+        # ``_persist`` (snapshot + cursor save_state pair) has up to 2 s
+        # — see TAXIIFeedManager.stop() — to drain its current write
+        # before storage closes. Polls still mid-flight after the grace
+        # window are cancelled and their snapshot is dropped; the next
+        # poll will refetch from the last-persisted cursor (S-067).
+        await taxii_manager.stop()
         await storage.close()
         _log.info("Seerflow stopped")
 
