@@ -158,3 +158,24 @@ async def test_canonical_http_scope_passes_same_dict_object(
     await middleware(scope, _noop_receive, _noop_send)
     received: Scope = captured["scope"]
     assert received is scope
+
+
+async def test_percent_encoded_non_ascii_raw_path_preserved(
+    middleware: CollapseSlashesMiddleware, captured: Captured
+) -> None:
+    """``raw_path`` keeps its percent-encoding; ``path`` keeps its decoded form.
+
+    Re-encoding the decoded ``path`` to UTF-8 would corrupt
+    ``%E2%98%83`` (snowman) into the literal three bytes — ASGI
+    consumers that re-parse ``raw_path`` (e.g. routers, loggers)
+    would then see different content from what the client sent.
+    """
+    scope: Scope = {
+        "type": "http",
+        "path": "//api/v1/☃",
+        "raw_path": b"//api/v1/%E2%98%83",
+    }
+    await middleware(scope, _noop_receive, _noop_send)
+    received: Scope = captured["scope"]
+    assert received["path"] == "/api/v1/☃"
+    assert received["raw_path"] == b"/api/v1/%E2%98%83"
