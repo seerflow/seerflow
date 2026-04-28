@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from time import monotonic
 from typing import TYPE_CHECKING
 
-from seerflow.alerting._http import RetryDecision, post_with_retry
+from seerflow.alerting._http import RetryDecision, post_with_retry, sanitize_body
 from seerflow.alerting.channels._format import severity_name as _sev_name
 from seerflow.alerting.channels._ratelimit import TokenBucket
 
@@ -117,7 +117,11 @@ class WhatsAppTarget:
             body = json.loads(body_text)
         except ValueError:
             body = {}
-        code = (body.get("error") or {}).get("code") if isinstance(body, dict) else None
+        # Two-step guard: a non-dict ``body["error"]`` (e.g. a list from a
+        # compromised upstream) would otherwise raise AttributeError on the
+        # nested ``.get()`` and convert a terminal 4xx into a retried failure.
+        err = body.get("error") if isinstance(body, dict) else None
+        code = err.get("code") if isinstance(err, dict) else None
         if code == _TEMPLATE_NOT_FOUND:
             self._circuit.open_until = self._monotonic() + _CIRCUIT_OPEN_SECONDS
             _log.error(
@@ -130,11 +134,13 @@ class WhatsAppTarget:
         if code is not None and status < 500:
             # Inspector owns the log: returning "stop" prevents post_with_retry
             # from also logging the same response body via _handle_response.
+            # ``code`` is sanitised because a compromised upstream could place
+            # control characters or ANSI escapes in the field.
             _log.error(
                 "WhatsApp %s: delivery failed status=%d code=%s",
                 self.name,
                 status,
-                code,
+                sanitize_body(str(code), max_len=64),
             )
             return "stop"
         return "default"

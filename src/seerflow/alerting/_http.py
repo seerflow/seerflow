@@ -15,11 +15,15 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
-# Scrub credential-bearing URL prefixes from log strings. Currently matches
-# Telegram's ``/bot<token>/`` pattern — aiohttp exception messages frequently
-# echo the request URL, so scrubbing at the log boundary keeps bot tokens out
-# of operator log streams.
-_SECRET_URL_PATTERNS = (re.compile(r"/bot[^/\s]+/"),)
+# Scrub credential-bearing fragments from log strings. Patterns:
+#   - Telegram's ``/bot<token>/`` URL prefix.
+#   - ``Bearer <token>`` Authorization-header values (defence in depth — current
+#     aiohttp ``str(exc)`` does not echo headers, but a future version or a
+#     wrapper may, and the WhatsApp channel relies on this header for auth).
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"/bot[^/\s]+/"), "/bot<redacted>/"),
+    (re.compile(r"Bearer\s+\S+"), "Bearer <redacted>"),
+)
 
 RetryDecision = Literal["stop", "retry", "default"]
 
@@ -34,9 +38,9 @@ _sanitize_body = sanitize_body
 
 
 def _scrub_secrets(msg: str) -> str:
-    """Redact known-secret URL segments from a log string."""
-    for pat in _SECRET_URL_PATTERNS:
-        msg = pat.sub("/bot<redacted>/", msg)
+    """Redact known-secret URL or header fragments from a log string."""
+    for pat, replacement in _SECRET_PATTERNS:
+        msg = pat.sub(replacement, msg)
     return msg
 
 

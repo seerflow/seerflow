@@ -419,3 +419,62 @@ async def test_whatsapp_503_then_131026_opens_circuit_mid_retry() -> None:
 
     assert call_count == 2
     assert target._circuit.open_until > 0.0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_non_dict_error_field_is_treated_as_no_code() -> None:
+    """A compromised upstream returning ``error: [list]`` (not a dict) must not
+    raise AttributeError inside the inspector, which would convert a terminal
+    4xx into a retried failure via post_with_retry's broad except."""
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+        rate_per_second=1000.0,
+        burst=1000,
+    )
+    call_count = 0
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        return CallbackResult(status=400, payload={"error": [1, 2, 3]})
+
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+            repeat=True,
+        )
+        async with aiohttp.ClientSession() as session:
+            await _deliver_with_zero_delay(target, session)
+
+    assert call_count == 1
+    assert target._circuit.open_until == 0.0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_transport_error_does_not_leak_bearer_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Defence in depth: any aiohttp transport error message that happens to
+    echo the request headers must not leak the bearer access token. The shared
+    ``_scrub_secrets`` helper covers this via the ``Bearer <token>`` pattern.
+    """
+    from seerflow.alerting._http import _scrub_secrets
+
+    leaky_message = (
+        "Cannot connect to https://graph.facebook.com — Authorization: Bearer secret-wa-token"
+    )
+    caplog.set_level(logging.WARNING, logger="seerflow")
+
+    scrubbed = _scrub_secrets(leaky_message)
+
+    assert "secret-wa-token" not in scrubbed
+    assert "Bearer <redacted>" in scrubbed
