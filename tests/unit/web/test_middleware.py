@@ -17,12 +17,14 @@ upstream URL canonicalisation that ``httpx`` performs in
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from seerflow.web.middleware import CollapseSlashesMiddleware
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 Scope = dict[str, Any]
 Captured = dict[str, Any]

@@ -111,9 +111,7 @@ def test_api_prefix_bypass_variants_also_return_404(tmp_path: Path, url: str) ->
     "raw_path",
     ["//api/v1/x", "///api/v1/x", "//api/v1//missing"],
 )
-def test_collapses_leading_multi_slash_path_at_app_level(
-    tmp_path: Path, raw_path: str
-) -> None:
+def test_collapses_leading_multi_slash_path_at_app_level(tmp_path: Path, raw_path: str) -> None:
     """``CollapseSlashesMiddleware`` rewrites the path before the SPA mount.
 
     Without the middleware, ``GET //api/v1/x`` reaches the ASGI layer
