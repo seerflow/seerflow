@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from limits import parse as _parse_limit_string
 
 if TYPE_CHECKING:
-    from seerflow.config import DetectionConfig
+    from seerflow.config import DetectionConfig, SeerflowConfig, ThreatIntelConfig
 
 
 # ---------------------------------------------------------------------------
@@ -276,3 +276,122 @@ def _validate_detection_config(config: DetectionConfig) -> None:
         raise ConfigError(
             f"detection.kill_chain.max_entities must be >= 1, got {kc.max_entities!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Threat-intelligence (TAXII) validation — S-067
+# ---------------------------------------------------------------------------
+
+
+def _validate_threat_intel(config: ThreatIntelConfig) -> None:
+    """Validate the threat-intel block. No-op when ``enabled`` is False."""
+    import socket
+    from urllib.parse import urlparse
+
+    if not config.enabled:
+        return
+
+    if config.default_poll_interval_s < 60:
+        raise ConfigError(
+            f"threat_intel.default_poll_interval_s must be >= 60, "
+            f"got {config.default_poll_interval_s!r}"
+        )
+    if config.request_timeout_s <= 0.0 or not math.isfinite(config.request_timeout_s):
+        raise ConfigError(
+            f"threat_intel.request_timeout_s must be finite and > 0, "
+            f"got {config.request_timeout_s!r}"
+        )
+    if config.max_indicators_per_feed < 1:
+        raise ConfigError(
+            f"threat_intel.max_indicators_per_feed must be >= 1, "
+            f"got {config.max_indicators_per_feed!r}"
+        )
+    if config.expired_grace_days < 0:
+        raise ConfigError(
+            f"threat_intel.expired_grace_days must be >= 0, "
+            f"got {config.expired_grace_days!r}"
+        )
+    if config.startup_jitter_s < 0:
+        raise ConfigError(
+            f"threat_intel.startup_jitter_s must be >= 0, "
+            f"got {config.startup_jitter_s!r}"
+        )
+
+    # Cheap structural checks first (duplicates, scheme, scalar bounds, auth
+    # consistency) so a misconfiguration surfaces deterministically without
+    # depending on DNS state.
+    seen_ids: set[str] = set()
+    for feed in config.feeds:
+        if feed.id in seen_ids:
+            raise ConfigError(
+                f"threat_intel.feeds: duplicate id {feed.id!r}"
+            )
+        seen_ids.add(feed.id)
+
+        parsed = urlparse(feed.url)
+        if parsed.scheme not in ("http", "https"):
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].url scheme must be http or https, "
+                f"got {parsed.scheme!r}"
+            )
+        if parsed.scheme == "http" and not feed.allow_insecure:
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].url must use https unless "
+                "allow_insecure is true"
+            )
+        if not parsed.hostname:
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].url must include a hostname"
+            )
+
+        if feed.poll_interval_s is not None and feed.poll_interval_s < 60:
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].poll_interval_s must be >= 60, "
+                f"got {feed.poll_interval_s!r}"
+            )
+        if not (0 <= feed.confidence_floor <= 100):
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].confidence_floor must be in [0, 100], "
+                f"got {feed.confidence_floor!r}"
+            )
+
+        auth = feed.auth
+        if auth is not None:
+            if auth.kind == "api_key" and not auth.api_key_env:
+                raise ConfigError(
+                    f"threat_intel.feeds[{feed.id}].auth.api_key_env is required "
+                    "when kind='api_key'"
+                )
+            if auth.kind == "basic" and (
+                not auth.username_env or not auth.password_env
+            ):
+                raise ConfigError(
+                    f"threat_intel.feeds[{feed.id}].auth.username_env and "
+                    "password_env are required when kind='basic'"
+                )
+
+    # DNS resolution check runs last so structural errors (handled above) do
+    # not depend on network state.
+    for feed in config.feeds:
+        if feed.allow_private_addresses:
+            continue
+        parsed = urlparse(feed.url)
+        if not parsed.hostname:
+            continue
+        try:
+            resolved = socket.gethostbyname(parsed.hostname)
+        except OSError as exc:
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].url DNS lookup failed for "
+                f"{parsed.hostname!r}: {exc}"
+            ) from exc
+        if _is_private_ip(resolved):
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].url resolves to private/reserved "
+                f"address {resolved!r}; set allow_private_addresses=true to override"
+            )
+
+
+def validate_seerflow_config(config: SeerflowConfig) -> None:
+    """Run cross-section validators on a fully built ``SeerflowConfig``."""
+    _validate_threat_intel(config.threat_intel)

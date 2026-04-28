@@ -38,7 +38,11 @@ from seerflow.config import (
     KillChainConfig,
     LLMConfig,
     ReceiverConfig,
+    SeerflowConfig,
     StorageConfig,
+    TAXIIAuthConfig,
+    TAXIIFeedConfig,
+    ThreatIntelConfig,
     UEBAConfig,
     UEBASubScoreWeights,
     WebhookEndpointConfig,
@@ -1188,4 +1192,174 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
         api_detail_rate_limit=detail_limit_str,
         api_coverage_rate_limit=coverage_limit_str,
         api_trust_proxy_headers=trust_proxy_raw,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Threat-intelligence (TAXII) section builder — S-067
+# ---------------------------------------------------------------------------
+
+
+def _build_taxii_auth_config(data: dict[str, Any]) -> TAXIIAuthConfig:
+    """Build a TAXIIAuthConfig from a raw mapping. Caller verifies non-None."""
+    kind_raw = data.get("kind")
+    if kind_raw not in ("api_key", "basic"):
+        raise ConfigError(
+            f"threat_intel.feeds[].auth.kind must be 'api_key' or 'basic', got {kind_raw!r}"
+        )
+    api_key_env = data.get("api_key_env")
+    if api_key_env is not None and not isinstance(api_key_env, str):
+        raise ConfigError("threat_intel.feeds[].auth.api_key_env must be a string or omitted")
+    api_key_header = data.get("api_key_header", "Authorization")
+    if not isinstance(api_key_header, str) or not api_key_header:
+        raise ConfigError(
+            "threat_intel.feeds[].auth.api_key_header must be a non-empty string"
+        )
+    username_env = data.get("username_env")
+    if username_env is not None and not isinstance(username_env, str):
+        raise ConfigError("threat_intel.feeds[].auth.username_env must be a string or omitted")
+    password_env = data.get("password_env")
+    if password_env is not None and not isinstance(password_env, str):
+        raise ConfigError("threat_intel.feeds[].auth.password_env must be a string or omitted")
+    return TAXIIAuthConfig(
+        kind=kind_raw,
+        api_key_env=api_key_env,
+        api_key_header=api_key_header,
+        username_env=username_env,
+        password_env=password_env,
+    )
+
+
+def _build_taxii_feed_config(data: dict[str, Any]) -> TAXIIFeedConfig:
+    """Build one TAXIIFeedConfig from a raw mapping."""
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"threat_intel.feeds[] entries must be mappings, got {type(data).__name__}"
+        )
+    feed_id = data.get("id")
+    if not isinstance(feed_id, str) or not feed_id:
+        raise ConfigError("threat_intel.feeds[].id must be a non-empty string")
+    url = data.get("url")
+    if not isinstance(url, str) or not url:
+        raise ConfigError("threat_intel.feeds[].url must be a non-empty string")
+    collection_id = data.get("collection_id")
+    if not isinstance(collection_id, str) or not collection_id:
+        raise ConfigError("threat_intel.feeds[].collection_id must be a non-empty string")
+    poll_interval_raw = data.get("poll_interval_s")
+    poll_interval_s: int | None
+    if poll_interval_raw is None:
+        poll_interval_s = None
+    elif isinstance(poll_interval_raw, bool) or not isinstance(poll_interval_raw, int):
+        raise ConfigError(
+            "threat_intel.feeds[].poll_interval_s must be an int or omitted, "
+            f"got {type(poll_interval_raw).__name__}"
+        )
+    else:
+        poll_interval_s = poll_interval_raw
+
+    auth_raw = data.get("auth")
+    auth: TAXIIAuthConfig | None
+    if auth_raw is None:
+        auth = None
+    elif isinstance(auth_raw, dict):
+        auth = _build_taxii_auth_config(auth_raw)
+    else:
+        raise ConfigError(
+            "threat_intel.feeds[].auth must be a mapping or omitted, "
+            f"got {type(auth_raw).__name__}"
+        )
+
+    confidence_floor = data.get("confidence_floor", 0)
+    if isinstance(confidence_floor, bool) or not isinstance(confidence_floor, int):
+        raise ConfigError(
+            "threat_intel.feeds[].confidence_floor must be an int, "
+            f"got {type(confidence_floor).__name__}"
+        )
+    enabled = data.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ConfigError("threat_intel.feeds[].enabled must be a bool")
+    allow_insecure = data.get("allow_insecure", False)
+    if not isinstance(allow_insecure, bool):
+        raise ConfigError("threat_intel.feeds[].allow_insecure must be a bool")
+    allow_private = data.get("allow_private_addresses", False)
+    if not isinstance(allow_private, bool):
+        raise ConfigError("threat_intel.feeds[].allow_private_addresses must be a bool")
+
+    return TAXIIFeedConfig(
+        id=feed_id,
+        url=url,
+        collection_id=collection_id,
+        poll_interval_s=poll_interval_s,
+        auth=auth,
+        confidence_floor=confidence_floor,
+        enabled=enabled,
+        allow_insecure=allow_insecure,
+        allow_private_addresses=allow_private,
+    )
+
+
+def _build_threat_intel_config(data: dict[str, Any]) -> ThreatIntelConfig:
+    """Build the threat-intelligence section. Missing key returns defaults."""
+    if not data:
+        return ThreatIntelConfig()
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"threat_intel must be a mapping, got {type(data).__name__}"
+        )
+
+    enabled = data.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ConfigError("threat_intel.enabled must be a bool")
+
+    feeds_raw = data.get("feeds", ())
+    if feeds_raw is None:
+        feeds_raw = ()
+    if not isinstance(feeds_raw, list | tuple):
+        raise ConfigError(
+            f"threat_intel.feeds must be a list, got {type(feeds_raw).__name__}"
+        )
+    feeds = tuple(_build_taxii_feed_config(entry) for entry in feeds_raw)
+
+    default_poll = data.get("default_poll_interval_s", 3600)
+    if isinstance(default_poll, bool) or not isinstance(default_poll, int):
+        raise ConfigError("threat_intel.default_poll_interval_s must be an int")
+
+    request_timeout = data.get("request_timeout_s", 30.0)
+    if isinstance(request_timeout, bool) or not isinstance(request_timeout, int | float):
+        raise ConfigError("threat_intel.request_timeout_s must be a number")
+
+    max_indicators = data.get("max_indicators_per_feed", 1_000_000)
+    if isinstance(max_indicators, bool) or not isinstance(max_indicators, int):
+        raise ConfigError("threat_intel.max_indicators_per_feed must be an int")
+
+    expired_grace = data.get("expired_grace_days", 30)
+    if isinstance(expired_grace, bool) or not isinstance(expired_grace, int):
+        raise ConfigError("threat_intel.expired_grace_days must be an int")
+
+    startup_jitter = data.get("startup_jitter_s", 30)
+    if isinstance(startup_jitter, bool) or not isinstance(startup_jitter, int):
+        raise ConfigError("threat_intel.startup_jitter_s must be an int")
+
+    return ThreatIntelConfig(
+        enabled=enabled,
+        feeds=feeds,
+        default_poll_interval_s=default_poll,
+        request_timeout_s=float(request_timeout),
+        max_indicators_per_feed=max_indicators,
+        expired_grace_days=expired_grace,
+        startup_jitter_s=startup_jitter,
+    )
+
+
+def build_seerflow_config(raw: dict[str, Any]) -> SeerflowConfig:
+    """Build a SeerflowConfig from an in-memory raw mapping.
+
+    Lightweight wrapper used by the threat-intel test surface (S-067). Mirrors
+    the subset of behaviour that tests rely on: section builders applied with
+    sensible defaults and env-var interpolation. Heavier validation lives in
+    ``validate_seerflow_config`` so callers can opt-in.
+    """
+    interpolated = _walk_and_interpolate(raw or {})
+    return SeerflowConfig(
+        threat_intel=_build_threat_intel_config(interpolated.get("threat_intel", {})),
     )
