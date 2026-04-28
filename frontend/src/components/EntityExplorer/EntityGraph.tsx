@@ -124,10 +124,13 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
     [related, truncated],
   );
 
-  // ResizeObserver — update size; centre force is updated below in a separate effect.
+  // ResizeObserver — observe the SVG element so that size reflects the SVG's actual
+  // content box, not the wrapper height (which includes the truncation banner + Reset-button
+  // row). forceCenter and focal pin coordinates are then driven by SVG-local dimensions,
+  // preventing nodes from being centred below the SVG's visual midpoint.
   useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
+    const target = svgRef.current;
+    if (!target) return;
     const ro = new ResizeObserver((entries) => {
       for (const e of entries) {
         setSize({
@@ -136,7 +139,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
         });
       }
     });
-    ro.observe(wrapper);
+    ro.observe(target);
     return () => ro.disconnect();
   }, []);
 
@@ -237,9 +240,12 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focal.uuid, focal.label, focal.type, rendered]);
 
-  // Manual non-passive wheel listener.
+  // Manual non-passive wheel listener — attached to the SVG so that getBoundingClientRect()
+  // returns SVG-local coordinates, matching the <g transform> origin (SVG top-left, not
+  // wrapper top-left). This eliminates the vertical drift caused by the banner + Reset-button
+  // row that sits between the wrapper top and the SVG top.
   useEffect(() => {
-    const el = wrapperRef.current;
+    const el = svgRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -494,8 +500,7 @@ export function EntityGraph({ focal, related, onNavigate }: Props) {
         ref={svgRef}
         role="img"
         aria-label={ariaLabel}
-        width={size.w}
-        height={size.h}
+        style={{ width: "100%", height: "100%" }}
         className={`flex-1 min-h-0 block ${dragKind === "pan" ? "cursor-grabbing" : "cursor-grab"}`}
         onPointerDown={onSvgPointerDown}
         onPointerMove={onSvgPointerMove}

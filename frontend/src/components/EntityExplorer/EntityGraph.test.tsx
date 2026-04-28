@@ -405,13 +405,15 @@ describe("EntityGraph — Reset view clears drag state", () => {
 // The cursor-anchored zoom algebraic invariant is fully covered in viewportReducer.test.ts
 // ("wheelAt keeps cursor-anchored point fixed"). Here we verify the component wires the
 // wheel handler by dispatching a WheelEvent and confirming the scale changes.
+// Fix S-060.F3/Issue-2: wheel listener moved from wrapper to SVG so that getBoundingClientRect
+// uses SVG-local coords matching the <g transform> origin.
 describe("EntityGraph — wheel zoom cursor anchor (component-level)", () => {
-  it("wheel handler wired: dispatching WheelEvent on wrapper triggers scale change or is documented jsdom limitation", () => {
+  it("wheel handler wired on SVG: dispatching WheelEvent on SVG triggers scale change or is documented jsdom limitation", () => {
     const { container } = render(
       <EntityGraph focal={focal} related={oneRelated} onNavigate={() => {}} />,
     );
-    const wrapper = container.querySelector('[role="application"]') as HTMLDivElement;
-    // The wheel listener is attached via addEventListener (non-passive) on wrapperRef.
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    // The wheel listener is now attached via addEventListener (non-passive) on svgRef.
     const evt = new WheelEvent("wheel", {
       deltaY: -100,
       clientX: 100,
@@ -419,7 +421,7 @@ describe("EntityGraph — wheel zoom cursor anchor (component-level)", () => {
       cancelable: true,
       bubbles: true,
     });
-    wrapper.dispatchEvent(evt);
+    svg.dispatchEvent(evt);
     const t = parseTranslateScale(getTransformGroup(container).getAttribute("transform") ?? "");
     // jsdom limitation: addEventListener listeners attached in useEffect may not fire
     // through dispatchEvent after act() in all vitest/jsdom versions.

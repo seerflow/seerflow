@@ -164,6 +164,7 @@ export const useEntityStore = create<State>((set, get) => ({
       sourceFilter: null,
       severityMin: null,
       discoveredSourceTypes: [],
+      related: [],
     });
     await get().refresh();
     void get().fetchRiskHistory();
@@ -258,7 +259,7 @@ export const useEntityStore = create<State>((set, get) => ({
       set({ selectedEntityUuid: null, selectedEntityType: null, selectedEntityValue: null });
       return;
     }
-    const { searchResults, recent, selectedEntityUuid: prev, discoveredSourceTypes } = get();
+    const { searchResults, recent, selectedEntityUuid: prev, discoveredSourceTypes, related: prevRelated } = get();
     const found =
       searchResults.find((r) => r.entity_uuid === parsed.entity_uuid) ??
       recent.find((r) => r.entity_uuid === parsed.entity_uuid) ??
@@ -272,6 +273,7 @@ export const useEntityStore = create<State>((set, get) => ({
       sourceFilter: parsed.source ?? null,
       severityMin: parsed.severity_min ?? null,
       discoveredSourceTypes: isCrossEntity ? [] : discoveredSourceTypes,
+      related: isCrossEntity ? [] : prevRelated,
     });
     await get().refresh();
     void get().fetchRiskHistory();
