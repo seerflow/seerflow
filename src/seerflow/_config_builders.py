@@ -1191,8 +1191,15 @@ def _parse_api_fields(raw: dict[str, Any]) -> _ApiFields:
     )
 
 
-# Re-export public threat-intel entry point so legacy callers (notably
-# tests/unit/test_threat_intel_config_loading.py) keep working — S-226.
-from seerflow._threat_intel_builders import (  # noqa: E402
-    build_seerflow_config as build_seerflow_config,
-)
+# Lazy re-export of the threat-intel public entry point so legacy callers
+# (notably tests/unit/test_threat_intel_config_loading.py:
+# `from seerflow._config_builders import build_seerflow_config`) keep working
+# — S-226. PEP 562 module __getattr__ defers the import to attribute-access
+# time, breaking the seerflow.config ↔ _config_builders ↔ _threat_intel_builders
+# cycle that triggers when _threat_intel_builders is the entry-point module.
+def __getattr__(name: str) -> Any:
+    if name == "build_seerflow_config":
+        from seerflow._threat_intel_builders import build_seerflow_config
+
+        return build_seerflow_config
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

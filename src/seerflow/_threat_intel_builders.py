@@ -1,10 +1,11 @@
 """TAXII / threat-intelligence section builders for seerflow config.
 
-Imports ``_walk_and_interpolate`` from ``seerflow._config_builders`` (parent),
-``ConfigError`` from ``seerflow._config_validation`` (leaf), and the
-threat-intel dataclasses from ``seerflow.config``. Used by
-``seerflow.config.load_config`` and re-exported by
-``seerflow._config_builders`` for legacy callers (notably
+Imports ``ConfigError`` from ``seerflow._config_validation`` (leaf) and the
+threat-intel dataclasses from ``seerflow.config``. ``_walk_and_interpolate``
+is loaded lazily inside ``build_seerflow_config`` to avoid the
+``seerflow.config`` ↔ ``seerflow._config_builders`` import cycle when this
+module is the entry point. Used by ``seerflow.config.load_config`` and
+re-exported by ``seerflow._config_builders`` for legacy callers (notably
 ``tests/unit/test_threat_intel_config_loading.py``).
 
 Extracted from ``seerflow._config_builders`` in S-226 to keep that module
@@ -15,7 +16,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from seerflow._config_builders import _walk_and_interpolate
 from seerflow._config_validation import ConfigError
 from seerflow.config import (
     SeerflowConfig,
@@ -177,6 +177,10 @@ def build_seerflow_config(raw: dict[str, Any]) -> SeerflowConfig:
     sensible defaults and env-var interpolation. Heavier validation lives in
     ``validate_seerflow_config`` so callers can opt-in.
     """
+    # Deferred to avoid the seerflow.config ↔ _config_builders import cycle
+    # when _threat_intel_builders is loaded as the entry point.
+    from seerflow._config_builders import _walk_and_interpolate
+
     interpolated = _walk_and_interpolate(raw or {})
     return SeerflowConfig(
         threat_intel=_build_threat_intel_config(interpolated.get("threat_intel", {})),
