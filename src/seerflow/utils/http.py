@@ -19,7 +19,19 @@ _log = logging.getLogger("seerflow")
 
 
 class GetWithRetryError(RuntimeError):
-    """Raised after ``max_attempts`` retries all failed."""
+    """Raised after ``max_attempts`` retries all failed.
+
+    ``status`` carries the last HTTP status code observed when the failure
+    came from a server response (e.g. exhausted retries on 5xx or, for the
+    caller, a non-retryable status the caller decided to escalate). It is
+    ``None`` for transport-level failures (DNS, TLS, connection reset, etc.).
+    Callers wishing to branch on auth vs transient should switch on this
+    integer rather than substring-matching ``str(exc)``.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
@@ -98,10 +110,12 @@ async def get_with_retry(
 
     if last_exc is not None:
         raise GetWithRetryError(
-            f"GET {url} failed after {max_attempts} attempts; last error: {last_exc!r}"
+            f"GET {url} failed after {max_attempts} attempts; last error: {last_exc!r}",
+            status=None,
         )
     raise GetWithRetryError(
-        f"GET {url} failed after {max_attempts} attempts; last status: {last_status}"
+        f"GET {url} failed after {max_attempts} attempts; last status: {last_status}",
+        status=last_status,
     )
 
 

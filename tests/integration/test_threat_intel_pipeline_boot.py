@@ -114,3 +114,60 @@ async def test_two_feeds_persist_snapshots(tmp_path: Path) -> None:
             assert any(ind.value == "198.51.100.1" for ind in snap.indicators)
     finally:
         await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_load_config_yaml_wires_threat_intel_block(tmp_path) -> None:
+    """Regression for the production path: ``load_config()`` must call the
+    threat_intel builder and validator, otherwise an opt-in YAML block is
+    silently ignored at runtime.
+    """
+    from seerflow.config import load_config
+
+    cfg_path = tmp_path / "seerflow.yaml"
+    cfg_path.write_text(
+        """
+threat_intel:
+  enabled: true
+  default_poll_interval_s: 1800
+  feeds:
+    - id: example
+      url: https://taxii.example.invalid/taxii2/api1/
+      collection_id: c1
+      poll_interval_s: 600
+      allow_private_addresses: true
+""".strip()
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.threat_intel.enabled is True
+    assert cfg.threat_intel.default_poll_interval_s == 1800
+    assert len(cfg.threat_intel.feeds) == 1
+    feed = cfg.threat_intel.feeds[0]
+    assert feed.id == "example"
+    assert feed.collection_id == "c1"
+    assert feed.poll_interval_s == 600
+
+
+@pytest.mark.asyncio
+async def test_load_config_yaml_runs_validator_for_insecure_url(tmp_path) -> None:
+    """Validator must reject ``http://`` URLs without an explicit opt-in,
+    proving ``validate_seerflow_config`` is wired into ``load_config``.
+    """
+    from seerflow.config import ConfigError, load_config
+
+    cfg_path = tmp_path / "seerflow.yaml"
+    cfg_path.write_text(
+        """
+threat_intel:
+  enabled: true
+  feeds:
+    - id: bad
+      url: http://insecure.example/taxii2/api1/
+      collection_id: c1
+""".strip()
+    )
+
+    with pytest.raises(ConfigError, match="https"):
+        load_config(str(cfg_path))

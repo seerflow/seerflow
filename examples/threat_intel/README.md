@@ -40,21 +40,25 @@ a referenced env var is unset, and logs the affected feed ID at ERROR.
 
 ## Smoke test
 
-After exporting credentials, run a one-shot poll-and-exit:
+Seerflow does not currently expose a one-shot CLI flag — the agent runs
+until interrupted. Smoke-test by starting the pipeline, waiting one poll
+cycle (≤ `poll_interval_s` plus `startup_jitter_s`), then inspecting the
+persisted snapshot:
 
 ```bash
-OTX_API_KEY=... uv run python -m seerflow start --once-poll-then-exit
-```
+# Start the agent in one terminal:
+OTX_API_KEY=... uv run python -m seerflow start
 
-Inspect the persisted snapshot bytes (SQLite default backend):
-
-```bash
+# After the first poll lands (watch INFO logs for "taxii: poll feed=…"),
+# in a second terminal inspect the persisted snapshot bytes
+# (SQLite default backend):
 sqlite3 ./data/seerflow.sqlite \
   "SELECT key, length(data) FROM model_state WHERE key LIKE 'taxii:%';"
 ```
 
 You should see two rows per healthy feed: `taxii:snapshot:<id>` and
-`taxii:cursor:<id>`.
+`taxii:cursor:<id>`. Stop the agent with `Ctrl-C` once you have observed
+non-zero snapshot bytes.
 
 The metrics surface lives at `GET /api/v1/stats` — the `taxii` field is
 populated whenever `threat_intel.enabled: true`.

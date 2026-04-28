@@ -61,9 +61,9 @@ class STIXIndicatorParser:
 
         confidence = int(sdo.get("confidence", 0))
         kill_chain = tuple(
-            phase.get("phase_name", "")
+            phase_name
             for phase in sdo.get("kill_chain_phases", [])
-            if isinstance(phase, dict)
+            if isinstance(phase, dict) and (phase_name := phase.get("phase_name", ""))
         )
         valid_from_ns = _to_ns(sdo.get("valid_from")) or 0
         valid_until_ns = _to_ns(sdo.get("valid_until"))

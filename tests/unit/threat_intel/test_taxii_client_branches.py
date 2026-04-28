@@ -48,10 +48,7 @@ async def test_get_objects_returns_silently_on_304() -> None:
         client = TAXIIClient(session=session)
         with aioresponses() as m:
             m.get(OBJECTS, status=304, body="")
-            collected = [
-                sdo
-                async for sdo, _ in client.get_objects(OBJECTS, added_after=None)
-            ]
+            collected = [sdo async for sdo, _ in client.get_objects(OBJECTS, added_after=None)]
             assert collected == []
 
 
@@ -93,8 +90,5 @@ async def test_get_objects_returns_when_more_true_but_no_next_token() -> None:
                 },
                 headers={"X-TAXII-Date-Added-Last": "2026-04-28T00:00:00.000Z"},
             )
-            collected = [
-                sdo
-                async for sdo, _ in client.get_objects(OBJECTS, added_after=None)
-            ]
+            collected = [sdo async for sdo, _ in client.get_objects(OBJECTS, added_after=None)]
             assert [s["id"] for s in collected] == ["i1"]

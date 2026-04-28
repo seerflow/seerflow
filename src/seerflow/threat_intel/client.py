@@ -46,12 +46,16 @@ class TAXIIClient:
     async def discover(self, root_url: str) -> dict[str, Any]:
         status, body, _ = await self._get(root_url)
         if status != 200:
-            raise GetWithRetryError(f"TAXII discover {root_url} -> {status}")
+            raise GetWithRetryError(f"TAXII discover {root_url} -> {status}", status=status)
         return body  # type: ignore[no-any-return]
 
     async def get_objects(
         self, objects_url: str, *, added_after: str | None
-    ) -> AsyncIterator[tuple[dict[str, Any], str | None]]:
+    ) -> AsyncIterator[tuple[dict[str, Any] | None, str | None]]:
+        """Yield ``(sdo, last_added)`` per indicator, plus one cursor-only
+        ``(None, last_added)`` per successful page (so consumers can advance
+        the cursor even when the page contains zero objects).
+        """
         params: dict[str, Any] = {}
         if added_after is not None:
             params["added_after"] = added_after
@@ -61,11 +65,16 @@ class TAXIIClient:
             if status == 304:
                 return
             if status != 200:
-                raise GetWithRetryError(f"TAXII objects {url} -> {status}")
+                raise GetWithRetryError(f"TAXII objects {url} -> {status}", status=status)
             last_added = headers.get("X-TAXII-Date-Added-Last")
             if not isinstance(body, dict):
-                raise GetWithRetryError(f"TAXII objects {url}: non-json body")
-            for sdo in body.get("objects", []) or []:
+                raise GetWithRetryError(f"TAXII objects {url}: non-json body", status=status)
+            objects = body.get("objects", []) or []
+            if not objects:
+                # Empty page: emit cursor-only marker so caller can advance
+                # ``taxii:cursor:<feed_id>`` without missing the watermark.
+                yield None, last_added
+            for sdo in objects:
                 yield sdo, last_added
             if body.get("more"):
                 next_token = body.get("next")

@@ -369,6 +369,26 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
         parsed = urlparse(feed.url)
         if not parsed.hostname:
             continue
+        # Fast path: hostname is already a literal IP — no DNS round-trip.
+        try:
+            ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            literal_ip = False
+        else:
+            literal_ip = True
+        if literal_ip:
+            if _is_private_ip(parsed.hostname):
+                raise ConfigError(
+                    f"threat_intel.feeds[{feed.id}].url targets private/reserved "
+                    f"address {parsed.hostname!r}; set allow_private_addresses=true to override"
+                )
+            continue
+        # DNS path: bound the lookup with a short timeout so a misbehaving
+        # resolver cannot stall startup. ``socket.gethostbyname`` does not
+        # accept a timeout argument, so we set the global default for this
+        # call only and restore it immediately afterwards.
+        prev_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(2.0)
         try:
             resolved = socket.gethostbyname(parsed.hostname)
         except OSError as exc:
@@ -376,6 +396,8 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
                 f"threat_intel.feeds[{feed.id}].url DNS lookup failed for "
                 f"{parsed.hostname!r}: {exc}"
             ) from exc
+        finally:
+            socket.setdefaulttimeout(prev_timeout)
         if _is_private_ip(resolved):
             raise ConfigError(
                 f"threat_intel.feeds[{feed.id}].url resolves to private/reserved "

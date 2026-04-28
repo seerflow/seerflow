@@ -132,6 +132,7 @@ async def test_filter_confidence_drops_below_floor() -> None:
 def _make_consumer_with_failing_client(
     *,
     error_msg: str,
+    status: int | None = None,
 ) -> tuple[TAXIIFeedConsumer, TAXIIMetricsRegistry, AuthCircuitBreaker]:
     model_store = MagicMock()
     model_store.save_state = AsyncMock()
@@ -142,7 +143,7 @@ def _make_consumer_with_failing_client(
     async def _gen(*_a: Any, **_kw: Any):
         # Yield once so the loop body runs, then raise mid-iteration.
         yield {"type": "indicator", "id": "i1", "pattern": "[]"}, "ts"
-        raise GetWithRetryError(error_msg)
+        raise GetWithRetryError(error_msg, status=status)
 
     fake_client.get_objects = _gen
     parser = MagicMock()
@@ -166,6 +167,7 @@ def _make_consumer_with_failing_client(
 async def test_classify_failure_records_auth_on_401() -> None:
     consumer, metrics, breaker = _make_consumer_with_failing_client(
         error_msg="GET https://x failed: status 401",
+        status=401,
     )
     snap = await consumer.poll_once()
     assert snap.indicators == ()
@@ -181,6 +183,7 @@ async def test_classify_failure_records_auth_on_401() -> None:
 async def test_classify_failure_records_auth_on_403() -> None:
     consumer, metrics, _ = _make_consumer_with_failing_client(
         error_msg="GET https://x failed: status 403",
+        status=403,
     )
     await consumer.poll_once()
     snap_metrics = metrics.snapshot("otx")
@@ -191,6 +194,7 @@ async def test_classify_failure_records_auth_on_403() -> None:
 async def test_classify_failure_records_non_auth_on_other_status() -> None:
     consumer, metrics, breaker = _make_consumer_with_failing_client(
         error_msg="GET https://x failed: status 502",
+        status=502,
     )
     await consumer.poll_once()
     snap_metrics = metrics.snapshot("otx")

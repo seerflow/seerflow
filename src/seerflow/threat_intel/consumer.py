@@ -77,6 +77,10 @@ class TAXIIFeedConsumer:
         try:
             async for sdo, last in self._client.get_objects(objects_url, added_after=added_after):
                 last_added = last or last_added
+                if sdo is None:
+                    # Cursor-only marker emitted by the client for empty pages —
+                    # advance the watermark even when the page has no SDOs.
+                    continue
                 indicators = self._parser.parse(sdo, source_feed=self._cfg.id)
                 indicators = self._filter_expired(indicators)
                 indicators = self._filter_confidence(indicators)
@@ -115,8 +119,12 @@ class TAXIIFeedConsumer:
             pass
         while not stop.is_set():
             await self.poll_once()
+            # AC7 — wait the configured interval ±5 % so multiple feeds do
+            # not synchronise into a thundering herd after long uptimes.
+            interval = float(self.poll_interval_s)
+            wait_s = interval * random.uniform(0.95, 1.05) if interval > 0 else 0.0  # noqa: S311
             try:
-                await asyncio.wait_for(stop.wait(), timeout=float(self.poll_interval_s))
+                await asyncio.wait_for(stop.wait(), timeout=wait_s)
                 return
             except TimeoutError:
                 continue
@@ -165,12 +173,13 @@ class TAXIIFeedConsumer:
         return tuple(ind for ind in inds if ind.confidence >= floor)
 
     def _classify_failure(self, exc: GetWithRetryError) -> None:
-        msg = str(exc)
-        if "401" in msg or "403" in msg:
+        # Branch on the typed HTTP status, not on substring matching the
+        # exception message — the message format is implementation detail.
+        if exc.status in (401, 403):
             self._breaker.record_failure()
             self._metrics.record_poll_failed(self._cfg.id, auth=True)
             self._metrics.set_circuit_open(self._cfg.id, open_=self._breaker.is_open())
-            _log.error("taxii: auth failure feed=%s: %s", self._cfg.id, msg)
+            _log.error("taxii: auth failure feed=%s: %s", self._cfg.id, exc)
         else:
             self._metrics.record_poll_failed(self._cfg.id, auth=False)
-            _log.warning("taxii: poll failed feed=%s: %s", self._cfg.id, msg)
+            _log.warning("taxii: poll failed feed=%s: %s", self._cfg.id, exc)

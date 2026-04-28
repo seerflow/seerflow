@@ -430,7 +430,12 @@ def load_config(
     ws_fields = _parse_ws_fields(raw)
     api_fields = _parse_api_fields(raw)
 
-    return SeerflowConfig(
+    from seerflow._config_builders import _build_threat_intel_config
+    from seerflow._config_validation import validate_seerflow_config
+
+    threat_intel = _build_threat_intel_config(raw.get("threat_intel", {}))
+
+    cfg = SeerflowConfig(
         storage=_build_storage(raw.get("storage", {})),
         receivers=_build_receivers(raw.get("receivers", {})),
         detection=_build_detection(raw.get("detection", {})),
@@ -438,6 +443,7 @@ def load_config(
         alerting=_build_alerting(raw.get("alerting", {})),
         llm=_build_llm(raw.get("llm", {})),
         ueba=_build_ueba(raw.get("ueba", {})),
+        threat_intel=threat_intel,
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
@@ -456,3 +462,6 @@ def load_config(
         api_coverage_rate_limit=api_fields.api_coverage_rate_limit,
         api_trust_proxy_headers=api_fields.api_trust_proxy_headers,
     )
+
+    validate_seerflow_config(cfg)
+    return cfg

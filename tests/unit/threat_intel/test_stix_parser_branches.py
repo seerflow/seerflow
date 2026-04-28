@@ -165,11 +165,12 @@ def test_parse_skips_non_dict_kill_chain_phase_entries() -> None:
         # Mix dict-with-name, dict-without-name, and a non-dict entry.
         "kill_chain_phases": [
             {"kill_chain_name": "lm", "phase_name": "delivery"},
-            {"kill_chain_name": "lm"},  # missing phase_name -> empty string.
+            {"kill_chain_name": "lm"},  # missing phase_name -> dropped.
             "not-a-dict",  # filtered out by isinstance check.
         ],
     }
     out = parser.parse(sdo, source_feed="t")
     assert len(out) == 1
-    # Two dict entries kept: one with phase_name, one defaulted to "".
-    assert out[0].kill_chain_phases == ("delivery", "")
+    # Only the dict entry with a non-empty phase_name survives — empty
+    # strings are dropped so downstream consumers don't see noisy phantoms.
+    assert out[0].kill_chain_phases == ("delivery",)
