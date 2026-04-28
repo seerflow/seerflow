@@ -21,9 +21,12 @@ class AuthCircuitBreaker:
     open_seconds: float = 3600.0
     now_fn: Callable[[], float] = time.monotonic
 
-    _failures: int = field(default=0)
-    _opened_at: float | None = field(default=None)
-    _half_open: bool = field(default=False)
+    # ``init=False`` keeps these fields out of the generated ``__init__``
+    # so callers cannot bypass the state-machine invariants by passing
+    # ``_failures=10`` etc. at construction time.
+    _failures: int = field(default=0, init=False)
+    _opened_at: float | None = field(default=None, init=False)
+    _half_open: bool = field(default=False, init=False)
 
     def allow(self) -> bool:
         if self._opened_at is None:

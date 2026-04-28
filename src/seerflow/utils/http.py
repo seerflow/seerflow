@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -71,22 +72,41 @@ async def get_with_retry(
                 break
             await _sleep_backoff(attempt, base_delay_s, jitter_pct, url, exc=exc)
             continue
-        if isinstance(result, tuple):
-            return result
-        last_status = result
+        if isinstance(result, _Final):
+            return result.status, result.body, result.headers
+        last_status = result.status
         if attempt >= max_attempts:
             break
         await _sleep_after_retryable(
-            attempt, max_attempts, base_delay_s, jitter_pct, url, status=last_status
+            attempt,
+            max_attempts,
+            base_delay_s,
+            jitter_pct,
+            url,
+            status=result.status,
+            retry_after_header=result.retry_after,
         )
     raise _exhausted_error(url, max_attempts, last_exc, last_status)
 
 
-# Out-of-band stash for the most recent ``Retry-After`` header so the
-# control loop above can decide the next sleep without having to
-# re-enter the ``async with`` context. Keyed by URL because a single
-# session may serve concurrent ``get_with_retry`` calls.
-_RETRY_AFTER_HEADER: dict[str, str | None] = {}
+@dataclass(frozen=True, slots=True)
+class _Final:
+    """Terminal response: caller returns (status, body, headers)."""
+
+    status: int
+    body: Any
+    headers: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class _Retryable:
+    """Retryable response (429 / 5xx). Carries Retry-After through the call
+    stack so the control loop sees the right header value even when two
+    concurrent ``get_with_retry`` calls target the same URL.
+    """
+
+    status: int
+    retry_after: str | None
 
 
 async def _attempt_get(
@@ -98,9 +118,9 @@ async def _attempt_get(
     timeout_s: float,
     *,
     allow_redirects: bool,
-) -> tuple[int, Any, dict[str, str]] | int:
-    """One HTTP attempt. Returns ``(status, body, headers)`` for a final
-    response or the integer status when the response is retryable.
+) -> _Final | _Retryable:
+    """One HTTP attempt. Returns a ``_Final`` for a terminal response or a
+    ``_Retryable`` carrying the status + Retry-After header value.
     """
     async with session.get(
         url,
@@ -111,10 +131,9 @@ async def _attempt_get(
         allow_redirects=allow_redirects,
     ) as resp:
         if resp.status in _RETRYABLE_STATUSES:
-            _RETRY_AFTER_HEADER[url] = resp.headers.get("Retry-After")
-            return resp.status
+            return _Retryable(status=resp.status, retry_after=resp.headers.get("Retry-After"))
         body = await _decode_body(resp)
-        return resp.status, body, dict(resp.headers)
+        return _Final(status=resp.status, body=body, headers=dict(resp.headers))
 
 
 async def _sleep_backoff(
@@ -144,8 +163,9 @@ async def _sleep_after_retryable(
     url: str,
     *,
     status: int | None,
+    retry_after_header: str | None,
 ) -> None:
-    retry_after = _parse_retry_after(_RETRY_AFTER_HEADER.pop(url, None))
+    retry_after = _parse_retry_after(retry_after_header)
     delay = retry_after if retry_after is not None else _backoff(attempt, base_delay_s, jitter_pct)
     _log.warning(
         "get_with_retry: %s -> %s (attempt %d/%d), sleeping %.2fs",

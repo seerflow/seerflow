@@ -51,6 +51,15 @@ class TAXIIFeedManager:
     async def start(self) -> list[str]:
         if not self._cfg.enabled:
             return []
+        if self._session is not None:
+            raise RuntimeError(
+                "TAXIIFeedManager.start() called while already running; "
+                "call stop() before re-starting"
+            )
+        # Fresh stop event — clears any prior set() from a previous stop()
+        # so a restart cycle does not leave run_forever() permanently
+        # short-circuited.
+        self._stop = asyncio.Event()
         self._session = aiohttp.ClientSession()
         failed: list[str] = []
         for feed_cfg in self._cfg.feeds:
@@ -86,7 +95,9 @@ class TAXIIFeedManager:
             self._session = None
 
     def _build_consumer(self, feed_cfg: TAXIIFeedConfig) -> TAXIIFeedConsumer:
-        assert self._session is not None
+        if self._session is None:
+            # Production guard, not an assert — assert is stripped under -O.
+            raise RuntimeError("_build_consumer called before start(); session is not initialised")
         auth_header, basic = _resolve_auth(feed_cfg.auth)
         client = TAXIIClient(
             session=self._session,
@@ -109,20 +120,22 @@ def _resolve_auth(
 ) -> tuple[dict[str, str] | None, aiohttp.BasicAuth | None]:
     if auth is None:
         return None, None
-    if auth.kind == "api_key":
-        if not auth.api_key_env:
-            raise RuntimeError("api_key auth requires api_key_env")
-        token = os.environ.get(auth.api_key_env)
-        if not token:
-            raise RuntimeError(f"env var {auth.api_key_env} is unset")
-        prefix = "Bearer " if auth.api_key_header.lower() == "authorization" else ""
-        return {auth.api_key_header: f"{prefix}{token}"}, None
-    if auth.kind == "basic":
-        if not auth.username_env or not auth.password_env:
-            raise RuntimeError("basic auth requires username_env and password_env")
-        u = os.environ.get(auth.username_env)
-        p = os.environ.get(auth.password_env)
-        if not u or not p:
-            raise RuntimeError(f"env vars {auth.username_env}/{auth.password_env} unset")
-        return None, aiohttp.BasicAuth(login=u, password=p)
-    raise RuntimeError(f"unknown auth kind: {auth.kind}")
+    match auth.kind:
+        case "api_key":
+            if not auth.api_key_env:
+                raise RuntimeError("api_key auth requires api_key_env")
+            token = os.environ.get(auth.api_key_env)
+            if not token:
+                raise RuntimeError(f"env var {auth.api_key_env} is unset")
+            prefix = "Bearer " if auth.api_key_header.lower() == "authorization" else ""
+            return {auth.api_key_header: f"{prefix}{token}"}, None
+        case "basic":
+            if not auth.username_env or not auth.password_env:
+                raise RuntimeError("basic auth requires username_env and password_env")
+            u = os.environ.get(auth.username_env)
+            p = os.environ.get(auth.password_env)
+            if not u or not p:
+                raise RuntimeError(f"env vars {auth.username_env}/{auth.password_env} unset")
+            return None, aiohttp.BasicAuth(login=u, password=p)
+        case _:
+            raise RuntimeError(f"unknown auth kind: {auth.kind}")

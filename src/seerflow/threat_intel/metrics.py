@@ -40,11 +40,7 @@ class TAXIIMetricsRegistry:
         self._feeds: dict[str, _MutableFeedState] = {}
 
     def _state(self, feed_id: str) -> _MutableFeedState:
-        st = self._feeds.get(feed_id)
-        if st is None:
-            st = _MutableFeedState()
-            self._feeds[feed_id] = st
-        return st
+        return self._feeds.setdefault(feed_id, _MutableFeedState())
 
     def record_poll_ok(
         self,

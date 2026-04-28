@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from seerflow.utils.http import GetWithRetryError, get_with_retry
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     import aiohttp
 
@@ -56,7 +56,7 @@ class TAXIIClient:
 
     async def get_objects(
         self, objects_url: str, *, added_after: str | None
-    ) -> AsyncIterator[tuple[dict[str, Any] | None, str | None]]:
+    ) -> AsyncGenerator[tuple[dict[str, Any] | None, str | None], None]:
         """Yield ``(sdo, last_added)`` per indicator, plus one cursor-only
         ``(None, last_added)`` per successful page (so consumers can advance
         the cursor even when the page contains zero objects).
