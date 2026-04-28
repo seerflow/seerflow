@@ -8,7 +8,6 @@ import { SummaryBadges } from "./SummaryBadges";
 import { api, ApiError } from "@/lib/api";
 import { AlertSchema } from "@/lib/schemas";
 import type { AlertFilter, WsFilter, WsMessage, SeverityBucket } from "@/lib/types";
-import { isAlert } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
@@ -70,16 +69,6 @@ export function AlertFeed(): JSX.Element {
         });
       }
     }
-    else if (m.type === "batch") {
-      // S-208: heterogeneous envelope — only ingest Alert-shaped batches.
-      // LiveEvent-shaped batches are EventStream's concern.
-      const first = m.events[0];
-      if (isAlert(first)) {
-        for (const a of m.events) {
-          if (isAlert(a)) prepend(a);
-        }
-      }
-    }
   }, [prepend]);
 
   useEffect(() => {
@@ -116,7 +105,6 @@ export function AlertFeed(): JSX.Element {
       wsBus.on("alert",       onAny),
       wsBus.on("alert_batch", onAny),
       wsBus.on("event",       onAny),
-      wsBus.on("batch",       onAny),
       wsBus.on("__status",    (m) => setStatus(m.status)),
     ];
     return () => { for (const off of offs) off(); };

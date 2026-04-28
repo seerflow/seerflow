@@ -5,6 +5,7 @@ import { WsProvider } from "@/components/WsProvider";
 import { useAlertStore } from "@/stores/alerts";
 import { logger } from "@/lib/logger";
 import * as wsBus from "@/lib/wsBus";
+import type { LiveEvent } from "@/lib/types";
 import { _resetForTests as resetWsIntents } from "@/lib/wsFilter";
 import { AlertSchema, validateOrDropItem } from "@/lib/schemas";
 import * as validationMetrics from "@/lib/validationMetrics";
@@ -223,6 +224,42 @@ describe("AlertFeed integration", () => {
     });
 
     expect(MockWS.last!.sent).toEqual([]);
+  });
+
+  it("does not ingest alerts arriving under type:'batch' (alerts ship via alert_batch)", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    act(() => { MockWS.last!._open(); });
+    // Let the warm-up promise resolve so subsequent bus emissions dispatch
+    // straight through `handleMessage` instead of being parked in the buffer.
+    await new Promise(r => setTimeout(r, 0));
+
+    // bigint timestamp_ns: we bypass parseWsFrame, which is the layer that
+    // would normally coerce the wire string → bigint, so the fixture has to
+    // ship in domain-typed form.
+    const mkAlert = (id: string, rule: string) => ({
+      alert_id: id, timestamp_ns: 1n, alert_type: "ml" as const, rule_name: rule,
+      severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
+      entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
+      dedup_count: 1, source_type: "syslog",
+    });
+    // Bypass parseWsFrame on purpose — the wire schema validates `batch` as
+    // LiveEvent-only and would drop this payload before it reached the bus.
+    // The whole point of this regression test is to prove that AlertFeed's
+    // bus subscription on `"batch"` no longer re-introduces alert-shaped
+    // frames via a dead `isAlert(first)` branch in `handleMessage` (the
+    // branch + subscription were both removed in S-211). The emit is a
+    // no-op for AlertFeed and the assertion holds.
+    //
+    // Cast: `WsMessage.batch.events` is `LiveEvent[]` after S-211's narrowing.
+    // We are deliberately violating that contract to prove the bus drops the
+    // shape; the cast is the only way to express "emit a malformed batch."
+    act(() => {
+      wsBus.emit({ type: "batch", events: [mkAlert("ghost-1", "ghost-rule")] as unknown as LiveEvent[] });
+    });
+
+    expect(screen.queryByText("ghost-rule")).toBeNull();
   });
 
   it("handles alert_batch arrivals", async () => {

@@ -69,7 +69,7 @@ export function EventStream(): JSX.Element {
         // S-208: isLiveEvent replaces the `"event_id" in first` stringly-typed check.
         const first = m.events[0];
         if (isLiveEvent(first)) {
-          useEventStore.getState().ingest(m.events as LiveEvent[]);
+          useEventStore.getState().ingest(m.events);
         }
       }),
       wsBus.on("__status", (m) => setStatus(m.status)),
