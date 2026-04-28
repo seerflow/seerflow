@@ -1234,66 +1234,65 @@ def _build_taxii_feed_config(data: dict[str, Any]) -> TAXIIFeedConfig:
         raise ConfigError(
             f"threat_intel.feeds[] entries must be mappings, got {type(data).__name__}"
         )
-    feed_id = data.get("id")
-    if not isinstance(feed_id, str) or not feed_id:
-        raise ConfigError("threat_intel.feeds[].id must be a non-empty string")
-    url = data.get("url")
-    if not isinstance(url, str) or not url:
-        raise ConfigError("threat_intel.feeds[].url must be a non-empty string")
-    collection_id = data.get("collection_id")
-    if not isinstance(collection_id, str) or not collection_id:
-        raise ConfigError("threat_intel.feeds[].collection_id must be a non-empty string")
-    poll_interval_raw = data.get("poll_interval_s")
-    poll_interval_s: int | None
-    if poll_interval_raw is None:
-        poll_interval_s = None
-    elif isinstance(poll_interval_raw, bool) or not isinstance(poll_interval_raw, int):
-        raise ConfigError(
-            "threat_intel.feeds[].poll_interval_s must be an int or omitted, "
-            f"got {type(poll_interval_raw).__name__}"
-        )
-    else:
-        poll_interval_s = poll_interval_raw
+    return TAXIIFeedConfig(
+        id=_require_taxii_str(data, "id"),
+        url=_require_taxii_str(data, "url"),
+        collection_id=_require_taxii_str(data, "collection_id"),
+        poll_interval_s=_require_taxii_optional_int(data, "poll_interval_s"),
+        auth=_require_taxii_auth(data),
+        confidence_floor=_require_taxii_int(data, "confidence_floor", default=0),
+        enabled=_require_taxii_bool(data, "enabled", default=True),
+        allow_insecure=_require_taxii_bool(data, "allow_insecure", default=False),
+        allow_private_addresses=_require_taxii_bool(
+            data, "allow_private_addresses", default=False
+        ),
+    )
 
+
+def _require_taxii_str(data: dict[str, Any], field: str) -> str:
+    value = data.get(field)
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"threat_intel.feeds[].{field} must be a non-empty string")
+    return value
+
+
+def _require_taxii_int(data: dict[str, Any], field: str, *, default: int) -> int:
+    value = data.get(field, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(
+            f"threat_intel.feeds[].{field} must be an int, got {type(value).__name__}"
+        )
+    return int(value)
+
+
+def _require_taxii_optional_int(data: dict[str, Any], field: str) -> int | None:
+    value = data.get(field)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(
+            f"threat_intel.feeds[].{field} must be an int or omitted, got {type(value).__name__}"
+        )
+    return int(value)
+
+
+def _require_taxii_bool(data: dict[str, Any], field: str, *, default: bool) -> bool:
+    value = data.get(field, default)
+    if not isinstance(value, bool):
+        raise ConfigError(f"threat_intel.feeds[].{field} must be a bool")
+    return value
+
+
+def _require_taxii_auth(data: dict[str, Any]) -> TAXIIAuthConfig | None:
     auth_raw = data.get("auth")
-    auth: TAXIIAuthConfig | None
     if auth_raw is None:
-        auth = None
-    elif isinstance(auth_raw, dict):
-        auth = _build_taxii_auth_config(auth_raw)
-    else:
+        return None
+    if not isinstance(auth_raw, dict):
         raise ConfigError(
             "threat_intel.feeds[].auth must be a mapping or omitted, "
             f"got {type(auth_raw).__name__}"
         )
-
-    confidence_floor = data.get("confidence_floor", 0)
-    if isinstance(confidence_floor, bool) or not isinstance(confidence_floor, int):
-        raise ConfigError(
-            "threat_intel.feeds[].confidence_floor must be an int, "
-            f"got {type(confidence_floor).__name__}"
-        )
-    enabled = data.get("enabled", True)
-    if not isinstance(enabled, bool):
-        raise ConfigError("threat_intel.feeds[].enabled must be a bool")
-    allow_insecure = data.get("allow_insecure", False)
-    if not isinstance(allow_insecure, bool):
-        raise ConfigError("threat_intel.feeds[].allow_insecure must be a bool")
-    allow_private = data.get("allow_private_addresses", False)
-    if not isinstance(allow_private, bool):
-        raise ConfigError("threat_intel.feeds[].allow_private_addresses must be a bool")
-
-    return TAXIIFeedConfig(
-        id=feed_id,
-        url=url,
-        collection_id=collection_id,
-        poll_interval_s=poll_interval_s,
-        auth=auth,
-        confidence_floor=confidence_floor,
-        enabled=enabled,
-        allow_insecure=allow_insecure,
-        allow_private_addresses=allow_private,
-    )
+    return _build_taxii_auth_config(auth_raw)
 
 
 def _build_threat_intel_config(data: dict[str, Any]) -> ThreatIntelConfig:

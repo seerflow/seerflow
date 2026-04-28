@@ -17,7 +17,12 @@ from typing import TYPE_CHECKING
 from limits import parse as _parse_limit_string
 
 if TYPE_CHECKING:
-    from seerflow.config import DetectionConfig, SeerflowConfig, ThreatIntelConfig
+    from seerflow.config import (
+        DetectionConfig,
+        SeerflowConfig,
+        TAXIIFeedConfig,
+        ThreatIntelConfig,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -283,18 +288,25 @@ def _validate_detection_config(config: DetectionConfig) -> None:
 # ---------------------------------------------------------------------------
 
 
+_THREAT_INTEL_MIN_POLL_INTERVAL_S = 60
+_THREAT_INTEL_DNS_TIMEOUT_S = 2.0
+
+
 def _validate_threat_intel(config: ThreatIntelConfig) -> None:
     """Validate the threat-intel block. No-op when ``enabled`` is False."""
-    import socket
-    from urllib.parse import urlparse
-
     if not config.enabled:
         return
+    _validate_threat_intel_defaults(config)
+    _validate_threat_intel_feeds_structural(config)
+    _validate_threat_intel_feeds_dns(config)
 
-    if config.default_poll_interval_s < 60:
+
+def _validate_threat_intel_defaults(config: ThreatIntelConfig) -> None:
+    """Scalar bounds on the top-level ``threat_intel:`` block."""
+    if config.default_poll_interval_s < _THREAT_INTEL_MIN_POLL_INTERVAL_S:
         raise ConfigError(
-            f"threat_intel.default_poll_interval_s must be >= 60, "
-            f"got {config.default_poll_interval_s!r}"
+            f"threat_intel.default_poll_interval_s must be >= "
+            f"{_THREAT_INTEL_MIN_POLL_INTERVAL_S}, got {config.default_poll_interval_s!r}"
         )
     if config.request_timeout_s <= 0.0 or not math.isfinite(config.request_timeout_s):
         raise ConfigError(
@@ -315,15 +327,20 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
             f"threat_intel.startup_jitter_s must be >= 0, got {config.startup_jitter_s!r}"
         )
 
-    # Cheap structural checks first (duplicates, scheme, scalar bounds, auth
-    # consistency) so a misconfiguration surfaces deterministically without
-    # depending on DNS state.
+
+def _validate_threat_intel_feeds_structural(config: ThreatIntelConfig) -> None:
+    """Cheap per-feed checks (duplicates, scheme, scalar bounds, auth consistency).
+
+    Runs before any DNS lookup so a misconfiguration surfaces
+    deterministically without depending on network state.
+    """
+    from urllib.parse import urlparse
+
     seen_ids: set[str] = set()
     for feed in config.feeds:
         if feed.id in seen_ids:
             raise ConfigError(f"threat_intel.feeds: duplicate id {feed.id!r}")
         seen_ids.add(feed.id)
-
         parsed = urlparse(feed.url)
         if parsed.scheme not in ("http", "https"):
             raise ConfigError(
@@ -336,73 +353,87 @@ def _validate_threat_intel(config: ThreatIntelConfig) -> None:
             )
         if not parsed.hostname:
             raise ConfigError(f"threat_intel.feeds[{feed.id}].url must include a hostname")
-
-        if feed.poll_interval_s is not None and feed.poll_interval_s < 60:
+        if (
+            feed.poll_interval_s is not None
+            and feed.poll_interval_s < _THREAT_INTEL_MIN_POLL_INTERVAL_S
+        ):
             raise ConfigError(
-                f"threat_intel.feeds[{feed.id}].poll_interval_s must be >= 60, "
-                f"got {feed.poll_interval_s!r}"
+                f"threat_intel.feeds[{feed.id}].poll_interval_s must be >= "
+                f"{_THREAT_INTEL_MIN_POLL_INTERVAL_S}, got {feed.poll_interval_s!r}"
             )
         if not (0 <= feed.confidence_floor <= 100):
             raise ConfigError(
                 f"threat_intel.feeds[{feed.id}].confidence_floor must be in [0, 100], "
                 f"got {feed.confidence_floor!r}"
             )
+        _validate_taxii_feed_auth(feed)
 
-        auth = feed.auth
-        if auth is not None:
-            if auth.kind == "api_key" and not auth.api_key_env:
-                raise ConfigError(
-                    f"threat_intel.feeds[{feed.id}].auth.api_key_env is required "
-                    "when kind='api_key'"
-                )
-            if auth.kind == "basic" and (not auth.username_env or not auth.password_env):
-                raise ConfigError(
-                    f"threat_intel.feeds[{feed.id}].auth.username_env and "
-                    "password_env are required when kind='basic'"
-                )
 
-    # DNS resolution check runs last so structural errors (handled above) do
-    # not depend on network state.
+def _validate_taxii_feed_auth(feed: TAXIIFeedConfig) -> None:
+    """Auth-config consistency: required env-var fields per ``kind``."""
+    auth = feed.auth
+    if auth is None:
+        return
+    if auth.kind == "api_key" and not auth.api_key_env:
+        raise ConfigError(
+            f"threat_intel.feeds[{feed.id}].auth.api_key_env is required when kind='api_key'"
+        )
+    if auth.kind == "basic" and (not auth.username_env or not auth.password_env):
+        raise ConfigError(
+            f"threat_intel.feeds[{feed.id}].auth.username_env and password_env "
+            "are required when kind='basic'"
+        )
+
+
+def _validate_threat_intel_feeds_dns(config: ThreatIntelConfig) -> None:
+    """Per-feed SSRF / private-IP guard; literal IPs short-circuit DNS."""
+    from urllib.parse import urlparse
+
     for feed in config.feeds:
         if feed.allow_private_addresses:
             continue
         parsed = urlparse(feed.url)
         if not parsed.hostname:
             continue
-        # Fast path: hostname is already a literal IP — no DNS round-trip.
-        try:
-            ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            literal_ip = False
-        else:
-            literal_ip = True
-        if literal_ip:
-            if _is_private_ip(parsed.hostname):
-                raise ConfigError(
-                    f"threat_intel.feeds[{feed.id}].url targets private/reserved "
-                    f"address {parsed.hostname!r}; set allow_private_addresses=true to override"
-                )
+        if _check_literal_ip_or_resolve(feed.id, parsed.hostname):
             continue
-        # DNS path: bound the lookup with a short timeout so a misbehaving
-        # resolver cannot stall startup. ``socket.gethostbyname`` does not
-        # accept a timeout argument, so we set the global default for this
-        # call only and restore it immediately afterwards.
-        prev_timeout = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(2.0)
-        try:
-            resolved = socket.gethostbyname(parsed.hostname)
-        except OSError as exc:
+
+
+def _check_literal_ip_or_resolve(feed_id: str, hostname: str) -> bool:
+    """Returns True after running the appropriate path; raises on private IP."""
+    import socket
+
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        if _is_private_ip(hostname):
             raise ConfigError(
-                f"threat_intel.feeds[{feed.id}].url DNS lookup failed for "
-                f"{parsed.hostname!r}: {exc}"
-            ) from exc
-        finally:
-            socket.setdefaulttimeout(prev_timeout)
-        if _is_private_ip(resolved):
-            raise ConfigError(
-                f"threat_intel.feeds[{feed.id}].url resolves to private/reserved "
-                f"address {resolved!r}; set allow_private_addresses=true to override"
+                f"threat_intel.feeds[{feed_id}].url targets private/reserved "
+                f"address {hostname!r}; set allow_private_addresses=true to override"
             )
+        return True
+    # DNS path with a bounded timeout so a misbehaving resolver cannot stall
+    # startup. ``socket.gethostbyname`` has no timeout arg, so we use the
+    # process-global default for the call and restore it immediately. This is
+    # safe at single-threaded startup; do not call from worker threads.
+    prev_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(_THREAT_INTEL_DNS_TIMEOUT_S)
+    try:
+        resolved = socket.gethostbyname(hostname)
+    except OSError as exc:
+        raise ConfigError(
+            f"threat_intel.feeds[{feed_id}].url DNS lookup failed for {hostname!r}: {exc}"
+        ) from exc
+    finally:
+        socket.setdefaulttimeout(prev_timeout)
+    if _is_private_ip(resolved):
+        raise ConfigError(
+            f"threat_intel.feeds[{feed_id}].url resolves to private/reserved "
+            f"address {resolved!r}; set allow_private_addresses=true to override"
+        )
+    return True
 
 
 def validate_seerflow_config(config: SeerflowConfig) -> None:

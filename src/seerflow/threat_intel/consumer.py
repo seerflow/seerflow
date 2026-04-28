@@ -56,14 +56,7 @@ class TAXIIFeedConsumer:
 
     async def poll_once(self) -> IndicatorSnapshot:
         if not self._breaker.allow():
-            self._metrics.set_circuit_open(self._cfg.id, open_=True)
-            _log.info("taxii: circuit open for feed=%s; skipping poll", self._cfg.id)
-            return IndicatorSnapshot(
-                feed_id=self._cfg.id,
-                fetched_at_ns=self._clock_ns(),
-                indicators=(),
-                cursor=None,
-            )
+            return self._empty_snapshot_for_open_circuit()
 
         cursor_bytes = await self._store.load_state(f"taxii:cursor:{self._cfg.id}")
         added_after = cursor_bytes.decode() if cursor_bytes else None
@@ -105,7 +98,10 @@ class TAXIIFeedConsumer:
             cursor=last_added,
         )
 
-        await self._persist(snap, truncated=truncated)
+        # Persist the snapshot+cursor pair atomically vs cancellation so a
+        # SIGTERM mid-poll does not leave taxii:snapshot:* and
+        # taxii:cursor:* desynchronised on disk.
+        await asyncio.shield(self._persist(snap, truncated=truncated))
         self._breaker.record_success()
         self._metrics.set_circuit_open(self._cfg.id, open_=False)
         return snap
@@ -130,6 +126,16 @@ class TAXIIFeedConsumer:
                 continue
 
     # internals -----------------------------------------------------------
+
+    def _empty_snapshot_for_open_circuit(self) -> IndicatorSnapshot:
+        self._metrics.set_circuit_open(self._cfg.id, open_=True)
+        _log.info("taxii: circuit open for feed=%s; skipping poll", self._cfg.id)
+        return IndicatorSnapshot(
+            feed_id=self._cfg.id,
+            fetched_at_ns=self._clock_ns(),
+            indicators=(),
+            cursor=None,
+        )
 
     def _build_objects_url(self) -> str:
         base = self._cfg.url.rstrip("/")

@@ -1,7 +1,12 @@
 """Async TAXII 2.1 wire client.
 
-Thin wrapper over ``aiohttp.ClientSession`` exposing the four endpoints
-S-067 needs: discovery, api-roots, collection list, and objects.
+Thin wrapper over ``aiohttp.ClientSession``. S-067 only needs two of the
+four TAXII 2.1 endpoints: ``discover`` (root URL) and ``get_objects``
+(per-collection paginated indicator stream). API-root and
+collection-list endpoints are intentionally unimplemented — operators
+configure the api-root + collection-id directly via YAML; auto-discovery
+is out of scope for this story.
+
 ``taxii2-client`` was deliberately rejected during brainstorm — it is
 sync-only and would block the event loop for multi-MB indicator payloads.
 """

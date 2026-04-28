@@ -752,8 +752,12 @@ async def _run_with_config(
         server.should_exit = True
         with contextlib.suppress(asyncio.CancelledError, TimeoutError):
             await asyncio.wait_for(server_task, timeout=10)
-        # Stop TAXII feed manager BEFORE storage.close() so any in-flight
-        # snapshot writes finish persisting (S-067).
+        # Stop TAXII feed manager BEFORE storage.close() so an in-flight
+        # ``_persist`` (snapshot + cursor save_state pair) has up to 2 s
+        # — see TAXIIFeedManager.stop() — to drain its current write
+        # before storage closes. Polls still mid-flight after the grace
+        # window are cancelled and their snapshot is dropped; the next
+        # poll will refetch from the last-persisted cursor (S-067).
         await taxii_manager.stop()
         await storage.close()
         _log.info("Seerflow stopped")

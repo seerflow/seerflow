@@ -52,21 +52,26 @@ class STIXIndicatorParser:
             )
             return ()
 
+        # Single try/except wrapping the pattern walk **and** the field
+        # conversions: ``int(confidence)`` and ``_to_ns(...)`` can raise on
+        # hostile / malformed input (non-numeric confidence, malformed ISO
+        # timestamps, non-iterable kill_chain_phases). The docstring promises
+        # "never raised at the caller", so every conversion that can fault on
+        # untrusted feed data lives inside the same guard.
         try:
             tree = _pv.create_pattern_object(pattern, version="2.1")
             leaves = _extract_leaves(tree)
+            confidence = int(sdo.get("confidence", 0))
+            kill_chain = tuple(
+                phase_name
+                for phase in sdo.get("kill_chain_phases", [])
+                if isinstance(phase, dict) and (phase_name := phase.get("phase_name", ""))
+            )
+            valid_from_ns = _to_ns(sdo.get("valid_from")) or 0
+            valid_until_ns = _to_ns(sdo.get("valid_until"))
         except Exception as exc:
-            _log.warning("stix_parser: pattern walk failed id=%s: %r", sdo.get("id"), exc)
+            _log.warning("stix_parser: SDO parse failed id=%s: %r", sdo.get("id"), exc)
             return ()
-
-        confidence = int(sdo.get("confidence", 0))
-        kill_chain = tuple(
-            phase_name
-            for phase in sdo.get("kill_chain_phases", [])
-            if isinstance(phase, dict) and (phase_name := phase.get("phase_name", ""))
-        )
-        valid_from_ns = _to_ns(sdo.get("valid_from")) or 0
-        valid_until_ns = _to_ns(sdo.get("valid_until"))
 
         out: list[Indicator] = []
         for ind_type, value in leaves:

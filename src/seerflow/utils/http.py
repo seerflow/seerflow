@@ -62,51 +62,36 @@ async def get_with_retry(
     last_status: int | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            async with session.get(
-                url,
-                headers=headers,
-                auth=auth,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=timeout_s),
-                allow_redirects=False,
-            ) as resp:
-                if resp.status in _RETRYABLE_STATUSES:
-                    last_status = resp.status
-                    if attempt < max_attempts:
-                        retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
-                        delay = (
-                            retry_after
-                            if retry_after is not None
-                            else _backoff(attempt, base_delay_s, jitter_pct)
-                        )
-                        _log.warning(
-                            "get_with_retry: %s -> %s (attempt %d/%d), sleeping %.2fs",
-                            url,
-                            resp.status,
-                            attempt,
-                            max_attempts,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        continue
-                    # Final attempt landed on a retryable status -> exhausted.
-                    break
-                body = await _decode_body(resp)
-                return resp.status, body, dict(resp.headers)
+            result = await _attempt_get(
+                session, url, headers, auth, params, timeout_s, allow_redirects=False
+            )
         except (aiohttp.ClientError, TimeoutError) as exc:
             last_exc = exc
             if attempt >= max_attempts:
                 break
-            delay = _backoff(attempt, base_delay_s, jitter_pct)
-            _log.warning(
-                "get_with_retry: %s network error %r (attempt %d/%d), sleeping %.2fs",
-                url,
-                exc,
-                attempt,
-                max_attempts,
-                delay,
-            )
-            await asyncio.sleep(delay)
+            await _sleep_backoff(attempt, base_delay_s, jitter_pct, url, exc=exc)
+            continue
+        # ``result`` is either ``(status, body, headers)`` (return now) or
+        # the integer status of a retryable response (sleep + retry, or
+        # break on final attempt).
+        if isinstance(result, tuple):
+            return result
+        last_status = result
+        if attempt >= max_attempts:
+            break
+        retry_after = _parse_retry_after(_RETRY_AFTER_HEADER.pop(url, None))
+        delay = (
+            retry_after if retry_after is not None else _backoff(attempt, base_delay_s, jitter_pct)
+        )
+        _log.warning(
+            "get_with_retry: %s -> %s (attempt %d/%d), sleeping %.2fs",
+            url,
+            last_status,
+            attempt,
+            max_attempts,
+            delay,
+        )
+        await asyncio.sleep(delay)
 
     if last_exc is not None:
         raise GetWithRetryError(
@@ -117,6 +102,60 @@ async def get_with_retry(
         f"GET {url} failed after {max_attempts} attempts; last status: {last_status}",
         status=last_status,
     )
+
+
+# Out-of-band stash for the most recent ``Retry-After`` header so the
+# control loop above can decide the next sleep without having to
+# re-enter the ``async with`` context. Keyed by URL because a single
+# session may serve concurrent ``get_with_retry`` calls.
+_RETRY_AFTER_HEADER: dict[str, str | None] = {}
+
+
+async def _attempt_get(
+    session: aiohttp.ClientSession,
+    url: str,
+    headers: dict[str, str] | None,
+    auth: aiohttp.BasicAuth | None,
+    params: dict[str, Any] | None,
+    timeout_s: float,
+    *,
+    allow_redirects: bool,
+) -> tuple[int, Any, dict[str, str]] | int:
+    """One HTTP attempt. Returns ``(status, body, headers)`` for a final
+    response or the integer status when the response is retryable.
+    """
+    async with session.get(
+        url,
+        headers=headers,
+        auth=auth,
+        params=params,
+        timeout=aiohttp.ClientTimeout(total=timeout_s),
+        allow_redirects=allow_redirects,
+    ) as resp:
+        if resp.status in _RETRYABLE_STATUSES:
+            _RETRY_AFTER_HEADER[url] = resp.headers.get("Retry-After")
+            return resp.status
+        body = await _decode_body(resp)
+        return resp.status, body, dict(resp.headers)
+
+
+async def _sleep_backoff(
+    attempt: int,
+    base_delay_s: float,
+    jitter_pct: float,
+    url: str,
+    *,
+    exc: Exception,
+) -> None:
+    delay = _backoff(attempt, base_delay_s, jitter_pct)
+    _log.warning(
+        "get_with_retry: %s network error %r (attempt %d), sleeping %.2fs",
+        url,
+        exc,
+        attempt,
+        delay,
+    )
+    await asyncio.sleep(delay)
 
 
 def _backoff(attempt: int, base_delay_s: float, jitter_pct: float) -> float:
