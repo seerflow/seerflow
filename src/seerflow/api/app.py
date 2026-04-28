@@ -36,7 +36,7 @@ from seerflow.api.routes import (
     stats,
 )
 from seerflow.api.ws import ConnectionManager
-from seerflow.web import DEFAULT_DIST, mount_dashboard
+from seerflow.web import DEFAULT_DIST, CollapseSlashesMiddleware, mount_dashboard
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -301,6 +301,13 @@ def create_api_app(
 
     _register_routes(app)
     _install_security_middlewares(app, config)
+    # Collapse leading-multi-slash request paths (e.g. ``//api/v1/x``)
+    # to a canonical single slash before route dispatch. ``add_middleware``
+    # reverses insertion order at build time, so this call goes LAST in
+    # ``create_api_app`` to run FIRST on the request — every downstream
+    # consumer (security middleware, routers, SPA mount) then sees a
+    # canonical ``scope["path"]`` (SEE-248).
+    app.add_middleware(CollapseSlashesMiddleware)
     # Mount the built React dashboard LAST so API routes (registered above)
     # take precedence over the catch-all ``/`` StaticFiles mount.
     mount_dashboard(app, dist_dir=DEFAULT_DIST)

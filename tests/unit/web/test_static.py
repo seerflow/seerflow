@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from seerflow.web.middleware import CollapseSlashesMiddleware
 from seerflow.web.static import mount_dashboard
 
 if TYPE_CHECKING:
@@ -77,31 +79,23 @@ def test_api_prefix_does_not_get_spa_fallback(tmp_path: Path) -> None:
         "/API/v1/x",
         "/%61pi/v1/missing",
         "/api%2Fv1/missing",
-        "//api/v1/x",
-        "///api/v1/x",
     ],
 )
 def test_api_prefix_bypass_variants_also_return_404(tmp_path: Path, url: str) -> None:
     """Bypass attempts must still 404 — not fall back to ``index.html``.
 
     Covers: bare ``/api`` (no trailing slash), upper-case ``/API/...``,
-    percent-encoded variants (``/%61pi/...`` where ``%61`` == 'a';
-    ``/api%2Fv1/...`` where ``%2F`` == '/'), and leading-multi-slash
-    variants (``//api/...``, ``///api/...``). Locks the API-vs-SPA
-    gate against URL-decoding regressions (SEE-245) and against the
-    leading-multi-slash bypass that Starlette's mount router would
-    otherwise strip before the predicate runs (SEE-248) — the latter
-    only passes once ``CollapseSlashesMiddleware`` is mounted on the
-    full app (verified separately in
-    ``test_app_collapse_slashes_middleware``).
+    and percent-encoded variants (``/%61pi/...`` where ``%61`` == 'a';
+    ``/api%2Fv1/...`` where ``%2F`` == '/'). Locks the API-vs-SPA
+    gate against URL-decoding regressions (SEE-245).
 
-    NOTE: this fixture mounts only ``mount_dashboard`` on a bare
-    ``FastAPI()`` — no middleware. The legacy percent-encoded /
-    case-folded variants are caught by ``_is_api_path`` itself; the
-    leading-multi-slash variants additionally rely on Starlette's
-    own ASGI scope normalisation that the bare app inherits via
-    ``add_middleware`` ordering, which is exercised by the
-    integration test in ``test_app_collapse_slashes_middleware``.
+    Leading-multi-slash variants (``//api/v1/x``, ``///api/v1/x``)
+    are exercised separately in
+    ``test_collapses_leading_multi_slash_path_at_app_level`` —
+    ``httpx`` rewrites the authority when an unjoined path string
+    starts with ``//``, so faithfully reproducing the bypass at the
+    ASGI layer requires constructing an ``httpx.URL`` directly
+    (SEE-248).
     """
     app = FastAPI()
     mount_dashboard(app, dist_dir=_write_dist(tmp_path))
@@ -111,6 +105,43 @@ def test_api_prefix_bypass_variants_also_return_404(tmp_path: Path, url: str) ->
         f"expected 404 for {url!r}, got {response.status_code} "
         f"(body starts with {response.text[:40]!r})"
     )
+
+
+@pytest.mark.parametrize(
+    "raw_path",
+    ["//api/v1/x", "///api/v1/x", "//api/v1//missing"],
+)
+def test_collapses_leading_multi_slash_path_at_app_level(
+    tmp_path: Path, raw_path: str
+) -> None:
+    """``CollapseSlashesMiddleware`` rewrites the path before the SPA mount.
+
+    Without the middleware, ``GET //api/v1/x`` reaches the ASGI layer
+    with ``scope["path"] == "//api/v1/x"``; Starlette's mount router
+    fails to match any route under that path and the SPA fallback
+    fires for paths without ``api/`` once the leading runs are stripped
+    by the router itself. The middleware collapses the runs upstream
+    so ``_is_api_path`` sees the canonical ``/api/v1/x`` and the
+    request gets a JSON 404 instead of the HTML SPA index (SEE-248).
+
+    NOTE: ``client.get(raw_path)`` would let ``httpx`` rewrite the
+    authority (treating ``//api`` as a network-path reference), so
+    construct the URL explicitly to deliver the literal multi-slash
+    path through the ASGI scope.
+    """
+    app = FastAPI()
+    app.add_middleware(CollapseSlashesMiddleware)
+    mount_dashboard(app, dist_dir=_write_dist(tmp_path))
+    client = TestClient(app)
+    url = httpx.URL("http://testserver" + raw_path)
+    response = client.get(url)
+    assert response.status_code == 404, (
+        f"expected 404 for {raw_path!r}, got {response.status_code} "
+        f"(body starts with {response.text[:40]!r})"
+    )
+    # Body should be JSON 404, not the SPA HTML — confirms the
+    # request reached the API/route layer rather than the SPA mount.
+    assert "<!doctype html>" not in response.text.lower()
 
 
 def test_spa_index_sends_no_cache_header(tmp_path: Path) -> None:
