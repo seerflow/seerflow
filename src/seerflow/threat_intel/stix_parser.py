@@ -18,6 +18,10 @@ from seerflow.models.indicator import Indicator, IndicatorType
 _log = logging.getLogger("seerflow")
 
 _MAX_PATTERN_LEN = 4096
+# Bound the per-SDO kill-chain list independently of the pattern-length cap
+# (a hostile feed could send a tiny pattern but a 1M-entry phase list,
+# producing a multi-MB Indicator struct).
+_MAX_KILL_CHAIN_PHASES = 64
 
 # STIX object-path -> IndicatorType (lower-case canonical form).
 _PATH_TYPE_MAP: dict[tuple[str, ...], IndicatorType] = {
@@ -62,9 +66,14 @@ class STIXIndicatorParser:
             tree = _pv.create_pattern_object(pattern, version="2.1")
             leaves = _extract_leaves(tree)
             confidence = int(sdo.get("confidence", 0))
+            raw_phases = sdo.get("kill_chain_phases", [])
+            if isinstance(raw_phases, list):
+                raw_phases = raw_phases[:_MAX_KILL_CHAIN_PHASES]
+            else:
+                raw_phases = []
             kill_chain = tuple(
                 phase_name
-                for phase in sdo.get("kill_chain_phases", [])
+                for phase in raw_phases
                 if isinstance(phase, dict) and (phase_name := phase.get("phase_name", ""))
             )
             valid_from_ns = _to_ns(sdo.get("valid_from")) or 0

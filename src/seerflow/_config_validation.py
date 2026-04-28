@@ -353,6 +353,14 @@ def _validate_threat_intel_feeds_structural(config: ThreatIntelConfig) -> None:
             )
         if not parsed.hostname:
             raise ConfigError(f"threat_intel.feeds[{feed.id}].url must include a hostname")
+        if parsed.username or parsed.password:
+            # URL-embedded credentials would be logged verbatim by aiohttp
+            # error reprs; auth must come from `auth.api_key_env` /
+            # `auth.username_env` / `auth.password_env` instead.
+            raise ConfigError(
+                f"threat_intel.feeds[{feed.id}].url must not contain embedded "
+                "userinfo credentials; use the `auth` block with env vars"
+            )
         if (
             feed.poll_interval_s is not None
             and feed.poll_interval_s < _THREAT_INTEL_MIN_POLL_INTERVAL_S

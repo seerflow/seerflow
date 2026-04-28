@@ -7,6 +7,7 @@ import logging
 import random
 import time
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 import msgspec
 
@@ -24,6 +25,13 @@ if TYPE_CHECKING:
     from seerflow.threat_intel.client import TAXIIClient
 
 _log = logging.getLogger("seerflow")
+
+# Bound the number of SDOs walked per poll. Independent of
+# ``max_indicators_per_feed`` (which caps *kept* indicators). A hostile
+# server returning an unbounded ``more=true`` pagination chain — or
+# millions of unmapped / expired SDOs — would otherwise wedge the
+# consumer task forever.
+_MAX_SDOS_PER_POLL = 500_000
 
 
 class TAXIIFeedConsumer:
@@ -94,8 +102,21 @@ class TAXIIFeedConsumer:
         collected: list[Indicator] = []
         truncated = 0
         last_added: str | None = None
+        sdo_count = 0
         async for sdo, last in self._client.get_objects(objects_url, added_after=added_after):
             last_added = last or last_added
+            sdo_count += 1
+            # Bound total SDOs seen per poll independently of the
+            # collected-indicator cap. A hostile server could otherwise
+            # wedge this task with an unbounded ``more=true`` chain of
+            # empty or unmapped pages.
+            if sdo_count > _MAX_SDOS_PER_POLL:
+                _log.warning(
+                    "taxii: feed=%s exceeded per-poll SDO cap (%d); stopping pagination early",
+                    self._cfg.id,
+                    _MAX_SDOS_PER_POLL,
+                )
+                break
             if sdo is None:
                 # Cursor-only marker emitted by the client for empty pages —
                 # advance the watermark even when the page has no SDOs.
@@ -142,8 +163,11 @@ class TAXIIFeedConsumer:
         )
 
     def _build_objects_url(self) -> str:
+        # URL-encode the collection_id so an operator cannot path-traverse
+        # into a different TAXII endpoint with a value like "../admin".
         base = self._cfg.url.rstrip("/")
-        return f"{base}/collections/{self._cfg.collection_id}/objects/"
+        encoded = quote(self._cfg.collection_id, safe="")
+        return f"{base}/collections/{encoded}/objects/"
 
     async def _persist(self, snap: IndicatorSnapshot, *, truncated: int) -> None:
         snap_bytes = msgspec.msgpack.encode(snap)

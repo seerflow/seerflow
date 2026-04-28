@@ -11,12 +11,29 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
 
 _log = logging.getLogger("seerflow")
+
+
+# ``aiohttp`` exception reprs (``ClientResponseError``, ``ClientConnectorError``)
+# include ``request_info`` which carries the request ``Authorization``
+# header. Scrub Bearer tokens and Basic-auth blobs before logging or
+# embedding in raised errors so secrets do not leak via the log stream.
+_SECRET_RE: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"Bearer\s+\S+"), "Bearer <redacted>"),
+    (re.compile(r"Basic\s+\S+"), "Basic <redacted>"),
+)
+
+
+def _scrub(msg: str) -> str:
+    for pat, replacement in _SECRET_RE:
+        msg = pat.sub(replacement, msg)
+    return msg
 
 
 class GetWithRetryError(RuntimeError):
@@ -36,6 +53,9 @@ class GetWithRetryError(RuntimeError):
 
 
 _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+# Cap server-supplied Retry-After at 5 minutes so a hostile or buggy server
+# cannot freeze a consumer task for hours by returning a multi-hour value.
+_MAX_RETRY_AFTER_S = 300.0
 
 
 async def get_with_retry(
@@ -146,9 +166,9 @@ async def _sleep_backoff(
 ) -> None:
     delay = _backoff(attempt, base_delay_s, jitter_pct)
     _log.warning(
-        "get_with_retry: %s network error %r (attempt %d), sleeping %.2fs",
+        "get_with_retry: %s network error %s (attempt %d), sleeping %.2fs",
         url,
-        exc,
+        _scrub(repr(exc)),
         attempt,
         delay,
     )
@@ -186,7 +206,8 @@ def _exhausted_error(
 ) -> GetWithRetryError:
     if last_exc is not None:
         return GetWithRetryError(
-            f"GET {url} failed after {max_attempts} attempts; last error: {last_exc!r}",
+            f"GET {url} failed after {max_attempts} attempts; "
+            f"last error: {_scrub(repr(last_exc))}",
             status=None,
         )
     return GetWithRetryError(
@@ -205,9 +226,12 @@ def _parse_retry_after(header: str | None) -> float | None:
     if not header:
         return None
     try:
-        return max(0.0, float(header))
+        value = float(header)
     except ValueError:
         return None
+    if not (0.0 <= value < float("inf")):
+        return None
+    return min(_MAX_RETRY_AFTER_S, max(0.0, value))
 
 
 async def _decode_body(resp: aiohttp.ClientResponse) -> Any:
