@@ -164,6 +164,7 @@ export const useEntityStore = create<State>((set, get) => ({
       sourceFilter: null,
       severityMin: null,
       discoveredSourceTypes: [],
+      related: [],
     });
     await get().refresh();
     void get().fetchRiskHistory();
@@ -258,7 +259,7 @@ export const useEntityStore = create<State>((set, get) => ({
       set({ selectedEntityUuid: null, selectedEntityType: null, selectedEntityValue: null });
       return;
     }
-    const { searchResults, recent, selectedEntityUuid: prev, discoveredSourceTypes } = get();
+    const { searchResults, recent, selectedEntityUuid: prev, discoveredSourceTypes, related: prevRelated } = get();
     const found =
       searchResults.find((r) => r.entity_uuid === parsed.entity_uuid) ??
       recent.find((r) => r.entity_uuid === parsed.entity_uuid) ??
@@ -272,6 +273,7 @@ export const useEntityStore = create<State>((set, get) => ({
       sourceFilter: parsed.source ?? null,
       severityMin: parsed.severity_min ?? null,
       discoveredSourceTypes: isCrossEntity ? [] : discoveredSourceTypes,
+      related: isCrossEntity ? [] : prevRelated,
     });
     await get().refresh();
     void get().fetchRiskHistory();
@@ -308,6 +310,16 @@ export const useEntityStore = create<State>((set, get) => ({
     localStorage.removeItem(RECENT_KEY);
   },
 }));
+
+// Pure selector: resolves the focal entity type either from the explicit store field
+// (set when a search result / recent click populates it) or, when the user deep-linked
+// to a UUID not in cache, from the first related entity returned by the timeline fetch.
+// Returns null only during the genuine pre-fetch race window.
+export function selectFocalType(
+  state: Pick<State, "selectedEntityType" | "related">,
+): string | null {
+  return state.selectedEntityType ?? state.related[0]?.entity_type ?? null;
+}
 
 export function currentViewState(): EntityViewState | null {
   const { selectedEntityUuid, range, sourceFilter, severityMin } = useEntityStore.getState();
