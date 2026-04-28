@@ -257,7 +257,7 @@ async def test_whatsapp_retries_503_then_succeeds() -> None:
             repeat=True,
         )
         async with aiohttp.ClientSession() as session:
-            await target.deliver(make_alert(), session=session)
+            await _deliver_with_zero_delay(target, session)
 
     assert call_count == 2
 
@@ -265,27 +265,65 @@ async def test_whatsapp_retries_503_then_succeeds() -> None:
 async def _deliver_with_zero_delay(target: WhatsAppTarget, session: aiohttp.ClientSession) -> None:
     """Run target.deliver(...) with zero-delay backoff inside post_with_retry.
 
-    `_post_one` calls the symbol `post_with_retry` it imported at module load,
-    so we rebind both `seerflow.alerting._http.post_with_retry` and the local
-    binding in `seerflow.alerting.channels.whatsapp` to a wrapper that forces
-    `delays=(0.0, 0.0, 0.0)`. The original is restored on exit.
+    `_post_one` calls the symbol `post_with_retry` that was bound at module load
+    in `seerflow.alerting.channels.whatsapp`, so rebinding `_wa.post_with_retry`
+    is sufficient — `_post_one` does not re-import the name on each call.
     """
-    from seerflow.alerting import _http
     from seerflow.alerting.channels import whatsapp as _wa
 
-    original = _http.post_with_retry
+    original = _wa.post_with_retry
 
     async def fast(*args: Any, **kwargs: Any) -> None:
         kwargs["delays"] = (0.0, 0.0, 0.0)
         await original(*args, **kwargs)
 
     try:
-        _http.post_with_retry = fast  # type: ignore[assignment]
         _wa.post_with_retry = fast  # type: ignore[attr-defined]
         await target.deliver(make_alert(), session=session)
     finally:
-        _http.post_with_retry = original  # type: ignore[assignment]
         _wa.post_with_retry = original  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_5xx_with_meta_code_does_not_double_log_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 5xx response that happens to carry a Meta ``code`` field must NOT be
+    escalated to ERROR by the inspector. ``post_with_retry`` already logs
+    WARNING per attempt and ERROR on exhaustion; double-logging at ERROR per
+    attempt would trigger operator alert fatigue for transient outages."""
+    import logging
+
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+        rate_per_second=1000.0,
+        burst=1000,
+    )
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        return CallbackResult(status=503, payload={"error": {"code": 4, "message": "rate limit"}})
+
+    caplog.set_level(logging.ERROR, logger="seerflow")
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+            repeat=True,
+        )
+        async with aiohttp.ClientSession() as session:
+            await _deliver_with_zero_delay(target, session)
+
+    inspector_lines = [
+        rec.getMessage() for rec in caplog.records if "delivery failed" in rec.getMessage()
+    ]
+    assert inspector_lines == []
 
 
 @pytest.mark.unit

@@ -68,9 +68,12 @@ async def _handle_response(
     masked_for_log: str,
     attempt: int,
 ) -> bool:
-    """Return True when the caller should stop retrying (success or 4xx)."""
-    if resp.status < 400:
-        return True
+    """Return True when the caller should stop retrying (4xx).
+
+    Pre-condition: ``resp.status >= 400``. The caller (``post_with_retry``)
+    short-circuits 2xx responses before this is invoked, so the success branch
+    no longer lives here.
+    """
     body = sanitize_body(body_text)
     if resp.status < 500:
         _log.error(

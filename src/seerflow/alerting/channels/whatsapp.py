@@ -104,10 +104,14 @@ class WhatsAppTarget:
     def _inspect_response(self, status: int, body_text: str) -> RetryDecision:
         """Open the 5-minute circuit on Meta error code 131026; otherwise defer.
 
-        For non-131026 errors the Meta-specific ``error.code`` is logged here
-        so operators retain the diagnostic field that the original hand-rolled
-        ``_post_one`` exposed before this path was routed through
-        ``post_with_retry`` (which only sees the raw response body).
+        For non-131026 4xx responses the Meta-specific ``error.code`` is logged
+        here so operators retain the diagnostic field that the original
+        hand-rolled ``_post_one`` exposed before this path was routed through
+        ``post_with_retry``. 5xx responses are intentionally NOT escalated to
+        ERROR even when they carry a Meta ``code`` field — they will be retried,
+        and ``post_with_retry`` already logs each attempt at WARNING and the
+        final exhaustion at ERROR. Logging here too would triple-log a transient
+        outage at ERROR severity and trigger operator alert fatigue.
         """
         try:
             body = json.loads(body_text)
@@ -123,7 +127,7 @@ class WhatsAppTarget:
                 int(_CIRCUIT_OPEN_SECONDS),
             )
             return "stop"
-        if code is not None:
+        if code is not None and status < 500:
             _log.error(
                 "WhatsApp %s: delivery failed status=%d code=%s",
                 self.name,
