@@ -7,9 +7,10 @@ model count) when a metrics provider is wired.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 
@@ -71,6 +72,7 @@ async def get_stats(
     total_events_processed = 0
     active_sources = 0
     model_count = 0
+    taxii_payload: dict[str, dict[str, Any]] | None = None
 
     if metrics_provider is not None:
         try:
@@ -82,6 +84,11 @@ async def get_stats(
             total_events_processed = snapshot.total_events_processed
             active_sources = snapshot.active_sources
             model_count = snapshot.model_count
+            if snapshot.taxii is not None and snapshot.taxii.feeds:
+                taxii_payload = {
+                    feed_id: dataclasses.asdict(feed_metrics)
+                    for feed_id, feed_metrics in snapshot.taxii.feeds.items()
+                }
         except Exception:
             # Provider failure must not 500 the endpoint; degrade to zero fields.
             _log.warning("pipeline metrics provider failed", exc_info=True)
@@ -96,4 +103,5 @@ async def get_stats(
         total_events_processed=total_events_processed,
         active_sources=active_sources,
         model_count=model_count,
+        taxii=taxii_payload,
     )

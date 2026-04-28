@@ -10,7 +10,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from seerflow.threat_intel.metrics import (
+        TAXIIMetricsAggregate,
+        TAXIIMetricsRegistry,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +32,7 @@ class PipelineMetrics:
     total_events_processed: int
     active_sources: int
     model_count: int
+    taxii: TAXIIMetricsAggregate | None = None
 
 
 MetricsProvider = Callable[[], PipelineMetrics]
@@ -38,6 +45,7 @@ def build_pipeline_metrics_provider(
     handler: Any,
     ensemble: Any,
     started_monotonic: float,
+    taxii_registry: TAXIIMetricsRegistry | None = None,
 ) -> MetricsProvider:
     """Return a zero-arg callable that yields a fresh PipelineMetrics.
 
@@ -49,6 +57,10 @@ def build_pipeline_metrics_provider(
 
     ``ensemble`` is expected to have a ``get_stats()`` returning a dict
     with a ``source_count`` key. ``None`` is allowed (returns zero).
+
+    ``taxii_registry`` is the running ``TAXIIMetricsRegistry`` owned by
+    the ``TAXIIFeedManager``. ``None`` (or a registry with no feeds) leaves
+    ``PipelineMetrics.taxii = None`` so the stats route can omit the field.
     """
 
     def _provider() -> PipelineMetrics:
@@ -60,11 +72,15 @@ def build_pipeline_metrics_provider(
         active = 0
         if ensemble is not None:
             active = int(ensemble.get_stats().get("source_count", 0))
+        taxii: TAXIIMetricsAggregate | None = None
+        if taxii_registry is not None:
+            taxii = taxii_registry.aggregate()
         return PipelineMetrics(
             started_monotonic=started_monotonic,
             total_events_processed=event_count,
             active_sources=active,
             model_count=active * _DETECTORS_PER_SOURCE,
+            taxii=taxii,
         )
 
     return _provider

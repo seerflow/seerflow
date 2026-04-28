@@ -159,6 +159,10 @@ class StatsResponse(BaseModel):
     total_events_processed: int = 0
     active_sources: int = 0
     model_count: int = 0
+    # Per-feed TAXII counters (S-067). ``None`` when threat_intel is
+    # disabled or no metrics provider is wired. Each value is a serialised
+    # ``TAXIIFeedMetrics`` dict (see seerflow.threat_intel.metrics).
+    taxii: dict[str, dict[str, Any]] | None = None
 
 
 class FeedbackRequest(BaseModel):
