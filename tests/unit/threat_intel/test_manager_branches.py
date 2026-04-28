@@ -138,3 +138,52 @@ def test_resolve_auth_basic_no_env_fields_raises() -> None:
     auth = TAXIIAuthConfig(kind="basic", username_env=None, password_env=None)
     with pytest.raises(RuntimeError, match="username_env and password_env"):
         _resolve_auth(auth)
+
+
+def test_resolve_auth_unknown_kind_raises() -> None:
+    """Cover the ``case _:`` fallback in ``_resolve_auth``. ``Literal`` makes
+    valid kinds 'api_key' / 'basic'; we bypass type checking via ``cast``
+    to drive the unknown-kind path that the match statement guards.
+    """
+    from typing import cast
+
+    auth = cast(
+        TAXIIAuthConfig, TAXIIAuthConfig.__new__(TAXIIAuthConfig)
+    )
+    object.__setattr__(auth, "kind", "weird")
+    object.__setattr__(auth, "api_key_env", None)
+    object.__setattr__(auth, "api_key_header", "Authorization")
+    object.__setattr__(auth, "username_env", None)
+    object.__setattr__(auth, "password_env", None)
+    with pytest.raises(RuntimeError, match="unknown auth kind"):
+        _resolve_auth(auth)
+
+
+@pytest.mark.asyncio
+async def test_manager_double_start_raises() -> None:
+    """``start()`` must reject re-entry while already running so the prior
+    ``ClientSession`` is not orphaned.
+    """
+    cfg = ThreatIntelConfig(enabled=True, startup_jitter_s=0)
+    store = MagicMock()
+    store.save_state = AsyncMock()
+    store.load_state = AsyncMock(return_value=None)
+    mgr = TAXIIFeedManager(config=cfg, model_store=store)
+    try:
+        await mgr.start()
+        with pytest.raises(RuntimeError, match="already running"):
+            await mgr.start()
+    finally:
+        await mgr.stop()
+
+
+@pytest.mark.asyncio
+async def test_build_consumer_without_start_raises() -> None:
+    """Direct ``_build_consumer`` call before ``start()`` must raise the
+    explicit RuntimeError instead of crashing on ``None.session``.
+    """
+    cfg = ThreatIntelConfig(enabled=True)
+    mgr = TAXIIFeedManager(config=cfg, model_store=MagicMock())
+    feed = TAXIIFeedConfig(id="x", url="https://x.example/", collection_id="c")
+    with pytest.raises(RuntimeError, match="before start"):
+        mgr._build_consumer(feed)
