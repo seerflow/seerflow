@@ -252,3 +252,121 @@ async def test_whatsapp_retries_503_then_succeeds() -> None:
             await target.deliver(make_alert(), session=session)
 
     assert call_count == 2
+
+
+async def _deliver_with_zero_delay(
+    target: WhatsAppTarget, session: aiohttp.ClientSession
+) -> None:
+    """Run target.deliver(...) with zero-delay backoff inside post_with_retry.
+
+    `_post_one` calls the symbol `post_with_retry` it imported at module load,
+    so we rebind both `seerflow.alerting._http.post_with_retry` and the local
+    binding in `seerflow.alerting.channels.whatsapp` to a wrapper that forces
+    `delays=(0.0, 0.0, 0.0)`. The original is restored on exit.
+    """
+    from seerflow.alerting import _http
+    from seerflow.alerting.channels import whatsapp as _wa
+
+    original = _http.post_with_retry
+
+    async def fast(*args: Any, **kwargs: Any) -> None:
+        kwargs["delays"] = (0.0, 0.0, 0.0)
+        await original(*args, **kwargs)
+
+    _http.post_with_retry = fast  # type: ignore[assignment]
+    _wa.post_with_retry = fast  # type: ignore[attr-defined]
+    try:
+        await target.deliver(make_alert(), session=session)
+    finally:
+        _http.post_with_retry = original  # type: ignore[assignment]
+        _wa.post_with_retry = original  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_three_5xx_exhausts_retries(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three 503s in a row exhaust the retry envelope and emit one error log."""
+    import logging
+
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+        rate_per_second=1000.0,
+        burst=1000,
+    )
+    call_count = 0
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        return CallbackResult(status=503, payload={})
+
+    caplog.set_level(logging.ERROR, logger="seerflow")
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+            repeat=True,
+        )
+        async with aiohttp.ClientSession() as session:
+            await _deliver_with_zero_delay(target, session)
+
+    assert call_count == 3
+    error_lines = [
+        rec for rec in caplog.records
+        if rec.levelno >= logging.ERROR and "exhausted" in rec.getMessage()
+    ]
+    assert len(error_lines) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_whatsapp_503_then_131026_opens_circuit_mid_retry() -> None:
+    """A 503 followed by a 131026 must open the circuit and stop retrying."""
+    now = [0.0]
+
+    def fake_mono() -> float:
+        return now[0]
+
+    target = WhatsAppTarget(
+        name="w",
+        phone_number_id="PID",
+        access_token="tok",
+        template_name="seerflow_alert",
+        language_code="en",
+        to_numbers=("+15559876543",),
+        rate_per_second=1000.0,
+        burst=1000,
+        _monotonic=fake_mono,
+    )
+    call_count = 0
+
+    def _capture(url: str, **kwargs: Any) -> CallbackResult:
+        del url, kwargs
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return CallbackResult(status=503, payload={})
+        return CallbackResult(
+            status=400,
+            payload={"error": {"code": 131026, "message": "template not found"}},
+        )
+
+    with aioresponses() as mock:
+        mock.post(
+            "https://graph.facebook.com/v18.0/PID/messages",
+            callback=_capture,
+            repeat=True,
+        )
+        async with aiohttp.ClientSession() as session:
+            await _deliver_with_zero_delay(target, session)
+
+    assert call_count == 2
+    assert target._circuit.open_until > 0.0
