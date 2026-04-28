@@ -42,11 +42,15 @@ def _is_api_path(path: str) -> bool:
     the mount. The contract is locked by the bypass test in
     ``test_static.py`` (SEE-245); any future refactor must preserve it.
 
-    Note: leading-double-slash bypass (``//api/...``) is NOT defended
-    here — Starlette consumes the duplicated prefix during mount
-    routing, so the predicate never sees the ``api/`` segment. Closing
-    that gap needs middleware-level path normalization; tracked as a
-    separate follow-up.
+    Leading-multi-slash inputs (``//api/...``, ``///api/...``) are
+    collapsed to a single ``/`` upstream by
+    ``seerflow.web.middleware.CollapseSlashesMiddleware`` before the
+    predicate runs (SEE-248), so this function only ever sees the
+    canonical path with at most one leading slash. Removing or
+    re-ordering that middleware re-opens the class of leading-multi-
+    slash bypasses; the contract is locked by the parametrised
+    integration test in ``tests/unit/web/test_static.py``
+    (``test_collapses_leading_multi_slash_path_at_app_level``).
     """
     clean = path.lstrip("/").lower()
     return clean == "api" or clean.startswith("api/")
