@@ -5,6 +5,7 @@ import { WsProvider } from "@/components/WsProvider";
 import { useAlertStore } from "@/stores/alerts";
 import { logger } from "@/lib/logger";
 import * as wsBus from "@/lib/wsBus";
+import type { LiveEvent } from "@/lib/types";
 import { _resetForTests as resetWsIntents } from "@/lib/wsFilter";
 import { AlertSchema, validateOrDropItem } from "@/lib/schemas";
 import * as validationMetrics from "@/lib/validationMetrics";
@@ -250,8 +251,12 @@ describe("AlertFeed integration", () => {
     // via the dead `isAlert(first)` branch in `handleMessage` (AlertFeed.tsx
     // L73–L82). After Task 2 removes the subscription, the emit becomes a
     // no-op for AlertFeed and the assertion holds.
+    //
+    // Cast: `WsMessage.batch.events` is `LiveEvent[]` after S-211's narrowing.
+    // We are deliberately violating that contract to prove the bus drops the
+    // shape; the cast is the only way to express "emit a malformed batch."
     act(() => {
-      wsBus.emit({ type: "batch", events: [mkAlert("ghost-1", "ghost-rule")] });
+      wsBus.emit({ type: "batch", events: [mkAlert("ghost-1", "ghost-rule")] as unknown as LiveEvent[] });
     });
 
     expect(screen.queryByText("ghost-rule")).toBeNull();
