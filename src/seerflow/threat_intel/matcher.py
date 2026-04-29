@@ -224,6 +224,55 @@ class IoCMatcher:
                         _log.exception("ioc_matcher: on_match callback raised; continuing")
         return tuple(matches)
 
+    def on_snapshot_updated(self, _feed_id: str) -> None:
+        """Sync listener — flips dirty flag, signals rebuild loop."""
+        self._dirty = True
+        # asyncio.Event.set() is sync-safe but only meaningful from the event
+        # loop thread. The listener fires from the consumer's loop, so we are
+        # already there.
+        try:
+            self._dirty_event.set()
+        except RuntimeError:  # pragma: no cover — loop closed
+            return
+
+    async def start(self) -> None:
+        if self._stopping:
+            raise RuntimeError("ioc_matcher: matcher mid-shutdown")
+        if self._task is not None:
+            return  # already running
+        await self.refresh()
+        self._task = asyncio.create_task(self._run_loop(), name="ioc_matcher.loop")
+
+    async def stop(self) -> None:
+        self._stopping = True
+        if self._task is None:
+            return
+        self._task.cancel()
+        try:
+            await asyncio.wait_for(self._task, timeout=5.0)
+        except (asyncio.CancelledError, TimeoutError):
+            pass
+        self._task = None
+        self._stopping = False
+
+    async def _run_loop(self) -> None:
+        debounce_s = max(0.0, self._matcher_cfg.rebuild_debounce_ms / 1000.0)
+        try:
+            while True:
+                await self._dirty_event.wait()
+                if debounce_s > 0:
+                    await asyncio.sleep(debounce_s)
+                # Drain dirty flag + event before rebuild so notifications
+                # arriving DURING the rebuild trigger one more pass.
+                self._dirty = False
+                self._dirty_event.clear()
+                await self.refresh()
+                if self._dirty:
+                    # Loop immediately to honour late notifications.
+                    continue
+        except asyncio.CancelledError:
+            return
+
     async def _build_state(self) -> _MatcherState:
         enabled_types = frozenset(self._matcher_cfg.enabled_types)
         floor = self._matcher_cfg.confidence_floor

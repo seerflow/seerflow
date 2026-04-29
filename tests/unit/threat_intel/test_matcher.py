@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 import uuid
 from typing import TYPE_CHECKING
@@ -404,3 +405,76 @@ async def test_check_event_silently_skips_malformed() -> None:
     # Garbage IP, garbage hash — must not raise.
     evt = _evt(ips=("not-an-ip",), hashes=("noprefix",))
     assert matcher.check_event(evt) == ()
+
+
+@pytest.mark.asyncio
+async def test_start_runs_initial_rebuild_and_registers_listener() -> None:
+    from seerflow.threat_intel.manager import TAXIIFeedManager
+
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True, feeds=feeds, matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1", fetched_at_ns=1, indicators=(_ipv4("1.2.3.4"),), cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    manager = TAXIIFeedManager(config=cfg, model_store=store)  # type: ignore[arg-type]
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    manager.register_snapshot_listener(matcher.on_snapshot_updated)
+
+    await matcher.start()
+    try:
+        assert matcher.metrics_snapshot().rebuild_count == 1
+        assert matcher.check("1.2.3.4", "ipv4") is not None
+    finally:
+        await matcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_listener_triggers_debounced_rebuild() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True, rebuild_debounce_ms=10),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1", fetched_at_ns=1, indicators=(_ipv4("1.2.3.4"),), cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.start()
+    try:
+        before = matcher.metrics_snapshot().rebuild_count
+        for _ in range(5):
+            matcher.on_snapshot_updated("f1")
+        await asyncio.sleep(0.1)
+        after = matcher.metrics_snapshot().rebuild_count
+        assert after == before + 1
+    finally:
+        await matcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_loop_and_is_idempotent() -> None:
+    cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
+
+    class _Store:
+        async def save_state(self, *_a, **_k) -> None:
+            return None
+
+        async def load_state(self, *_a, **_k) -> bytes | None:
+            return None
+
+        async def delete_state(self, *_a, **_k) -> None:
+            return None
+
+    matcher = IoCMatcher(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    await matcher.start()
+    await matcher.stop()
+    await matcher.stop()  # second call must be a no-op
