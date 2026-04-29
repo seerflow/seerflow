@@ -68,20 +68,6 @@ class _MemStore:
         self._kv.pop(key, None)
 
 
-def _seed_snapshot(store: _MemStore, feed_id: str, *indicators: Indicator) -> None:
-    snap = IndicatorSnapshot(
-        feed_id=feed_id,
-        fetched_at_ns=1,
-        indicators=tuple(indicators),
-        cursor=None,
-    )
-    import asyncio
-
-    asyncio.get_event_loop().run_until_complete(
-        store.save_state(f"taxii:snapshot:{feed_id}", msgspec.msgpack.encode(snap))
-    )
-
-
 def _ipv4(value: str, *, source: str = "f1", confidence: int = 80) -> Indicator:
     return Indicator(
         value=value,
@@ -803,3 +789,89 @@ async def test_build_state_warns_when_bit_array_exceeds_budget(
     assert any("exceeds 10 MB budget" in rec.message for rec in caplog.records)
     # Matcher still served the rebuild: bit_array_bytes reflects the oversized array.
     assert matcher.metrics_snapshot().bit_array_bytes > 10 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_restart_after_stop_rebuilds_fresh_bit_array() -> None:
+    """AC12: stop() + start() cycles must rebuild the bit array from a fresh snapshot."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap1 = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap1))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.start()
+    try:
+        assert matcher._state is not None
+        prior_id = id(matcher._state.bloom)
+        assert matcher.check("1.2.3.4", "ipv4") is not None
+    finally:
+        await matcher.stop()
+
+    # Replace the snapshot with a different indicator under the same feed id.
+    snap2 = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=2,
+        indicators=(_ipv4("5.6.7.8"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap2))
+
+    await matcher.start()
+    try:
+        assert matcher._state is not None
+        assert id(matcher._state.bloom) != prior_id
+        assert matcher.check("5.6.7.8", "ipv4") is not None
+    finally:
+        await matcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_keeps_previous_state_and_increments_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raising _build_state must preserve prior state and bump rebuild_failures_total."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    assert matcher.check("1.2.3.4", "ipv4") is not None
+    prior_state = matcher._state
+    assert prior_state is not None
+
+    async def _boom() -> object:
+        raise RuntimeError("simulated rebuild failure")
+
+    monkeypatch.setattr(matcher, "_build_state", _boom)
+    await matcher.refresh()
+
+    # State unchanged — same object identity preserved.
+    assert matcher._state is prior_state
+    metrics = matcher.metrics_snapshot()
+    assert metrics.rebuild_failures_total == 1
+    assert metrics.rebuild_count == 1  # still just the prior successful refresh
+    # Known indicator still matches via preserved state.
+    assert matcher.check("1.2.3.4", "ipv4") is not None

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import msgspec
 
-from seerflow.models.indicator import IndicatorSnapshot
+from seerflow.models.indicator import IndicatorSnapshot, IndicatorType
 from seerflow.models.ioc_match import IoCMatch
 from seerflow.threat_intel._bloom import BloomParams, _BloomFilter
 
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from seerflow.config import ThreatIntelConfig
     from seerflow.models.event import SeerflowEvent
-    from seerflow.models.indicator import Indicator, IndicatorType
+    from seerflow.models.indicator import Indicator
     from seerflow.storage.protocols import ModelStore
 
 _log = logging.getLogger("seerflow")
@@ -115,7 +115,7 @@ class IoCMatcher:
     async def refresh(self) -> None:
         try:
             new_state = await self._build_state()
-        except Exception:  # pragma: no cover — surfaced via failure metric
+        except Exception:
             with self._lock:
                 self._rebuild_failures_total += 1
             _log.exception("ioc_matcher: rebuild failed; keeping previous state")
@@ -127,10 +127,10 @@ class IoCMatcher:
             self._last_rebuild_at_ns = self._clock_ns()
 
     def check(self, value: str, type_: IndicatorType) -> Indicator | None:
-        with self._lock:
-            self._checks_total += 1
         if type_ not in self._matcher_cfg.enabled_types:
             return None
+        with self._lock:
+            self._checks_total += 1
         state = self._state
         if state is None:
             return None
@@ -147,11 +147,11 @@ class IoCMatcher:
             self._confirmed_matches_total += 1
         return ind
 
-    def check_many(self, values: Mapping[str, Iterable[str]]) -> tuple[IoCMatch, ...]:
+    def check_many(self, values: Mapping[IndicatorType, Iterable[str]]) -> tuple[IoCMatch, ...]:
         matches: list[IoCMatch] = []
         for type_, vs in values.items():
             for v in vs:
-                ind = self.check(v, type_)  # type: ignore[arg-type]
+                ind = self.check(v, type_)
                 if ind is not None:
                     matches.append(self._build_match(v, type_, ind, event_id=""))
         return tuple(matches)
@@ -198,7 +198,7 @@ class IoCMatcher:
             if algo in hashes_by_type and hex_digest:
                 hashes_by_type[algo].append(hex_digest)
         domains = list(event.related_domains)
-        url = event.attributes.get("url") if isinstance(event.attributes, dict) else None
+        url = event.attributes.get("url")
         urls = [str(url)] if isinstance(url, str) and url else []
 
         candidates: dict[str, list[str]] = {
