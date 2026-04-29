@@ -110,3 +110,46 @@ The static resolver covers IPv4 only. Feeds whose hostnames resolve
 exclusively to IPv6 will fail to start. File a feature request if you
 hit this — the SSRF guard already understands IPv6 via
 `ipaddress.ip_address`; only the resolver shim needs extending.
+
+## Bloom matcher (S-068)
+
+Once the TAXII feeds are polling, enable the in-memory IoC matcher to start
+checking every event against the indicator set. The matcher is gated by its
+own flag — TAXII can poll without matching, and the matcher refuses to start
+if `threat_intel.enabled` is false (no feeds means no indicators).
+
+```yaml
+threat_intel:
+  enabled: true
+  feeds:
+    - id: otx
+      # ... existing fields ...
+  matcher:
+    enabled: true
+    fpr: 0.001                 # target Bloom false-positive rate
+    min_capacity: 100000       # bottom of the sizing curve, even on cold boot
+    capacity_growth_factor: 1.25
+    confidence_floor: 0        # raise to filter low-confidence indicators
+    rebuild_debounce_ms: 200
+    enabled_types:
+      - ipv4
+      - ipv6
+      - domain
+      - url
+      - md5
+      - sha1
+      - sha256
+```
+
+**Memory budget.** Optimal Bloom sizing is `m_bits = -N * ln(fpr) / (ln 2)²`.
+At 1 M indicators / 0.001 FPR that is ~1.8 MB; at 5 M / 0.001 it is ~9 MB. The
+matcher logs a WARNING when the bit array exceeds 10 MB but still serves
+matches at the configured FPR — it never silently widens the false-positive
+surface to fit the budget.
+
+**Verifying matches.** Surface the per-matcher counters via the running
+`/api/v1/stats` endpoint:
+
+```bash
+curl http://127.0.0.1:8080/api/v1/stats | jq .ioc_matcher
+```
