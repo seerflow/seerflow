@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
+import struct
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -40,3 +43,61 @@ class BloomParams:
 def optimal_params(*, expected_items: int, fpr: float) -> BloomParams:
     """Pure-function helper — returns BloomParams; same as direct construction."""
     return BloomParams(expected_items=expected_items, fpr=fpr)
+
+
+class _BloomFilter:
+    """Fixed-size bit-array Bloom filter, immutable after construction."""
+
+    __slots__ = ("_bits", "_m", "_k", "_byte_size")
+
+    def __init__(self, bits: bytearray, m: int, k: int) -> None:
+        # Constructor is private; callers use ``from_values``. The signature
+        # is kept narrow so we don't accidentally expose a public mutator.
+        self._bits = bits
+        self._m = m
+        self._k = k
+        self._byte_size = len(bits)
+
+    @classmethod
+    def from_values(
+        cls, values: Iterable[str], params: BloomParams
+    ) -> _BloomFilter:
+        bits = bytearray(params.byte_size)
+        m = params.bit_count
+        k = params.hash_count
+        for v in values:
+            cls._set(bits, m, k, v)
+        return cls(bits, m, k)
+
+    def __contains__(self, value: str) -> bool:
+        h1, h2 = self._hash_pair(value)
+        for i in range(self._k):
+            idx = (h1 + i * h2) % self._m
+            if not (self._bits[idx >> 3] >> (idx & 7)) & 1:
+                return False
+        return True
+
+    @property
+    def byte_size(self) -> int:
+        return self._byte_size
+
+    @property
+    def bit_count(self) -> int:
+        return self._m
+
+    @property
+    def hash_count(self) -> int:
+        return self._k
+
+    @staticmethod
+    def _hash_pair(value: str) -> tuple[int, int]:
+        digest = hashlib.blake2b(value.encode("utf-8"), digest_size=16).digest()
+        h1, h2 = struct.unpack("<QQ", digest)
+        return h1, h2
+
+    @classmethod
+    def _set(cls, bits: bytearray, m: int, k: int, value: str) -> None:
+        h1, h2 = cls._hash_pair(value)
+        for i in range(k):
+            idx = (h1 + i * h2) % m
+            bits[idx >> 3] |= 1 << (idx & 7)
