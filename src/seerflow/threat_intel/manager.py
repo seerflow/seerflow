@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -40,6 +41,7 @@ class TAXIIFeedManager:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._stop = asyncio.Event()
         self._metrics = TAXIIMetricsRegistry()
+        self._snapshot_listeners: list[Callable[[str], None]] = []
 
     @property
     def metrics(self) -> TAXIIMetricsRegistry:
@@ -129,7 +131,23 @@ class TAXIIFeedManager:
             client=client,
             metrics=self._metrics,
             breaker=AuthCircuitBreaker(),
+            on_persist=self._fire_snapshot_listeners,
         )
+
+    def register_snapshot_listener(self, callback: Callable[[str], None]) -> None:
+        """Register a sync callback fired after each successful snapshot persist."""
+        self._snapshot_listeners.append(callback)
+
+    def _fire_snapshot_listeners(self, feed_id: str) -> None:
+        """Invoke all registered listeners; isolate exceptions per listener."""
+        for cb in self._snapshot_listeners:
+            try:
+                cb(feed_id)
+            except Exception:
+                _log.exception(
+                    "taxii: snapshot listener raised for feed=%s; continuing",
+                    feed_id,
+                )
 
 
 def _resolve_auth(

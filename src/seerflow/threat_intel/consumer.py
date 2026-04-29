@@ -48,6 +48,7 @@ class TAXIIFeedConsumer:
         metrics: TAXIIMetricsRegistry | None = None,
         breaker: AuthCircuitBreaker | None = None,
         clock_ns: Callable[[], int] = time.time_ns,
+        on_persist: Callable[[str], None] | None = None,
     ) -> None:
         self._cfg = feed_config
         self._defaults = defaults
@@ -57,6 +58,7 @@ class TAXIIFeedConsumer:
         self._metrics = metrics or TAXIIMetricsRegistry()
         self._breaker = breaker or AuthCircuitBreaker()
         self._clock_ns = clock_ns
+        self._on_persist = on_persist
 
     @property
     def poll_interval_s(self) -> int:
@@ -190,6 +192,11 @@ class TAXIIFeedConsumer:
                 self._defaults.max_indicators_per_feed,
             )
             self._metrics.record_truncated(self._cfg.id, count=truncated)
+        if self._on_persist is not None:
+            try:
+                self._on_persist(self._cfg.id)
+            except Exception:
+                _log.exception("taxii: on_persist hook raised for feed=%s", self._cfg.id)
 
     def _filter_expired(self, inds: tuple[Indicator, ...]) -> tuple[Indicator, ...]:
         grace_days = self._defaults.expired_grace_days
