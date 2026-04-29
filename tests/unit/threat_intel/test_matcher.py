@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 import msgspec
 import pytest
 
@@ -181,3 +183,89 @@ async def test_refresh_skips_disabled_types() -> None:
     matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
     await matcher.refresh()
     assert matcher.metrics_snapshot().indicators_loaded == {}
+
+
+@pytest.mark.asyncio
+async def test_check_returns_indicator_for_known_value() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    hit = matcher.check("1.2.3.4", "ipv4")
+    assert hit is not None
+    assert hit.value == "1.2.3.4"
+    assert matcher.check("9.9.9.9", "ipv4") is None
+    metrics = matcher.metrics_snapshot()
+    assert metrics.checks_total == 2
+    assert metrics.confirmed_matches_total == 1
+
+
+@pytest.mark.asyncio
+async def test_check_returns_none_for_disabled_type() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True, enabled_types=("domain",)),
+    )
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    assert matcher.check("1.2.3.4", "ipv4") is None  # type disabled
+
+
+@pytest.mark.asyncio
+async def test_false_positive_metric_increments_on_bloom_collision() -> None:
+    """Brute-force a Bloom collision in a tiny high-FPR filter."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    # Tiny bloom + high FPR so collisions are easy to find.
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True, fpr=0.5, min_capacity=10),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+
+    rng = random.Random(0xBADC0FFEE)  # noqa: S311 — deterministic test RNG, not crypto
+    collision: str | None = None
+    for _ in range(10_000):
+        candidate = f"{rng.randrange(0, 1 << 32):08x}"
+        # We want a value where the Bloom probes True but the dict lacks it.
+        state = matcher._state
+        assert state is not None
+        if candidate in state.bloom and candidate not in state.by_type.get("ipv4", {}):
+            collision = candidate
+            break
+    assert collision is not None, "expected a Bloom collision in 10K probes"
+
+    # Probe known value first (bloom hit + confirmed match), then collision
+    # (bloom hit + false positive). This matches the test's own intent stated
+    # in the bloom_hits assertion comment below.
+    assert matcher.check("1.2.3.4", "ipv4") is not None
+    assert matcher.check(collision, "ipv4") is None
+    metrics = matcher.metrics_snapshot()
+    assert metrics.false_positives_total == 1
+    assert metrics.bloom_hits_total >= 2  # known-value probe + collision probe

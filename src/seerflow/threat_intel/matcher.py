@@ -22,14 +22,14 @@ from typing import TYPE_CHECKING
 import msgspec
 
 from seerflow.models.indicator import IndicatorSnapshot
+from seerflow.models.ioc_match import IoCMatch
 from seerflow.threat_intel._bloom import BloomParams, _BloomFilter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Mapping
 
     from seerflow.config import ThreatIntelConfig
-    from seerflow.models.indicator import Indicator
-    from seerflow.models.ioc_match import IoCMatch
+    from seerflow.models.indicator import Indicator, IndicatorType
     from seerflow.storage.protocols import ModelStore
 
 _log = logging.getLogger("seerflow")
@@ -122,6 +122,62 @@ class IoCMatcher:
         with self._lock:
             self._rebuild_count += 1
             self._last_rebuild_at_ns = self._clock_ns()
+
+    def check(self, value: str, type_: IndicatorType) -> Indicator | None:
+        with self._lock:
+            self._checks_total += 1
+        if type_ not in self._matcher_cfg.enabled_types:
+            return None
+        state = self._state
+        if state is None:
+            return None
+        if value not in state.bloom:
+            return None
+        with self._lock:
+            self._bloom_hits_total += 1
+        ind = state.by_type.get(type_, {}).get(value)
+        if ind is None:
+            with self._lock:
+                self._false_positives_total += 1
+            return None
+        with self._lock:
+            self._confirmed_matches_total += 1
+        return ind
+
+    def check_many(self, values: Mapping[str, Iterable[str]]) -> tuple[IoCMatch, ...]:
+        matches: list[IoCMatch] = []
+        for type_, vs in values.items():
+            for v in vs:
+                ind = self.check(v, type_)  # type: ignore[arg-type]
+                if ind is not None:
+                    matches.append(self._build_match(v, type_, ind, event_id=""))
+        return tuple(matches)
+
+    def _build_match(
+        self,
+        value: str,
+        type_: str,
+        indicator: Indicator,
+        *,
+        event_id: str,
+    ) -> IoCMatch:
+        kind: str
+        if type_ in ("ipv4", "ipv6"):
+            kind = "ip"
+        elif type_ in ("md5", "sha1", "sha256"):
+            kind = "hash"
+        elif type_ == "url":
+            kind = "url"
+        else:
+            kind = "domain"
+        return IoCMatch(
+            value=value,
+            type=type_,  # type: ignore[arg-type]
+            indicator=indicator,
+            event_id=event_id,
+            entity_kind=kind,  # type: ignore[arg-type]
+            matched_at_ns=self._clock_ns(),
+        )
 
     async def _build_state(self) -> _MatcherState:
         enabled_types = frozenset(self._matcher_cfg.enabled_types)
