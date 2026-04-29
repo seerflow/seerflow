@@ -76,3 +76,34 @@ explicitly opts in:
 To pause an enabled feed without removing its config, set the per-feed
 `enabled: false` flag — the manager skips disabled feeds while keeping
 the rest of the block intact.
+
+## DNS-rebinding mitigation
+
+Seerflow resolves each feed hostname **once at startup** and pins the
+resolved IPv4 address into the `aiohttp.ClientSession`'s resolver
+(`seerflow.threat_intel.dns.StaticResolver`). Per-request DNS lookups
+are not re-issued — runtime cannot drift from the IP that the startup
+SSRF guard validated against `_is_private_ip`.
+
+This means:
+
+- **Geo-DNS / DNS load-balanced TAXII endpoints are not transparently
+  followed.** If a feed serves multiple A records and rotates them
+  through DNS, Seerflow uses the IP captured at startup until the
+  process restarts.
+- **Private IPs leaked through DNS at runtime cannot reach the
+  pipeline.** A feed whose authoritative DNS later returns
+  `169.254.169.254` (cloud IMDS) or `192.168.x.x` cannot be repurposed
+  against the host running Seerflow.
+- **Opt-out via `allow_private_addresses: true`.** Setting this flag on
+  a feed bypasses both the startup SSRF guard *and* the static
+  resolver — the feed runs through aiohttp's default resolver. Use
+  this only for trusted internal feeds where the operator has audited
+  the network path.
+
+### IPv6
+
+The static resolver covers IPv4 only. Feeds whose hostnames resolve
+exclusively to IPv6 will fail to start. File a feature request if you
+hit this — the SSRF guard already understands IPv6 via
+`ipaddress.ip_address`; only the resolver shim needs extending.
