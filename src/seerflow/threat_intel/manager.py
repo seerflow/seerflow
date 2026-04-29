@@ -60,7 +60,18 @@ class TAXIIFeedManager:
         # so a restart cycle does not leave run_forever() permanently
         # short-circuited.
         self._stop = asyncio.Event()
-        self._session = aiohttp.ClientSession()
+        # AC1 (S-227): pin each enabled feed's hostname to the IP captured
+        # at startup so per-request DNS cannot drift to a private/IMDS
+        # address at runtime. Feeds with allow_private_addresses=True are
+        # excluded — they fall through to aiohttp's default resolver.
+        from seerflow.threat_intel.dns import StaticResolver, build_static_resolver_map
+
+        resolver_map = build_static_resolver_map(self._cfg)
+        if resolver_map:
+            connector = aiohttp.TCPConnector(resolver=StaticResolver(resolver_map))
+            self._session = aiohttp.ClientSession(connector=connector)
+        else:
+            self._session = aiohttp.ClientSession()
         failed: list[str] = []
         for feed_cfg in self._cfg.feeds:
             if not feed_cfg.enabled:
