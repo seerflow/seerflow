@@ -415,10 +415,15 @@ async def test_start_runs_initial_rebuild_and_registers_listener() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
     cfg = ThreatIntelConfig(
-        enabled=True, feeds=feeds, matcher=IoCMatcherConfig(enabled=True),
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
     )
     snap = IndicatorSnapshot(
-        feed_id="f1", fetched_at_ns=1, indicators=(_ipv4("1.2.3.4"),), cursor=None,
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
     )
     await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
 
@@ -444,7 +449,10 @@ async def test_listener_triggers_debounced_rebuild() -> None:
         matcher=IoCMatcherConfig(enabled=True, rebuild_debounce_ms=10),
     )
     snap = IndicatorSnapshot(
-        feed_id="f1", fetched_at_ns=1, indicators=(_ipv4("1.2.3.4"),), cursor=None,
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
     )
     await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
 
@@ -486,10 +494,15 @@ async def test_concurrent_reads_during_rebuild_never_observe_partial_state() -> 
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
     cfg = ThreatIntelConfig(
-        enabled=True, feeds=feeds, matcher=IoCMatcherConfig(enabled=True),
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
     )
     snap = IndicatorSnapshot(
-        feed_id="f1", fetched_at_ns=1, indicators=(_ipv4("1.2.3.4"),), cursor=None,
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
     )
     await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
 
@@ -503,7 +516,7 @@ async def test_concurrent_reads_during_rebuild_never_observe_partial_state() -> 
         while not stop.is_set():
             try:
                 matcher.check("1.2.3.4", "ipv4")
-            except BaseException as exc:  # noqa: BLE001 — capture for assert
+            except BaseException as exc:  # capture for assert
                 errors.append(exc)
                 return
 

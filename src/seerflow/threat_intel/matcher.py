@@ -248,10 +248,8 @@ class IoCMatcher:
         if self._task is None:
             return
         self._task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
             await asyncio.wait_for(self._task, timeout=5.0)
-        except (asyncio.CancelledError, TimeoutError):
-            pass
         self._task = None
         self._stopping = False
 

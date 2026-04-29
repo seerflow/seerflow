@@ -154,9 +154,6 @@ async def test_start_uses_default_session_when_all_feeds_allow_private(
 @pytest.mark.asyncio
 async def test_register_snapshot_listener_fires_on_consumer_persist(monkeypatch) -> None:
     """Manager fires registered listeners after a successful consumer persist."""
-    from seerflow.config import ThreatIntelConfig, TAXIIFeedConfig
-    from seerflow.threat_intel.manager import TAXIIFeedManager
-
     cfg = ThreatIntelConfig(
         enabled=True,
         feeds=(TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),),
@@ -181,9 +178,6 @@ async def test_register_snapshot_listener_fires_on_consumer_persist(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_listener_exception_does_not_break_others(monkeypatch) -> None:
-    from seerflow.config import ThreatIntelConfig, TAXIIFeedConfig
-    from seerflow.threat_intel.manager import TAXIIFeedManager
-
     cfg = ThreatIntelConfig(
         enabled=True,
         feeds=(TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),),

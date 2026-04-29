@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -16,6 +15,8 @@ from seerflow.threat_intel.consumer import TAXIIFeedConsumer
 from seerflow.threat_intel.metrics import TAXIIMetricsRegistry
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from seerflow.config import (
         TAXIIAuthConfig,
         TAXIIFeedConfig,
