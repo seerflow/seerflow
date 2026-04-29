@@ -70,6 +70,7 @@ def _is_private_ip(hostname: str | None) -> bool:
         or addr.is_loopback
         or addr.is_link_local
         or addr.is_reserved
+        or addr.is_multicast
         or addr in _CGNAT_NETWORK
     )
 

@@ -86,6 +86,19 @@ def test_resolve_feed_with_private_ip_guard_rejects_resolved_private_ip(
         cv._resolve_feed_with_private_ip_guard("feed-x", "imds.example")
 
 
+def test_resolve_feed_with_private_ip_guard_rejects_literal_multicast() -> None:
+    """Defence in depth: multicast addresses should be rejected even though
+    the kernel rejects unicast TCP to them. Reviewer 5 (security) low.
+    """
+    from seerflow._config_validation import (
+        ConfigError,
+        _resolve_feed_with_private_ip_guard,
+    )
+
+    with pytest.raises(ConfigError, match="private/reserved"):
+        _resolve_feed_with_private_ip_guard("feed-x", "224.0.0.1")
+
+
 # --- S-227 Task 2: max_indicators_per_feed bounds --------------------------
 
 
