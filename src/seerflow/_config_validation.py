@@ -11,10 +11,13 @@ Extracted from `seerflow.config` in S-172 to keep config.py under CLAUDE.md's
 from __future__ import annotations
 
 import ipaddress
+import logging
 import math
 from typing import TYPE_CHECKING
 
 from limits import parse as _parse_limit_string
+
+_log = logging.getLogger("seerflow")
 
 if TYPE_CHECKING:
     from seerflow.config import (
@@ -290,6 +293,11 @@ def _validate_detection_config(config: DetectionConfig) -> None:
 
 _THREAT_INTEL_MIN_POLL_INTERVAL_S = 60
 _THREAT_INTEL_DNS_TIMEOUT_S = 2.0
+_THREAT_INTEL_MAX_INDICATORS_HARD = 10_000_000
+# Warn threshold sits 50 % above the default (1_000_000) so default configs
+# do not produce an advisory log line — only operators who raise the cap
+# above the documented default see the WARN.
+_THREAT_INTEL_MAX_INDICATORS_WARN = 1_500_000
 
 
 def _validate_threat_intel(config: ThreatIntelConfig) -> None:
@@ -317,6 +325,17 @@ def _validate_threat_intel_defaults(config: ThreatIntelConfig) -> None:
         raise ConfigError(
             f"threat_intel.max_indicators_per_feed must be >= 1, "
             f"got {config.max_indicators_per_feed!r}"
+        )
+    if config.max_indicators_per_feed > _THREAT_INTEL_MAX_INDICATORS_HARD:
+        raise ConfigError(
+            f"threat_intel.max_indicators_per_feed must be <= "
+            f"{_THREAT_INTEL_MAX_INDICATORS_HARD}, got {config.max_indicators_per_feed!r}"
+        )
+    if config.max_indicators_per_feed > _THREAT_INTEL_MAX_INDICATORS_WARN:
+        _log.warning(
+            "threat_intel.max_indicators_per_feed=%d may produce >100 MB snapshots; "
+            "consider lowering or splitting across feeds",
+            config.max_indicators_per_feed,
         )
     if config.expired_grace_days < 0:
         raise ConfigError(
@@ -409,6 +428,18 @@ def _validate_threat_intel_feeds_dns(config: ThreatIntelConfig) -> None:
 
 def _check_literal_ip_or_resolve(feed_id: str, hostname: str) -> bool:
     """Returns True after running the appropriate path; raises on private IP."""
+    _resolve_feed_with_private_ip_guard(feed_id, hostname)
+    return True
+
+
+def _resolve_feed_with_private_ip_guard(feed_id: str, hostname: str) -> str:
+    """Resolve ``hostname`` to an IPv4 string, rejecting private/reserved addresses.
+
+    Returns the literal IPv4 when the input is already an IP, otherwise the
+    DNS-resolved IPv4. Raises ``ConfigError`` on private addresses or DNS
+    failure. Used at startup by both the feed validator and the TAXII feed
+    manager's static-resolver builder.
+    """
     import socket
 
     try:
@@ -421,7 +452,7 @@ def _check_literal_ip_or_resolve(feed_id: str, hostname: str) -> bool:
                 f"threat_intel.feeds[{feed_id}].url targets private/reserved "
                 f"address {hostname!r}; set allow_private_addresses=true to override"
             )
-        return True
+        return hostname
     # DNS path with a bounded timeout so a misbehaving resolver cannot stall
     # startup. ``socket.gethostbyname`` has no timeout arg, so we use the
     # process-global default for the call and restore it immediately. This is
@@ -441,7 +472,7 @@ def _check_literal_ip_or_resolve(feed_id: str, hostname: str) -> bool:
             f"threat_intel.feeds[{feed_id}].url resolves to private/reserved "
             f"address {resolved!r}; set allow_private_addresses=true to override"
         )
-    return True
+    return resolved
 
 
 def validate_seerflow_config(config: SeerflowConfig) -> None:

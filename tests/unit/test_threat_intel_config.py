@@ -42,3 +42,88 @@ def test_threat_intel_config_defaults() -> None:
     assert cfg.max_indicators_per_feed == 1_000_000
     assert cfg.expired_grace_days == 30
     assert cfg.startup_jitter_s == 30
+
+
+# --- S-227 Task 1: _resolve_feed_with_private_ip_guard ----------------------
+
+
+def test_resolve_feed_with_private_ip_guard_returns_literal_public_ip() -> None:
+    from seerflow._config_validation import _resolve_feed_with_private_ip_guard
+
+    assert _resolve_feed_with_private_ip_guard("feed-x", "1.1.1.1") == "1.1.1.1"
+
+
+def test_resolve_feed_with_private_ip_guard_rejects_literal_private_ip() -> None:
+    from seerflow._config_validation import (
+        ConfigError,
+        _resolve_feed_with_private_ip_guard,
+    )
+
+    with pytest.raises(ConfigError, match="private/reserved"):
+        _resolve_feed_with_private_ip_guard("feed-x", "10.0.0.1")
+
+
+def test_resolve_feed_with_private_ip_guard_returns_resolved_ip_for_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import socket
+
+    from seerflow import _config_validation as cv
+
+    monkeypatch.setattr(socket, "gethostbyname", lambda _h: "8.8.8.8")
+    assert cv._resolve_feed_with_private_ip_guard("feed-x", "taxii.example") == "8.8.8.8"
+
+
+def test_resolve_feed_with_private_ip_guard_rejects_resolved_private_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import socket
+
+    from seerflow import _config_validation as cv
+
+    monkeypatch.setattr(socket, "gethostbyname", lambda _h: "169.254.169.254")
+    with pytest.raises(cv.ConfigError, match="private/reserved"):
+        cv._resolve_feed_with_private_ip_guard("feed-x", "imds.example")
+
+
+# --- S-227 Task 2: max_indicators_per_feed bounds --------------------------
+
+
+def test_max_indicators_per_feed_hard_cap_rejects_over_10m() -> None:
+    from seerflow._config_validation import (
+        ConfigError,
+        _validate_threat_intel_defaults,
+    )
+
+    cfg = ThreatIntelConfig(enabled=True, max_indicators_per_feed=10_000_001)
+    with pytest.raises(ConfigError, match="max_indicators_per_feed"):
+        _validate_threat_intel_defaults(cfg)
+
+
+def test_max_indicators_per_feed_warn_logs_above_threshold(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    from seerflow._config_validation import _validate_threat_intel_defaults
+
+    cfg = ThreatIntelConfig(enabled=True, max_indicators_per_feed=2_000_000)
+    with caplog.at_level(logging.WARNING, logger="seerflow"):
+        _validate_threat_intel_defaults(cfg)
+    assert any(
+        "max_indicators_per_feed=2000000" in rec.message and ">100 MB" in rec.message
+        for rec in caplog.records
+    )
+
+
+def test_max_indicators_per_feed_default_does_not_warn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    from seerflow._config_validation import _validate_threat_intel_defaults
+
+    cfg = ThreatIntelConfig(enabled=True)  # default 1_000_000
+    with caplog.at_level(logging.WARNING, logger="seerflow"):
+        _validate_threat_intel_defaults(cfg)
+    assert not any("max_indicators_per_feed" in rec.message for rec in caplog.records)
