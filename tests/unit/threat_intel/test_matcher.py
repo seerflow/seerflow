@@ -528,31 +528,6 @@ def test_check_returns_none_when_state_unbuilt(stub_store: object) -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_many_dispatches_per_type() -> None:
-    store = _MemStore()
-    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
-    cfg = ThreatIntelConfig(
-        enabled=True,
-        feeds=feeds,
-        matcher=IoCMatcherConfig(enabled=True),
-    )
-    snap = IndicatorSnapshot(
-        feed_id="f1",
-        fetched_at_ns=1,
-        indicators=(_ipv4("1.2.3.4"),),
-        cursor=None,
-    )
-    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
-
-    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
-    await matcher.refresh()
-    matches = matcher.check_many({"ipv4": ("1.2.3.4", "9.9.9.9")})
-    assert len(matches) == 1
-    assert matches[0].value == "1.2.3.4"
-    assert matches[0].event_id == ""
-
-
-@pytest.mark.asyncio
 async def test_check_event_skips_unknown_candidates() -> None:
     """Well-formed candidates that aren't in the indicator set must be skipped."""
     store = _MemStore()
@@ -722,11 +697,14 @@ async def test_run_loop_reruns_when_dirty_set_during_rebuild() -> None:
         if notified["count"] == 0:
             notified["count"] = 1
             matcher._dirty = True
+            assert matcher._dirty_event is not None
             matcher._dirty_event.set()
 
     matcher.refresh = refresh_then_redirty  # type: ignore[method-assign]
 
-    # Start without re-running refresh (already done above).
+    # Bind the event to the running loop (start() normally does this) and
+    # then launch the run loop directly without re-running refresh.
+    matcher._dirty_event = asyncio.Event()
     matcher._task = asyncio.create_task(matcher._run_loop(), name="ioc_matcher.loop")
     try:
         # First listener call wakes the loop. During that refresh the hook
@@ -875,3 +853,52 @@ async def test_refresh_failure_keeps_previous_state_and_increments_metric(
     assert metrics.rebuild_count == 1  # still just the prior successful refresh
     # Known indicator still matches via preserved state.
     assert matcher.check("1.2.3.4", "ipv4") is not None
+
+
+@pytest.mark.asyncio
+async def test_stop_before_start_does_not_brick_matcher() -> None:
+    """stop() before start() must reset _stopping so a later start() is not bricked."""
+    cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
+
+    class _Store:
+        async def save_state(self, *_a, **_k) -> None:
+            return None
+
+        async def load_state(self, *_a, **_k) -> bytes | None:
+            return None
+
+        async def delete_state(self, *_a, **_k) -> None:
+            return None
+
+    matcher = IoCMatcher(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    # No start() — task is None. Calling stop() must clear _stopping.
+    await matcher.stop()
+    assert matcher._stopping is False
+    # Subsequent start() must not raise RuntimeError("mid-shutdown").
+    await matcher.start()
+    try:
+        assert matcher.metrics_snapshot().rebuild_count == 1
+    finally:
+        await matcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_on_snapshot_updated_before_start_is_noop() -> None:
+    """A listener firing before start() must drop the signal silently."""
+    cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
+
+    class _Store:
+        async def save_state(self, *_a, **_k) -> None:
+            return None
+
+        async def load_state(self, *_a, **_k) -> bytes | None:
+            return None
+
+        async def delete_state(self, *_a, **_k) -> None:
+            return None
+
+    matcher = IoCMatcher(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    # _dirty_event is None pre-start — must not raise.
+    matcher.on_snapshot_updated("f1")
+    assert matcher._dirty is True
+    assert matcher._dirty_event is None

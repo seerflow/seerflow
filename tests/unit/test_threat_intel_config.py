@@ -229,3 +229,58 @@ def test_matcher_validation_rejects_negative_growth_factor() -> None:
     )
     with pytest.raises(ConfigError, match="capacity_growth_factor"):
         validate_seerflow_config(cfg)
+
+
+def test_matcher_validation_rejects_confidence_floor_above_100() -> None:
+    from seerflow._config_validation import ConfigError, validate_seerflow_config
+    from seerflow._threat_intel_builders import _build_threat_intel_config
+    from seerflow.config import SeerflowConfig
+
+    cfg = SeerflowConfig(
+        threat_intel=_build_threat_intel_config(
+            {"matcher": {"enabled": True, "confidence_floor": 150}}
+        )
+    )
+    with pytest.raises(ConfigError, match="confidence_floor"):
+        validate_seerflow_config(cfg)
+
+
+def test_matcher_validation_rejects_confidence_floor_below_zero() -> None:
+    from seerflow._config_validation import ConfigError, validate_seerflow_config
+    from seerflow._threat_intel_builders import _build_threat_intel_config
+    from seerflow.config import SeerflowConfig
+
+    cfg = SeerflowConfig(
+        threat_intel=_build_threat_intel_config(
+            {"matcher": {"enabled": True, "confidence_floor": -1}}
+        )
+    )
+    with pytest.raises(ConfigError, match="confidence_floor"):
+        validate_seerflow_config(cfg)
+
+
+def test_matcher_validation_rejects_empty_enabled_types() -> None:
+    from seerflow._config_validation import ConfigError, validate_seerflow_config
+    from seerflow._threat_intel_builders import _build_threat_intel_config
+    from seerflow.config import SeerflowConfig
+
+    cfg = SeerflowConfig(
+        threat_intel=_build_threat_intel_config(
+            {"matcher": {"enabled": True, "enabled_types": []}}
+        )
+    )
+    with pytest.raises(ConfigError, match="enabled_types"):
+        validate_seerflow_config(cfg)
+
+
+def test_matcher_validation_skipped_when_disabled() -> None:
+    """A disabled matcher must ignore its own params; invalid fpr should not block boot."""
+    from seerflow._config_validation import validate_seerflow_config
+    from seerflow._threat_intel_builders import _build_threat_intel_config
+    from seerflow.config import SeerflowConfig
+
+    cfg = SeerflowConfig(
+        threat_intel=_build_threat_intel_config({"matcher": {"enabled": False, "fpr": 0.0}})
+    )
+    # Must not raise even though fpr=0.0 would be invalid for an enabled matcher.
+    validate_seerflow_config(cfg)

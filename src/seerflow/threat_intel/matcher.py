@@ -3,7 +3,8 @@
 Builds + refreshes a bit-array Bloom filter (with a per-type confirmation
 dict) from the IndicatorSnapshot blobs persisted by S-067's TAXII consumers.
 Probes are O(1); confirmation eliminates Bloom false positives before any
-match is dispatched.
+match is dispatched. ``check_event`` is the public hot path; it iterates
+event entities internally and calls ``check`` per candidate.
 
 S-069 subscribes to ``on_match`` and turns matches into Alerts; this module
 does NOT call AlertStore.
@@ -28,7 +29,7 @@ from seerflow.models.ioc_match import IoCMatch
 from seerflow.threat_intel._bloom import BloomParams, _BloomFilter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable
 
     from seerflow.config import ThreatIntelConfig
     from seerflow.models.event import SeerflowEvent
@@ -77,6 +78,7 @@ class IoCMatcher:
     ) -> None:
         self._cfg = config
         self._matcher_cfg = config.matcher
+        self._enabled_types_set: frozenset[str] = frozenset(config.matcher.enabled_types)
         self._store = model_store
         self._on_match = on_match
         self._clock_ns = clock_ns
@@ -92,7 +94,9 @@ class IoCMatcher:
         self._false_positives_total = 0
 
         self._dirty = False
-        self._dirty_event = asyncio.Event()
+        # Bind asyncio.Event lazily in start() to avoid loop-binding mismatch
+        # when the matcher is constructed outside the running event loop.
+        self._dirty_event: asyncio.Event | None = None
         self._stopping = False
         self._task: asyncio.Task[None] | None = None
 
@@ -127,34 +131,26 @@ class IoCMatcher:
             self._last_rebuild_at_ns = self._clock_ns()
 
     def check(self, value: str, type_: IndicatorType) -> Indicator | None:
-        if type_ not in self._matcher_cfg.enabled_types:
+        if type_ not in self._enabled_types_set:
             return None
+        # Single-attribute reads are atomic in CPython; the immutable
+        # _MatcherState is published via attribute assignment so callers
+        # never observe a partial swap. Hold the lock once for all counter
+        # bumps so check() does at most one acquire/release per probe.
+        state = self._state
         with self._lock:
             self._checks_total += 1
-        state = self._state
-        if state is None:
-            return None
-        if value not in state.bloom:
-            return None
-        with self._lock:
+            if state is None:
+                return None
+            if value not in state.bloom:
+                return None
             self._bloom_hits_total += 1
-        ind = state.by_type.get(type_, {}).get(value)
-        if ind is None:
-            with self._lock:
+            ind = state.by_type.get(type_, {}).get(value)
+            if ind is None:
                 self._false_positives_total += 1
-            return None
-        with self._lock:
+                return None
             self._confirmed_matches_total += 1
-        return ind
-
-    def check_many(self, values: Mapping[IndicatorType, Iterable[str]]) -> tuple[IoCMatch, ...]:
-        matches: list[IoCMatch] = []
-        for type_, vs in values.items():
-            for v in vs:
-                ind = self.check(v, type_)
-                if ind is not None:
-                    matches.append(self._build_match(v, type_, ind, event_id=""))
-        return tuple(matches)
+            return ind
 
     def _build_match(
         self,
@@ -229,7 +225,11 @@ class IoCMatcher:
         self._dirty = True
         # asyncio.Event.set() is sync-safe but only meaningful from the event
         # loop thread. The listener fires from the consumer's loop, so we are
-        # already there.
+        # already there. The event is created in start(); if a listener fires
+        # before start() (or after stop()), drop the signal — the next
+        # start() will refresh() unconditionally.
+        if self._dirty_event is None:
+            return
         try:
             self._dirty_event.set()
         except RuntimeError:  # pragma: no cover — loop closed
@@ -240,12 +240,18 @@ class IoCMatcher:
             raise RuntimeError("ioc_matcher: matcher mid-shutdown")
         if self._task is not None:
             return  # already running
+        # Bind to the currently running event loop so the listener and the
+        # run-loop coroutine share the same Event instance.
+        self._dirty_event = asyncio.Event()
         await self.refresh()
         self._task = asyncio.create_task(self._run_loop(), name="ioc_matcher.loop")
 
     async def stop(self) -> None:
         self._stopping = True
         if self._task is None:
+            # No task to cancel — clear the shutdown flag so a subsequent
+            # start() is not bricked with RuntimeError("mid-shutdown").
+            self._stopping = False
             return
         self._task.cancel()
         with contextlib.suppress(asyncio.CancelledError, TimeoutError):
@@ -255,15 +261,18 @@ class IoCMatcher:
 
     async def _run_loop(self) -> None:
         debounce_s = max(0.0, self._matcher_cfg.rebuild_debounce_ms / 1000.0)
+        # _dirty_event is set by start() before this coroutine is scheduled.
+        assert self._dirty_event is not None
+        dirty_event = self._dirty_event
         try:
             while True:
-                await self._dirty_event.wait()
+                await dirty_event.wait()
                 if debounce_s > 0:
                     await asyncio.sleep(debounce_s)
                 # Drain dirty flag + event before rebuild so notifications
                 # arriving DURING the rebuild trigger one more pass.
                 self._dirty = False
-                self._dirty_event.clear()
+                dirty_event.clear()
                 await self.refresh()
                 if self._dirty:
                     # Loop immediately to honour late notifications.
@@ -272,7 +281,7 @@ class IoCMatcher:
             return
 
     async def _build_state(self) -> _MatcherState:
-        enabled_types = frozenset(self._matcher_cfg.enabled_types)
+        enabled_types = self._enabled_types_set
         floor = self._matcher_cfg.confidence_floor
         by_type: dict[str, dict[str, Indicator]] = {}
         for feed in self._cfg.feeds:

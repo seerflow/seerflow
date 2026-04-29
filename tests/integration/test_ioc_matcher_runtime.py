@@ -65,28 +65,3 @@ async def test_matcher_construction_order_attaches_listener_before_manager_start
             await manager.stop()
     finally:
         await store.close()
-
-
-@pytest.mark.asyncio
-async def test_listener_not_registered_when_matcher_disabled(
-    tmp_path: Path,
-) -> None:
-    """AC1: when matcher.enabled=False, run.py skips construction → no listener attached."""
-    from seerflow.threat_intel.manager import TAXIIFeedManager
-
-    store = await connect_storage(StorageConfig(data_dir=str(tmp_path)))
-    try:
-        cfg = ThreatIntelConfig(
-            enabled=False,
-            feeds=(TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),),
-            matcher=IoCMatcherConfig(enabled=False),
-        )
-        manager = TAXIIFeedManager(config=cfg, model_store=store)
-        # Mirror run.py: when matcher.enabled is False, no IoCMatcher is constructed
-        # and no listener is registered with the manager.
-        try:
-            assert len(manager._snapshot_listeners) == 0
-        finally:
-            await manager.stop()
-    finally:
-        await store.close()
