@@ -72,3 +72,18 @@ class TestBuildProvider:
         assert m.total_events_processed == 99
         assert m.active_sources == 0
         assert m.model_count == 0
+
+
+def test_pipeline_metrics_includes_ioc_matcher_field() -> None:
+    from seerflow.api.metrics import PipelineMetrics
+    from seerflow.threat_intel.matcher import IoCMatcherMetrics
+
+    m = PipelineMetrics(
+        started_monotonic=0.0,
+        total_events_processed=0,
+        active_sources=0,
+        model_count=0,
+        ioc_matcher=IoCMatcherMetrics(),
+    )
+    assert m.ioc_matcher is not None
+    assert m.ioc_matcher.rebuild_count == 0
