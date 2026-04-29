@@ -163,6 +163,10 @@ class StatsResponse(BaseModel):
     # disabled or no metrics provider is wired. Each value is a serialised
     # ``TAXIIFeedMetrics`` dict (see seerflow.threat_intel.metrics).
     taxii: dict[str, dict[str, Any]] | None = None
+    # IoC matcher snapshot (S-068). ``None`` when the matcher is disabled
+    # or no metrics provider is wired. Serialised ``IoCMatcherMetrics``
+    # dataclass (see seerflow.threat_intel.matcher).
+    ioc_matcher: dict[str, object] | None = None
 
 
 class FeedbackRequest(BaseModel):

@@ -132,13 +132,16 @@ class TestStatsEndpointEnrichment:
 
         log_store, alert_store = self._default_stores()
         start = _time.monotonic() - 100.0
-        provider = lambda: PipelineMetrics(  # noqa: E731
-            started_monotonic=start,
-            total_events_processed=5000,
-            active_sources=3,
-            model_count=12,
-        )
-        client = TestClient(self._build_app(log_store, alert_store, provider=provider))
+
+        def _provider() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=start,
+                total_events_processed=5000,
+                active_sources=3,
+                model_count=12,
+            )
+
+        client = TestClient(self._build_app(log_store, alert_store, provider=_provider))
         resp = client.get("/api/v1/stats")
         body = resp.json()
         assert body["total_events_processed"] == 5000
@@ -164,13 +167,16 @@ class TestStatsEndpointEnrichment:
         from seerflow.api.metrics import PipelineMetrics
 
         log_store, alert_store = self._default_stores()
-        provider = lambda: PipelineMetrics(  # noqa: E731
-            started_monotonic=_time.monotonic(),
-            total_events_processed=1000,
-            active_sources=1,
-            model_count=4,
-        )
-        client = TestClient(self._build_app(log_store, alert_store, provider=provider))
+
+        def _provider() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=_time.monotonic(),
+                total_events_processed=1000,
+                active_sources=1,
+                model_count=4,
+            )
+
+        client = TestClient(self._build_app(log_store, alert_store, provider=_provider))
         resp = client.get("/api/v1/stats")
         assert resp.json()["event_rate_per_sec"] == 0.0
 
@@ -207,3 +213,75 @@ class TestStatsEndpointEnrichment:
         assert body["total_events_processed"] == 0
         assert body["active_sources"] == 0
         assert body["model_count"] == 0
+
+    def test_ioc_matcher_metrics_round_trip(self) -> None:
+        """``IoCMatcherMetrics`` from the provider populates the ``ioc_matcher``
+        field on the response (S-068 AC9)."""
+        import time as _time
+
+        from seerflow.api.metrics import PipelineMetrics
+        from seerflow.threat_intel.matcher import IoCMatcherMetrics
+
+        log_store, alert_store = self._default_stores()
+        ioc_metrics = IoCMatcherMetrics(
+            indicators_loaded={"ipv4-addr": 17, "domain-name": 9},
+            bit_array_bytes=1024,
+            expected_fpr=0.001,
+            last_rebuild_at_ns=1_700_000_000_000_000_000,
+            rebuild_count=3,
+            rebuild_failures_total=1,
+            checks_total=42,
+            bloom_hits_total=5,
+            confirmed_matches_total=4,
+            false_positives_total=1,
+        )
+
+        def _provider_with_matcher() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=_time.monotonic() - 10.0,
+                total_events_processed=1000,
+                active_sources=1,
+                model_count=4,
+                ioc_matcher=ioc_metrics,
+            )
+
+        client = TestClient(
+            self._build_app(log_store, alert_store, provider=_provider_with_matcher)
+        )
+        resp = client.get("/api/v1/stats")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ioc_matcher"] is not None
+        payload = body["ioc_matcher"]
+        assert payload["indicators_loaded"] == {"ipv4-addr": 17, "domain-name": 9}
+        assert payload["bit_array_bytes"] == 1024
+        assert payload["expected_fpr"] == 0.001
+        assert payload["last_rebuild_at_ns"] == 1_700_000_000_000_000_000
+        assert payload["rebuild_count"] == 3
+        assert payload["rebuild_failures_total"] == 1
+        assert payload["checks_total"] == 42
+        assert payload["bloom_hits_total"] == 5
+        assert payload["confirmed_matches_total"] == 4
+        assert payload["false_positives_total"] == 1
+
+    def test_ioc_matcher_absent_when_provider_omits_it(self) -> None:
+        """When the provider's snapshot has ``ioc_matcher=None``, the response
+        leaves the field as ``null`` (matcher disabled / not yet built)."""
+        import time as _time
+
+        from seerflow.api.metrics import PipelineMetrics
+
+        log_store, alert_store = self._default_stores()
+
+        def _provider_no_matcher() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=_time.monotonic() - 10.0,
+                total_events_processed=1000,
+                active_sources=1,
+                model_count=4,
+            )
+
+        client = TestClient(self._build_app(log_store, alert_store, provider=_provider_no_matcher))
+        resp = client.get("/api/v1/stats")
+        assert resp.status_code == 200
+        assert resp.json()["ioc_matcher"] is None

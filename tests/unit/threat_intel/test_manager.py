@@ -149,3 +149,56 @@ async def test_start_uses_default_session_when_all_feeds_allow_private(
             await mgr.stop()
     finally:
         await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_register_snapshot_listener_fires_on_consumer_persist(monkeypatch) -> None:
+    """Manager fires registered listeners after a successful consumer persist."""
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=(TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),),
+    )
+
+    class _Store:
+        async def save_state(self, key: str, data: bytes) -> None:
+            return None
+
+        async def load_state(self, key: str) -> bytes | None:
+            return None
+
+        async def delete_state(self, key: str) -> None:
+            return None
+
+    captured: list[str] = []
+    manager = TAXIIFeedManager(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    manager.register_snapshot_listener(captured.append)
+    manager._fire_snapshot_listeners("f1")  # type: ignore[attr-defined]
+    assert captured == ["f1"]
+
+
+@pytest.mark.asyncio
+async def test_listener_exception_does_not_break_others(monkeypatch) -> None:
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=(TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),),
+    )
+
+    class _Store:
+        async def save_state(self, key: str, data: bytes) -> None:
+            return None
+
+        async def load_state(self, key: str) -> bytes | None:
+            return None
+
+        async def delete_state(self, key: str) -> None:
+            return None
+
+    def boom(_fid: str) -> None:
+        raise RuntimeError("listener exploded")
+
+    captured: list[str] = []
+    manager = TAXIIFeedManager(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    manager.register_snapshot_listener(boom)
+    manager.register_snapshot_listener(captured.append)
+    manager._fire_snapshot_listeners("f1")  # type: ignore[attr-defined]
+    assert captured == ["f1"]

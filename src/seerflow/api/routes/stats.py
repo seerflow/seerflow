@@ -12,6 +12,7 @@ import logging
 import time
 from typing import Annotated, Any
 
+import msgspec
 from fastapi import APIRouter, Depends, Request
 
 from seerflow.api.deps import (
@@ -73,6 +74,7 @@ async def get_stats(
     active_sources = 0
     model_count = 0
     taxii_payload: dict[str, dict[str, Any]] | None = None
+    ioc_matcher_payload: dict[str, object] | None = None
 
     if metrics_provider is not None:
         try:
@@ -89,6 +91,8 @@ async def get_stats(
                     feed_id: dataclasses.asdict(feed_metrics)
                     for feed_id, feed_metrics in snapshot.taxii.feeds.items()
                 }
+            if snapshot.ioc_matcher is not None:
+                ioc_matcher_payload = msgspec.to_builtins(snapshot.ioc_matcher)
         except Exception:
             # Provider failure must not 500 the endpoint; degrade to zero fields.
             _log.warning("pipeline metrics provider failed", exc_info=True)
@@ -104,4 +108,5 @@ async def get_stats(
         active_sources=active_sources,
         model_count=model_count,
         taxii=taxii_payload,
+        ioc_matcher=ioc_matcher_payload,
     )

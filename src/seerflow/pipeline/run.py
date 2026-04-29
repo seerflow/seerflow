@@ -23,7 +23,7 @@ from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
 from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
-from seerflow.threat_intel import TAXIIFeedManager
+from seerflow.threat_intel import IoCMatcher, TAXIIFeedManager
 from seerflow.ueba.engine import UEBAEngine
 from seerflow.ueba.store import BaselineStore
 from seerflow.web import DEFAULT_DIST
@@ -284,6 +284,17 @@ async def _run_with_config(
         config=config.threat_intel,
         model_store=storage,
     )
+    # IoC matcher (S-068). Constructed before manager.start() so the snapshot
+    # listener is registered atomically with the consumer fan-out — any
+    # snapshot persisted during initial poll will trigger a matcher rebuild.
+    ioc_matcher: IoCMatcher | None = None
+    if config.threat_intel.matcher.enabled:
+        ioc_matcher = IoCMatcher(
+            config=config.threat_intel,
+            model_store=storage,
+        )
+        taxii_manager.register_snapshot_listener(ioc_matcher.on_snapshot_updated)
+        await ioc_matcher.start()
     taxii_failed = await taxii_manager.start()
     if taxii_failed:
         _log.warning(
@@ -351,6 +362,11 @@ async def _run_with_config(
             "  - Ensure ports are not already in use\n"
             "  - Verify receiver settings in seerflow.yaml"
         )
+        # Mirror the documented shutdown order (see end of run_pipeline):
+        # stop the IoC matcher before TAXII so its debounce loop is cancelled
+        # before consumers exit, and no late rebuild fires after teardown.
+        if ioc_matcher is not None:
+            await ioc_matcher.stop()
         await taxii_manager.stop()
         await storage.close()
         sys.exit(1)
@@ -644,6 +660,7 @@ async def _run_with_config(
         ensemble,
         time.monotonic(),
         taxii_registry=taxii_manager.metrics,
+        ioc_matcher=ioc_matcher,
     )
     # Run pipeline + uvicorn server as sibling tasks (S-217). The first
     # to complete (or fail) wakes the wait so we can drain both cleanly.
@@ -752,6 +769,12 @@ async def _run_with_config(
         server.should_exit = True
         with contextlib.suppress(asyncio.CancelledError, TimeoutError):
             await asyncio.wait_for(server_task, timeout=10)
+        # Stop the IoC matcher BEFORE the manager so its debounce loop is
+        # cancelled before TAXII consumers exit (no late listener fires after
+        # the rebuild loop has stopped). The manager's stop() handles the
+        # remainder of the threat-intel teardown sequence (S-068).
+        if ioc_matcher is not None:
+            await ioc_matcher.stop()
         # Stop TAXII feed manager BEFORE storage.close() so an in-flight
         # ``_persist`` (snapshot + cursor save_state pair) has up to 2 s
         # — see TAXIIFeedManager.stop() — to drain its current write

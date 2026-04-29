@@ -261,6 +261,27 @@ class TAXIIFeedConfig:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class IoCMatcherConfig:
+    """Bloom-filter IoC matcher (S-068) configuration block."""
+
+    enabled: bool = False
+    fpr: float = 0.001
+    min_capacity: int = 100_000
+    capacity_growth_factor: float = 1.25
+    confidence_floor: int = 0
+    rebuild_debounce_ms: int = 200
+    enabled_types: tuple[str, ...] = (
+        "ipv4",
+        "ipv6",
+        "domain",
+        "url",
+        "md5",
+        "sha1",
+        "sha256",
+    )
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class ThreatIntelConfig:
     """Top-level threat-intelligence feed configuration."""
 
@@ -271,6 +292,7 @@ class ThreatIntelConfig:
     max_indicators_per_feed: int = 1_000_000
     expired_grace_days: int = 30
     startup_jitter_s: int = 30
+    matcher: IoCMatcherConfig = field(default_factory=IoCMatcherConfig)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

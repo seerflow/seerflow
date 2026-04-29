@@ -1,0 +1,376 @@
+"""Bloom-filter IoC matcher (S-068).
+
+Builds + refreshes a bit-array Bloom filter (with a per-type confirmation
+dict) from the IndicatorSnapshot blobs persisted by S-067's TAXII consumers.
+Probes are O(1); confirmation eliminates Bloom false positives before any
+match is dispatched. ``check_event`` is the public hot path; it iterates
+event entities internally and calls ``check`` per candidate.
+
+S-069 subscribes to ``on_match`` and turns matches into Alerts; this module
+does NOT call AlertStore.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import ipaddress
+import logging
+import math
+import threading
+import time
+from dataclasses import dataclass
+from itertools import chain
+from typing import TYPE_CHECKING, Final, Literal
+
+import msgspec
+
+from seerflow.models.indicator import IndicatorSnapshot, IndicatorType
+from seerflow.models.ioc_match import IoCMatch
+from seerflow.threat_intel._bloom import BloomParams, _BloomFilter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from seerflow.config import ThreatIntelConfig
+    from seerflow.models.event import SeerflowEvent
+    from seerflow.models.indicator import Indicator
+    from seerflow.storage.protocols import ModelStore
+
+_log = logging.getLogger("seerflow")
+
+# Hard ceiling on the combined Bloom bit-array allocation. Above this the
+# matcher refuses to rebuild rather than risk OOM on misconfiguration.
+_MAX_BLOOM_BYTES: Final[int] = 100 * 1024 * 1024  # 100 MB hard ceiling
+
+
+class IoCMatcherMetrics(msgspec.Struct, frozen=True, gc=False):
+    """Immutable snapshot of matcher counters, surfaced via /api/v1/stats."""
+
+    indicators_loaded: dict[str, int] = msgspec.field(default_factory=dict)
+    bit_array_bytes: int = 0
+    expected_fpr: float = 0.0
+    last_rebuild_at_ns: int | None = None
+    rebuild_count: int = 0
+    rebuild_failures_total: int = 0
+    checks_total: int = 0
+    bloom_hits_total: int = 0
+    confirmed_matches_total: int = 0
+    false_positives_total: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _MatcherState:
+    """Bloom + confirmation dict — atomically swapped on rebuild."""
+
+    bloom: _BloomFilter
+    by_type: dict[IndicatorType, dict[str, Indicator]]
+    indicators_loaded: dict[IndicatorType, int]
+    bit_array_bytes: int
+
+
+class IoCMatcher:
+    """Probes events against the threat-intel indicator set."""
+
+    def __init__(
+        self,
+        *,
+        config: ThreatIntelConfig,
+        model_store: ModelStore,
+        on_match: Callable[[IoCMatch], None] | None = None,
+        clock_ns: Callable[[], int] = time.time_ns,
+    ) -> None:
+        self._cfg = config
+        self._matcher_cfg = config.matcher
+        self._enabled_types_set: frozenset[str] = frozenset(config.matcher.enabled_types)
+        self._store = model_store
+        self._on_match = on_match
+        self._clock_ns = clock_ns
+
+        self._state: _MatcherState | None = None
+        self._lock = threading.Lock()  # guards counters + rebuild exclusion
+        self._rebuild_count = 0
+        self._rebuild_failures_total = 0
+        self._last_rebuild_at_ns: int | None = None
+        self._checks_total = 0
+        self._bloom_hits_total = 0
+        self._confirmed_matches_total = 0
+        self._false_positives_total = 0
+
+        # Bind asyncio.Event lazily in start() to avoid loop-binding mismatch
+        # when the matcher is constructed outside the running event loop.
+        # The Event itself is the single source of truth for the "dirty"
+        # signal — its set/cleared state replaces a separate boolean flag.
+        self._dirty_event: asyncio.Event | None = None
+        self._stopping = False
+        self._task: asyncio.Task[None] | None = None
+
+    def metrics_snapshot(self) -> IoCMatcherMetrics:
+        with self._lock:
+            state = self._state
+            indicators_loaded: dict[str, int] = (
+                {str(k): v for k, v in state.indicators_loaded.items()} if state else {}
+            )
+            return IoCMatcherMetrics(
+                indicators_loaded=indicators_loaded,
+                bit_array_bytes=state.bit_array_bytes if state else 0,
+                expected_fpr=self._matcher_cfg.fpr,
+                last_rebuild_at_ns=self._last_rebuild_at_ns,
+                rebuild_count=self._rebuild_count,
+                rebuild_failures_total=self._rebuild_failures_total,
+                checks_total=self._checks_total,
+                bloom_hits_total=self._bloom_hits_total,
+                confirmed_matches_total=self._confirmed_matches_total,
+                false_positives_total=self._false_positives_total,
+            )
+
+    async def refresh(self) -> None:
+        try:
+            new_state = await self._build_state()
+        except Exception:
+            with self._lock:
+                self._rebuild_failures_total += 1
+            _log.exception("ioc_matcher: rebuild failed; keeping previous state")
+            return
+        # CPython attribute assignment is atomic for a single object reference.
+        self._state = new_state
+        with self._lock:
+            self._rebuild_count += 1
+            self._last_rebuild_at_ns = self._clock_ns()
+
+    def check(self, value: str, type_: IndicatorType) -> Indicator | None:
+        if type_ not in self._enabled_types_set:
+            return None
+        # Single-attribute reads are atomic in CPython; the immutable
+        # _MatcherState is published via attribute assignment so callers
+        # never observe a partial swap. Hold the lock once for all counter
+        # bumps so check() does at most one acquire/release per probe.
+        state = self._state
+        with self._lock:
+            self._checks_total += 1
+            if state is None:
+                return None
+            if value not in state.bloom:
+                return None
+            self._bloom_hits_total += 1
+            ind = state.by_type.get(type_, {}).get(value)
+            if ind is None:
+                self._false_positives_total += 1
+                return None
+            self._confirmed_matches_total += 1
+            return ind
+
+    def _build_match(
+        self,
+        value: str,
+        ind_type: IndicatorType,
+        indicator: Indicator,
+        *,
+        event_id: str,
+    ) -> IoCMatch:
+        kind: Literal["ip", "domain", "url", "hash"]
+        if ind_type in ("ipv4", "ipv6"):
+            kind = "ip"
+        elif ind_type in ("md5", "sha1", "sha256"):
+            kind = "hash"
+        elif ind_type == "url":
+            kind = "url"
+        else:
+            kind = "domain"
+        return IoCMatch(
+            value=value,
+            type=ind_type,
+            indicator=indicator,
+            event_id=event_id,
+            entity_kind=kind,
+            matched_at_ns=self._clock_ns(),
+        )
+
+    def check_event(self, event: SeerflowEvent) -> tuple[IoCMatch, ...]:
+        ipv4: list[str] = []
+        ipv6: list[str] = []
+        for raw in event.related_ips:
+            with contextlib.suppress(ValueError):
+                addr = ipaddress.ip_address(raw)
+                # Canonicalize to ipaddress's str() form so probe and indicator
+                # keys agree regardless of upstream notation (e.g. ``::1`` vs
+                # ``0:0:0:0:0:0:0:1``).
+                canonical = str(addr)
+                if addr.version == 4:
+                    ipv4.append(canonical)
+                else:
+                    ipv6.append(canonical)
+        md5_hashes: list[str] = []
+        sha1_hashes: list[str] = []
+        sha256_hashes: list[str] = []
+        hashes_by_type: dict[IndicatorType, list[str]] = {
+            "md5": md5_hashes,
+            "sha1": sha1_hashes,
+            "sha256": sha256_hashes,
+        }
+        for raw in event.related_hashes:
+            # Lowercase the entire entry so both algo prefix and hex digest
+            # compare case-insensitively against the indicator dict.
+            raw_lower = raw.lower()
+            algo, _sep, hex_digest = raw_lower.partition(":")
+            if not hex_digest:
+                continue
+            if algo == "md5":
+                md5_hashes.append(hex_digest)
+            elif algo == "sha1":
+                sha1_hashes.append(hex_digest)
+            elif algo == "sha256":
+                sha256_hashes.append(hex_digest)
+        # Domains are case-insensitive per RFC 4343; lowercase before probe.
+        domains = [d.lower() for d in event.related_domains]
+        url = event.attributes.get("url")
+        urls = [str(url)] if isinstance(url, str) and url else []
+
+        candidates: dict[IndicatorType, list[str]] = {
+            "ipv4": ipv4,
+            "ipv6": ipv6,
+            "domain": domains,
+            "url": urls,
+            **hashes_by_type,
+        }
+        matches: list[IoCMatch] = []
+        event_id_str = str(event.event_id)
+        for ind_type, values in candidates.items():
+            for v in values:
+                ind = self.check(v, ind_type)
+                if ind is None:
+                    continue
+                m = self._build_match(v, ind_type, ind, event_id=event_id_str)
+                matches.append(m)
+                if self._on_match is not None:
+                    try:
+                        self._on_match(m)
+                    except Exception:
+                        _log.exception("ioc_matcher: on_match callback raised; continuing")
+        return tuple(matches)
+
+    def on_snapshot_updated(self, _feed_id: str) -> None:
+        """Sync listener — signals rebuild loop via the dirty event."""
+        # asyncio.Event.set() is sync-safe but only meaningful from the event
+        # loop thread. The listener fires from the consumer's loop, so we are
+        # already there. The event is created in start(); if a listener fires
+        # before start() (or after stop()), drop the signal — the next
+        # start() will refresh() unconditionally.
+        if self._dirty_event is None:
+            return
+        try:
+            self._dirty_event.set()
+        except RuntimeError:  # pragma: no cover — loop closed
+            return
+
+    async def start(self) -> None:
+        if self._stopping:
+            raise RuntimeError("ioc_matcher: matcher mid-shutdown")
+        if self._task is not None:
+            return  # already running
+        # Bind to the currently running event loop so the listener and the
+        # run-loop coroutine share the same Event instance.
+        self._dirty_event = asyncio.Event()
+        await self.refresh()
+        self._task = asyncio.create_task(self._run_loop(), name="ioc_matcher.loop")
+
+    async def stop(self) -> None:
+        self._stopping = True
+        if self._task is None:
+            # No task to cancel — clear the shutdown flag so a subsequent
+            # start() is not bricked with RuntimeError("mid-shutdown").
+            self._stopping = False
+            return
+        self._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+            await asyncio.wait_for(self._task, timeout=5.0)
+        self._task = None
+        self._stopping = False
+
+    async def _run_loop(self) -> None:
+        debounce_s = max(0.0, self._matcher_cfg.rebuild_debounce_ms / 1000.0)
+        if self._dirty_event is None:
+            raise RuntimeError("ioc_matcher: _run_loop started without dirty_event bound")
+        dirty_event = self._dirty_event
+        try:
+            while True:
+                await dirty_event.wait()
+                if debounce_s > 0:
+                    await asyncio.sleep(debounce_s)
+                # Clear before rebuild so notifications arriving DURING the
+                # rebuild re-set the event and trigger one more pass.
+                dirty_event.clear()
+                await self.refresh()
+                if dirty_event.is_set():
+                    # Notification fired during rebuild — loop immediately.
+                    continue
+        except asyncio.CancelledError:
+            return
+
+    async def _build_state(self) -> _MatcherState:
+        enabled_types = self._enabled_types_set
+        floor = self._matcher_cfg.confidence_floor
+        by_type: dict[IndicatorType, dict[str, Indicator]] = {}
+        for feed in self._cfg.feeds:
+            if not feed.enabled:
+                continue
+            raw = await self._store.load_state(f"taxii:snapshot:{feed.id}")
+            if not raw:
+                continue
+            snap = msgspec.msgpack.decode(raw, type=IndicatorSnapshot)
+            for ind in snap.indicators:
+                if ind.type not in enabled_types:
+                    continue
+                if ind.confidence < floor:
+                    continue
+                # Normalize indicator side symmetrically with check_event(): IPs
+                # canonicalized via ipaddress; domains/hashes lowercased; URLs
+                # left untouched (RFC 3986 path is case-sensitive).
+                key = ind.value
+                if ind.type in ("ipv4", "ipv6"):
+                    try:
+                        key = str(ipaddress.ip_address(ind.value))
+                    except ValueError:
+                        _log.warning(
+                            "ioc_matcher: feed=%s indicator value not a valid IP: %r; skipping",
+                            ind.source_feed,
+                            ind.value,
+                        )
+                        continue
+                elif ind.type in ("domain", "md5", "sha1", "sha256"):
+                    key = ind.value.lower()
+                bucket = by_type.setdefault(ind.type, {})
+                bucket[key] = ind
+
+        indicators_loaded = {t: len(v) for t, v in by_type.items()}
+        actual = sum(indicators_loaded.values())
+        capacity = max(
+            self._matcher_cfg.min_capacity,
+            math.ceil(actual * self._matcher_cfg.capacity_growth_factor),
+        )
+        params = BloomParams(expected_items=capacity, fpr=self._matcher_cfg.fpr)
+        if params.byte_size > _MAX_BLOOM_BYTES:
+            raise MemoryError(
+                f"ioc_matcher: refusing to allocate "
+                f"{params.byte_size / (1024 * 1024):.1f} MB Bloom filter "
+                f"(hard cap = {_MAX_BLOOM_BYTES // (1024 * 1024)} MB); "
+                f"reduce capacity={capacity} or raise fpr={self._matcher_cfg.fpr}"
+            )
+        if params.byte_size > 10 * 1024 * 1024:
+            _log.warning(
+                "ioc_matcher: bit array %.2f MB exceeds 10 MB target at "
+                "capacity=%d fpr=%.4f; consider raising fpr or lowering capacity",
+                params.byte_size / (1024 * 1024),
+                capacity,
+                self._matcher_cfg.fpr,
+            )
+        bloom = _BloomFilter.from_values(
+            chain.from_iterable(by_type.values()),
+            params,
+        )
+        return _MatcherState(
+            bloom=bloom,
+            by_type=by_type,
+            indicators_loaded=indicators_loaded,
+            bit_array_bytes=params.byte_size,
+        )

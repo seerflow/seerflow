@@ -3,6 +3,7 @@
 from seerflow.threat_intel.client import TAXIIClient
 from seerflow.threat_intel.consumer import TAXIIFeedConsumer
 from seerflow.threat_intel.manager import TAXIIFeedManager
+from seerflow.threat_intel.matcher import IoCMatcher, IoCMatcherMetrics
 from seerflow.threat_intel.metrics import (
     TAXIIFeedMetrics,
     TAXIIMetricsAggregate,
@@ -11,6 +12,8 @@ from seerflow.threat_intel.metrics import (
 from seerflow.threat_intel.stix_parser import STIXIndicatorParser
 
 __all__ = [
+    "IoCMatcher",
+    "IoCMatcherMetrics",
     "STIXIndicatorParser",
     "TAXIIClient",
     "TAXIIFeedConsumer",

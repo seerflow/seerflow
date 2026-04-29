@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from seerflow.threat_intel.matcher import IoCMatcher, IoCMatcherMetrics
     from seerflow.threat_intel.metrics import (
         TAXIIMetricsAggregate,
         TAXIIMetricsRegistry,
@@ -33,6 +34,7 @@ class PipelineMetrics:
     active_sources: int
     model_count: int
     taxii: TAXIIMetricsAggregate | None = None
+    ioc_matcher: IoCMatcherMetrics | None = None
 
 
 MetricsProvider = Callable[[], PipelineMetrics]
@@ -46,6 +48,7 @@ def build_pipeline_metrics_provider(
     ensemble: Any,
     started_monotonic: float,
     taxii_registry: TAXIIMetricsRegistry | None = None,
+    ioc_matcher: IoCMatcher | None = None,
 ) -> MetricsProvider:
     """Return a zero-arg callable that yields a fresh PipelineMetrics.
 
@@ -75,12 +78,14 @@ def build_pipeline_metrics_provider(
         taxii: TAXIIMetricsAggregate | None = None
         if taxii_registry is not None:
             taxii = taxii_registry.aggregate()
+        ioc_metrics = ioc_matcher.metrics_snapshot() if ioc_matcher is not None else None
         return PipelineMetrics(
             started_monotonic=started_monotonic,
             total_events_processed=event_count,
             active_sources=active,
             model_count=active * _DETECTORS_PER_SOURCE,
             taxii=taxii,
+            ioc_matcher=ioc_metrics,
         )
 
     return _provider

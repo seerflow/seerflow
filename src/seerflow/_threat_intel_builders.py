@@ -18,6 +18,7 @@ from typing import Any
 
 from seerflow._config_validation import ConfigError
 from seerflow.config import (
+    IoCMatcherConfig,
     SeerflowConfig,
     TAXIIAuthConfig,
     TAXIIFeedConfig,
@@ -120,6 +121,56 @@ def _require_taxii_auth(data: dict[str, Any]) -> TAXIIAuthConfig | None:
     return _build_taxii_auth_config(auth_raw)
 
 
+def _build_ioc_matcher_config(data: dict[str, Any]) -> IoCMatcherConfig:
+    """Build the IoC matcher block. Empty / missing returns defaults."""
+    if not data:
+        return IoCMatcherConfig()
+    if not isinstance(data, dict):
+        raise ConfigError(f"threat_intel.matcher must be a mapping, got {type(data).__name__}")
+
+    enabled = data.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ConfigError("threat_intel.matcher.enabled must be a bool")
+
+    fpr = data.get("fpr", 0.001)
+    if isinstance(fpr, bool) or not isinstance(fpr, int | float):
+        raise ConfigError("threat_intel.matcher.fpr must be a number")
+
+    min_capacity = data.get("min_capacity", 100_000)
+    if isinstance(min_capacity, bool) or not isinstance(min_capacity, int):
+        raise ConfigError("threat_intel.matcher.min_capacity must be an int")
+
+    growth = data.get("capacity_growth_factor", 1.25)
+    if isinstance(growth, bool) or not isinstance(growth, int | float):
+        raise ConfigError("threat_intel.matcher.capacity_growth_factor must be a number")
+
+    confidence_floor = data.get("confidence_floor", 0)
+    if isinstance(confidence_floor, bool) or not isinstance(confidence_floor, int):
+        raise ConfigError("threat_intel.matcher.confidence_floor must be an int")
+
+    debounce = data.get("rebuild_debounce_ms", 200)
+    if isinstance(debounce, bool) or not isinstance(debounce, int):
+        raise ConfigError("threat_intel.matcher.rebuild_debounce_ms must be an int")
+
+    enabled_types_raw = data.get(
+        "enabled_types",
+        ("ipv4", "ipv6", "domain", "url", "md5", "sha1", "sha256"),
+    )
+    if not isinstance(enabled_types_raw, list | tuple):
+        raise ConfigError("threat_intel.matcher.enabled_types must be a list of strings")
+    enabled_types = tuple(str(t) for t in enabled_types_raw)
+
+    return IoCMatcherConfig(
+        enabled=enabled,
+        fpr=float(fpr),
+        min_capacity=min_capacity,
+        capacity_growth_factor=float(growth),
+        confidence_floor=confidence_floor,
+        rebuild_debounce_ms=debounce,
+        enabled_types=enabled_types,
+    )
+
+
 def _build_threat_intel_config(data: dict[str, Any]) -> ThreatIntelConfig:
     """Build the threat-intelligence section. Missing key returns defaults."""
     if not data:
@@ -158,6 +209,9 @@ def _build_threat_intel_config(data: dict[str, Any]) -> ThreatIntelConfig:
     if isinstance(startup_jitter, bool) or not isinstance(startup_jitter, int):
         raise ConfigError("threat_intel.startup_jitter_s must be an int")
 
+    matcher_raw = data.get("matcher", {})
+    matcher = _build_ioc_matcher_config(matcher_raw)
+
     return ThreatIntelConfig(
         enabled=enabled,
         feeds=feeds,
@@ -166,6 +220,7 @@ def _build_threat_intel_config(data: dict[str, Any]) -> ThreatIntelConfig:
         max_indicators_per_feed=max_indicators,
         expired_grace_days=expired_grace,
         startup_jitter_s=startup_jitter,
+        matcher=matcher,
     )
 
 

@@ -23,6 +23,7 @@ _log = logging.getLogger("seerflow")
 if TYPE_CHECKING:
     from seerflow.config import (
         DetectionConfig,
+        IoCMatcherConfig,
         SeerflowConfig,
         TAXIIFeedConfig,
         ThreatIntelConfig,
@@ -468,6 +469,48 @@ def _resolve_feed_with_private_ip_guard(feed_id: str, hostname: str) -> str:
     return resolved
 
 
+_KNOWN_INDICATOR_TYPES = frozenset({"ipv4", "ipv6", "domain", "url", "md5", "sha1", "sha256"})
+
+
+def _validate_ioc_matcher_config(matcher: IoCMatcherConfig) -> None:
+    if not (0.0 < matcher.fpr < 1.0):
+        raise ConfigError(f"threat_intel.matcher.fpr must be in (0, 1), got {matcher.fpr!r}")
+    if matcher.min_capacity < 1:
+        raise ConfigError(
+            f"threat_intel.matcher.min_capacity must be >= 1, got {matcher.min_capacity!r}"
+        )
+    if matcher.capacity_growth_factor < 1.0:
+        raise ConfigError(
+            f"threat_intel.matcher.capacity_growth_factor must be >= 1.0, "
+            f"got {matcher.capacity_growth_factor!r}"
+        )
+    if not (0 <= matcher.confidence_floor <= 100):
+        raise ConfigError(
+            f"threat_intel.matcher.confidence_floor must be in [0, 100], "
+            f"got {matcher.confidence_floor!r}"
+        )
+    if matcher.rebuild_debounce_ms < 0:
+        raise ConfigError(
+            f"threat_intel.matcher.rebuild_debounce_ms must be >= 0, "
+            f"got {matcher.rebuild_debounce_ms!r}"
+        )
+    if not matcher.enabled_types:
+        raise ConfigError(
+            "threat_intel.matcher.enabled_types must not be empty "
+            "(matcher would silently drop every probe)"
+        )
+    unknown = [t for t in matcher.enabled_types if t not in _KNOWN_INDICATOR_TYPES]
+    if unknown:
+        raise ConfigError(
+            f"threat_intel.matcher.enabled_types contains unknown values: {unknown!r}"
+        )
+
+
 def validate_seerflow_config(config: SeerflowConfig) -> None:
     """Run cross-section validators on a fully built ``SeerflowConfig``."""
     _validate_threat_intel(config.threat_intel)
+    # Skip matcher param validation when the matcher is disabled — a
+    # disabled matcher should ignore its own params, so an invalid fpr/etc.
+    # must not block boot when the operator has the feature flag off.
+    if config.threat_intel.matcher.enabled:
+        _validate_ioc_matcher_config(config.threat_intel.matcher)
