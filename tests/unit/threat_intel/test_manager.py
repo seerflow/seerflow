@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,12 +11,15 @@ import pytest
 from seerflow.config import TAXIIFeedConfig, ThreatIntelConfig
 from seerflow.threat_intel.manager import TAXIIFeedManager
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 @pytest.fixture(autouse=True)
 def _bypass_dns_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     """S-227: ``TAXIIFeedManager.start()`` resolves each feed hostname at
     socket level to populate the static aiohttp resolver. Tests use stub
-    hostnames like ``a`` / ``x`` that don't resolve; substitute a sentinel
+    hostnames (``a`` / ``x``) that don't resolve; substitute a sentinel
     public IP so the resolver-map builder succeeds without hitting real
     DNS.
     """

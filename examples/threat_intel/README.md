@@ -99,7 +99,10 @@ This means:
   a feed bypasses both the startup SSRF guard *and* the static
   resolver — the feed runs through aiohttp's default resolver. Use
   this only for trusted internal feeds where the operator has audited
-  the network path.
+  the network path. Mixed configurations are supported: when public
+  feeds and opt-out feeds coexist in the same `threat_intel:` block,
+  public feeds remain pinned while opt-out feeds resolve normally
+  through the fallback resolver.
 
 ### IPv6
 

@@ -8,6 +8,12 @@ IMDS address at runtime. This module captures each feed hostname's IP
 once at startup (reusing the ``_is_private_ip`` SSRF guard from
 ``_config_validation``) and replaces ``aiohttp``'s default resolver so
 runtime requests cannot drift from the validated answer.
+
+Mixed configurations (public feeds + ``allow_private_addresses`` opt-out
+feeds in the same ``ThreatIntelConfig``) keep working: the resolver
+delegates unknown hosts to a fallback resolver (``ThreadedResolver`` by
+default). Public feeds are pinned; opt-out feeds resolve normally
+through aiohttp's default path.
 """
 
 from __future__ import annotations
@@ -16,8 +22,8 @@ import socket
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from aiohttp.abc import AbstractResolver
-from aiohttp.resolver import ResolveResult
+from aiohttp.abc import AbstractResolver, ResolveResult
+from aiohttp.resolver import ThreadedResolver
 
 from seerflow._config_validation import _resolve_feed_with_private_ip_guard
 
@@ -26,10 +32,24 @@ if TYPE_CHECKING:
 
 
 class StaticResolver(AbstractResolver):
-    """Returns the pinned IPv4 for known hosts; raises ``OSError`` for unknown hosts."""
+    """Pin known hosts to startup IPs; delegate unknown hosts to a fallback.
 
-    def __init__(self, mapping: dict[str, str]) -> None:
-        self._map = mapping
+    Hosts in ``mapping`` resolve to the captured IPv4 with no further DNS
+    lookup. Hosts absent from the mapping fall through to the fallback
+    resolver (default: ``aiohttp.resolver.ThreadedResolver``) so feeds
+    that opted out of the static-pinning guard via
+    ``allow_private_addresses=True`` continue to function in mixed
+    configurations.
+    """
+
+    def __init__(
+        self,
+        mapping: dict[str, str],
+        *,
+        fallback: AbstractResolver | None = None,
+    ) -> None:
+        self._map = dict(mapping)
+        self._fallback = fallback if fallback is not None else ThreadedResolver()
 
     async def resolve(
         self,
@@ -39,7 +59,11 @@ class StaticResolver(AbstractResolver):
     ) -> list[ResolveResult]:
         ip = self._map.get(host)
         if ip is None:
-            raise OSError(f"static resolver: unknown host {host!r}")
+            # Opt-out feed (allow_private_addresses=True) or any host outside
+            # the pinned set — defer to the fallback resolver. Operators who
+            # mix public and trusted-internal feeds in the same config still
+            # get the static pin for the public ones.
+            return await self._fallback.resolve(host, port, family)
         return [
             ResolveResult(
                 hostname=host,
@@ -52,14 +76,14 @@ class StaticResolver(AbstractResolver):
         ]
 
     async def close(self) -> None:
-        return None
+        await self._fallback.close()
 
 
 def build_static_resolver_map(config: ThreatIntelConfig) -> dict[str, str]:
     """Resolve each enabled feed's hostname once and return ``{host: ip}``.
 
     Skips disabled feeds and feeds with ``allow_private_addresses=True`` —
-    those run through aiohttp's default resolver. Re-uses
+    those run through the fallback resolver at request time. Re-uses
     ``_resolve_feed_with_private_ip_guard`` so the SSRF rejection logic
     stays in one place.
     """

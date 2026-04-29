@@ -9,6 +9,7 @@ a ``MagicMock(allow=False)`` and never end-to-end).
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,6 +25,9 @@ from seerflow.threat_intel.manager import TAXIIFeedManager
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from seerflow.storage.protocols import ModelStore
+    from seerflow.threat_intel.consumer import TAXIIFeedConsumer
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +55,9 @@ def _stix_indicator() -> dict[str, str]:
     }
 
 
-async def _build_manager_and_consumer(tmp_path: Path):  # type: ignore[no-untyped-def]
+async def _build_manager_and_consumer(
+    tmp_path: Path,
+) -> tuple[TAXIIFeedManager, TAXIIFeedConsumer, ModelStore]:
     cfg = ThreatIntelConfig(
         enabled=True,
         feeds=(
@@ -69,12 +75,16 @@ async def _build_manager_and_consumer(tmp_path: Path):  # type: ignore[no-untype
     )
     mgr = TAXIIFeedManager(config=cfg, model_store=storage)
     # Build the session via start() so the static-resolver wiring runs,
-    # then cancel the background tasks so we can drive poll_once() on
-    # our own schedule.
+    # then cancel and *await* the background tasks so we can drive
+    # poll_once() on our own schedule without leaving "Task was destroyed
+    # but it is pending!" warnings on the asyncio GC path.
     await mgr.start()
-    for task in mgr._tasks.values():
-        task.cancel()
+    pending = list(mgr._tasks.values())
     mgr._tasks.clear()
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
     consumer = mgr._build_consumer(cfg.feeds[0])
     return mgr, consumer, storage
 

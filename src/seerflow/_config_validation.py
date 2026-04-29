@@ -13,6 +13,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import math
+import socket
 from typing import TYPE_CHECKING
 
 from limits import parse as _parse_limit_string
@@ -422,14 +423,7 @@ def _validate_threat_intel_feeds_dns(config: ThreatIntelConfig) -> None:
         parsed = urlparse(feed.url)
         if not parsed.hostname:
             continue
-        if _check_literal_ip_or_resolve(feed.id, parsed.hostname):
-            continue
-
-
-def _check_literal_ip_or_resolve(feed_id: str, hostname: str) -> bool:
-    """Returns True after running the appropriate path; raises on private IP."""
-    _resolve_feed_with_private_ip_guard(feed_id, hostname)
-    return True
+        _resolve_feed_with_private_ip_guard(feed.id, parsed.hostname)
 
 
 def _resolve_feed_with_private_ip_guard(feed_id: str, hostname: str) -> str:
@@ -440,8 +434,6 @@ def _resolve_feed_with_private_ip_guard(feed_id: str, hostname: str) -> str:
     failure. Used at startup by both the feed validator and the TAXII feed
     manager's static-resolver builder.
     """
-    import socket
-
     try:
         ipaddress.ip_address(hostname)
     except ValueError:
