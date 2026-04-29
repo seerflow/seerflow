@@ -362,6 +362,11 @@ async def _run_with_config(
             "  - Ensure ports are not already in use\n"
             "  - Verify receiver settings in seerflow.yaml"
         )
+        # Mirror the documented shutdown order (see end of run_pipeline):
+        # stop the IoC matcher before TAXII so its debounce loop is cancelled
+        # before consumers exit, and no late rebuild fires after teardown.
+        if ioc_matcher is not None:
+            await ioc_matcher.stop()
         await taxii_manager.stop()
         await storage.close()
         sys.exit(1)
