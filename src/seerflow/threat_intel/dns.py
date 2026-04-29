@@ -64,12 +64,15 @@ class StaticResolver(AbstractResolver):
             # mix public and trusted-internal feeds in the same config still
             # get the static pin for the public ones.
             return await self._fallback.resolve(host, port, family)
+        # Pinned IPv4 — force AF_INET in the result so the connector cannot
+        # interpret the literal as anything else, regardless of what the
+        # caller passed (TCPConnector defaults to AF_UNSPEC).
         return [
             ResolveResult(
                 hostname=host,
                 host=ip,
                 port=port,
-                family=family,
+                family=socket.AF_INET,
                 proto=0,
                 flags=socket.AI_NUMERICHOST | socket.AI_NUMERICSERV,
             )

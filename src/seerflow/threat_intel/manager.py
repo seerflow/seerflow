@@ -64,6 +64,12 @@ class TAXIIFeedManager:
         # at startup so per-request DNS cannot drift to a private/IMDS
         # address at runtime. Feeds with allow_private_addresses=True are
         # excluded — they fall through to aiohttp's default resolver.
+        # Deferred import: ``seerflow.threat_intel.dns`` imports
+        # ``_resolve_feed_with_private_ip_guard`` from
+        # ``seerflow._config_validation``, which itself imports from
+        # ``seerflow.config``. Importing ``dns`` at this module's top
+        # would re-enter the same ``seerflow.config`` ↔ builder chain
+        # that ``_threat_intel_builders`` already side-steps.
         from seerflow.threat_intel.dns import StaticResolver, build_static_resolver_map
 
         resolver_map = build_static_resolver_map(self._cfg)
