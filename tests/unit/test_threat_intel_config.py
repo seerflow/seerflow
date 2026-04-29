@@ -140,3 +140,49 @@ def test_max_indicators_per_feed_default_does_not_warn(
     with caplog.at_level(logging.WARNING, logger="seerflow"):
         _validate_threat_intel_defaults(cfg)
     assert not any("max_indicators_per_feed" in rec.message for rec in caplog.records)
+
+
+# --- S-068 Task 5: IoCMatcherConfig builder --------------------------------
+
+
+def test_threat_intel_matcher_block_defaults() -> None:
+    from seerflow._threat_intel_builders import _build_threat_intel_config
+
+    cfg = _build_threat_intel_config({})
+    assert cfg.matcher.enabled is False
+    assert cfg.matcher.fpr == 0.001
+    assert cfg.matcher.min_capacity == 100_000
+    assert cfg.matcher.capacity_growth_factor == 1.25
+    assert cfg.matcher.confidence_floor == 0
+    assert cfg.matcher.rebuild_debounce_ms == 200
+    assert cfg.matcher.enabled_types == (
+        "ipv4",
+        "ipv6",
+        "domain",
+        "url",
+        "md5",
+        "sha1",
+        "sha256",
+    )
+
+
+def test_threat_intel_matcher_block_overrides() -> None:
+    from seerflow._threat_intel_builders import _build_threat_intel_config
+
+    cfg = _build_threat_intel_config(
+        {
+            "matcher": {
+                "enabled": True,
+                "fpr": 0.01,
+                "min_capacity": 1_000,
+                "capacity_growth_factor": 2.0,
+                "confidence_floor": 50,
+                "rebuild_debounce_ms": 0,
+                "enabled_types": ["ipv4", "domain"],
+            }
+        }
+    )
+    assert cfg.matcher.enabled is True
+    assert cfg.matcher.fpr == 0.01
+    assert cfg.matcher.confidence_floor == 50
+    assert cfg.matcher.enabled_types == ("ipv4", "domain")
