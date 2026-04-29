@@ -41,11 +41,6 @@ class BloomParams:
         return math.ceil(self.bit_count / 8)
 
 
-def optimal_params(*, expected_items: int, fpr: float) -> BloomParams:
-    """Pure-function helper — returns BloomParams; same as direct construction."""
-    return BloomParams(expected_items=expected_items, fpr=fpr)
-
-
 class _BloomFilter:
     """Fixed-size bit-array Bloom filter, immutable after construction."""
 

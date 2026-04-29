@@ -389,8 +389,9 @@ async def test_check_event_silently_skips_malformed() -> None:
     cfg = ThreatIntelConfig(enabled=True, feeds=feeds, matcher=IoCMatcherConfig(enabled=True))
     matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
     await matcher.refresh()
-    # Garbage IP, garbage hash — must not raise.
-    evt = _evt(ips=("not-an-ip",), hashes=("noprefix",))
+    # Garbage IP, hash without prefix, and an unrecognised hash algo prefix —
+    # all silently skipped, must not raise.
+    evt = _evt(ips=("not-an-ip",), hashes=("noprefix", "blake2b:abcdef"))
     assert matcher.check_event(evt) == ()
 
 
@@ -552,7 +553,11 @@ async def test_check_event_skips_unknown_candidates() -> None:
     evt = _evt(
         ips=("1.2.3.4", "9.9.9.9"),
         domains=("unknown.example",),
-        hashes=("md5:11111111111111111111111111111111",),
+        hashes=(
+            "md5:11111111111111111111111111111111",
+            "sha1:2222222222222222222222222222222222222222",
+            "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        ),
         url="https://unknown.example/y",
     )
     matches = matcher.check_event(evt)
@@ -696,7 +701,6 @@ async def test_run_loop_reruns_when_dirty_set_during_rebuild() -> None:
         # Re-dirty exactly once mid-rebuild to force the `continue` branch.
         if notified["count"] == 0:
             notified["count"] = 1
-            matcher._dirty = True
             assert matcher._dirty_event is not None
             matcher._dirty_event.set()
 
@@ -708,8 +712,9 @@ async def test_run_loop_reruns_when_dirty_set_during_rebuild() -> None:
     matcher._task = asyncio.create_task(matcher._run_loop(), name="ioc_matcher.loop")
     try:
         # First listener call wakes the loop. During that refresh the hook
-        # re-sets dirty, hitting the `if self._dirty: continue` branch and
-        # forcing a second rebuild without another listener call.
+        # re-sets the dirty event, hitting the `if dirty_event.is_set():
+        # continue` branch and forcing a second rebuild without another
+        # listener call.
         matcher.on_snapshot_updated("f1")
         await asyncio.sleep(0.1)
         after = matcher.metrics_snapshot().rebuild_count
@@ -900,5 +905,28 @@ async def test_on_snapshot_updated_before_start_is_noop() -> None:
     matcher = IoCMatcher(config=cfg, model_store=_Store())  # type: ignore[arg-type]
     # _dirty_event is None pre-start — must not raise.
     matcher.on_snapshot_updated("f1")
-    assert matcher._dirty is True
+    # Pre-start signals are dropped: the dirty event remains unbound and a
+    # subsequent start() will refresh() unconditionally.
     assert matcher._dirty_event is None
+
+
+@pytest.mark.asyncio
+async def test_run_loop_raises_when_dirty_event_unbound() -> None:
+    """Defensive: ``_run_loop`` must surface a clear error if it is launched
+    without ``start()`` having bound the dirty event."""
+    cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
+
+    class _Store:
+        async def save_state(self, *_a, **_k) -> None:
+            return None
+
+        async def load_state(self, *_a, **_k) -> bytes | None:
+            return None
+
+        async def delete_state(self, *_a, **_k) -> None:
+            return None
+
+    matcher = IoCMatcher(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    assert matcher._dirty_event is None
+    with pytest.raises(RuntimeError, match="dirty_event"):
+        await matcher._run_loop()

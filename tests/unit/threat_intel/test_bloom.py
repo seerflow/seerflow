@@ -1,4 +1,4 @@
-"""Unit tests for _bloom.BloomParams + optimal_params."""
+"""Unit tests for _bloom.BloomParams + _BloomFilter."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from seerflow.threat_intel._bloom import BloomParams, _BloomFilter, optimal_params
+from seerflow.threat_intel._bloom import BloomParams, _BloomFilter
 
 
 def test_bloom_params_validates_fpr() -> None:
@@ -22,8 +22,8 @@ def test_bloom_params_validates_expected_items() -> None:
         BloomParams(expected_items=0, fpr=0.01)
 
 
-def test_optimal_params_for_spec_target() -> None:
-    p = optimal_params(expected_items=1_000_000, fpr=0.001)
+def test_bloom_params_for_spec_target() -> None:
+    p = BloomParams(expected_items=1_000_000, fpr=0.001)
     # m = -N * ln(p) / (ln 2)^2 ≈ 14_377_587 bits
     assert 14_300_000 <= p.bit_count <= 14_500_000
     # Bit array fits inside the 10 MB ceiling at the spec target.
@@ -32,8 +32,8 @@ def test_optimal_params_for_spec_target() -> None:
     assert p.hash_count == 10
 
 
-def test_optimal_params_minimum_hash_count() -> None:
-    p = optimal_params(expected_items=1, fpr=0.5)
+def test_bloom_params_minimum_hash_count() -> None:
+    p = BloomParams(expected_items=1, fpr=0.5)
     assert p.hash_count >= 1
 
 

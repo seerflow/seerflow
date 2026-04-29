@@ -19,8 +19,9 @@ import logging
 import math
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from itertools import chain
+from typing import TYPE_CHECKING, Literal
 
 import msgspec
 
@@ -39,11 +40,10 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 
-@dataclass(frozen=True, slots=True)
-class IoCMatcherMetrics:
+class IoCMatcherMetrics(msgspec.Struct, frozen=True, gc=False):
     """Immutable snapshot of matcher counters, surfaced via /api/v1/stats."""
 
-    indicators_loaded: dict[str, int] = field(default_factory=dict)
+    indicators_loaded: dict[str, int] = msgspec.field(default_factory=dict)
     bit_array_bytes: int = 0
     expected_fpr: float = 0.0
     last_rebuild_at_ns: int | None = None
@@ -60,8 +60,8 @@ class _MatcherState:
     """Bloom + confirmation dict — atomically swapped on rebuild."""
 
     bloom: _BloomFilter
-    by_type: dict[str, dict[str, Indicator]]
-    indicators_loaded: dict[str, int]
+    by_type: dict[IndicatorType, dict[str, Indicator]]
+    indicators_loaded: dict[IndicatorType, int]
     bit_array_bytes: int
 
 
@@ -93,9 +93,10 @@ class IoCMatcher:
         self._confirmed_matches_total = 0
         self._false_positives_total = 0
 
-        self._dirty = False
         # Bind asyncio.Event lazily in start() to avoid loop-binding mismatch
         # when the matcher is constructed outside the running event loop.
+        # The Event itself is the single source of truth for the "dirty"
+        # signal — its set/cleared state replaces a separate boolean flag.
         self._dirty_event: asyncio.Event | None = None
         self._stopping = False
         self._task: asyncio.Task[None] | None = None
@@ -103,8 +104,11 @@ class IoCMatcher:
     def metrics_snapshot(self) -> IoCMatcherMetrics:
         with self._lock:
             state = self._state
+            indicators_loaded: dict[str, int] = (
+                {str(k): v for k, v in state.indicators_loaded.items()} if state else {}
+            )
             return IoCMatcherMetrics(
-                indicators_loaded=dict(state.indicators_loaded) if state else {},
+                indicators_loaded=indicators_loaded,
                 bit_array_bytes=state.bit_array_bytes if state else 0,
                 expected_fpr=self._matcher_cfg.fpr,
                 last_rebuild_at_ns=self._last_rebuild_at_ns,
@@ -155,26 +159,26 @@ class IoCMatcher:
     def _build_match(
         self,
         value: str,
-        type_: str,
+        ind_type: IndicatorType,
         indicator: Indicator,
         *,
         event_id: str,
     ) -> IoCMatch:
-        kind: str
-        if type_ in ("ipv4", "ipv6"):
+        kind: Literal["ip", "domain", "url", "hash"]
+        if ind_type in ("ipv4", "ipv6"):
             kind = "ip"
-        elif type_ in ("md5", "sha1", "sha256"):
+        elif ind_type in ("md5", "sha1", "sha256"):
             kind = "hash"
-        elif type_ == "url":
+        elif ind_type == "url":
             kind = "url"
         else:
             kind = "domain"
         return IoCMatch(
             value=value,
-            type=type_,  # type: ignore[arg-type]
+            type=ind_type,
             indicator=indicator,
             event_id=event_id,
-            entity_kind=kind,  # type: ignore[arg-type]
+            entity_kind=kind,
             matched_at_ns=self._clock_ns(),
         )
 
@@ -188,16 +192,29 @@ class IoCMatcher:
                     ipv4.append(raw)
                 else:
                     ipv6.append(raw)
-        hashes_by_type: dict[str, list[str]] = {"md5": [], "sha1": [], "sha256": []}
+        md5_hashes: list[str] = []
+        sha1_hashes: list[str] = []
+        sha256_hashes: list[str] = []
+        hashes_by_type: dict[IndicatorType, list[str]] = {
+            "md5": md5_hashes,
+            "sha1": sha1_hashes,
+            "sha256": sha256_hashes,
+        }
         for raw in event.related_hashes:
             algo, _sep, hex_digest = raw.partition(":")
-            if algo in hashes_by_type and hex_digest:
-                hashes_by_type[algo].append(hex_digest)
+            if not hex_digest:
+                continue
+            if algo == "md5":
+                md5_hashes.append(hex_digest)
+            elif algo == "sha1":
+                sha1_hashes.append(hex_digest)
+            elif algo == "sha256":
+                sha256_hashes.append(hex_digest)
         domains = list(event.related_domains)
         url = event.attributes.get("url")
         urls = [str(url)] if isinstance(url, str) and url else []
 
-        candidates: dict[str, list[str]] = {
+        candidates: dict[IndicatorType, list[str]] = {
             "ipv4": ipv4,
             "ipv6": ipv6,
             "domain": domains,
@@ -206,12 +223,12 @@ class IoCMatcher:
         }
         matches: list[IoCMatch] = []
         event_id_str = str(event.event_id)
-        for type_, values in candidates.items():
+        for ind_type, values in candidates.items():
             for v in values:
-                ind = self.check(v, type_)  # type: ignore[arg-type]
+                ind = self.check(v, ind_type)
                 if ind is None:
                     continue
-                m = self._build_match(v, type_, ind, event_id=event_id_str)
+                m = self._build_match(v, ind_type, ind, event_id=event_id_str)
                 matches.append(m)
                 if self._on_match is not None:
                     try:
@@ -221,8 +238,7 @@ class IoCMatcher:
         return tuple(matches)
 
     def on_snapshot_updated(self, _feed_id: str) -> None:
-        """Sync listener — flips dirty flag, signals rebuild loop."""
-        self._dirty = True
+        """Sync listener — signals rebuild loop via the dirty event."""
         # asyncio.Event.set() is sync-safe but only meaningful from the event
         # loop thread. The listener fires from the consumer's loop, so we are
         # already there. The event is created in start(); if a listener fires
@@ -261,21 +277,20 @@ class IoCMatcher:
 
     async def _run_loop(self) -> None:
         debounce_s = max(0.0, self._matcher_cfg.rebuild_debounce_ms / 1000.0)
-        # _dirty_event is set by start() before this coroutine is scheduled.
-        assert self._dirty_event is not None
+        if self._dirty_event is None:
+            raise RuntimeError("ioc_matcher: _run_loop started without dirty_event bound")
         dirty_event = self._dirty_event
         try:
             while True:
                 await dirty_event.wait()
                 if debounce_s > 0:
                     await asyncio.sleep(debounce_s)
-                # Drain dirty flag + event before rebuild so notifications
-                # arriving DURING the rebuild trigger one more pass.
-                self._dirty = False
+                # Clear before rebuild so notifications arriving DURING the
+                # rebuild re-set the event and trigger one more pass.
                 dirty_event.clear()
                 await self.refresh()
-                if self._dirty:
-                    # Loop immediately to honour late notifications.
+                if dirty_event.is_set():
+                    # Notification fired during rebuild — loop immediately.
                     continue
         except asyncio.CancelledError:
             return
@@ -283,7 +298,7 @@ class IoCMatcher:
     async def _build_state(self) -> _MatcherState:
         enabled_types = self._enabled_types_set
         floor = self._matcher_cfg.confidence_floor
-        by_type: dict[str, dict[str, Indicator]] = {}
+        by_type: dict[IndicatorType, dict[str, Indicator]] = {}
         for feed in self._cfg.feeds:
             if not feed.enabled:
                 continue
@@ -314,10 +329,10 @@ class IoCMatcher:
                 capacity,
                 self._matcher_cfg.fpr,
             )
-        all_values: list[str] = []
-        for bucket in by_type.values():
-            all_values.extend(bucket.keys())
-        bloom = _BloomFilter.from_values(all_values, params)
+        bloom = _BloomFilter.from_values(
+            chain.from_iterable(by_type.values()),
+            params,
+        )
         return _MatcherState(
             bloom=bloom,
             by_type=by_type,

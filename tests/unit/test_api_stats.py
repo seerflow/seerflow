@@ -132,13 +132,16 @@ class TestStatsEndpointEnrichment:
 
         log_store, alert_store = self._default_stores()
         start = _time.monotonic() - 100.0
-        provider = lambda: PipelineMetrics(  # noqa: E731
-            started_monotonic=start,
-            total_events_processed=5000,
-            active_sources=3,
-            model_count=12,
-        )
-        client = TestClient(self._build_app(log_store, alert_store, provider=provider))
+
+        def _provider() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=start,
+                total_events_processed=5000,
+                active_sources=3,
+                model_count=12,
+            )
+
+        client = TestClient(self._build_app(log_store, alert_store, provider=_provider))
         resp = client.get("/api/v1/stats")
         body = resp.json()
         assert body["total_events_processed"] == 5000
@@ -164,13 +167,16 @@ class TestStatsEndpointEnrichment:
         from seerflow.api.metrics import PipelineMetrics
 
         log_store, alert_store = self._default_stores()
-        provider = lambda: PipelineMetrics(  # noqa: E731
-            started_monotonic=_time.monotonic(),
-            total_events_processed=1000,
-            active_sources=1,
-            model_count=4,
-        )
-        client = TestClient(self._build_app(log_store, alert_store, provider=provider))
+
+        def _provider() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=_time.monotonic(),
+                total_events_processed=1000,
+                active_sources=1,
+                model_count=4,
+            )
+
+        client = TestClient(self._build_app(log_store, alert_store, provider=_provider))
         resp = client.get("/api/v1/stats")
         assert resp.json()["event_rate_per_sec"] == 0.0
 
@@ -229,14 +235,19 @@ class TestStatsEndpointEnrichment:
             confirmed_matches_total=4,
             false_positives_total=1,
         )
-        provider = lambda: PipelineMetrics(  # noqa: E731
-            started_monotonic=_time.monotonic() - 10.0,
-            total_events_processed=1000,
-            active_sources=1,
-            model_count=4,
-            ioc_matcher=ioc_metrics,
+
+        def _provider_with_matcher() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=_time.monotonic() - 10.0,
+                total_events_processed=1000,
+                active_sources=1,
+                model_count=4,
+                ioc_matcher=ioc_metrics,
+            )
+
+        client = TestClient(
+            self._build_app(log_store, alert_store, provider=_provider_with_matcher)
         )
-        client = TestClient(self._build_app(log_store, alert_store, provider=provider))
         resp = client.get("/api/v1/stats")
         assert resp.status_code == 200
         body = resp.json()
@@ -261,13 +272,16 @@ class TestStatsEndpointEnrichment:
         from seerflow.api.metrics import PipelineMetrics
 
         log_store, alert_store = self._default_stores()
-        provider = lambda: PipelineMetrics(  # noqa: E731
-            started_monotonic=_time.monotonic() - 10.0,
-            total_events_processed=1000,
-            active_sources=1,
-            model_count=4,
-        )
-        client = TestClient(self._build_app(log_store, alert_store, provider=provider))
+
+        def _provider_no_matcher() -> PipelineMetrics:
+            return PipelineMetrics(
+                started_monotonic=_time.monotonic() - 10.0,
+                total_events_processed=1000,
+                active_sources=1,
+                model_count=4,
+            )
+
+        client = TestClient(self._build_app(log_store, alert_store, provider=_provider_no_matcher))
         resp = client.get("/api/v1/stats")
         assert resp.status_code == 200
         assert resp.json()["ioc_matcher"] is None
