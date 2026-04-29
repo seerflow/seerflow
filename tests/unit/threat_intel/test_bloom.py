@@ -48,25 +48,19 @@ def test_bloom_filter_empty_probe_misses() -> None:
 
 
 def test_bloom_filter_roundtrip_added_value() -> None:
-    bf = _BloomFilter.from_values(
-        ("evil.example",), BloomParams(expected_items=10, fpr=0.01)
-    )
+    bf = _BloomFilter.from_values(("evil.example",), BloomParams(expected_items=10, fpr=0.01))
     assert "evil.example" in bf
 
 
 def test_bloom_filter_unicode_determinism() -> None:
-    bf = _BloomFilter.from_values(
-        ("héllo🌍",), BloomParams(expected_items=10, fpr=0.01)
-    )
+    bf = _BloomFilter.from_values(("héllo🌍",), BloomParams(expected_items=10, fpr=0.01))
     assert "héllo🌍" in bf
 
 
 def test_bloom_filter_empirical_fpr_within_band() -> None:
-    rng = random.Random(0xC0DE)
+    rng = random.Random(0xC0DE)  # noqa: S311 — deterministic test RNG, not crypto
     inserted = [f"insert-{i}-{rng.random():.10f}" for i in range(10_000)]
-    bf = _BloomFilter.from_values(
-        inserted, BloomParams(expected_items=10_000, fpr=0.01)
-    )
+    bf = _BloomFilter.from_values(inserted, BloomParams(expected_items=10_000, fpr=0.01))
     probes = [f"miss-{i}-{rng.random():.10f}" for i in range(10_000)]
     hits = sum(1 for p in probes if p in bf)
     # ±50 % envelope on a 10 K probe — empirical FPR variance is wide.

@@ -6,7 +6,7 @@ from typing import Literal
 
 import msgspec
 
-from seerflow.models.indicator import Indicator, IndicatorType
+from seerflow.models.indicator import Indicator, IndicatorType  # noqa: TC001
 
 
 class IoCMatch(msgspec.Struct, frozen=True, gc=False):

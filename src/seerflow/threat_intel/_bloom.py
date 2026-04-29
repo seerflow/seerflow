@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import math
 import struct
-from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,9 +23,7 @@ class BloomParams:
         if not (0.0 < self.fpr < 1.0):
             raise ValueError(f"fpr must be in (0, 1), got {self.fpr!r}")
         if self.expected_items < 1:
-            raise ValueError(
-                f"expected_items must be >= 1, got {self.expected_items!r}"
-            )
+            raise ValueError(f"expected_items must be >= 1, got {self.expected_items!r}")
 
     @property
     def bit_count(self) -> int:
@@ -48,7 +49,7 @@ def optimal_params(*, expected_items: int, fpr: float) -> BloomParams:
 class _BloomFilter:
     """Fixed-size bit-array Bloom filter, immutable after construction."""
 
-    __slots__ = ("_bits", "_m", "_k", "_byte_size")
+    __slots__ = ("_bits", "_byte_size", "_k", "_m")
 
     def __init__(self, bits: bytearray, m: int, k: int) -> None:
         # Constructor is private; callers use ``from_values``. The signature
@@ -59,9 +60,7 @@ class _BloomFilter:
         self._byte_size = len(bits)
 
     @classmethod
-    def from_values(
-        cls, values: Iterable[str], params: BloomParams
-    ) -> _BloomFilter:
+    def from_values(cls, values: Iterable[str], params: BloomParams) -> _BloomFilter:
         bits = bytearray(params.byte_size)
         m = params.bit_count
         k = params.hash_count
