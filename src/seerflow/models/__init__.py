@@ -34,6 +34,7 @@ from seerflow.models.entity import (
 )
 from seerflow.models.event import AttrValue, SeerflowEvent, SeverityLevel
 from seerflow.models.indicator import Indicator, IndicatorSnapshot, IndicatorType
+from seerflow.models.ioc_match import IoCMatch
 from seerflow.models.query import (
     AlertQuery,
     EntityRelation,
@@ -65,6 +66,7 @@ __all__ = [
     "Indicator",
     "IndicatorSnapshot",
     "IndicatorType",
+    "IoCMatch",
     "Page",
     "ProcessEntity",
     "SecurityEntity",
