@@ -77,3 +77,12 @@ def test_bloom_filter_byte_size_matches_params() -> None:
 def test_bloom_filter_no_public_mutator() -> None:
     bf = _BloomFilter.from_values((), BloomParams(expected_items=10, fpr=0.01))
     assert not hasattr(bf, "add"), "post-construction mutation API must not exist"
+
+
+def test_bloom_filter_exposes_bit_count_and_hash_count() -> None:
+    p = BloomParams(expected_items=100, fpr=0.01)
+    bf = _BloomFilter.from_values((), p)
+    assert bf.bit_count == p.bit_count
+    assert bf.hash_count == p.hash_count
+    assert bf.bit_count > 0
+    assert bf.hash_count >= 1

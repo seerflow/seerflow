@@ -531,3 +531,275 @@ async def test_concurrent_reads_during_rebuild_never_observe_partial_state() -> 
         for t in threads:
             t.join(timeout=1.0)
     assert not errors, f"reader thread observed torn state: {errors}"
+
+
+def test_check_returns_none_when_state_unbuilt(stub_store: object) -> None:
+    """`check()` before any refresh must return None without raising."""
+    cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
+    matcher = IoCMatcher(config=cfg, model_store=stub_store)  # type: ignore[arg-type]
+    assert matcher.check("1.2.3.4", "ipv4") is None
+    assert matcher.metrics_snapshot().checks_total == 1
+
+
+@pytest.mark.asyncio
+async def test_check_many_dispatches_per_type() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    matches = matcher.check_many({"ipv4": ("1.2.3.4", "9.9.9.9")})
+    assert len(matches) == 1
+    assert matches[0].value == "1.2.3.4"
+    assert matches[0].event_id == ""
+
+
+@pytest.mark.asyncio
+async def test_check_event_skips_unknown_candidates() -> None:
+    """Well-formed candidates that aren't in the indicator set must be skipped."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    # Event mixes one matching IP with several well-formed-but-unknown values
+    # across every candidate type, exercising the `continue` skip branch.
+    evt = _evt(
+        ips=("1.2.3.4", "9.9.9.9"),
+        domains=("unknown.example",),
+        hashes=("md5:11111111111111111111111111111111",),
+        url="https://unknown.example/y",
+    )
+    matches = matcher.check_event(evt)
+    assert {m.value for m in matches} == {"1.2.3.4"}
+
+
+@pytest.mark.asyncio
+async def test_check_event_swallows_on_match_callback_exception() -> None:
+    """A raising on_match must not stop further matches or propagate."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    def boom(_m: IoCMatch) -> None:
+        raise RuntimeError("listener exploded")
+
+    matcher = IoCMatcher(  # type: ignore[arg-type]
+        config=cfg,
+        model_store=store,
+        on_match=boom,
+    )
+    await matcher.refresh()
+    # Must not raise even though callback does.
+    matches = matcher.check_event(_evt(ips=("1.2.3.4",)))
+    assert len(matches) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_is_idempotent_while_running() -> None:
+    cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
+
+    class _Store:
+        async def save_state(self, *_a, **_k) -> None:
+            return None
+
+        async def load_state(self, *_a, **_k) -> bytes | None:
+            return None
+
+        async def delete_state(self, *_a, **_k) -> None:
+            return None
+
+    matcher = IoCMatcher(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    await matcher.start()
+    try:
+        first_task = matcher._task
+        await matcher.start()  # second call — must short-circuit
+        assert matcher._task is first_task
+    finally:
+        await matcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_during_shutdown() -> None:
+    cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
+
+    class _Store:
+        async def save_state(self, *_a, **_k) -> None:
+            return None
+
+        async def load_state(self, *_a, **_k) -> bytes | None:
+            return None
+
+        async def delete_state(self, *_a, **_k) -> None:
+            return None
+
+    matcher = IoCMatcher(config=cfg, model_store=_Store())  # type: ignore[arg-type]
+    matcher._stopping = True  # simulate mid-shutdown
+    with pytest.raises(RuntimeError, match="mid-shutdown"):
+        await matcher.start()
+
+
+@pytest.mark.asyncio
+async def test_run_loop_no_debounce_when_zero_ms() -> None:
+    """rebuild_debounce_ms=0 must skip the asyncio.sleep branch."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True, rebuild_debounce_ms=0),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.start()
+    try:
+        before = matcher.metrics_snapshot().rebuild_count
+        matcher.on_snapshot_updated("f1")
+        await asyncio.sleep(0.05)
+        assert matcher.metrics_snapshot().rebuild_count == before + 1
+    finally:
+        await matcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_run_loop_reruns_when_dirty_set_during_rebuild() -> None:
+    """If a notification arrives while refresh() runs, the loop iterates again."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True, rebuild_debounce_ms=0),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+
+    # Initial refresh BEFORE we install the hook, so start() is clean.
+    await matcher.refresh()
+    base = matcher.metrics_snapshot().rebuild_count
+
+    original_refresh = matcher.refresh
+    notified = {"count": 0}
+
+    async def refresh_then_redirty() -> None:
+        await original_refresh()
+        # Re-dirty exactly once mid-rebuild to force the `continue` branch.
+        if notified["count"] == 0:
+            notified["count"] = 1
+            matcher._dirty = True
+            matcher._dirty_event.set()
+
+    matcher.refresh = refresh_then_redirty  # type: ignore[method-assign]
+
+    # Start without re-running refresh (already done above).
+    matcher._task = asyncio.create_task(matcher._run_loop(), name="ioc_matcher.loop")
+    try:
+        # First listener call wakes the loop. During that refresh the hook
+        # re-sets dirty, hitting the `if self._dirty: continue` branch and
+        # forcing a second rebuild without another listener call.
+        matcher.on_snapshot_updated("f1")
+        await asyncio.sleep(0.1)
+        after = matcher.metrics_snapshot().rebuild_count
+        # listener wake (one rebuild) + continue branch (second rebuild) >= 2
+        assert after - base >= 2
+    finally:
+        await matcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_build_state_skips_disabled_feeds() -> None:
+    store = _MemStore()
+    feeds = (
+        TAXIIFeedConfig(id="f1", url="https://x", collection_id="c", enabled=False),
+        TAXIIFeedConfig(id="f2", url="https://y", collection_id="d"),
+    )
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    # Both feeds have snapshots persisted, but f1 is disabled and must be skipped.
+    for fid, val in (("f1", "1.2.3.4"), ("f2", "5.6.7.8")):
+        s = IndicatorSnapshot(
+            feed_id=fid,
+            fetched_at_ns=1,
+            indicators=(_ipv4(val, source=fid),),
+            cursor=None,
+        )
+        await store.save_state(f"taxii:snapshot:{fid}", msgspec.msgpack.encode(s))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    assert matcher.check("1.2.3.4", "ipv4") is None  # f1 skipped
+    assert matcher.check("5.6.7.8", "ipv4") is not None
+
+
+@pytest.mark.asyncio
+async def test_build_state_warns_when_bit_array_exceeds_budget(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Capacity that pushes byte_size > 10 MB triggers a WARNING but still serves."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    # min_capacity 2_000_000 with fpr=0.001 → ~3.4 MB; force >10 MB by lifting
+    # min_capacity past the threshold (≈ 5.8M items @ 0.001 → ≥10 MB).
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True, min_capacity=6_000_000, fpr=0.001),
+    )
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    with caplog.at_level("WARNING", logger="seerflow"):
+        await matcher.refresh()
+    assert any("exceeds 10 MB budget" in rec.message for rec in caplog.records)
+    # Matcher still served the rebuild: bit_array_bytes reflects the oversized array.
+    assert matcher.metrics_snapshot().bit_array_bytes > 10 * 1024 * 1024
