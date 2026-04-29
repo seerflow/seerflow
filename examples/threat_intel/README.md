@@ -153,3 +153,9 @@ surface to fit the budget.
 ```bash
 curl http://127.0.0.1:8080/api/v1/stats | jq .ioc_matcher
 ```
+
+**Security note (operational):** the metrics block exposed at `/api/v1/stats` includes `confirmed_matches_total` — a monotonically increasing counter. An attacker with both `/stats` access and event-injection capability could enumerate the indicator set by polling deltas. The endpoint is rate-limited and surfaces only counters (no indicator values), but operators in higher-sensitivity deployments should consider:
+
+- Restricting `/stats` to operator-level auth.
+- Routing the dashboard endpoint behind a separate ingress.
+- Treating the stats surface as the same trust boundary as the TAXII feed name list (S-067 also exposes feed-level counters).

@@ -769,7 +769,7 @@ async def test_build_state_warns_when_bit_array_exceeds_budget(
     matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
     with caplog.at_level("WARNING", logger="seerflow"):
         await matcher.refresh()
-    assert any("exceeds 10 MB budget" in rec.message for rec in caplog.records)
+    assert any("exceeds 10 MB target" in rec.message for rec in caplog.records)
     # Matcher still served the rebuild: bit_array_bytes reflects the oversized array.
     assert matcher.metrics_snapshot().bit_array_bytes > 10 * 1024 * 1024
 
@@ -930,3 +930,211 @@ async def test_run_loop_raises_when_dirty_event_unbound() -> None:
     assert matcher._dirty_event is None
     with pytest.raises(RuntimeError, match="dirty_event"):
         await matcher._run_loop()
+
+
+@pytest.mark.asyncio
+async def test_ipv6_canonical_form_match() -> None:
+    """Indicator stored as ``::1`` matches event entity ``0:0:0:0:0:0:0:1``."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(
+            Indicator(
+                value="::1",
+                type="ipv6",
+                source_feed="f1",
+                confidence=80,
+                kill_chain_phases=(),
+                valid_from_ns=0,
+                valid_until_ns=None,
+            ),
+        ),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    matches = matcher.check_event(_evt(ips=("0:0:0:0:0:0:0:1",)))
+    assert {m.type for m in matches} == {"ipv6"}
+
+
+@pytest.mark.asyncio
+async def test_ipv4_already_canonical_no_break() -> None:
+    """IPv4 indicators in canonical dotted-decimal still match unchanged."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    matches = matcher.check_event(_evt(ips=("1.2.3.4",)))
+    assert {m.value for m in matches} == {"1.2.3.4"}
+
+
+@pytest.mark.asyncio
+async def test_build_state_drops_malformed_ip_indicator(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A feed shipping an unparseable IP value is logged and skipped, not crashed."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    bad_ind = Indicator(
+        value="not-an-ip",
+        type="ipv4",
+        source_feed="f1",
+        confidence=80,
+        kill_chain_phases=(),
+        valid_from_ns=0,
+        valid_until_ns=None,
+    )
+    good_ind = _ipv4("1.2.3.4")
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(bad_ind, good_ind),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    with caplog.at_level("WARNING", logger="seerflow"):
+        await matcher.refresh()
+    assert any("not a valid IP" in rec.message for rec in caplog.records)
+    # Good indicator survives; bad one dropped.
+    assert matcher.metrics_snapshot().indicators_loaded == {"ipv4": 1}
+    assert matcher.check("1.2.3.4", "ipv4") is not None
+
+
+@pytest.mark.asyncio
+async def test_domain_case_normalized_match() -> None:
+    """Indicator ``evil.example`` matches event domain ``Evil.Example`` (case-fold)."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(
+            Indicator(
+                value="evil.example",
+                type="domain",
+                source_feed="f1",
+                confidence=80,
+                kill_chain_phases=(),
+                valid_from_ns=0,
+                valid_until_ns=None,
+            ),
+        ),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    matches = matcher.check_event(_evt(domains=("Evil.Example",)))
+    assert {m.type for m in matches} == {"domain"}
+
+
+@pytest.mark.asyncio
+async def test_hash_case_normalized_match() -> None:
+    """Hash event with uppercase digest + uppercase algo prefix still matches."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(
+            Indicator(
+                value=digest.upper(),  # feed shipped uppercase
+                type="sha256",
+                source_feed="f1",
+                confidence=80,
+                kill_chain_phases=(),
+                valid_from_ns=0,
+                valid_until_ns=None,
+            ),
+        ),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    # Event ships the same digest in mixed case with uppercase algo prefix.
+    matches = matcher.check_event(_evt(hashes=(f"SHA256:{digest.upper()}",)))
+    assert {m.type for m in matches} == {"sha256"}
+
+
+@pytest.mark.asyncio
+async def test_build_state_refuses_bloom_above_hard_cap() -> None:
+    """Bloom byte_size exceeding the 100 MB ceiling must raise + preserve prior state."""
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    # Seed a viable prior state first.
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(_ipv4("1.2.3.4"),),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+    cfg_ok = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    matcher = IoCMatcher(config=cfg_ok, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    prior_state = matcher._state
+    assert prior_state is not None
+    # Now swap in a config with capacity/fpr that pushes byte_size > 100 MB.
+    # 200M items @ fpr=1e-6 → ~700 MB which is well above the cap.
+    cfg_huge = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(
+            enabled=True,
+            min_capacity=200_000_000,
+            fpr=1e-6,
+        ),
+    )
+    matcher._cfg = cfg_huge
+    matcher._matcher_cfg = cfg_huge.matcher
+    await matcher.refresh()
+    # State unchanged + failure counter bumped.
+    assert matcher._state is prior_state
+    assert matcher.metrics_snapshot().rebuild_failures_total == 1

@@ -21,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass
 from itertools import chain
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 import msgspec
 
@@ -38,6 +38,10 @@ if TYPE_CHECKING:
     from seerflow.storage.protocols import ModelStore
 
 _log = logging.getLogger("seerflow")
+
+# Hard ceiling on the combined Bloom bit-array allocation. Above this the
+# matcher refuses to rebuild rather than risk OOM on misconfiguration.
+_MAX_BLOOM_BYTES: Final[int] = 100 * 1024 * 1024  # 100 MB hard ceiling
 
 
 class IoCMatcherMetrics(msgspec.Struct, frozen=True, gc=False):
@@ -188,10 +192,14 @@ class IoCMatcher:
         for raw in event.related_ips:
             with contextlib.suppress(ValueError):
                 addr = ipaddress.ip_address(raw)
+                # Canonicalize to ipaddress's str() form so probe and indicator
+                # keys agree regardless of upstream notation (e.g. ``::1`` vs
+                # ``0:0:0:0:0:0:0:1``).
+                canonical = str(addr)
                 if addr.version == 4:
-                    ipv4.append(raw)
+                    ipv4.append(canonical)
                 else:
-                    ipv6.append(raw)
+                    ipv6.append(canonical)
         md5_hashes: list[str] = []
         sha1_hashes: list[str] = []
         sha256_hashes: list[str] = []
@@ -201,7 +209,10 @@ class IoCMatcher:
             "sha256": sha256_hashes,
         }
         for raw in event.related_hashes:
-            algo, _sep, hex_digest = raw.partition(":")
+            # Lowercase the entire entry so both algo prefix and hex digest
+            # compare case-insensitively against the indicator dict.
+            raw_lower = raw.lower()
+            algo, _sep, hex_digest = raw_lower.partition(":")
             if not hex_digest:
                 continue
             if algo == "md5":
@@ -210,7 +221,8 @@ class IoCMatcher:
                 sha1_hashes.append(hex_digest)
             elif algo == "sha256":
                 sha256_hashes.append(hex_digest)
-        domains = list(event.related_domains)
+        # Domains are case-insensitive per RFC 4343; lowercase before probe.
+        domains = [d.lower() for d in event.related_domains]
         url = event.attributes.get("url")
         urls = [str(url)] if isinstance(url, str) and url else []
 
@@ -311,8 +323,24 @@ class IoCMatcher:
                     continue
                 if ind.confidence < floor:
                     continue
+                # Normalize indicator side symmetrically with check_event(): IPs
+                # canonicalized via ipaddress; domains/hashes lowercased; URLs
+                # left untouched (RFC 3986 path is case-sensitive).
+                key = ind.value
+                if ind.type in ("ipv4", "ipv6"):
+                    try:
+                        key = str(ipaddress.ip_address(ind.value))
+                    except ValueError:
+                        _log.warning(
+                            "ioc_matcher: feed=%s indicator value not a valid IP: %r; skipping",
+                            ind.source_feed,
+                            ind.value,
+                        )
+                        continue
+                elif ind.type in ("domain", "md5", "sha1", "sha256"):
+                    key = ind.value.lower()
                 bucket = by_type.setdefault(ind.type, {})
-                bucket[ind.value] = ind
+                bucket[key] = ind
 
         indicators_loaded = {t: len(v) for t, v in by_type.items()}
         actual = sum(indicators_loaded.values())
@@ -321,9 +349,16 @@ class IoCMatcher:
             math.ceil(actual * self._matcher_cfg.capacity_growth_factor),
         )
         params = BloomParams(expected_items=capacity, fpr=self._matcher_cfg.fpr)
+        if params.byte_size > _MAX_BLOOM_BYTES:
+            raise MemoryError(
+                f"ioc_matcher: refusing to allocate "
+                f"{params.byte_size / (1024 * 1024):.1f} MB Bloom filter "
+                f"(hard cap = {_MAX_BLOOM_BYTES // (1024 * 1024)} MB); "
+                f"reduce capacity={capacity} or raise fpr={self._matcher_cfg.fpr}"
+            )
         if params.byte_size > 10 * 1024 * 1024:
             _log.warning(
-                "ioc_matcher: bit array %.2f MB exceeds 10 MB budget at "
+                "ioc_matcher: bit array %.2f MB exceeds 10 MB target at "
                 "capacity=%d fpr=%.4f; consider raising fpr or lowering capacity",
                 params.byte_size / (1024 * 1024),
                 capacity,

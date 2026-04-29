@@ -51,7 +51,12 @@ async def test_matcher_rebuilds_within_one_second_for_100k_indicators(
         snap = IndicatorSnapshot(
             feed_id="f1",
             fetched_at_ns=1,
-            indicators=tuple(_ipv4(f"10.0.{i // 256}.{i % 256}") for i in range(100_000)),
+            indicators=tuple(
+                # 100K distinct, valid IPv4s — span 10.0.0.0/14 (256x256x4=262K)
+                # so every octet stays inside [0, 255].
+                _ipv4(f"10.{i // 65_536}.{(i // 256) % 256}.{i % 256}")
+                for i in range(100_000)
+            ),
             cursor=None,
         )
         await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
