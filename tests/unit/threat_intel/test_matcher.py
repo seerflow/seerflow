@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import random
+import uuid
+from typing import TYPE_CHECKING
 
 import msgspec
 import pytest
 
 from seerflow.config import IoCMatcherConfig, TAXIIFeedConfig, ThreatIntelConfig
+from seerflow.models.event import SeerflowEvent
 from seerflow.models.indicator import Indicator, IndicatorSnapshot
 from seerflow.threat_intel.matcher import (
     IoCMatcher,
     IoCMatcherMetrics,
 )
+
+if TYPE_CHECKING:
+    from seerflow.models.ioc_match import IoCMatch
 
 
 @pytest.fixture
@@ -269,3 +275,132 @@ async def test_false_positive_metric_increments_on_bloom_collision() -> None:
     metrics = matcher.metrics_snapshot()
     assert metrics.false_positives_total == 1
     assert metrics.bloom_hits_total >= 2  # known-value probe + collision probe
+
+
+def _evt(
+    *,
+    ips: tuple[str, ...] = (),
+    hashes: tuple[str, ...] = (),
+    domains: tuple[str, ...] = (),
+    url: str | None = None,
+) -> SeerflowEvent:
+    attrs: dict[str, str] = {}
+    if url is not None:
+        attrs["url"] = url
+    return SeerflowEvent(
+        event_id=uuid.UUID("11111111-2222-3333-4444-555555555555"),
+        timestamp_ns=1,
+        observed_ns=1,
+        related_ips=ips,
+        related_domains=domains,
+        related_hashes=hashes,
+        attributes=attrs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_check_event_extracts_ip_domain_hash_url() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True,
+        feeds=feeds,
+        matcher=IoCMatcherConfig(enabled=True),
+    )
+    indicators = (
+        _ipv4("1.2.3.4"),
+        Indicator(
+            value="evil.example",
+            type="domain",
+            source_feed="f1",
+            confidence=80,
+            kill_chain_phases=(),
+            valid_from_ns=0,
+            valid_until_ns=None,
+        ),
+        Indicator(
+            value="aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+            type="sha256",
+            source_feed="f1",
+            confidence=80,
+            kill_chain_phases=(),
+            valid_from_ns=0,
+            valid_until_ns=None,
+        ),
+        Indicator(
+            value="https://evil.example/x",
+            type="url",
+            source_feed="f1",
+            confidence=80,
+            kill_chain_phases=(),
+            valid_from_ns=0,
+            valid_until_ns=None,
+        ),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=indicators,
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    captured: list[IoCMatch] = []
+    matcher = IoCMatcher(  # type: ignore[arg-type]
+        config=cfg,
+        model_store=store,
+        on_match=captured.append,
+    )
+    await matcher.refresh()
+
+    evt = _evt(
+        ips=("1.2.3.4",),
+        domains=("evil.example",),
+        hashes=("sha256:aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",),
+        url="https://evil.example/x",
+    )
+    matches = matcher.check_event(evt)
+    assert {m.type for m in matches} == {"ipv4", "domain", "sha256", "url"}
+    # on_match dispatch fired for every match.
+    assert {m.type for m in captured} == {"ipv4", "domain", "sha256", "url"}
+
+
+@pytest.mark.asyncio
+async def test_check_event_classifies_ipv4_vs_ipv6() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(enabled=True, feeds=feeds, matcher=IoCMatcherConfig(enabled=True))
+    snap = IndicatorSnapshot(
+        feed_id="f1",
+        fetched_at_ns=1,
+        indicators=(
+            Indicator(
+                value="2001:db8::1",
+                type="ipv6",
+                source_feed="f1",
+                confidence=80,
+                kill_chain_phases=(),
+                valid_from_ns=0,
+                valid_until_ns=None,
+            ),
+        ),
+        cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    matches = matcher.check_event(_evt(ips=("2001:db8::1",)))
+    assert {m.type for m in matches} == {"ipv6"}
+
+
+@pytest.mark.asyncio
+async def test_check_event_silently_skips_malformed() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(enabled=True, feeds=feeds, matcher=IoCMatcherConfig(enabled=True))
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+    # Garbage IP, garbage hash — must not raise.
+    evt = _evt(ips=("not-an-ip",), hashes=("noprefix",))
+    assert matcher.check_event(evt) == ()

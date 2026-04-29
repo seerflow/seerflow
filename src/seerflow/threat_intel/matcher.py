@@ -12,6 +12,8 @@ does NOT call AlertStore.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import ipaddress
 import logging
 import math
 import threading
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
     from seerflow.config import ThreatIntelConfig
+    from seerflow.models.event import SeerflowEvent
     from seerflow.models.indicator import Indicator, IndicatorType
     from seerflow.storage.protocols import ModelStore
 
@@ -178,6 +181,48 @@ class IoCMatcher:
             entity_kind=kind,  # type: ignore[arg-type]
             matched_at_ns=self._clock_ns(),
         )
+
+    def check_event(self, event: SeerflowEvent) -> tuple[IoCMatch, ...]:
+        ipv4: list[str] = []
+        ipv6: list[str] = []
+        for raw in event.related_ips:
+            with contextlib.suppress(ValueError):
+                addr = ipaddress.ip_address(raw)
+                if addr.version == 4:
+                    ipv4.append(raw)
+                else:
+                    ipv6.append(raw)
+        hashes_by_type: dict[str, list[str]] = {"md5": [], "sha1": [], "sha256": []}
+        for raw in event.related_hashes:
+            algo, _sep, hex_digest = raw.partition(":")
+            if algo in hashes_by_type and hex_digest:
+                hashes_by_type[algo].append(hex_digest)
+        domains = list(event.related_domains)
+        url = event.attributes.get("url") if isinstance(event.attributes, dict) else None
+        urls = [str(url)] if isinstance(url, str) and url else []
+
+        candidates: dict[str, list[str]] = {
+            "ipv4": ipv4,
+            "ipv6": ipv6,
+            "domain": domains,
+            "url": urls,
+            **hashes_by_type,
+        }
+        matches: list[IoCMatch] = []
+        event_id_str = str(event.event_id)
+        for type_, values in candidates.items():
+            for v in values:
+                ind = self.check(v, type_)  # type: ignore[arg-type]
+                if ind is None:
+                    continue
+                m = self._build_match(v, type_, ind, event_id=event_id_str)
+                matches.append(m)
+                if self._on_match is not None:
+                    try:
+                        self._on_match(m)
+                    except Exception:
+                        _log.exception("ioc_matcher: on_match callback raised; continuing")
+        return tuple(matches)
 
     async def _build_state(self) -> _MatcherState:
         enabled_types = frozenset(self._matcher_cfg.enabled_types)
