@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import threading
 import uuid
 from typing import TYPE_CHECKING
 
@@ -478,3 +479,42 @@ async def test_stop_cancels_loop_and_is_idempotent() -> None:
     await matcher.start()
     await matcher.stop()
     await matcher.stop()  # second call must be a no-op
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reads_during_rebuild_never_observe_partial_state() -> None:
+    store = _MemStore()
+    feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
+    cfg = ThreatIntelConfig(
+        enabled=True, feeds=feeds, matcher=IoCMatcherConfig(enabled=True),
+    )
+    snap = IndicatorSnapshot(
+        feed_id="f1", fetched_at_ns=1, indicators=(_ipv4("1.2.3.4"),), cursor=None,
+    )
+    await store.save_state("taxii:snapshot:f1", msgspec.msgpack.encode(snap))
+
+    matcher = IoCMatcher(config=cfg, model_store=store)  # type: ignore[arg-type]
+    await matcher.refresh()
+
+    stop = threading.Event()
+    errors: list[BaseException] = []
+
+    def reader() -> None:
+        while not stop.is_set():
+            try:
+                matcher.check("1.2.3.4", "ipv4")
+            except BaseException as exc:  # noqa: BLE001 — capture for assert
+                errors.append(exc)
+                return
+
+    threads = [threading.Thread(target=reader) for _ in range(4)]
+    for t in threads:
+        t.start()
+    try:
+        for _ in range(50):
+            await matcher.refresh()
+    finally:
+        stop.set()
+        for t in threads:
+            t.join(timeout=1.0)
+    assert not errors, f"reader thread observed torn state: {errors}"
