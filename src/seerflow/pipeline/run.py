@@ -54,6 +54,20 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 
+def _derive_llm_health(backend: object | None, configured_backend: str) -> str:
+    """Three-state ``health_state["llm"]`` value (S-070).
+
+    - ``ready``    → backend instance constructed
+    - ``disabled`` → operator did not configure a backend (intentional)
+    - ``degraded`` → operator configured a backend that could not be loaded
+    """
+    if backend is not None:
+        return "ready"
+    if not configured_backend:
+        return "disabled"
+    return "degraded"
+
+
 @dataclass
 class _ShutdownContext:
     """Handler-owned mutable state for the SIGINT/SIGTERM closure.
@@ -297,6 +311,13 @@ async def _run_with_config(
         taxii_manager.register_snapshot_listener(ioc_matcher.on_snapshot_updated)
         await ioc_matcher.start()
     ioc_enrichment_counters = _IoCEnrichmentCounters() if ioc_matcher is not None else None
+    # LLM backend (S-070). Built once at boot; ``None`` on graceful absence
+    # (no backend configured, optional dep missing, model file missing) so
+    # downstream consumers (S-071 alert explanation, S-072 NL hunt) can
+    # null-check before calling ``complete(...)``.
+    from seerflow.llm import LLMBackend, build_llm_backend
+
+    llm_backend: LLMBackend | None = build_llm_backend(config.llm)
     taxii_failed = await taxii_manager.start()
     if taxii_failed:
         _log.warning(
@@ -500,7 +521,15 @@ async def _run_with_config(
     # manager off ``app.state`` and reuse it for ``make_handler`` so
     # the pipeline and the FastAPI route share the same fan-out.
 
-    health_state: dict[str, str] = {"pipeline": "running", "storage": "connected"}
+    # ``llm`` health (S-070): three-state surface
+    #   ready    → backend constructed
+    #   disabled → operator did not configure a backend
+    #   degraded → operator configured a backend but it could not be loaded
+    health_state: dict[str, str] = {
+        "pipeline": "running",
+        "storage": "connected",
+        "llm": _derive_llm_health(llm_backend, config.llm.backend),
+    }
     api_app = make_api_app(
         log_store=storage,
         alert_store=storage,

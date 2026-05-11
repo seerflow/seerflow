@@ -25,6 +25,31 @@ class TestMakeApiAppSeam:
         assert "make_api_app" in run_mod._run_with_config.__code__.co_varnames
 
 
+class TestDeriveLlmHealth:
+    """``_derive_llm_health`` covers S-070's three-state surface."""
+
+    def test_ready_when_backend_present(self) -> None:
+        from seerflow.pipeline.run import _derive_llm_health
+
+        assert _derive_llm_health(object(), "llama_cpp") == "ready"
+
+    def test_disabled_when_no_backend_and_no_config(self) -> None:
+        from seerflow.pipeline.run import _derive_llm_health
+
+        assert _derive_llm_health(None, "") == "disabled"
+
+    def test_degraded_when_no_backend_but_config_present(self) -> None:
+        from seerflow.pipeline.run import _derive_llm_health
+
+        assert _derive_llm_health(None, "llama_cpp") == "degraded"
+
+    def test_ready_takes_precedence_over_config(self) -> None:
+        # A constructed backend always wins, regardless of config string.
+        from seerflow.pipeline.run import _derive_llm_health
+
+        assert _derive_llm_health(object(), "") == "ready"
+
+
 class TestSharedConnectionManager:
     """One ``ConnectionManager`` shared by handler and FastAPI app."""
 

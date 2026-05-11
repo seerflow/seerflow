@@ -200,11 +200,29 @@ class CorrelationConfig:
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class LLMConfig:
-    """LLM backend configuration."""
+    """LLM backend configuration (S-070).
+
+    ``backend`` selects the concrete implementation:
+
+    - ``""``           — LLM features disabled (default)
+    - ``"llama_cpp"``  — local CPU inference via ``llama-cpp-python`` (S-070)
+    - ``"ollama"``     — HTTP backend (S-098, deferred)
+    - ``"cloud"``      — Anthropic/OpenAI SDK backends (S-099, deferred)
+
+    Numeric fields apply to ``llama_cpp`` only; they are accepted on every
+    config so future backends can reuse them without a schema migration.
+    """
 
     backend: str = ""
     model_path: str = ""
     ollama_url: str = "http://localhost:11434"
+    # llama_cpp tuning (S-070).
+    n_ctx: int = 4096
+    n_threads: int | None = None
+    n_gpu_layers: int = 0
+    max_tokens_default: int = 256
+    temperature_default: float = 0.2
+    seed: int = 42
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
