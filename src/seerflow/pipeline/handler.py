@@ -287,6 +287,21 @@ def make_handler(
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(ioc_alert)
                             await _feed_kill_chain(ioc_alert)
+                            if risk_register is not None and ioc_alert.entity_uuid:
+                                from seerflow.correlation.risk import RiskEntry
+
+                                risk_register.add_risk(
+                                    ioc_alert.entity_uuid,
+                                    RiskEntry(
+                                        timestamp_ns=seerflow_event.timestamp_ns,
+                                        risk_points=ioc_alert.risk_score * 20,
+                                        source="ioc",
+                                        rule_name=ioc_alert.rule_name,
+                                        mitre_tactics=ioc_alert.mitre_tactics,
+                                        mitre_techniques=ioc_alert.mitre_techniques,
+                                    ),
+                                )
+                                _ioc_counters.risk_register_updates_total += 1
                         else:
                             _ioc_counters.alerts_deduped_total += 1
                     except Exception:

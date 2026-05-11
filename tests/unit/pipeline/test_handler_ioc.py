@@ -134,6 +134,36 @@ async def test_handler_skips_when_matcher_none() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handler_feeds_risk_register_on_new_ioc_alert() -> None:
+    storage = MagicMock()
+    storage.write_alert = AsyncMock(return_value=True)
+    storage.write_events = AsyncMock()
+    storage.write_templates = AsyncMock()
+    storage.write_edge = AsyncMock()
+
+    risk_register = MagicMock()
+    risk_register.check_threshold = MagicMock(return_value=False)
+    risk_register.get_risk = MagicMock(return_value=0.0)
+    counters = _IoCEnrichmentCounters()
+
+    handler = make_handler(
+        ensemble=_ensemble_mock(),
+        storage=storage,
+        ioc_matcher=_FakeMatcher(matches=(_seed_match(),)),
+        ioc_enrichment_counters=counters,
+        risk_register=risk_register,
+    )
+
+    await handler(_raw_event())
+
+    risk_register.add_risk.assert_called_once()
+    args = risk_register.add_risk.call_args.args
+    assert args[1].source == "ioc"
+    assert args[1].risk_points == pytest.approx(0.75 * 20)
+    assert counters.risk_register_updates_total == 1
+
+
+@pytest.mark.asyncio
 async def test_handler_skips_when_dedup_returns_false() -> None:
     storage = MagicMock()
     storage.write_alert = AsyncMock(return_value=False)  # dedup hit
