@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.threat_intel.enricher import _IoCEnrichmentCounters
+    from seerflow.threat_intel.matcher import IoCMatcher
     from seerflow.ueba.baseline import EntityBaseline, EntityType
     from seerflow.ueba.engine import UEBAEngine
     from seerflow.ueba.store import BaselineStore
@@ -84,6 +86,8 @@ def make_handler(
     baseline_store: BaselineStore | None = None,
     ueba_engine: UEBAEngine | None = None,
     ueba_alert_cooldown_ns: int = 900_000_000_000,
+    ioc_matcher: IoCMatcher | None = None,
+    ioc_enrichment_counters: _IoCEnrichmentCounters | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -92,6 +96,11 @@ def make_handler(
     from seerflow.models.entity import resolve_entities, sanitize_for_log
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
+    from seerflow.threat_intel.enricher import (
+        IoCAlertBuilder,
+        _clamp_confidence,
+        _IoCEnrichmentCounters,
+    )
 
     _alerting = alerting_config if alerting_config is not None else _AlertingConfig()
     normalizer = EventNormalizer()
@@ -101,6 +110,13 @@ def make_handler(
     start_time = time.time()
     last_save_ns = time.time_ns()
     risk_alerted: set[str] = set()  # entities that already fired a risk alert
+
+    _ioc_builder = IoCAlertBuilder() if ioc_matcher is not None else None
+    _ioc_counters = (
+        ioc_enrichment_counters
+        if ioc_enrichment_counters is not None
+        else _IoCEnrichmentCounters()
+    )
 
     async def _feed_kill_chain(alert: Alert) -> None:
         """Feed an alert to the kill-chain tracker and write any resulting alerts."""
@@ -231,6 +247,60 @@ def make_handler(
                     await _feed_kill_chain(ueba_alert)
                 except Exception:
                     _log.warning("UEBA alert write failed", exc_info=True)
+
+        # ── IoC threat-intel enrichment (S-069) ────────────────────────
+        if _ioc_builder is not None and ioc_matcher is not None and entity_refs:
+            ioc_matches = ioc_matcher.check_event(seerflow_event)
+            if ioc_matches:
+                for _m in ioc_matches:
+                    uid, val, etype = _ioc_builder.select_entity_uuid(
+                        seerflow_event,
+                        _m,
+                        entity_refs,
+                        typed_for_edges,
+                    )
+                    if not uid:
+                        _ioc_counters.dropped_entity_uuid_lookups_total += 1
+                        continue
+                    try:
+                        ioc_alert = _ioc_builder.build_alert(
+                            _m,
+                            seerflow_event,
+                            entity_uuid=uid,
+                            entity_value=val,
+                            entity_type=etype,
+                        )
+                        is_new = await storage.write_alert(
+                            ioc_alert,
+                            dedup_window_ns=_dedup_window_ns(
+                                ioc_alert.rule_name, _alerting
+                            ),
+                        )
+                        if is_new:
+                            _ioc_counters.alerts_emitted_total += 1
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(ioc_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(ioc_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(ioc_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(ioc_alert)
+                            await _feed_kill_chain(ioc_alert)
+                        else:
+                            _ioc_counters.alerts_deduped_total += 1
+                    except Exception:
+                        _log.warning("IoC alert write failed", exc_info=True)
+                # Enrich the event after all alerts; one msgspec.replace call.
+                max_conf = max(
+                    _clamp_confidence(_m.indicator.confidence) for _m in ioc_matches
+                )
+                new_attrs = _ioc_builder.enriched_attributes(seerflow_event, ioc_matches)
+                seerflow_event = msgspec.structs.replace(
+                    seerflow_event,
+                    attributes=new_attrs,
+                    risk_score=max(seerflow_event.risk_score, max_conf / 100.0),
+                )
 
         # Advance watermark and check for late events
         if watermark is not None:
