@@ -248,7 +248,7 @@ class IoCAlertBuilder:
             alert_type="ioc",
             timestamp_ns=event.timestamp_ns,
             severity_id=SeverityLevel(severity),
-            rule_name=f"ti:{ind.source_feed}",
+            rule_name=f"ti:{safe_feed}",
             description=description,
             entity_uuid=entity_uuid,
             entity_value=entity_value,
