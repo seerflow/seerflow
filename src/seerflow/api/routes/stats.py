@@ -75,6 +75,7 @@ async def get_stats(
     model_count = 0
     taxii_payload: dict[str, dict[str, Any]] | None = None
     ioc_matcher_payload: dict[str, object] | None = None
+    ioc_enrichment_payload: dict[str, object] | None = None
 
     if metrics_provider is not None:
         try:
@@ -93,6 +94,8 @@ async def get_stats(
                 }
             if snapshot.ioc_matcher is not None:
                 ioc_matcher_payload = msgspec.to_builtins(snapshot.ioc_matcher)
+            if snapshot.ioc_enrichment is not None:
+                ioc_enrichment_payload = msgspec.to_builtins(snapshot.ioc_enrichment)
         except Exception:
             # Provider failure must not 500 the endpoint; degrade to zero fields.
             _log.warning("pipeline metrics provider failed", exc_info=True)
@@ -109,4 +112,5 @@ async def get_stats(
         model_count=model_count,
         taxii=taxii_payload,
         ioc_matcher=ioc_matcher_payload,
+        ioc_enrichment=ioc_enrichment_payload,
     )

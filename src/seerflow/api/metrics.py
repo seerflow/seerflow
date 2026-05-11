@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from seerflow.threat_intel.enricher import (
+        IoCEnrichmentMetrics,
+        _IoCEnrichmentCounters,
+    )
     from seerflow.threat_intel.matcher import IoCMatcher, IoCMatcherMetrics
     from seerflow.threat_intel.metrics import (
         TAXIIMetricsAggregate,
@@ -35,6 +39,7 @@ class PipelineMetrics:
     model_count: int
     taxii: TAXIIMetricsAggregate | None = None
     ioc_matcher: IoCMatcherMetrics | None = None
+    ioc_enrichment: IoCEnrichmentMetrics | None = None
 
 
 MetricsProvider = Callable[[], PipelineMetrics]
@@ -49,6 +54,7 @@ def build_pipeline_metrics_provider(
     started_monotonic: float,
     taxii_registry: TAXIIMetricsRegistry | None = None,
     ioc_matcher: IoCMatcher | None = None,
+    ioc_enrichment_counters: _IoCEnrichmentCounters | None = None,
 ) -> MetricsProvider:
     """Return a zero-arg callable that yields a fresh PipelineMetrics.
 
@@ -79,6 +85,11 @@ def build_pipeline_metrics_provider(
         if taxii_registry is not None:
             taxii = taxii_registry.aggregate()
         ioc_metrics = ioc_matcher.metrics_snapshot() if ioc_matcher is not None else None
+        ioc_enrichment = (
+            ioc_enrichment_counters.snapshot()
+            if ioc_enrichment_counters is not None
+            else None
+        )
         return PipelineMetrics(
             started_monotonic=started_monotonic,
             total_events_processed=event_count,
@@ -86,6 +97,7 @@ def build_pipeline_metrics_provider(
             model_count=active * _DETECTORS_PER_SOURCE,
             taxii=taxii,
             ioc_matcher=ioc_metrics,
+            ioc_enrichment=ioc_enrichment,
         )
 
     return _provider

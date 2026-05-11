@@ -24,6 +24,7 @@ from seerflow.pipeline import build_pipeline
 from seerflow.pipeline.handler import make_handler
 from seerflow.storage import connect_storage
 from seerflow.threat_intel import IoCMatcher, TAXIIFeedManager
+from seerflow.threat_intel.enricher import _IoCEnrichmentCounters
 from seerflow.ueba.engine import UEBAEngine
 from seerflow.ueba.store import BaselineStore
 from seerflow.web import DEFAULT_DIST
@@ -295,6 +296,9 @@ async def _run_with_config(
         )
         taxii_manager.register_snapshot_listener(ioc_matcher.on_snapshot_updated)
         await ioc_matcher.start()
+    ioc_enrichment_counters = (
+        _IoCEnrichmentCounters() if ioc_matcher is not None else None
+    )
     taxii_failed = await taxii_manager.start()
     if taxii_failed:
         _log.warning(
@@ -648,6 +652,8 @@ async def _run_with_config(
         ueba_engine=ueba_engine,
         ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
         ws_manager=ws_manager,
+        ioc_matcher=ioc_matcher,
+        ioc_enrichment_counters=ioc_enrichment_counters,
     )
     # Wire the live pipeline metrics provider for /api/v1/stats (S-067 ext).
     # ``taxii_registry`` is supplied so the route can surface per-feed counters
@@ -661,6 +667,7 @@ async def _run_with_config(
         time.monotonic(),
         taxii_registry=taxii_manager.metrics,
         ioc_matcher=ioc_matcher,
+        ioc_enrichment_counters=ioc_enrichment_counters,
     )
     # Run pipeline + uvicorn server as sibling tasks (S-217). The first
     # to complete (or fail) wakes the wait so we can drain both cleanly.

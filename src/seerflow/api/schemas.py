@@ -167,6 +167,10 @@ class StatsResponse(BaseModel):
     # or no metrics provider is wired. Serialised ``IoCMatcherMetrics``
     # dataclass (see seerflow.threat_intel.matcher).
     ioc_matcher: dict[str, object] | None = None
+    # IoC enrichment counters (S-069). ``None`` when the matcher is disabled
+    # or no metrics provider is wired. Serialised ``IoCEnrichmentMetrics``
+    # struct (see seerflow.threat_intel.enricher).
+    ioc_enrichment: dict[str, object] | None = None
 
 
 class FeedbackRequest(BaseModel):
