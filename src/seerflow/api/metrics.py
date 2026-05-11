@@ -86,9 +86,7 @@ def build_pipeline_metrics_provider(
             taxii = taxii_registry.aggregate()
         ioc_metrics = ioc_matcher.metrics_snapshot() if ioc_matcher is not None else None
         ioc_enrichment = (
-            ioc_enrichment_counters.snapshot()
-            if ioc_enrichment_counters is not None
-            else None
+            ioc_enrichment_counters.snapshot() if ioc_enrichment_counters is not None else None
         )
         return PipelineMetrics(
             started_monotonic=started_monotonic,

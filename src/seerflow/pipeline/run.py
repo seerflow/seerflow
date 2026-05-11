@@ -296,9 +296,7 @@ async def _run_with_config(
         )
         taxii_manager.register_snapshot_listener(ioc_matcher.on_snapshot_updated)
         await ioc_matcher.start()
-    ioc_enrichment_counters = (
-        _IoCEnrichmentCounters() if ioc_matcher is not None else None
-    )
+    ioc_enrichment_counters = _IoCEnrichmentCounters() if ioc_matcher is not None else None
     taxii_failed = await taxii_manager.start()
     if taxii_failed:
         _log.warning(

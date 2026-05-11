@@ -272,9 +272,7 @@ def make_handler(
                         )
                         is_new = await storage.write_alert(
                             ioc_alert,
-                            dedup_window_ns=_dedup_window_ns(
-                                ioc_alert.rule_name, _alerting
-                            ),
+                            dedup_window_ns=_dedup_window_ns(ioc_alert.rule_name, _alerting),
                         )
                         if is_new:
                             _ioc_counters.alerts_emitted_total += 1
@@ -307,9 +305,7 @@ def make_handler(
                     except Exception:
                         _log.warning("IoC alert write failed", exc_info=True)
                 # Enrich the event after all alerts; one msgspec.replace call.
-                max_conf = max(
-                    _clamp_confidence(_m.indicator.confidence) for _m in ioc_matches
-                )
+                max_conf = max(_clamp_confidence(_m.indicator.confidence) for _m in ioc_matches)
                 new_attrs = _ioc_builder.enriched_attributes(seerflow_event, ioc_matches)
                 seerflow_event = msgspec.structs.replace(
                     seerflow_event,

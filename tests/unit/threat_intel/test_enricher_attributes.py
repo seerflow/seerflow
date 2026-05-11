@@ -79,9 +79,7 @@ class TestEnrichedAttributes:
         out = IoCAlertBuilder().enriched_attributes(e, [m])
         msgspec.json.encode(out)  # raises on non-serialisable values
 
-    def test_caps_at_max_entries_and_logs_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_caps_at_max_entries_and_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         e = _evt()
         eid = str(e.event_id)
         many = [_match(eid, value=f"10.0.0.{i}") for i in range(IOC_MATCHES_MAX_ENTRIES + 5)]

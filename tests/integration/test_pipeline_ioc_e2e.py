@@ -59,9 +59,7 @@ async def test_ioc_match_produces_alert_and_enriches_event(tmp_path: Path) -> No
         ti_cfg = ThreatIntelConfig(
             enabled=True,
             matcher=IoCMatcherConfig(enabled=True, rebuild_debounce_ms=10),
-            feeds=(
-                TAXIIFeedConfig(id=feed_id, url="https://x", collection_id="c"),
-            ),
+            feeds=(TAXIIFeedConfig(id=feed_id, url="https://x", collection_id="c"),),
         )
         matcher = IoCMatcher(config=ti_cfg, model_store=storage)
         await matcher.start()

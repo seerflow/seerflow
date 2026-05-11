@@ -14,17 +14,21 @@ from __future__ import annotations
 
 import logging
 import uuid as _uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import msgspec
 
-from seerflow.models._types import EntityType
 from seerflow.models.alert import Alert
 from seerflow.models.entity import infer_entity_type
-from seerflow.models.event import SeerflowEvent, SeverityLevel
-from seerflow.models.ioc_match import IoCMatch
+from seerflow.models.event import SeverityLevel
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from seerflow.models._types import EntityType
+    from seerflow.models.event import SeerflowEvent
+    from seerflow.models.ioc_match import IoCMatch
 
 _log = logging.getLogger("seerflow")
 
@@ -71,7 +75,7 @@ def _stix_phases_to_tactics(phases: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _clamp_confidence(raw: int) -> int:
-    """Clamp STIX 2.1 confidence (declared 0–100) into the documented range.
+    """Clamp STIX 2.1 confidence (declared 0-100) into the documented range.
 
     Feed implementations occasionally emit negative or > 100 values; the
     matcher does not pre-validate this, so we clamp at the boundary where
@@ -85,7 +89,7 @@ def _clamp_confidence(raw: int) -> int:
 
 
 def _severity_for_confidence(confidence: int) -> int:
-    """Map STIX confidence (0–100) to Seerflow ``SeverityLevel`` integer.
+    """Map STIX confidence (0-100) to Seerflow ``SeverityLevel`` integer.
 
     Bands are intentionally conservative — see story S-069 brainstorm
     notes for the SOC-noise rationale (STIX's High band starting at 50
@@ -105,10 +109,7 @@ def _severity_for_confidence(confidence: int) -> int:
 
 
 def _alert_uuid5(event: SeerflowEvent, match: IoCMatch, entity_uuid: str) -> str:
-    seed = (
-        f"ioc:{match.type}:{match.value}:{entity_uuid}:"
-        f"{event.timestamp_ns}:{event.source_type}"
-    )
+    seed = f"ioc:{match.type}:{match.value}:{entity_uuid}:{event.timestamp_ns}:{event.source_type}"
     return str(_uuid.uuid5(_uuid.NAMESPACE_DNS, seed))
 
 
