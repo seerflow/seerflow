@@ -33,6 +33,10 @@ class EventResponse(BaseModel):
     message: str
     template_id: int
     entity_refs: list[str] = Field(default_factory=list)
+    # IoC enrichment (S-069). ``None`` when the event has no matches; a list
+    # of summary dicts otherwise — see ``_ioc_match_payload`` in
+    # seerflow.threat_intel.enricher for the canonical shape.
+    ioc_matches: list[dict[str, Any]] | None = None
 
     @field_serializer("timestamp_ns", when_used="json")
     def _serialize_timestamp_ns(self, v: int) -> str:
@@ -47,6 +51,8 @@ class EventResponse(BaseModel):
     @classmethod
     def from_event(cls, event: SeerflowEvent) -> EventResponse:
         """Convert a msgspec SeerflowEvent to a Pydantic response model."""
+        raw = event.attributes.get("ioc_matches") if event.attributes else None
+        ioc_matches = list(raw) if isinstance(raw, list) and raw else None
         return cls(
             event_id=str(event.event_id),
             timestamp_ns=event.timestamp_ns,
@@ -57,6 +63,7 @@ class EventResponse(BaseModel):
             message=event.message,
             template_id=event.template_id,
             entity_refs=list(event.entity_refs),
+            ioc_matches=ioc_matches,
         )
 
 
