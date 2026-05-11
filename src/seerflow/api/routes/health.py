@@ -24,7 +24,17 @@ from seerflow.api.schemas import HealthResponse
 
 router = APIRouter(tags=["system"])
 
-_HEALTHY_VALUES = frozenset({"running", "connected", "ok"})
+_HEALTHY_VALUES = frozenset(
+    {
+        "running",
+        "connected",
+        "ok",
+        "ready",
+        # S-070: intentional absence of an optional component (e.g. LLM not
+        # configured) is healthy. Only "degraded" maps to HTTP 503.
+        "disabled",
+    }
+)
 
 HealthState = Annotated[dict[str, str], Depends(get_health_state)]
 Engines = Annotated[DetectionEngines, Depends(get_engines)]

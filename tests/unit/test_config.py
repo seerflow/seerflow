@@ -1618,3 +1618,165 @@ class TestDspotThresholdCapMultiplier:
         )
         with pytest.raises(ConfigError, match="threshold_cap_multiplier"):
             load_config(str(yaml_path))
+
+
+class TestLLMConfig:
+    """``LLMConfig`` + ``_build_llm`` validation (S-070)."""
+
+    def test_defaults_apply_when_no_block(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.backend == ""
+        assert config.llm.model_path == ""
+        assert config.llm.n_ctx == 4096
+        assert config.llm.n_threads is None
+        assert config.llm.n_gpu_layers == 0
+        assert config.llm.max_tokens_default == 256
+        assert config.llm.temperature_default == pytest.approx(0.2)
+        assert config.llm.seed == 42
+
+    def test_full_block_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  backend: llama_cpp\n"
+            "  model_path: /models/phi4.gguf\n"
+            "  n_ctx: 2048\n"
+            "  n_threads: 3\n"
+            "  n_gpu_layers: 1\n"
+            "  max_tokens_default: 512\n"
+            "  temperature_default: 0.7\n"
+            "  seed: 7\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.backend == "llama_cpp"
+        assert config.llm.model_path == "/models/phi4.gguf"
+        assert config.llm.n_ctx == 2048
+        assert config.llm.n_threads == 3
+        assert config.llm.n_gpu_layers == 1
+        assert config.llm.max_tokens_default == 512
+        assert config.llm.temperature_default == pytest.approx(0.7)
+        assert config.llm.seed == 7
+
+    def test_unknown_backend_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  backend: garbage\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.backend"):
+            load_config(str(yaml_path))
+
+    def test_backend_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  backend: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.backend"):
+            load_config(str(yaml_path))
+
+    def test_model_path_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  model_path: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.model_path"):
+            load_config(str(yaml_path))
+
+    def test_ollama_url_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_url: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.ollama_url"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [128, 511, 32769, 999999])
+    def test_n_ctx_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  n_ctx: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_ctx"):
+            load_config(str(yaml_path))
+
+    def test_n_ctx_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_ctx: 'big'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_ctx"):
+            load_config(str(yaml_path))
+
+    def test_n_ctx_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_ctx: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_ctx"):
+            load_config(str(yaml_path))
+
+    def test_n_threads_zero_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_threads: 0\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_threads"):
+            load_config(str(yaml_path))
+
+    def test_n_threads_negative_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_threads: -1\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_threads"):
+            load_config(str(yaml_path))
+
+    def test_n_threads_null_accepted(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_threads: null\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.n_threads is None
+
+    def test_n_gpu_layers_negative_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_gpu_layers: -1\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_gpu_layers"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 1025, 999999])
+    def test_max_tokens_default_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  max_tokens_default: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.max_tokens_default"):
+            load_config(str(yaml_path))
+
+    def test_max_tokens_default_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  max_tokens_default: 'lots'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.max_tokens_default"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [-0.1, 2.0001, 10.0])
+    def test_temperature_default_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  temperature_default: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.temperature_default"):
+            load_config(str(yaml_path))
+
+    def test_temperature_default_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: 'hot'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.temperature_default"):
+            load_config(str(yaml_path))
+
+    def test_temperature_default_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.temperature_default"):
+            load_config(str(yaml_path))
+
+    def test_temperature_default_zero_accepted(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: 0.0\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.temperature_default == pytest.approx(0.0)
+
+    def test_temperature_default_integer_coerced(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: 1\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.temperature_default == pytest.approx(1.0)
+
+    def test_seed_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  seed: 'random'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.seed"):
+            load_config(str(yaml_path))
+
+    def test_seed_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  seed: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.seed"):
+            load_config(str(yaml_path))

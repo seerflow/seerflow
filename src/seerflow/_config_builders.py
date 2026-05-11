@@ -887,11 +887,95 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     )
 
 
+_VALID_LLM_BACKENDS: frozenset[str] = frozenset({"", "llama_cpp", "ollama", "cloud"})
+
+_LLAMA_CPP_MAX_TOKENS_CAP = 1024  # mirrors LLAMA_CPP_MAX_TOKENS_HARD_CAP
+
+
 def _build_llm(data: dict[str, Any]) -> LLMConfig:
+    """Build and validate the ``llm:`` block (S-070).
+
+    All numeric fields are validated even when ``backend != "llama_cpp"`` —
+    a typo'd ``n_ctx`` on an otherwise-disabled config should still surface,
+    and future backends may reuse the fields.
+    """
+    backend = data.get("backend", "")
+    if not isinstance(backend, str):
+        raise ConfigError(f"llm.backend must be a string, got {type(backend).__name__}")
+    if backend not in _VALID_LLM_BACKENDS:
+        raise ConfigError(
+            "llm.backend must be one of "
+            f"{sorted(b for b in _VALID_LLM_BACKENDS if b)}, got {backend!r}"
+        )
+
+    model_path = data.get("model_path", "")
+    if not isinstance(model_path, str):
+        raise ConfigError(f"llm.model_path must be a string, got {type(model_path).__name__}")
+
+    ollama_url = data.get("ollama_url", "http://localhost:11434")
+    if not isinstance(ollama_url, str):
+        raise ConfigError(f"llm.ollama_url must be a string, got {type(ollama_url).__name__}")
+
+    n_ctx = data.get("n_ctx", 4096)
+    if not isinstance(n_ctx, int) or isinstance(n_ctx, bool):
+        raise ConfigError(f"llm.n_ctx must be an integer, got {type(n_ctx).__name__}")
+    if not 512 <= n_ctx <= 32768:
+        raise ConfigError(f"llm.n_ctx must be in [512, 32768], got {n_ctx!r}")
+
+    n_threads_raw = data.get("n_threads")
+    n_threads: int | None
+    if n_threads_raw is None:
+        n_threads = None
+    else:
+        if (
+            not isinstance(n_threads_raw, int)
+            or isinstance(n_threads_raw, bool)
+            or n_threads_raw < 1
+        ):
+            raise ConfigError(
+                f"llm.n_threads must be null or an integer >= 1, got {n_threads_raw!r}"
+            )
+        n_threads = n_threads_raw
+
+    n_gpu_layers = data.get("n_gpu_layers", 0)
+    if not isinstance(n_gpu_layers, int) or isinstance(n_gpu_layers, bool) or n_gpu_layers < 0:
+        raise ConfigError(f"llm.n_gpu_layers must be an integer >= 0, got {n_gpu_layers!r}")
+
+    max_tokens_default = data.get("max_tokens_default", 256)
+    if not isinstance(max_tokens_default, int) or isinstance(max_tokens_default, bool):
+        raise ConfigError(
+            f"llm.max_tokens_default must be an integer, got {type(max_tokens_default).__name__}"
+        )
+    if not 1 <= max_tokens_default <= _LLAMA_CPP_MAX_TOKENS_CAP:
+        raise ConfigError(
+            "llm.max_tokens_default must be in "
+            f"[1, {_LLAMA_CPP_MAX_TOKENS_CAP}], got {max_tokens_default!r}"
+        )
+
+    temperature_default = data.get("temperature_default", 0.2)
+    if isinstance(temperature_default, bool) or not isinstance(temperature_default, (int, float)):
+        raise ConfigError(
+            f"llm.temperature_default must be a number, got {type(temperature_default).__name__}"
+        )
+    if not 0.0 <= float(temperature_default) <= 2.0:
+        raise ConfigError(
+            f"llm.temperature_default must be in [0.0, 2.0], got {temperature_default!r}"
+        )
+
+    seed = data.get("seed", 42)
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ConfigError(f"llm.seed must be an integer, got {type(seed).__name__}")
+
     return LLMConfig(
-        backend=data.get("backend", ""),
-        model_path=data.get("model_path", ""),
-        ollama_url=data.get("ollama_url", "http://localhost:11434"),
+        backend=backend,
+        model_path=model_path,
+        ollama_url=ollama_url,
+        n_ctx=n_ctx,
+        n_threads=n_threads,
+        n_gpu_layers=n_gpu_layers,
+        max_tokens_default=max_tokens_default,
+        temperature_default=float(temperature_default),
+        seed=seed,
     )
 
 

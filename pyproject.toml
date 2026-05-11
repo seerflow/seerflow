@@ -51,6 +51,11 @@ dependencies = [
 
 [project.optional-dependencies]
 redis = ["redis>=5.0"]
+# S-070: local CPU LLM inference via llama-cpp-python. Optional because the
+# wheel is platform-specific and ~50 MB; operators who do not configure an
+# LLM backend never need to install it. ``build_llm_backend`` degrades
+# gracefully when the import fails.
+llm-cpu = ["llama-cpp-python>=0.3.0"]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
