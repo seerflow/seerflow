@@ -13,12 +13,14 @@ for the rationale.
 from __future__ import annotations
 
 import logging
+import uuid as _uuid
 from collections.abc import Sequence
 from typing import Any, Final
 
 from seerflow.models._types import EntityType
+from seerflow.models.alert import Alert
 from seerflow.models.entity import infer_entity_type
-from seerflow.models.event import SeerflowEvent
+from seerflow.models.event import SeerflowEvent, SeverityLevel
 from seerflow.models.ioc_match import IoCMatch
 
 _log = logging.getLogger("seerflow")
@@ -99,6 +101,14 @@ def _severity_for_confidence(confidence: int) -> int:
     return 5
 
 
+def _alert_uuid5(event: SeerflowEvent, match: IoCMatch, entity_uuid: str) -> str:
+    seed = (
+        f"ioc:{match.type}:{match.value}:{entity_uuid}:"
+        f"{event.timestamp_ns}:{event.source_type}"
+    )
+    return str(_uuid.uuid5(_uuid.NAMESPACE_DNS, seed))
+
+
 def _ioc_match_payload(match: IoCMatch) -> dict[str, Any]:
     ind = match.indicator
     return {
@@ -165,3 +175,42 @@ class IoCAlertBuilder:
                     return (uid, match.value, label)
                 seen += 1
         return ("", match.value, label)
+
+    def build_alert(
+        self,
+        match: IoCMatch,
+        event: SeerflowEvent,
+        *,
+        entity_uuid: str,
+        entity_value: str,
+        entity_type: EntityType,
+    ) -> Alert:
+        if match.event_id != str(event.event_id):
+            raise ValueError(
+                f"event_id mismatch: match={match.event_id!r} event={event.event_id!r}"
+            )
+        ind = match.indicator
+        clamped = _clamp_confidence(ind.confidence)
+        tactics = _stix_phases_to_tactics(ind.kill_chain_phases)
+        risk = clamped / 100.0
+        severity = _severity_for_confidence(clamped)
+        description = (
+            f"Threat-intel match: {match.value} ({match.type}) "
+            f"from {ind.source_feed} confidence={clamped}"
+        )
+        return Alert(
+            alert_id=_alert_uuid5(event, match, entity_uuid),
+            alert_type="ioc",
+            timestamp_ns=event.timestamp_ns,
+            severity_id=SeverityLevel(severity),
+            rule_name=f"ti:{ind.source_feed}",
+            description=description,
+            entity_uuid=entity_uuid,
+            entity_value=entity_value,
+            entity_type=entity_type,
+            contributing_events=(event.event_id,),
+            mitre_tactics=tactics,
+            mitre_techniques=(),
+            risk_score=max(0.0, min(1.0, risk)),
+            dedup_key=f"ioc:{match.type}:{match.value}:{entity_uuid}",
+        )
