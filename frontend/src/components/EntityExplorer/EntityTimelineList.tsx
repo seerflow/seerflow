@@ -56,6 +56,16 @@ export function EntityTimelineList({ events, total, limit }: Props) {
   ) : (
     <div key={row.key} className="flex items-center gap-2 px-2 py-1.5 text-sm border-b">
       <span className="font-mono text-xs text-muted-foreground">{formatTime(row.event!.timestamp_ns)}</span>
+      {row.event!.ioc_matches && row.event!.ioc_matches.length > 0 ? (
+        <span
+          className="rounded bg-purple-700 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+          title={row.event!.ioc_matches
+            .map((m) => `${m.type}:${m.value} (${m.source_feed}, conf=${m.confidence})`)
+            .join("\n")}
+        >
+          TI
+        </span>
+      ) : null}
       <span
         className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white"
         style={{ backgroundColor: entitySourceColor(row.event!.source_type) }}

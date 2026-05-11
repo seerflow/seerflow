@@ -93,6 +93,49 @@ describe("LiveEventSchema", () => {
     expect(v.safeParse(LiveEventSchema, { ...validEvent, event_id: "a/b" }).success).toBe(false);
     expect(v.safeParse(LiveEventSchema, { ...validEvent, event_id: "" }).success).toBe(false);
   });
+
+  it("S-069: accepts ioc_matches array on events and preserves the field", () => {
+    const result = v.safeParse(LiveEventSchema, {
+      ...validEvent,
+      ioc_matches: [
+        {
+          value: "1.2.3.4",
+          type: "ipv4",
+          source_feed: "otx",
+          confidence: 75,
+          kill_chain_phases: ["command-and-control"],
+          entity_kind: "ip",
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // Schema must surface the parsed ioc_matches, not silently strip it.
+      expect(result.output.ioc_matches).toEqual([
+        {
+          value: "1.2.3.4",
+          type: "ipv4",
+          source_feed: "otx",
+          confidence: 75,
+          kill_chain_phases: ["command-and-control"],
+          entity_kind: "ip",
+        },
+      ]);
+    }
+  });
+
+  it("S-069: ioc_matches is optional", () => {
+    const result = v.safeParse(LiveEventSchema, validEvent);
+    expect(result.success).toBe(true);
+  });
+
+  it("S-069: rejects ioc_matches with wrong shape", () => {
+    const result = v.safeParse(LiveEventSchema, {
+      ...validEvent,
+      ioc_matches: [{ value: "1.2.3.4" }], // missing required fields
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("AlertSchema", () => {

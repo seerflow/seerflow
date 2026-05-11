@@ -14,8 +14,15 @@ import uuid
 
 import msgspec
 
-# Bounded type for event attribute values — terminal types only.
-AttrValue = str | int | float | bool | None
+# Bounded type for event attribute values.
+# Terminal scalars + one level of structured payloads (lists of
+# string-keyed dicts of scalars + lists-of-strings) used by enrichment
+# blocks like ``ioc_matches`` (S-069). Deeper structures must be
+# encoded by the producer.
+_AttrLeaf = str | int | float | bool | None
+_AttrStructFieldValue = _AttrLeaf | list[str]
+_AttrStruct = dict[str, _AttrStructFieldValue]
+AttrValue = _AttrLeaf | list[_AttrStruct]
 
 
 class SeverityLevel(int, enum.Enum):
