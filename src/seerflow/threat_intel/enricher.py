@@ -15,7 +15,10 @@ from __future__ import annotations
 import logging
 import uuid as _uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Final
+
+import msgspec
 
 from seerflow.models._types import EntityType
 from seerflow.models.alert import Alert
@@ -213,4 +216,31 @@ class IoCAlertBuilder:
             mitre_techniques=(),
             risk_score=max(0.0, min(1.0, risk)),
             dedup_key=f"ioc:{match.type}:{match.value}:{entity_uuid}",
+        )
+
+
+class IoCEnrichmentMetrics(msgspec.Struct, frozen=True, gc=False):
+    """Immutable snapshot of IoC enrichment counters, surfaced via /api/v1/stats."""
+
+    alerts_emitted_total: int = 0
+    alerts_deduped_total: int = 0
+    dropped_entity_uuid_lookups_total: int = 0
+    risk_register_updates_total: int = 0
+
+
+@dataclass(slots=True)
+class _IoCEnrichmentCounters:
+    """Mutable counter holder; lives in the handler closure."""
+
+    alerts_emitted_total: int = 0
+    alerts_deduped_total: int = 0
+    dropped_entity_uuid_lookups_total: int = 0
+    risk_register_updates_total: int = 0
+
+    def snapshot(self) -> IoCEnrichmentMetrics:
+        return IoCEnrichmentMetrics(
+            alerts_emitted_total=self.alerts_emitted_total,
+            alerts_deduped_total=self.alerts_deduped_total,
+            dropped_entity_uuid_lookups_total=self.dropped_entity_uuid_lookups_total,
+            risk_register_updates_total=self.risk_register_updates_total,
         )
