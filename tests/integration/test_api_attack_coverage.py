@@ -17,11 +17,18 @@ if TYPE_CHECKING:
     from seerflow.storage.sqlite import SqliteBackend
 
 
+# Anchor test alerts to "recent" (current wall clock) so they always fall
+# inside the endpoint's default 30-day window. Previously these used a
+# hard-coded 2026-04-09 timestamp which silently aged out of the window
+# once wall-clock advanced past 2026-05-09 (SEE-252).
+_FIXED_NOW_NS = time.time_ns()
+
+
 def _make_alert(i: int) -> Alert:
     return Alert(
         alert_id=f"perf-a{i}",
         alert_type="sigma",
-        timestamp_ns=1_775_736_000_000_000_000 + i,
+        timestamp_ns=_FIXED_NOW_NS + i,
         severity_id=SeverityLevel.WARNING,
         rule_name="test",
         description="",
@@ -82,7 +89,7 @@ class TestAttackCoverageIntegration:
         a_parent = Alert(
             alert_id="rollup-parent",
             alert_type="sigma",
-            timestamp_ns=1_775_736_000_000_000_000,
+            timestamp_ns=_FIXED_NOW_NS,
             severity_id=SeverityLevel.WARNING,
             rule_name="test",
             description="",
@@ -97,7 +104,7 @@ class TestAttackCoverageIntegration:
         a_sub = Alert(
             alert_id="rollup-sub",
             alert_type="sigma",
-            timestamp_ns=1_775_736_000_000_000_001,
+            timestamp_ns=_FIXED_NOW_NS + 1,
             severity_id=SeverityLevel.WARNING,
             rule_name="test",
             description="",
