@@ -114,6 +114,15 @@ export interface EntityRelation {
   relation_type: RelationType | string;
 }
 
+export interface IoCMatchSummary {
+  value: string;
+  type: string;
+  source_feed: string;
+  confidence: number;
+  kill_chain_phases: string[];
+  entity_kind: string;
+}
+
 export interface EntityEvent {
   event_id: string;
   timestamp_ns: bigint;
@@ -124,6 +133,7 @@ export interface EntityEvent {
   related_users: string[];
   related_hosts: string[];
   related_domains: string[];
+  ioc_matches?: IoCMatchSummary[];
 }
 
 export interface EntityTimelineResponse {
@@ -156,6 +166,7 @@ export interface LiveEvent {
   score?: number;
   is_anomaly?: boolean;
   upper_threshold?: number;
+  ioc_matches?: IoCMatchSummary[];
 }
 
 export interface EventFilter {

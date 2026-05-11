@@ -25,6 +25,15 @@ const BigintNsSchema = v.pipe(v.bigint(), v.check((n) => n >= 0n, "ns timestamp 
 const BoundedString = (max: number) =>
   v.pipe(v.string(), v.maxLength(max));
 
+export const IoCMatchSummarySchema = v.object({
+  value: BoundedString(256),
+  type: BoundedString(32),
+  source_feed: BoundedString(128),
+  confidence: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(100)),
+  kill_chain_phases: v.pipe(v.array(BoundedString(64)), v.maxLength(32)),
+  entity_kind: BoundedString(32),
+});
+
 const EntitySummarySchema = v.strictObject({
   ips: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
   users: v.optional(v.pipe(v.array(BoundedString(256)), v.maxLength(64))),
@@ -48,6 +57,7 @@ export const LiveEventSchema = v.object({
   score: v.optional(finite()),
   is_anomaly: v.optional(v.boolean()),
   upper_threshold: v.optional(finite()),
+  ioc_matches: v.optional(v.pipe(v.array(IoCMatchSummarySchema), v.maxLength(32))),
 });
 
 export const AlertTypeSchema = v.picklist(["ml", "sigma", "correlation", "ueba", "ioc"] as const);
