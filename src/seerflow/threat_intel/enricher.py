@@ -16,12 +16,20 @@ import logging
 from collections.abc import Sequence
 from typing import Any, Final
 
+from seerflow.models._types import EntityType
+from seerflow.models.entity import infer_entity_type
 from seerflow.models.event import SeerflowEvent
 from seerflow.models.ioc_match import IoCMatch
 
 _log = logging.getLogger("seerflow")
 
 IOC_MATCHES_MAX_ENTRIES: Final[int] = 32
+
+_KIND_TO_ENTITY_SLOT: Final[dict[str, tuple[str, EntityType]]] = {
+    # entity_kind in IoCMatch -> (related_* attribute name, EntityType label)
+    "ip": ("related_ips", "ip"),
+    "domain": ("related_domains", "domain"),
+}
 
 _STIX_PHASE_TO_ATTACK_TACTIC: Final[dict[str, str]] = {
     "reconnaissance": "TA0043",
@@ -130,3 +138,30 @@ class IoCAlertBuilder:
             kept = list(matches)
         new_attrs["ioc_matches"] = [_ioc_match_payload(m) for m in kept]
         return new_attrs
+
+    def select_entity_uuid(
+        self,
+        event: SeerflowEvent,
+        match: IoCMatch,
+        entity_refs: tuple[str, ...],
+        typed_for_edges: Sequence[tuple[str, str]],
+    ) -> tuple[str, str, EntityType]:
+        slot = _KIND_TO_ENTITY_SLOT.get(match.entity_kind)
+        if slot is None:
+            # URL / hash kinds — no slot in related_*; return empty entity_uuid.
+            return ("", match.value, infer_entity_type(event))
+        attr_name, label = slot
+        raw_values = getattr(event, attr_name, ())
+        try:
+            idx = list(raw_values).index(match.value)
+        except ValueError:
+            return ("", match.value, label)
+        # typed_for_edges is built in the same order as entity_refs; walk the
+        # typed list and pick the n-th positional match for our entity label.
+        seen = 0
+        for type_name, uid in typed_for_edges:
+            if type_name == label:
+                if seen == idx:
+                    return (uid, match.value, label)
+                seen += 1
+        return ("", match.value, label)
