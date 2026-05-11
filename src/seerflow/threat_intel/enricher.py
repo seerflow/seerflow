@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Final
 import msgspec
 
 from seerflow.models.alert import Alert
-from seerflow.models.entity import infer_entity_type
+from seerflow.models.entity import infer_entity_type, sanitize_for_log
 from seerflow.models.event import SeverityLevel
 
 if TYPE_CHECKING:
@@ -33,6 +33,12 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 IOC_MATCHES_MAX_ENTRIES: Final[int] = 32
+
+# Cap the indicator value length embedded in `Alert.dedup_key` so a hostile or
+# pathologically-long indicator (e.g. a ~4 KB URL) cannot inflate the unique
+# `alerts.dedup_key` TEXT index. Mirrors the front-end's 256-char wire cap with
+# headroom for the `ioc:{type}:` and `:{entity_uuid}` framing.
+_DEDUP_VALUE_MAX_LEN: Final[int] = 512
 
 _KIND_TO_ENTITY_SLOT: Final[dict[str, tuple[str, EntityType]]] = {
     # entity_kind in IoCMatch -> (related_* attribute name, EntityType label)
@@ -59,6 +65,7 @@ _STIX_PHASE_TO_ATTACK_TACTIC: Final[dict[str, str]] = {
 
 
 def _normalise_phase(raw: str) -> str:
+    """Lowercase, strip, and kebab-case a STIX kill-chain phase name."""
     return raw.strip().lower().replace("_", "-")
 
 
@@ -109,11 +116,17 @@ def _severity_for_confidence(confidence: int) -> int:
 
 
 def _alert_uuid5(event: SeerflowEvent, match: IoCMatch, entity_uuid: str) -> str:
+    """Derive a deterministic UUID5 alert_id seeded by (type, value, entity, ts, source)."""
     seed = f"ioc:{match.type}:{match.value}:{entity_uuid}:{event.timestamp_ns}:{event.source_type}"
     return str(_uuid.uuid5(_uuid.NAMESPACE_DNS, seed))
 
 
 def _ioc_match_payload(match: IoCMatch) -> dict[str, Any]:
+    """Serialise an ``IoCMatch`` into the JSON-safe shape stored under
+    ``SeerflowEvent.attributes['ioc_matches']`` and re-emitted by
+    ``EventResponse.ioc_matches``. Only the six documented fields are kept;
+    no `entity_uuid` is included by design (a match may have no linkable
+    entity — see ``IoCAlertBuilder.select_entity_uuid``)."""
     ind = match.indicator
     return {
         "value": match.value,
@@ -137,6 +150,9 @@ class IoCAlertBuilder:
         event: SeerflowEvent,
         matches: Sequence[IoCMatch],
     ) -> dict[str, Any]:
+        """Return a fresh ``attributes`` dict for *event* with an
+        ``ioc_matches`` payload appended. Never mutates the input event.
+        Caps the payload to ``IOC_MATCHES_MAX_ENTRIES`` and logs WARNING."""
         new_attrs: dict[str, Any] = dict(event.attributes)
         if not matches:
             return new_attrs
@@ -147,9 +163,9 @@ class IoCAlertBuilder:
                 len(matches),
                 IOC_MATCHES_MAX_ENTRIES,
             )
-            kept = list(matches)[:IOC_MATCHES_MAX_ENTRIES]
+            kept: Sequence[IoCMatch] = matches[:IOC_MATCHES_MAX_ENTRIES]
         else:
-            kept = list(matches)
+            kept = matches
         new_attrs["ioc_matches"] = [_ioc_match_payload(m) for m in kept]
         return new_attrs
 
@@ -160,6 +176,18 @@ class IoCAlertBuilder:
         entity_refs: tuple[str, ...],
         typed_for_edges: Sequence[tuple[str, str]],
     ) -> tuple[str, str, EntityType]:
+        """Resolve the entity UUID for *match* using positional alignment.
+
+        Pre-condition: ``typed_for_edges`` is co-indexed with ``entity_refs``
+        (both built in the same single-pass loop in ``pipeline.handler``).
+        For ``entity_kind ∈ {"ip", "domain"}`` the match's ``value`` is
+        looked up in the matching ``event.related_*`` tuple to find its
+        index, then the n-th typed entry of the same label is returned.
+
+        Returns ``("", value, label)`` when no positional match is found
+        (URL / hash kinds, or value missing from the related-tuple — the
+        caller increments ``dropped_entity_uuid_lookups_total``).
+        """
         slot = _KIND_TO_ENTITY_SLOT.get(match.entity_kind)
         if slot is None:
             # URL / hash kinds — no slot in related_*; return empty entity_uuid.
@@ -198,10 +226,23 @@ class IoCAlertBuilder:
         tactics = _stix_phases_to_tactics(ind.kill_chain_phases)
         risk = clamped / 100.0
         severity = _severity_for_confidence(clamped)
+        # Sanitize feed-controlled strings before they reach the alert
+        # description: indicator values flow into log lines and downstream
+        # sink payloads (PagerDuty / OTLP / WS), and a hostile feed could
+        # otherwise embed CR / LF / ANSI sequences that corrupt log
+        # aggregators or terminal output. Same defence already applied to
+        # related-entity logging in ``pipeline/handler.py``.
+        safe_value = sanitize_for_log(match.value)
+        safe_type = sanitize_for_log(match.type)
+        safe_feed = sanitize_for_log(ind.source_feed)
         description = (
-            f"Threat-intel match: {match.value} ({match.type}) "
-            f"from {ind.source_feed} confidence={clamped}"
+            f"Threat-intel match: {safe_value} ({safe_type}) from {safe_feed} confidence={clamped}"
         )
+        # Cap the value embedded in the dedup key so a pathologically long
+        # indicator value (e.g. a 4 KB URL) cannot bloat the unique
+        # `alerts.dedup_key` TEXT index. 512 chars leaves headroom for the
+        # framing while staying well below SQLite's row-size limits.
+        dedup_value = match.value[:_DEDUP_VALUE_MAX_LEN]
         return Alert(
             alert_id=_alert_uuid5(event, match, entity_uuid),
             alert_type="ioc",
@@ -216,7 +257,7 @@ class IoCAlertBuilder:
             mitre_tactics=tactics,
             mitre_techniques=(),
             risk_score=max(0.0, min(1.0, risk)),
-            dedup_key=f"ioc:{match.type}:{match.value}:{entity_uuid}",
+            dedup_key=f"ioc:{match.type}:{dedup_value}:{entity_uuid}",
         )
 
 

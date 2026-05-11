@@ -314,6 +314,10 @@ def make_handler(
                 )
 
         # Advance watermark and check for late events
+        # Note: from here on, `seerflow_event` may carry `attributes["ioc_matches"]`
+        # and a bumped `risk_score` from the S-069 IoC enrichment block above.
+        # Downstream consumers (window buffer, correlation, WS broadcast,
+        # storage write) all see the enriched event.
         if watermark is not None:
             watermark.advance(seerflow_event.timestamp_ns)
 
