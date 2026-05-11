@@ -13,6 +13,7 @@ const mk = (o: Partial<EntityEvent> = {}): EntityEvent => ({
   related_users: o.related_users ?? [],
   related_hosts: o.related_hosts ?? [],
   related_domains: o.related_domains ?? [],
+  ...(o.ioc_matches !== undefined ? { ioc_matches: o.ioc_matches } : {}),
 });
 
 describe("EntityTimelineList", () => {
@@ -57,6 +58,29 @@ describe("EntityTimelineList", () => {
     const virtContainer = container.querySelector('div[style*="position: relative"]');
     expect(virtContainer).not.toBeNull();
     expect((virtContainer as HTMLElement).style.height).toMatch(/\d+px/);
+  });
+
+  it("S-069: renders TI badge when event has ioc_matches", () => {
+    const evt = mk({
+      ioc_matches: [
+        {
+          value: "1.2.3.4",
+          type: "ipv4",
+          source_feed: "otx",
+          confidence: 75,
+          kill_chain_phases: ["impact"],
+          entity_kind: "ip",
+        },
+      ],
+    });
+    render(<EntityTimelineList events={[evt]} total={1} limit={100} />);
+    expect(screen.getByText("TI")).toBeInTheDocument();
+  });
+
+  it("S-069: does not render TI badge when ioc_matches absent or empty", () => {
+    const evt = mk({});
+    render(<EntityTimelineList events={[evt]} total={1} limit={100} />);
+    expect(screen.queryByText("TI")).not.toBeInTheDocument();
   });
 
   it("renders boundary timestamp_ns above 2^53 without precision loss (S-199 AC-7)", () => {
