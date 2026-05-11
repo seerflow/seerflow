@@ -12,7 +12,16 @@ for the rationale.
 
 from __future__ import annotations
 
-from typing import Final
+import logging
+from collections.abc import Sequence
+from typing import Any, Final
+
+from seerflow.models.event import SeerflowEvent
+from seerflow.models.ioc_match import IoCMatch
+
+_log = logging.getLogger("seerflow")
+
+IOC_MATCHES_MAX_ENTRIES: Final[int] = 32
 
 _STIX_PHASE_TO_ATTACK_TACTIC: Final[dict[str, str]] = {
     "reconnaissance": "TA0043",
@@ -80,3 +89,44 @@ def _severity_for_confidence(confidence: int) -> int:
     if c < 85:
         return 4
     return 5
+
+
+def _ioc_match_payload(match: IoCMatch) -> dict[str, Any]:
+    ind = match.indicator
+    return {
+        "value": match.value,
+        "type": match.type,
+        "source_feed": ind.source_feed,
+        "confidence": _clamp_confidence(ind.confidence),
+        "kill_chain_phases": list(ind.kill_chain_phases),
+        "entity_kind": match.entity_kind,
+    }
+
+
+class IoCAlertBuilder:
+    """Stateless builder for IoC alerts + enriched event attributes.
+
+    Pure-function methods only — no I/O, no shared state. Threading-safe
+    by construction.
+    """
+
+    def enriched_attributes(
+        self,
+        event: SeerflowEvent,
+        matches: Sequence[IoCMatch],
+    ) -> dict[str, Any]:
+        new_attrs: dict[str, Any] = dict(event.attributes)
+        if not matches:
+            return new_attrs
+        if len(matches) > IOC_MATCHES_MAX_ENTRIES:
+            _log.warning(
+                "ioc_matches truncated: event=%s matches=%d cap=%d",
+                event.event_id,
+                len(matches),
+                IOC_MATCHES_MAX_ENTRIES,
+            )
+            kept = list(matches)[:IOC_MATCHES_MAX_ENTRIES]
+        else:
+            kept = list(matches)
+        new_attrs["ioc_matches"] = [_ioc_match_payload(m) for m in kept]
+        return new_attrs
