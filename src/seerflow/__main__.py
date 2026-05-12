@@ -23,6 +23,16 @@ def _run_async(coro: Coroutine[Any, Any, None]) -> None:
         asyncio.run(coro)
 
 
+def _run_async_int(coro: Coroutine[Any, Any, int]) -> int:
+    """Run a coroutine returning an exit code, with uvloop fallback."""
+    try:
+        import uvloop
+
+        return uvloop.run(coro)
+    except ImportError:
+        return asyncio.run(coro)
+
+
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
@@ -62,6 +72,10 @@ def main() -> None:
             from seerflow.feedback_cmd import run_feedback
 
             _run_async(run_feedback(args))
+        elif args.command == "hunt":
+            from seerflow.hunt_cmd import run_hunt
+
+            sys.exit(_run_async_int(run_hunt(args)))
         elif args.command == "rules":
             from seerflow.rules_cmd import run_rules_list
 

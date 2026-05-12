@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from seerflow.api.metrics import MetricsProvider
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.llm.explanation.service import AlertExplanationService
+    from seerflow.llm.hunt.service import NaturalLanguageHuntService
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -133,4 +134,16 @@ def get_explanation_service(request: Request) -> AlertExplanationService | None:
     service: AlertExplanationService | None = getattr(
         request.app.state, "explanation_service", None
     )
+    return service
+
+
+def get_hunt_service(request: Request) -> NaturalLanguageHuntService | None:
+    """FastAPI Depends provider — returns the NL hunt service or None.
+
+    Returns the service stashed at ``app.state.hunt_service`` (S-072), or
+    ``None`` if the attribute is missing (LLM disabled / degraded / API
+    running without a pipeline). Callers translate ``None`` to a 503
+    response with the ``health_state["llm"]`` status.
+    """
+    service: NaturalLanguageHuntService | None = getattr(request.app.state, "hunt_service", None)
     return service

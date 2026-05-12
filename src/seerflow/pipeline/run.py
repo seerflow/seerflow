@@ -553,6 +553,24 @@ async def _run_with_config(
             baseline_store=baseline_store,
         )
 
+    # Natural language hunt service (S-072). Same construction pattern as
+    # the explanation service: only built when the LLM backend is ready;
+    # the route returns 503 otherwise.
+    from seerflow.llm.hunt import HuntCache, NaturalLanguageHuntService
+
+    hunt_service: NaturalLanguageHuntService | None = None
+    if llm_backend is not None:
+        hunt_cache = HuntCache(
+            max_entries=config.llm.hunt_cache_size,
+            ttl_seconds=config.llm.hunt_cache_ttl_s,
+        )
+        hunt_service = NaturalLanguageHuntService(
+            backend=llm_backend,
+            cache=hunt_cache,
+            cfg=config.llm,
+            log_store=storage,
+        )
+
     api_app = make_api_app(
         log_store=storage,
         alert_store=storage,
@@ -567,6 +585,7 @@ async def _run_with_config(
         health_state=health_state,
         ensemble=ensemble,
         explanation_service=explanation_service,
+        hunt_service=hunt_service,
     )
     ws_manager: ConnectionManager = api_app.state.ws_manager
     uvicorn_config = uvicorn.Config(

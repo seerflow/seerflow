@@ -14,6 +14,7 @@ from seerflow.utils.text import NOTE_MAX_LENGTH, sanitise_feedback_note
 
 if TYPE_CHECKING:
     from seerflow.llm.explanation.result import ExplanationResult
+    from seerflow.llm.hunt.result import HuntResult
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
     from seerflow.models.feedback import FeedbackEvent
@@ -148,6 +149,52 @@ class AlertExplanationResponse(BaseModel):
             anomaly_rationale=result.anomaly_rationale,
             contributing_events=list(result.contributing_events),
             recommended_next_steps=list(result.recommended_next_steps),
+            model=result.model,
+            generated_at_ns=result.generated_at_ns,
+            latency_ms=result.latency_ms,
+            cached=result.cached,
+            truncated=result.truncated,
+        )
+
+
+class NLHuntRequest(BaseModel):
+    """``POST /api/v1/hunt`` request body (S-072, FR-057).
+
+    ``query`` is the natural-language question. Validation length matches
+    the default ``hunt_max_query_chars`` on ``LLMConfig`` so over-budget
+    queries are rejected at the API boundary, before the prompt builder
+    re-validates.
+    """
+
+    query: str = Field(min_length=1, max_length=16_384)
+
+
+class NLHuntResponse(BaseModel):
+    """``POST /api/v1/hunt`` response (S-072, FR-057)."""
+
+    query: str
+    filters: dict[str, Any]
+    events: list[EventResponse] = Field(default_factory=list)
+    total: int
+    model: str
+    generated_at_ns: int
+    latency_ms: float
+    cached: bool
+    truncated: bool
+
+    @field_serializer("generated_at_ns", when_used="json")
+    def _serialize_generated_at_ns(self, v: int) -> str:
+        """Render epoch-ns as a JSON string for JS bigint safety."""
+        return str(v)
+
+    @classmethod
+    def from_result(cls, result: HuntResult) -> NLHuntResponse:
+        """Convert a ``HuntResult`` dataclass to the JSON response model."""
+        return cls(
+            query=result.query,
+            filters=dict(result.filters),
+            events=[EventResponse.from_event(e) for e in result.events],
+            total=result.total,
             model=result.model,
             generated_at_ns=result.generated_at_ns,
             latency_ms=result.latency_ms,
