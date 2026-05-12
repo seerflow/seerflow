@@ -342,14 +342,14 @@ class PostgresBackend(_PostgresAlertMixin, _PostgresSigmaStateMixin):
                 (asyncpg import fails) or the configured ``postgresql_url``
                 is empty.
         """
+        dsn = config.postgresql_url
+        if not dsn:
+            raise ConfigError("storage.postgresql_url is required when backend='postgresql'")
+
         try:
             import asyncpg
         except ImportError as exc:  # pragma: no cover — exercised by factory test
             raise ConfigError(_MISSING_ASYNCPG_MSG) from exc
-
-        dsn = config.postgresql_url
-        if not dsn:
-            raise ConfigError("storage.postgresql_url is required when backend='postgresql'")
 
         pool = await asyncpg.create_pool(
             dsn=dsn,
