@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from seerflow.api.anomaly_timeline import AnomalyTimelineRing
     from seerflow.api.metrics import MetricsProvider
     from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.llm.explanation.service import AlertExplanationService
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -119,3 +120,17 @@ def get_pipeline_metrics_provider(request: Request) -> MetricsProvider | None:
         request.app.state, "pipeline_metrics_provider", None
     )
     return provider
+
+
+def get_explanation_service(request: Request) -> AlertExplanationService | None:
+    """FastAPI Depends provider — returns the LLM explanation service or None.
+
+    Returns the service stashed at ``app.state.explanation_service`` (S-071),
+    or ``None`` if the attribute is missing (LLM disabled / degraded / API
+    running without a pipeline). Callers translate ``None`` to a 503
+    response with the ``health_state["llm"]`` status.
+    """
+    service: AlertExplanationService | None = getattr(
+        request.app.state, "explanation_service", None
+    )
+    return service

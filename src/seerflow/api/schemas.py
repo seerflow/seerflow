@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 from seerflow.utils.text import NOTE_MAX_LENGTH, sanitise_feedback_note
 
 if TYPE_CHECKING:
+    from seerflow.llm.explanation.result import ExplanationResult
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
     from seerflow.models.feedback import FeedbackEvent
@@ -116,6 +117,42 @@ class AlertResponse(BaseModel):
             feedback_note=alert.feedback_note,
             mitre_tactics=list(alert.mitre_tactics),
             mitre_techniques=list(alert.mitre_techniques),
+        )
+
+
+class AlertExplanationResponse(BaseModel):
+    """JSON representation of an ``ExplanationResult`` (S-071, FR-056)."""
+
+    alert_id: str
+    summary: str
+    anomaly_rationale: str
+    contributing_events: list[str] = Field(default_factory=list)
+    recommended_next_steps: list[str] = Field(default_factory=list)
+    model: str
+    generated_at_ns: int
+    latency_ms: float
+    cached: bool
+    truncated: bool
+
+    @field_serializer("generated_at_ns", when_used="json")
+    def _serialize_generated_at_ns(self, v: int) -> str:
+        """Render epoch-ns as a JSON string for JS bigint safety."""
+        return str(v)
+
+    @classmethod
+    def from_result(cls, result: ExplanationResult) -> AlertExplanationResponse:
+        """Convert an ``ExplanationResult`` dataclass to a Pydantic model."""
+        return cls(
+            alert_id=result.alert_id,
+            summary=result.summary,
+            anomaly_rationale=result.anomaly_rationale,
+            contributing_events=list(result.contributing_events),
+            recommended_next_steps=list(result.recommended_next_steps),
+            model=result.model,
+            generated_at_ns=result.generated_at_ns,
+            latency_ms=result.latency_ms,
+            cached=result.cached,
+            truncated=result.truncated,
         )
 
 
