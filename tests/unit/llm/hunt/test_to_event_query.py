@@ -178,6 +178,29 @@ def test_severity_min_boolean_dropped() -> None:
 
 
 @pytest.mark.unit
+def test_naive_iso_timestamps_treated_as_utc() -> None:
+    """Naive ISO strings (no offset) must NOT be parsed in local time."""
+    filters: dict[str, object] = {
+        "time_range_iso": {
+            "start": "2026-01-01T00:00:00",
+            "end": "2026-01-01T06:00:00",
+        }
+    }
+    q = translate_to_event_query(
+        filters,
+        default_window_ns=_DEFAULT_WINDOW_NS,
+        default_limit=100,
+        now_ns=1_700_000_000_000_000_000,
+    )
+    assert q.time_range is not None
+    # Window width must be exactly 6h regardless of the host's timezone.
+    assert q.time_range.end_ns - q.time_range.start_ns == 6 * 3_600 * 1_000_000_000
+    # Start anchored on the UTC interpretation of 2026-01-01T00:00:00 → epoch ns.
+    expected_start_ns = 1_767_225_600_000_000_000  # 2026-01-01T00:00:00Z in ns
+    assert q.time_range.start_ns == expected_start_ns
+
+
+@pytest.mark.unit
 def test_iso_to_ns_handles_garbage_string() -> None:
     """Invalid ISO strings on either side of the range fall back."""
     q = translate_to_event_query(

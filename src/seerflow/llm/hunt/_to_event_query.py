@@ -15,7 +15,7 @@ malformed translator output and return a runnable ``EventQuery``.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from seerflow.models.query import EventQuery, TimeRange
 
@@ -39,6 +39,11 @@ def _iso_to_ns(iso_value: str) -> int | None:
         dt = datetime.fromisoformat(normalised)
     except (ValueError, TypeError):
         return None
+    # Naive datetimes from the LLM are assumed UTC — never local time. Without
+    # this normalisation ``.timestamp()`` would interpret naive values in the
+    # process's local timezone, producing off-by-hours filter windows.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
     return int(dt.timestamp() * 1_000_000_000)
 
 
