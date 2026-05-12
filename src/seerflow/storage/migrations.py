@@ -15,10 +15,8 @@ import logging
 from typing import TYPE_CHECKING
 
 import aiosqlite
-import msgspec
 
-from seerflow.models.alert import Alert
-from seerflow.sigma.attack import format_technique
+from seerflow.storage._mitre_backfill import decode_alert_for_backfill
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -123,20 +121,12 @@ async def _backfill_mitre_junctions(conn: aiosqlite.Connection) -> None:
         tactic_rows: list[tuple[str, str, int]] = []
         technique_rows: list[tuple[str, str, int]] = []
         for dedup_key, ts_ns, blob in rows:
-            if blob is None:
+            decoded = decode_alert_for_backfill(blob, ts_ns, dedup_key)
+            if decoded is None:
                 continue
-            try:
-                alert = msgspec.msgpack.decode(blob, type=Alert)
-            except (msgspec.DecodeError, TypeError, AttributeError):
-                logger.warning(
-                    "v3 backfill: skipping alert %s with corrupt data blob",
-                    dedup_key,
-                )
-                continue
-            for t in alert.mitre_tactics or ():
-                tactic_rows.append((dedup_key, t, ts_ns))
-            for t in alert.mitre_techniques or ():
-                technique_rows.append((dedup_key, format_technique(t), ts_ns))
+            tactics, techniques = decoded
+            tactic_rows.extend((dedup_key, t, ts_ns) for t in tactics)
+            technique_rows.extend((dedup_key, t, ts_ns) for t in techniques)
 
         if tactic_rows:
             await conn.executemany(
