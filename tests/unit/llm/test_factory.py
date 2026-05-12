@@ -8,7 +8,9 @@ Covers every branch:
 - llama_cpp + ImportError → ``None`` + WARNING with install hint
 - llama_cpp + non-ImportError → re-raised + ERROR
 - llama_cpp + happy path → backend instance
-- ollama → ``None`` + INFO ("deferred")
+- ollama + valid config → ``OllamaBackend`` instance + INFO log (S-098)
+- ollama + empty ollama_url → ``None`` + WARNING (S-098)
+- ollama + empty ollama_model → ``None`` + WARNING (S-098)
 - cloud → ``None`` + INFO ("deferred")
 - unknown backend → ``ConfigError``
 """
@@ -69,13 +71,54 @@ def test_backend_unknown_raises_config_error() -> None:
 
 
 @pytest.mark.unit
-def test_backend_ollama_returns_none_logs_info(
+def test_backend_ollama_valid_returns_backend_logs_info(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """S-098: ``backend=ollama`` + valid url + model → ``OllamaBackend`` instance."""
+    from seerflow.llm.backends.ollama import OllamaBackend
+
     caplog.set_level(logging.INFO, logger="seerflow.llm.factory")
-    out = build_llm_backend(_cfg(backend="ollama"))
+    out = build_llm_backend(
+        _cfg(
+            backend="ollama",
+            ollama_url="http://localhost:11434",
+            ollama_model="phi4-mini",
+            ollama_timeout_s=45.0,
+        )
+    )
+    assert isinstance(out, OllamaBackend)
+    assert out.name == "ollama"
+    assert out.base_url == "http://localhost:11434"
+    assert out.model == "phi4-mini"
+    assert out.timeout_s == pytest.approx(45.0)
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("ollama" in m and "configured backend" in m for m in msgs)
+    # The deferred log must not appear once the real branch is wired.
+    assert not any("deferred" in m for m in msgs)
+
+
+@pytest.mark.unit
+def test_backend_ollama_empty_url_returns_none_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """S-098: empty ``ollama_url`` → graceful absence."""
+    caplog.set_level(logging.WARNING, logger="seerflow.llm.factory")
+    out = build_llm_backend(_cfg(backend="ollama", ollama_url="", ollama_model="phi4-mini"))
     assert out is None
-    assert any("ollama" in r.getMessage() and "deferred" in r.getMessage() for r in caplog.records)
+    assert any("ollama_url" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.unit
+def test_backend_ollama_empty_model_returns_none_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """S-098: empty ``ollama_model`` → graceful absence."""
+    caplog.set_level(logging.WARNING, logger="seerflow.llm.factory")
+    out = build_llm_backend(
+        _cfg(backend="ollama", ollama_url="http://localhost:11434", ollama_model="")
+    )
+    assert out is None
+    assert any("ollama_model" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.unit

@@ -916,6 +916,28 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
     if not isinstance(ollama_url, str):
         raise ConfigError(f"llm.ollama_url must be a string, got {type(ollama_url).__name__}")
 
+    # S-098: Ollama-specific knobs.
+    ollama_model = data.get("ollama_model", "phi4-mini")
+    if not isinstance(ollama_model, str):
+        raise ConfigError(f"llm.ollama_model must be a string, got {type(ollama_model).__name__}")
+    if not 1 <= len(ollama_model) <= 256:
+        raise ConfigError(
+            f"llm.ollama_model must be a non-empty string of length <= 256, got {ollama_model!r}"
+        )
+
+    ollama_timeout_s_raw = data.get("ollama_timeout_s", 30.0)
+    if isinstance(ollama_timeout_s_raw, bool) or not isinstance(
+        ollama_timeout_s_raw, (int, float)
+    ):
+        raise ConfigError(
+            f"llm.ollama_timeout_s must be a number, got {type(ollama_timeout_s_raw).__name__}"
+        )
+    ollama_timeout_s = float(ollama_timeout_s_raw)
+    if not 1.0 <= ollama_timeout_s <= 600.0:
+        raise ConfigError(
+            f"llm.ollama_timeout_s must be in [1.0, 600.0], got {ollama_timeout_s_raw!r}"
+        )
+
     n_ctx = data.get("n_ctx", 4096)
     if not isinstance(n_ctx, int) or isinstance(n_ctx, bool):
         raise ConfigError(f"llm.n_ctx must be an integer, got {type(n_ctx).__name__}")
@@ -1080,6 +1102,8 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
         backend=backend,
         model_path=model_path,
         ollama_url=ollama_url,
+        ollama_model=ollama_model,
+        ollama_timeout_s=ollama_timeout_s,
         n_ctx=n_ctx,
         n_threads=n_threads,
         n_gpu_layers=n_gpu_layers,

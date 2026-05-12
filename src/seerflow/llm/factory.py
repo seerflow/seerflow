@@ -1,11 +1,12 @@
-"""Config-driven factory for ``LLMBackend`` instances (S-070).
+"""Config-driven factory for ``LLMBackend`` instances (S-070, S-098).
 
 Graceful absence is the explicit contract: when the operator has not
 configured a backend, or has configured one whose optional dependency is
-not installed, or has pointed at a missing model file, the factory returns
-``None`` and logs at INFO (intentional absence) or WARNING (config asked
-for a backend but it could not be loaded). Real misconfiguration — typos
-in the backend name, corrupted model files — surface immediately.
+not installed, or has pointed at a missing model file / blank Ollama
+URL or model name, the factory returns ``None`` and logs at INFO
+(intentional absence) or WARNING (config asked for a backend but it
+could not be loaded). Real misconfiguration — typos in the backend name,
+corrupted model files — surface immediately.
 
 Three-state health surface (driven from ``build_llm_backend``'s return):
 
@@ -22,12 +23,44 @@ from typing import TYPE_CHECKING
 
 from seerflow._config_validation import ConfigError
 from seerflow.llm.backends.llama_cpp import LlamaCppBackend
+from seerflow.llm.backends.ollama import OllamaBackend
 
 if TYPE_CHECKING:
     from seerflow.config import LLMConfig
     from seerflow.llm.protocol import LLMBackend
 
 _VALID_BACKENDS: frozenset[str] = frozenset({"", "llama_cpp", "ollama", "cloud"})
+
+
+def _maybe_load_ollama(cfg: LLMConfig, log: logging.Logger) -> LLMBackend | None:
+    """Build an ``OllamaBackend`` from config; ``None`` on graceful absence.
+
+    Graceful-absence paths (return ``None`` + WARNING):
+
+    - empty ``ollama_url``
+    - empty ``ollama_model``
+
+    No daemon probe is performed here — the first ``complete(...)`` call is
+    when Ollama is actually contacted. Health surfaces *configuration*
+    readiness, not *runtime* daemon health.
+    """
+    if not cfg.ollama_url:
+        log.warning("llm: ollama_url missing → disabled")
+        return None
+    if not cfg.ollama_model:
+        log.warning("llm: ollama_model missing → disabled")
+        return None
+    backend = OllamaBackend(
+        base_url=cfg.ollama_url,
+        model=cfg.ollama_model,
+        timeout_s=cfg.ollama_timeout_s,
+    )
+    log.info(
+        "ollama: configured backend url=%s model=%s",
+        cfg.ollama_url,
+        cfg.ollama_model,
+    )
+    return backend
 
 
 def _maybe_load_llama_cpp(cfg: LLMConfig, log: logging.Logger) -> LLMBackend | None:
@@ -85,8 +118,7 @@ def build_llm_backend(cfg: LLMConfig, *, log: logging.Logger | None = None) -> L
         return None
 
     if cfg.backend == "ollama":
-        logger.info("llm: backend=ollama deferred to S-098")
-        return None
+        return _maybe_load_ollama(cfg, logger)
 
     if cfg.backend == "cloud":
         logger.info("llm: backend=cloud deferred to S-099")

@@ -216,6 +216,9 @@ class LLMConfig:
     backend: str = ""
     model_path: str = ""
     ollama_url: str = "http://localhost:11434"
+    # Ollama backend tuning (S-098). Defaults match FR-064 acceptance criteria.
+    ollama_model: str = "phi4-mini"
+    ollama_timeout_s: float = 30.0
     # llama_cpp tuning (S-070).
     n_ctx: int = 4096
     n_threads: int | None = None
