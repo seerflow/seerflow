@@ -387,9 +387,7 @@ class TestAlertsAdvanced:
         assert page.items[0].feedback == "tp"
         assert page.items[0].origin == "cli"
 
-    async def test_update_feedback_unknown_alert_noop(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    async def test_update_feedback_unknown_alert_noop(self, pg_backend: PostgresBackend) -> None:
         await pg_backend.update_feedback("does-not-exist", "fp")  # no exception
 
     async def test_append_feedback_event(self, pg_backend: PostgresBackend) -> None:
@@ -429,9 +427,7 @@ class TestAlertsAdvanced:
         assert len(buckets) == 2
         assert {b[0] for b in buckets} == {1_000, 2_000}
 
-    async def test_count_alerts_bucketed_rejects_zero(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    async def test_count_alerts_bucketed_rejects_zero(self, pg_backend: PostgresBackend) -> None:
         with pytest.raises(ValueError, match="bucket_ns must be positive"):
             await pg_backend.count_alerts_bucketed(
                 alert_type="ml",
@@ -458,9 +454,7 @@ class TestAlertsAdvanced:
         keys = {a.dedup_key for a in page.items}
         assert keys == {"par-1", "par-2"}
 
-    async def test_technique_with_tactic_subtechnique(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    async def test_technique_with_tactic_subtechnique(self, pg_backend: PostgresBackend) -> None:
         await pg_backend.write_alert(
             _make_alert(
                 dedup_key="tt-1",
@@ -481,9 +475,7 @@ class TestAlertsAdvanced:
         assert page.total == 1
         assert page.items[0].dedup_key == "tt-1"
 
-    async def test_technique_with_tactic_parent(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    async def test_technique_with_tactic_parent(self, pg_backend: PostgresBackend) -> None:
         await pg_backend.write_alert(
             _make_alert(
                 dedup_key="par-tt-1",
