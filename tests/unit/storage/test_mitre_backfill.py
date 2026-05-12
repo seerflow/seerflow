@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import msgspec
-import pytest
 
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.storage._mitre_backfill import decode_alert_for_backfill
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _build_alert(
@@ -59,9 +62,7 @@ class TestDecodeAlertForBackfill:
         result = decode_alert_for_backfill(blob, 1, "dk")
         assert result == ([], [])
 
-    def test_corrupt_blob_returns_none_and_warns(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_corrupt_blob_returns_none_and_warns(self, caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.WARNING, logger="seerflow.storage._mitre_backfill")
         result = decode_alert_for_backfill(b"\x00garbage", 1, "dk-bad")
         assert result is None

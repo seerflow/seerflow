@@ -146,10 +146,7 @@ def _validate_postgres_pool(
     coercion failure.
     """
     if not isinstance(min_size, int) or isinstance(min_size, bool) or min_size < 1:
-        msg = (
-            f"storage.postgresql_pool_min_size must be a positive integer >= 1, "
-            f"got {min_size!r}"
-        )
+        msg = f"storage.postgresql_pool_min_size must be a positive integer >= 1, got {min_size!r}"
         raise ConfigError(msg)
     if not isinstance(max_size, int) or isinstance(max_size, bool) or max_size < min_size:
         msg = (
