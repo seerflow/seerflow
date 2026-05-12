@@ -189,9 +189,7 @@ def _anthropic_response(text: str, *, block_type: str = "text") -> Any:
 
 
 def _openai_response(text: str | None) -> Any:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=text))]
-    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
 
 
 # ---------------------------------------------------------------------------
@@ -511,9 +509,7 @@ async def test_anthropic_malformed_non_text_block(
 ) -> None:
     _set_fake_anthropic(
         monkeypatch,
-        response=SimpleNamespace(
-            content=[SimpleNamespace(type="tool_use", text="ignored")]
-        ),
+        response=SimpleNamespace(content=[SimpleNamespace(type="tool_use", text="ignored")]),
     )
     backend = AnthropicBackend(api_key="k", model="m")
     with pytest.raises(CloudBackendError, match="malformed response"):
@@ -644,6 +640,56 @@ def test_openai_constructor_raises_importerror_when_sdk_missing(
 def test_cloud_backend_error_is_runtime_error() -> None:
     err = CloudBackendError("anthropic: boom")
     assert isinstance(err, RuntimeError)
+
+
+@pytest.mark.unit
+def test_stringify_body_covers_string_dict_and_other_shapes() -> None:
+    """Defensive coverage for ``_stringify_body``'s three input shapes."""
+    from seerflow.llm.backends.cloud import _stringify_body
+
+    assert _stringify_body(None) == ""
+    assert _stringify_body("plain text body") == "plain text body"
+    long = "x" * 500
+    assert _stringify_body(long) == "x" * 200
+    # ``body["error"]["message"]`` path.
+    assert _stringify_body({"error": {"message": "Too many requests"}}) == "Too many requests"
+    # Dict without the ``error.message`` shape falls back to ``str()``.
+    fallback = _stringify_body({"foo": "bar"})
+    assert "foo" in fallback and "bar" in fallback
+    # ``error`` is not a dict → falls back to ``str(body)``.
+    fallback2 = _stringify_body({"error": "string-not-dict"})
+    assert "error" in fallback2
+    # ``error.message`` is not a string → falls back to ``str(body)``.
+    fallback3 = _stringify_body({"error": {"message": 42}})
+    assert "42" in fallback3
+    # Non-dict, non-string body → ``str(body)``.
+    assert _stringify_body(42) == "42"
+
+
+@pytest.mark.unit
+def test_provider_endpoint_url_defaults_per_provider() -> None:
+    """Covers every branch of ``_provider_endpoint_url``."""
+    from seerflow.llm.backends.cloud import _provider_endpoint_url
+
+    assert _provider_endpoint_url("anthropic", None) == "https://api.anthropic.com"
+    assert _provider_endpoint_url("openai", None) == "https://api.openai.com/v1"
+    assert _provider_endpoint_url("anthropic", "https://proxy.example/") == "https://proxy.example"
+    assert _provider_endpoint_url("unknown", None) == "<unknown>"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_openai_malformed_missing_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenAI response with ``choices[0].message is None`` raises malformed."""
+    _set_fake_openai(
+        monkeypatch,
+        response=SimpleNamespace(choices=[SimpleNamespace(message=None)]),
+    )
+    backend = OpenAIBackend(api_key="k", model="m")
+    with pytest.raises(CloudBackendError, match="missing 'message'"):
+        await backend.complete("p")
 
 
 @pytest.mark.unit
