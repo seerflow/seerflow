@@ -341,6 +341,213 @@ class TestEntityTimeline:
         timeline = await pg_backend.get_timeline(ent, TimeRange(start_ns=0, end_ns=300))
         assert [e.message for e in timeline] == ["c", "a", "b"]
 
+    async def test_timeline_with_filters(self, pg_backend: PostgresBackend) -> None:
+        ent = str(uuid.uuid4())
+        await pg_backend.write_events(
+            [
+                _make_event(
+                    entity_refs=(ent,),
+                    source_type="syslog",
+                    severity=SeverityLevel.INFORMATIONAL,
+                    timestamp_ns=100,
+                ),
+                _make_event(
+                    entity_refs=(ent,),
+                    source_type="otlp",
+                    severity=SeverityLevel.ERROR,
+                    timestamp_ns=200,
+                ),
+            ]
+        )
+        await pg_backend.flush()
+        only_otlp = await pg_backend.get_timeline(
+            ent, TimeRange(start_ns=0, end_ns=300), source_type="otlp"
+        )
+        assert len(only_otlp) == 1
+
+        only_severe = await pg_backend.get_timeline(
+            ent, TimeRange(start_ns=0, end_ns=300), severity_min=SeverityLevel.ERROR
+        )
+        assert len(only_severe) == 1
+
+
+class TestAlertsAdvanced:
+    async def test_update_feedback(self, pg_backend: PostgresBackend) -> None:
+        alert = _make_alert(dedup_key="fb-1")
+        await pg_backend.write_alert(alert)
+        await pg_backend.update_feedback(alert.alert_id, "tp", note="confirmed", origin="cli")
+
+        fetched = await pg_backend.get_alert_by_id(alert.alert_id)
+        assert fetched is not None
+        assert fetched.feedback == "tp"
+        assert fetched.feedback_note == "confirmed"
+
+        page = await pg_backend.list_feedback_events(alert.alert_id)
+        assert page.total == 1
+        assert page.items[0].feedback == "tp"
+        assert page.items[0].origin == "cli"
+
+    async def test_update_feedback_unknown_alert_noop(
+        self, pg_backend: PostgresBackend
+    ) -> None:
+        await pg_backend.update_feedback("does-not-exist", "fp")  # no exception
+
+    async def test_append_feedback_event(self, pg_backend: PostgresBackend) -> None:
+        alert = _make_alert(dedup_key="fb-app")
+        await pg_backend.write_alert(alert)
+        await pg_backend.append_feedback_event(
+            alert.alert_id, "fp", "note", "api", submitted_at_ns=12345
+        )
+        page = await pg_backend.list_feedback_events(alert.alert_id)
+        assert page.total == 1
+        assert page.items[0].submitted_at_ns == 12345
+
+    async def test_get_feedback_stats(self, pg_backend: PostgresBackend) -> None:
+        a1 = _make_alert(dedup_key="s-1")
+        a2 = _make_alert(dedup_key="s-2")
+        await pg_backend.write_alert(a1)
+        await pg_backend.write_alert(a2)
+        await pg_backend.update_feedback(a1.alert_id, "tp")
+        await pg_backend.update_feedback(a2.alert_id, "fp")
+        stats = await pg_backend.get_feedback_stats()
+        assert stats == {"tp": 1, "fp": 1, "total": 2}
+
+    async def test_count_alerts_bucketed(self, pg_backend: PostgresBackend) -> None:
+        await pg_backend.write_alert(
+            _make_alert(dedup_key="b-1", rule_name="r", timestamp_ns=1_000),
+        )
+        await pg_backend.write_alert(
+            _make_alert(dedup_key="b-2", rule_name="r", timestamp_ns=2_000),
+        )
+        buckets = await pg_backend.count_alerts_bucketed(
+            alert_type="ml",
+            rule_name="r",
+            time_range=TimeRange(start_ns=0, end_ns=10_000),
+            bucket_ns=1_000,
+        )
+        # Two buckets at floor(1000/1000)*1000 = 1000 and floor(2000/1000)*1000 = 2000.
+        assert len(buckets) == 2
+        assert {b[0] for b in buckets} == {1_000, 2_000}
+
+    async def test_count_alerts_bucketed_rejects_zero(
+        self, pg_backend: PostgresBackend
+    ) -> None:
+        with pytest.raises(ValueError, match="bucket_ns must be positive"):
+            await pg_backend.count_alerts_bucketed(
+                alert_type="ml",
+                rule_name="r",
+                time_range=TimeRange(start_ns=0, end_ns=1),
+                bucket_ns=0,
+            )
+
+    async def test_technique_parent_rollup(self, pg_backend: PostgresBackend) -> None:
+        # Parent ``T1053`` with sub-techniques ``T1053.001`` / ``T1053.005``.
+        # Filtering by the parent should match the sub-technique alerts via
+        # the range-bounds path.
+        await pg_backend.write_alert(
+            _make_alert(dedup_key="par-1", techniques=("T1053.001",)),
+        )
+        await pg_backend.write_alert(
+            _make_alert(dedup_key="par-2", techniques=("T1053.005",)),
+        )
+        await pg_backend.write_alert(
+            _make_alert(dedup_key="par-3", techniques=("T1059",)),
+        )
+        page = await pg_backend.query_alerts(AlertQuery(technique="T1053"))
+        assert page.total == 2
+        keys = {a.dedup_key for a in page.items}
+        assert keys == {"par-1", "par-2"}
+
+    async def test_technique_with_tactic_subtechnique(
+        self, pg_backend: PostgresBackend
+    ) -> None:
+        await pg_backend.write_alert(
+            _make_alert(
+                dedup_key="tt-1",
+                tactics=("execution",),
+                techniques=("T1059.001",),
+            ),
+        )
+        await pg_backend.write_alert(
+            _make_alert(
+                dedup_key="tt-2",
+                tactics=("execution",),
+                techniques=("T1059.002",),
+            ),
+        )
+        page = await pg_backend.query_alerts(
+            AlertQuery(tactic="execution", technique="T1059.001"),
+        )
+        assert page.total == 1
+        assert page.items[0].dedup_key == "tt-1"
+
+    async def test_technique_with_tactic_parent(
+        self, pg_backend: PostgresBackend
+    ) -> None:
+        await pg_backend.write_alert(
+            _make_alert(
+                dedup_key="par-tt-1",
+                tactics=("execution",),
+                techniques=("T1059.001",),
+            ),
+        )
+        await pg_backend.write_alert(
+            _make_alert(
+                dedup_key="par-tt-2",
+                tactics=("defense-evasion",),
+                techniques=("T1059.002",),
+            ),
+        )
+        page = await pg_backend.query_alerts(
+            AlertQuery(tactic="execution", technique="T1059"),
+        )
+        assert page.total == 1
+        assert page.items[0].dedup_key == "par-tt-1"
+
+
+class TestTemplates:
+    async def test_write_and_get_templates(self, pg_backend: PostgresBackend) -> None:
+        from seerflow.storage.sqlite import TemplateInfo
+
+        await pg_backend.write_templates(
+            [
+                TemplateInfo(
+                    template_id=1,
+                    template_str="<*> failed login",
+                    first_seen_ns=100,
+                    last_seen_ns=200,
+                    event_count=5,
+                    example_message="user X failed login",
+                )
+            ]
+        )
+        # Upsert: write again with a higher last_seen and event_count.
+        await pg_backend.write_templates(
+            [
+                TemplateInfo(
+                    template_id=1,
+                    template_str="<*> failed login",
+                    first_seen_ns=999,  # overwritten as MAX; the upsert
+                    last_seen_ns=300,  # leaves first_seen_ns from the original.
+                    event_count=2,
+                    example_message="ignored",
+                )
+            ]
+        )
+        templates = await pg_backend.get_templates()
+        assert len(templates) == 1
+        t = templates[0]
+        assert t.template_id == 1
+        assert t.event_count == 7  # 5 + 2 sum
+        assert t.last_seen_ns == 300
+        # first_seen_ns and example_message preserve the original discovery.
+        assert t.first_seen_ns == 100
+        assert t.example_message == "user X failed login"
+
+    async def test_write_templates_empty_is_noop(self, pg_backend: PostgresBackend) -> None:
+        await pg_backend.write_templates([])
+        assert await pg_backend.get_templates() == []
+
 
 class TestSigmaRuleState:
     async def test_set_enabled_and_list(self, pg_backend: PostgresBackend) -> None:
