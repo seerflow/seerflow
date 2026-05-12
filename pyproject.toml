@@ -153,7 +153,16 @@ check_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["drain3.*", "igraph.*", "river.*", "aiosqlite.*", "scipy.*", "redis.*"]
+module = [
+    "drain3.*",
+    "igraph.*",
+    "river.*",
+    "aiosqlite.*",
+    "scipy.*",
+    "redis.*",
+    "asyncpg.*",
+    "testcontainers.*",
+]
 ignore_missing_imports = true
 
 [tool.bandit]

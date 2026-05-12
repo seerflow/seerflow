@@ -23,7 +23,7 @@ from seerflow.storage import connect_storage
 if TYPE_CHECKING:
     import argparse
 
-    from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.storage.factory import StorageBackend
 
 
 _DURATION_RE = re.compile(r"^(\d+)([mhd])$")
@@ -59,7 +59,7 @@ def format_timestamp(ns: int) -> str:
     return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_events(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute event query and print results."""
     from seerflow.models.query import EventQuery, TimeRange
 
@@ -130,7 +130,7 @@ async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> 
     print(f"\n{result.total} event(s) total, showing {len(result.items)}")
 
 
-async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_alerts(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute alert query and print results."""
     from seerflow.models.query import AlertQuery, TimeRange
 
@@ -251,7 +251,7 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
     print(f"\n{result.total} alert(s) total, showing {len(result.items)}")
 
 
-async def run_query_templates(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_templates(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute template query and print results."""
     templates = await storage.get_templates(limit=args.limit)
 
@@ -294,7 +294,7 @@ async def run_query_templates(storage: SqliteBackend, args: argparse.Namespace) 
 _DEFAULT_TIMELINE_WINDOW_NS = 24 * 3_600_000_000_000  # 24 hours
 
 
-async def run_query_timeline(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_timeline(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute entity timeline query and print results."""
     import uuid as _uuid_mod
 

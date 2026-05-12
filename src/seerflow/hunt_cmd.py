@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     import argparse
 
     from seerflow.llm.hunt.result import HuntResult
-    from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.storage.factory import StorageBackend
 
 
 _log = logging.getLogger("seerflow")
@@ -38,7 +38,7 @@ _log = logging.getLogger("seerflow")
 
 async def _build_service_and_storage(
     args: argparse.Namespace,
-) -> tuple[NaturalLanguageHuntService | None, SqliteBackend]:
+) -> tuple[NaturalLanguageHuntService | None, StorageBackend]:
     """Construct the hunt service + storage backend from CLI args.
 
     Returns ``(service, storage)``. ``service`` is ``None`` when the LLM
