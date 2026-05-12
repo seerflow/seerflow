@@ -919,13 +919,10 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
     # S-098: Ollama-specific knobs.
     ollama_model = data.get("ollama_model", "phi4-mini")
     if not isinstance(ollama_model, str):
-        raise ConfigError(
-            f"llm.ollama_model must be a string, got {type(ollama_model).__name__}"
-        )
+        raise ConfigError(f"llm.ollama_model must be a string, got {type(ollama_model).__name__}")
     if not 1 <= len(ollama_model) <= 256:
         raise ConfigError(
-            "llm.ollama_model must be a non-empty string of length <= 256, "
-            f"got {ollama_model!r}"
+            f"llm.ollama_model must be a non-empty string of length <= 256, got {ollama_model!r}"
         )
 
     ollama_timeout_s_raw = data.get("ollama_timeout_s", 30.0)
@@ -933,8 +930,7 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
         ollama_timeout_s_raw, (int, float)
     ):
         raise ConfigError(
-            "llm.ollama_timeout_s must be a number, got "
-            f"{type(ollama_timeout_s_raw).__name__}"
+            f"llm.ollama_timeout_s must be a number, got {type(ollama_timeout_s_raw).__name__}"
         )
     ollama_timeout_s = float(ollama_timeout_s_raw)
     if not 1.0 <= ollama_timeout_s <= 600.0:

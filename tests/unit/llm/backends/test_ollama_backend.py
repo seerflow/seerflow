@@ -7,7 +7,6 @@ directly. No real network I/O is performed.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from typing import Any
@@ -21,7 +20,6 @@ from seerflow.llm.backends.ollama import (
     OllamaBackend,
     OllamaBackendError,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -226,7 +224,7 @@ async def test_timeout_raises_backend_error() -> None:
     with aioresponses() as mock:
         mock.post(
             "http://test/api/generate",
-            exception=asyncio.TimeoutError("slow"),
+            exception=TimeoutError("slow"),
         )
         with pytest.raises(OllamaBackendError) as exc:
             await backend.complete("p")

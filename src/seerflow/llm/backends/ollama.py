@@ -126,9 +126,11 @@ class OllamaBackend:
         """Open a per-call session, POST once, return parsed JSON payload."""
         timeout = aiohttp.ClientTimeout(total=self.timeout_s)
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, json=body) as resp:
-                    return await self._read_payload(resp, url)
+            async with (
+                aiohttp.ClientSession(timeout=timeout) as session,
+                session.post(url, json=body) as resp,
+            ):
+                return await self._read_payload(resp, url)
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             raise OllamaBackendError(
                 f"ollama: request to {url} failed: {_scrub(repr(exc))}"
@@ -138,9 +140,7 @@ class OllamaBackend:
         """Read + parse the response, raising ``OllamaBackendError`` on issues."""
         if resp.status >= 400:
             snippet = await self._read_snippet(resp)
-            raise OllamaBackendError(
-                f"ollama: HTTP {resp.status} from {url}: {_scrub(snippet)}"
-            )
+            raise OllamaBackendError(f"ollama: HTTP {resp.status} from {url}: {_scrub(snippet)}")
         try:
             return await resp.json(content_type=None)
         except (aiohttp.ContentTypeError, ValueError) as exc:
