@@ -311,6 +311,41 @@ def test_backend_cloud_openai_import_error_returns_none_warns(
 
 
 @pytest.mark.unit
+def test_backend_cloud_base_url_userinfo_scrubbed_in_info_log(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """S-099 security guard: ``user:pass@`` in ``cloud_base_url`` MUST be scrubbed.
+
+    An operator placing the OpenAI SDK behind a reverse proxy can embed
+    HTTP-basic credentials in ``cloud_base_url`` (``https://USER:PASS@proxy/v1``).
+    Those credentials MUST NOT appear in the factory's INFO log line.
+    """
+    monkeypatch.setattr("seerflow.llm.factory.OpenAIBackend", lambda **_: object())
+    caplog.set_level(logging.INFO, logger="seerflow.llm.factory")
+
+    out = build_llm_backend(
+        _cfg(
+            backend="cloud",
+            cloud_provider="openai",
+            cloud_api_key="sk-x",
+            cloud_model="gpt-4o-mini",
+            cloud_base_url="https://proxy-user:p4ssw0rd-secret@proxy.example/v1",
+        )
+    )
+    assert out is not None
+    msgs = [r.getMessage() for r in caplog.records]
+    info_msgs = [m for m in msgs if "configured backend" in m]
+    assert info_msgs, "expected an INFO log on successful cloud configuration"
+    joined = " | ".join(info_msgs)
+    # Userinfo block redacted; hostname still visible for diagnostics.
+    assert "p4ssw0rd-secret" not in joined
+    assert "proxy-user" not in joined
+    assert "<redacted>" in joined
+    assert "proxy.example" in joined
+
+
+@pytest.mark.unit
 def test_llama_cpp_missing_model_path_returns_none_warns(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from seerflow._config_validation import ConfigError
 from seerflow.llm.backends.cloud import AnthropicBackend, OpenAIBackend
 from seerflow.llm.backends.llama_cpp import LlamaCppBackend
-from seerflow.llm.backends.ollama import OllamaBackend
+from seerflow.llm.backends.ollama import OllamaBackend, _scrub
 
 if TYPE_CHECKING:
     from seerflow.config import LLMConfig
@@ -128,13 +128,15 @@ def _maybe_load_cloud(cfg: LLMConfig, log: logging.Logger) -> LLMBackend | None:
         return None
 
     # INFO log carries provider + model + (when set) base_url ONLY. The API
-    # key MUST NEVER appear in any log line.
+    # key MUST NEVER appear in any log line. ``base_url`` is scrubbed
+    # through ``_scrub`` because an operator can embed ``user:pass@`` in a
+    # reverse-proxy URL — that must not surface in the log stream.
     if base_url:
         log.info(
             "cloud: configured backend provider=%s model=%s base_url=%s",
             provider,
             cfg.cloud_model,
-            base_url,
+            _scrub(base_url),
         )
     else:
         log.info(

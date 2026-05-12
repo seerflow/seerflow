@@ -32,6 +32,12 @@ import logging
 import time
 from typing import Any
 
+# Package-private import of ``_scrub``: ``ollama.py`` and ``cloud.py`` are
+# sibling backends in the same ``seerflow.llm.backends`` package. The leading
+# underscore signals "private to the package", not "private to the module".
+# Duplicating the regex set across siblings would invite drift the next time
+# a new redaction pattern is added (e.g. ``user:pass@`` was added in S-098 as
+# a post-merge fix). Single source of truth wins.
 from seerflow.llm.backends.ollama import _scrub
 
 _log = logging.getLogger(__name__)
