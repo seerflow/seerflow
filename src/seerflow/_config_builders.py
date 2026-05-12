@@ -966,6 +966,65 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ConfigError(f"llm.seed must be an integer, got {type(seed).__name__}")
 
+    # Alert explanation knobs (S-071).
+    explanation_cache_size = data.get("explanation_cache_size", 256)
+    if (
+        not isinstance(explanation_cache_size, int)
+        or isinstance(explanation_cache_size, bool)
+        or not 0 <= explanation_cache_size <= 100_000
+    ):
+        raise ConfigError(
+            "llm.explanation_cache_size must be an integer in [0, 100000], "
+            f"got {explanation_cache_size!r}"
+        )
+
+    explanation_cache_ttl_s = data.get("explanation_cache_ttl_s", 3600)
+    if (
+        not isinstance(explanation_cache_ttl_s, int)
+        or isinstance(explanation_cache_ttl_s, bool)
+        or not 1 <= explanation_cache_ttl_s <= 86_400
+    ):
+        raise ConfigError(
+            "llm.explanation_cache_ttl_s must be an integer in [1, 86400], "
+            f"got {explanation_cache_ttl_s!r}"
+        )
+
+    explanation_max_contributing_events = data.get("explanation_max_contributing_events", 8)
+    if (
+        not isinstance(explanation_max_contributing_events, int)
+        or isinstance(explanation_max_contributing_events, bool)
+        or not 1 <= explanation_max_contributing_events <= 64
+    ):
+        raise ConfigError(
+            "llm.explanation_max_contributing_events must be an integer in [1, 64], "
+            f"got {explanation_max_contributing_events!r}"
+        )
+
+    explanation_max_prompt_chars = data.get("explanation_max_prompt_chars", 8000)
+    if (
+        not isinstance(explanation_max_prompt_chars, int)
+        or isinstance(explanation_max_prompt_chars, bool)
+        or not 512 <= explanation_max_prompt_chars <= 32_000
+    ):
+        raise ConfigError(
+            "llm.explanation_max_prompt_chars must be an integer in [512, 32000], "
+            f"got {explanation_max_prompt_chars!r}"
+        )
+
+    explanation_timeout_s = data.get("explanation_timeout_s", 12.0)
+    if isinstance(explanation_timeout_s, bool) or not isinstance(
+        explanation_timeout_s, (int, float)
+    ):
+        raise ConfigError(
+            "llm.explanation_timeout_s must be a number, got "
+            f"{type(explanation_timeout_s).__name__}"
+        )
+    explanation_timeout_s = float(explanation_timeout_s)
+    if not 1.0 <= explanation_timeout_s <= 120.0:
+        raise ConfigError(
+            f"llm.explanation_timeout_s must be in [1.0, 120.0], got {explanation_timeout_s!r}"
+        )
+
     return LLMConfig(
         backend=backend,
         model_path=model_path,
@@ -976,6 +1035,11 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
         max_tokens_default=max_tokens_default,
         temperature_default=float(temperature_default),
         seed=seed,
+        explanation_cache_size=explanation_cache_size,
+        explanation_cache_ttl_s=explanation_cache_ttl_s,
+        explanation_max_contributing_events=explanation_max_contributing_events,
+        explanation_max_prompt_chars=explanation_max_prompt_chars,
+        explanation_timeout_s=explanation_timeout_s,
     )
 
 

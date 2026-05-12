@@ -223,6 +223,12 @@ class LLMConfig:
     max_tokens_default: int = 256
     temperature_default: float = 0.2
     seed: int = 42
+    # Alert explanation knobs (S-071). All defaults preserve current behaviour.
+    explanation_cache_size: int = 256
+    explanation_cache_ttl_s: int = 3600
+    explanation_max_contributing_events: int = 8
+    explanation_max_prompt_chars: int = 8000
+    explanation_timeout_s: float = 12.0
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

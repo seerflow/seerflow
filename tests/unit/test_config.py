@@ -1780,3 +1780,118 @@ class TestLLMConfig:
         yaml_path.write_text("llm:\n  seed: true\n", encoding="utf-8")
         with pytest.raises(ConfigError, match=r"llm\.seed"):
             load_config(str(yaml_path))
+
+
+class TestLLMExplanationConfig:
+    """``LLMConfig`` explanation-knob validation (S-071)."""
+
+    def test_explanation_defaults(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.explanation_cache_size == 256
+        assert config.llm.explanation_cache_ttl_s == 3600
+        assert config.llm.explanation_max_contributing_events == 8
+        assert config.llm.explanation_max_prompt_chars == 8000
+        assert config.llm.explanation_timeout_s == pytest.approx(12.0)
+
+    def test_full_explanation_block_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  explanation_cache_size: 512\n"
+            "  explanation_cache_ttl_s: 600\n"
+            "  explanation_max_contributing_events: 16\n"
+            "  explanation_max_prompt_chars: 4096\n"
+            "  explanation_timeout_s: 8.0\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.explanation_cache_size == 512
+        assert config.llm.explanation_cache_ttl_s == 600
+        assert config.llm.explanation_max_contributing_events == 16
+        assert config.llm.explanation_max_prompt_chars == 4096
+        assert config.llm.explanation_timeout_s == pytest.approx(8.0)
+
+    @pytest.mark.parametrize("value", [-1, 100_001])
+    def test_explanation_cache_size_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_cache_size: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_size"):
+            load_config(str(yaml_path))
+
+    def test_explanation_cache_size_zero_accepted(self, tmp_path: Path) -> None:
+        """``0`` disables the cache layer."""
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_cache_size: 0\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.explanation_cache_size == 0
+
+    def test_explanation_cache_size_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_cache_size: 'big'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_size"):
+            load_config(str(yaml_path))
+
+    def test_explanation_cache_size_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_cache_size: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_size"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 86_401])
+    def test_explanation_cache_ttl_s_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_cache_ttl_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_ttl_s"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 65])
+    def test_explanation_max_contributing_events_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            f"llm:\n  explanation_max_contributing_events: {value}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match=r"explanation_max_contributing_events"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [511, 32_001])
+    def test_explanation_max_prompt_chars_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_max_prompt_chars: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_max_prompt_chars"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0.9, 120.1])
+    def test_explanation_timeout_s_out_of_range_rejected(
+        self, tmp_path: Path, value: float
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_explanation_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_explanation_timeout_s_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_timeout_s: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_explanation_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_timeout_s: 5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.explanation_timeout_s == pytest.approx(5.0)

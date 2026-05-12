@@ -31,6 +31,7 @@ from seerflow.api.routes import (
     config,
     entities,
     events,
+    explanations,
     health,
     sigma,
     stats,
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
 
     from seerflow.config import SeerflowConfig
     from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.llm.explanation.service import AlertExplanationService
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.sigma.state import SigmaRuleStateStore
@@ -215,6 +217,7 @@ def _register_routes(app: FastAPI) -> None:
     app.include_router(attack.router, prefix=_API_PREFIX)
     app.include_router(config.router, prefix=_API_PREFIX)
     app.include_router(entities.router, prefix=_API_PREFIX)
+    app.include_router(explanations.router, prefix=_API_PREFIX)
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
     app.include_router(anomaly.router, prefix=_API_PREFIX)
@@ -235,6 +238,7 @@ def create_api_app(
     sigma_state_store: SigmaRuleStateStore | None = None,
     health_state: dict[str, str] | None = None,
     ensemble: DetectionEnsemble | None = None,
+    explanation_service: AlertExplanationService | None = None,
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -264,6 +268,10 @@ def create_api_app(
         ensemble: Optional ``DetectionEnsemble`` exposed via
             ``/api/v1/health`` so the response carries the legacy aiohttp
             ``detection`` extra (S-217).
+        explanation_service: Optional ``AlertExplanationService`` powering
+            the ``POST /api/v1/alerts/{id}/explain`` + ``GET .../explanation``
+            endpoints (S-071). ``None`` when the LLM backend is disabled or
+            degraded — the routes then return 503.
     """
     app = FastAPI(
         title="Seerflow API",
@@ -294,6 +302,7 @@ def create_api_app(
         if health_state is not None
         else {"pipeline": "running", "storage": "connected"}
     )
+    app.state.explanation_service = explanation_service
     app.state.anomaly_timeline_ring = AnomalyTimelineRing()
     app.state.ws_manager = ws_manager or _build_ws_manager(
         alert_store, config, app.state.anomaly_timeline_ring

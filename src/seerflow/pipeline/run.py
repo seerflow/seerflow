@@ -530,6 +530,29 @@ async def _run_with_config(
         "storage": "connected",
         "llm": _derive_llm_health(llm_backend, config.llm.backend),
     }
+    # Alert explanation service (S-071). Constructed only when the LLM
+    # backend loaded successfully; the routes return 503 with the
+    # ``health_state["llm"]`` status when ``explanation_service is None``.
+    from seerflow.llm.explanation import (
+        AlertExplanationService,
+        ExplanationCache,
+    )
+
+    explanation_service: AlertExplanationService | None = None
+    if llm_backend is not None:
+        explanation_cache = ExplanationCache(
+            max_entries=config.llm.explanation_cache_size,
+            ttl_seconds=config.llm.explanation_cache_ttl_s,
+        )
+        explanation_service = AlertExplanationService(
+            backend=llm_backend,
+            cache=explanation_cache,
+            cfg=config.llm,
+            alert_store=storage,
+            log_store=storage,
+            baseline_store=baseline_store,
+        )
+
     api_app = make_api_app(
         log_store=storage,
         alert_store=storage,
@@ -543,6 +566,7 @@ async def _run_with_config(
         sigma_state_store=storage,
         health_state=health_state,
         ensemble=ensemble,
+        explanation_service=explanation_service,
     )
     ws_manager: ConnectionManager = api_app.state.ws_manager
     uvicorn_config = uvicorn.Config(
