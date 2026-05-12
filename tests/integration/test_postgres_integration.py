@@ -14,14 +14,19 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
-from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
 
-from seerflow.config import StorageConfig
-from seerflow.models.alert import Alert
-from seerflow.models.event import SeerflowEvent, SeverityLevel
-from seerflow.models.query import AlertQuery, EventQuery, TimeRange
-from seerflow.storage.postgres import PostgresBackend
-from seerflow.storage.protocols import (
+testcontainers_postgres = pytest.importorskip(
+    "testcontainers.postgres",
+    reason="testcontainers not installed (docker-gated integration test)",
+)
+PostgresContainer = testcontainers_postgres.PostgresContainer
+
+from seerflow.config import StorageConfig  # noqa: E402
+from seerflow.models.alert import Alert  # noqa: E402
+from seerflow.models.event import SeerflowEvent, SeverityLevel  # noqa: E402
+from seerflow.models.query import AlertQuery, EventQuery, TimeRange  # noqa: E402
+from seerflow.storage.postgres import PostgresBackend  # noqa: E402
+from seerflow.storage.protocols import (  # noqa: E402
     AlertStore,
     EntityStore,
     LogStore,
@@ -30,6 +35,10 @@ from seerflow.storage.protocols import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
+
+    from testcontainers.postgres import (
+        PostgresContainer as _PostgresContainerType,
+    )
 
 pytestmark = pytest.mark.docker
 
@@ -43,7 +52,7 @@ def _to_asyncpg_dsn(dsn: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def pg_container() -> Iterator[PostgresContainer]:
+def pg_container() -> Iterator[_PostgresContainerType]:
     """Module-scoped container — one ``docker run`` per test module."""
     with PostgresContainer("postgres:16-alpine") as container:
         yield container
@@ -51,7 +60,7 @@ def pg_container() -> Iterator[PostgresContainer]:
 
 @pytest.fixture
 async def pg_backend(
-    pg_container: PostgresContainer,
+    pg_container: _PostgresContainerType,
 ) -> AsyncIterator[PostgresBackend]:
     """Function-scoped backend on a fresh ephemeral schema per test."""
     import asyncpg
