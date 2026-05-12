@@ -65,7 +65,13 @@ class TestEnvVarInterpolation:
     def test_env_var_substitution(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEST_SEERFLOW_BACKEND", "postgresql")
         yaml_file = tmp_path / "seerflow.yaml"
-        yaml_file.write_text("storage:\n  backend: ${TEST_SEERFLOW_BACKEND}\n")
+        # S-074: include a URL so the DSN-required check passes; the env-var
+        # interpolation is what this test exercises.
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: ${TEST_SEERFLOW_BACKEND}\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+        )
         config = load_config(str(yaml_file))
         assert config.storage.backend == "postgresql"
 
@@ -110,7 +116,11 @@ class TestEnvVarInterpolation:
 class TestPartialConfig:
     def test_partial_merge_preserves_defaults(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
-        yaml_file.write_text("storage:\n  backend: postgresql\n")
+        # S-074: include a URL so the DSN-required check passes; this test
+        # exercises partial-config merge behaviour, not URL validation.
+        yaml_file.write_text(
+            "storage:\n  backend: postgresql\n  postgresql_url: postgresql://localhost/db\n"
+        )
         config = load_config(str(yaml_file))
         assert config.storage.backend == "postgresql"
         assert config.receivers.syslog_udp_port == 514
@@ -632,6 +642,94 @@ class TestStorageConfigRepr:
         cfg = StorageConfig(postgresql_url="postgres://user:secret@host/db")
         assert "secret" not in repr(cfg)
         assert "postgresql_url" not in repr(cfg)
+
+
+class TestStorageBackendLiteral:
+    """S-074: ``StorageConfig.backend`` is a ``Literal["sqlite", "postgresql"]``.
+
+    The narrowing happens at the dataclass annotation, so the runtime
+    behaviour is unchanged — these tests document the contract and prevent
+    accidental widening back to ``str``. mypy is the real enforcer for
+    static-typo detection at call sites; this class is the runtime witness.
+    """
+
+    def test_sqlite_value_accepted(self) -> None:
+        cfg = StorageConfig(backend="sqlite")
+        assert cfg.backend == "sqlite"
+
+    def test_postgresql_value_accepted(self) -> None:
+        cfg = StorageConfig(backend="postgresql", postgresql_url="postgresql://x")
+        assert cfg.backend == "postgresql"
+
+    def test_backend_field_annotation_is_literal(self) -> None:
+        """Inspect the dataclass annotation to confirm the Literal narrowing.
+
+        Uses string-form inspection (not ``typing.get_type_hints``) to avoid
+        importing the alerting/* TYPE_CHECKING-guarded symbols. The annotation
+        must mention both literal values; we accept any well-formed
+        ``Literal[...]`` spelling.
+        """
+        import dataclasses
+
+        fields = {f.name: f for f in dataclasses.fields(StorageConfig)}
+        ann = str(fields["backend"].type)
+        # Tolerate either "Literal['sqlite', 'postgresql']" or
+        # "typing.Literal['sqlite', 'postgresql']" depending on PEP 563 status.
+        assert "Literal" in ann
+        assert "sqlite" in ann
+        assert "postgresql" in ann
+
+
+class TestStorageBackendDsnRequired:
+    """S-074: ``postgresql`` backend requires a non-empty ``postgresql_url``.
+
+    The check fires at config-load time (``_build_storage``) rather than at
+    ``connect_storage`` time so the operator sees the error in their YAML
+    feedback loop, not in a runtime traceback after process start-up.
+    """
+
+    def test_empty_url_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n  postgresql_url: ''\n")
+        with pytest.raises(ConfigError, match="postgresql_url"):
+            load_config(str(yaml_file))
+
+    def test_whitespace_url_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n  postgresql_url: '   '\n")
+        with pytest.raises(ConfigError, match="postgresql_url"):
+            load_config(str(yaml_file))
+
+    def test_missing_url_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n")
+        with pytest.raises(ConfigError, match="postgresql_url"):
+            load_config(str(yaml_file))
+
+    def test_non_empty_url_accepted(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n  backend: postgresql\n  postgresql_url: postgresql://localhost/db\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert cfg.storage.backend == "postgresql"
+        assert cfg.storage.postgresql_url == "postgresql://localhost/db"
+
+    def test_sqlite_does_not_require_postgresql_url(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: sqlite\n")
+        cfg = load_config(str(yaml_file))
+        assert cfg.storage.backend == "sqlite"
+        assert cfg.storage.postgresql_url == ""
+
+    def test_error_message_mentions_required_and_field(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n")
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(str(yaml_file))
+        msg = str(exc_info.value)
+        assert "postgresql_url" in msg
+        assert "required" in msg.lower()
 
 
 class TestPostgresPoolConfig:

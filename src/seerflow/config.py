@@ -46,7 +46,7 @@ class StorageConfig:
     serving a dashboard plus the ingest pipeline.
     """
 
-    backend: str = "sqlite"
+    backend: Literal["sqlite", "postgresql"] = "sqlite"
     data_dir: str = ""
     sqlite_path: str = ""
     postgresql_url: str = field(default="", repr=False)
