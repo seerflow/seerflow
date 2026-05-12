@@ -634,6 +634,68 @@ class TestStorageConfigRepr:
         assert "postgresql_url" not in repr(cfg)
 
 
+class TestPostgresPoolConfig:
+    """S-073: connection-pool knobs on ``StorageConfig``."""
+
+    def test_default_pool_min_size(self) -> None:
+        assert StorageConfig().postgresql_pool_min_size == 2
+
+    def test_default_pool_max_size(self) -> None:
+        assert StorageConfig().postgresql_pool_max_size == 10
+
+    def test_default_command_timeout(self) -> None:
+        assert StorageConfig().postgresql_command_timeout_s == 30.0
+
+    def test_yaml_overrides_pool_knobs(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_pool_min_size: 4\n"
+            "  postgresql_pool_max_size: 16\n"
+            "  postgresql_command_timeout_s: 5.0\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert cfg.storage.postgresql_pool_min_size == 4
+        assert cfg.storage.postgresql_pool_max_size == 16
+        assert cfg.storage.postgresql_command_timeout_s == 5.0
+
+    def test_invalid_pool_min_size_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_pool_min_size: 0\n"
+        )
+        with pytest.raises(ConfigError, match="postgresql_pool_min_size"):
+            load_config(str(yaml_file))
+
+    def test_max_less_than_min_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_pool_min_size: 5\n"
+            "  postgresql_pool_max_size: 3\n"
+        )
+        with pytest.raises(ConfigError, match="postgresql_pool_max_size"):
+            load_config(str(yaml_file))
+
+    def test_negative_command_timeout_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_command_timeout_s: 0\n"
+        )
+        with pytest.raises(ConfigError, match="postgresql_command_timeout_s"):
+            load_config(str(yaml_file))
+
+
 class TestDetectionBoundaryValid:
     """S-146: Boundary valid tests for new detection params."""
 
