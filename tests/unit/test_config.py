@@ -1895,3 +1895,92 @@ class TestLLMExplanationConfig:
         yaml_path.write_text("llm:\n  explanation_timeout_s: 5\n", encoding="utf-8")
         config = load_config(str(yaml_path))
         assert config.llm.explanation_timeout_s == pytest.approx(5.0)
+
+
+class TestLLMHuntConfig:
+    """``LLMConfig`` hunt-knob validation (S-072)."""
+
+    def test_hunt_defaults(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.hunt_cache_size == 256
+        assert config.llm.hunt_cache_ttl_s == 3600
+        assert config.llm.hunt_timeout_s == pytest.approx(12.0)
+        assert config.llm.hunt_max_results == 100
+        assert config.llm.hunt_max_query_chars == 512
+
+    def test_full_hunt_block_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  hunt_cache_size: 64\n"
+            "  hunt_cache_ttl_s: 900\n"
+            "  hunt_timeout_s: 5.0\n"
+            "  hunt_max_results: 50\n"
+            "  hunt_max_query_chars: 256\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.hunt_cache_size == 64
+        assert config.llm.hunt_cache_ttl_s == 900
+        assert config.llm.hunt_timeout_s == pytest.approx(5.0)
+        assert config.llm.hunt_max_results == 50
+        assert config.llm.hunt_max_query_chars == 256
+
+    @pytest.mark.parametrize("value", [-1, 100_001])
+    def test_hunt_cache_size_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_cache_size: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_cache_size"):
+            load_config(str(yaml_path))
+
+    def test_hunt_cache_size_zero_accepted(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_cache_size: 0\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.hunt_cache_size == 0
+
+    def test_hunt_cache_size_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_cache_size: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_cache_size"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 86_401])
+    def test_hunt_cache_ttl_s_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_cache_ttl_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_cache_ttl_s"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0.9, 120.1])
+    def test_hunt_timeout_s_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_hunt_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_hunt_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_timeout_s: 7\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.hunt_timeout_s == pytest.approx(7.0)
+
+    @pytest.mark.parametrize("value", [0, 10_001])
+    def test_hunt_max_results_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_max_results: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_max_results"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [15, 16_385])
+    def test_hunt_max_query_chars_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_max_query_chars: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_max_query_chars"):
+            load_config(str(yaml_path))

@@ -96,6 +96,25 @@ def build_parser() -> argparse.ArgumentParser:
     feedback_parser.add_argument("type", choices=["tp", "fp"], help="Feedback type")
     feedback_parser.add_argument("--note", default="", help="Optional note")
 
+    hunt_parser = subparsers.add_parser(
+        "hunt",
+        help="Natural language threat hunt (NL → events via LLM)",
+    )
+    hunt_parser.add_argument("query", help="Natural language hunt query")
+    hunt_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max results (default: from config.llm.hunt_max_results)",
+    )
+    hunt_parser.add_argument(
+        "--db",
+        type=str,
+        default=None,
+        help="Database path (default: from config)",
+    )
+    hunt_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+
     rules_parser = subparsers.add_parser("rules", help="Inspect loaded Sigma rules")
     rules_sub = rules_parser.add_subparsers(dest="rules_cmd")
     rules_sub.required = True

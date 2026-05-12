@@ -1025,6 +1025,57 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
             f"llm.explanation_timeout_s must be in [1.0, 120.0], got {explanation_timeout_s!r}"
         )
 
+    # Natural language hunt knobs (S-072). Same validation pattern as explanation knobs.
+    hunt_cache_size = data.get("hunt_cache_size", 256)
+    if (
+        not isinstance(hunt_cache_size, int)
+        or isinstance(hunt_cache_size, bool)
+        or not 0 <= hunt_cache_size <= 100_000
+    ):
+        raise ConfigError(
+            f"llm.hunt_cache_size must be an integer in [0, 100000], got {hunt_cache_size!r}"
+        )
+
+    hunt_cache_ttl_s = data.get("hunt_cache_ttl_s", 3600)
+    if (
+        not isinstance(hunt_cache_ttl_s, int)
+        or isinstance(hunt_cache_ttl_s, bool)
+        or not 1 <= hunt_cache_ttl_s <= 86_400
+    ):
+        raise ConfigError(
+            f"llm.hunt_cache_ttl_s must be an integer in [1, 86400], got {hunt_cache_ttl_s!r}"
+        )
+
+    hunt_timeout_s = data.get("hunt_timeout_s", 12.0)
+    if isinstance(hunt_timeout_s, bool) or not isinstance(hunt_timeout_s, (int, float)):
+        raise ConfigError(
+            f"llm.hunt_timeout_s must be a number, got {type(hunt_timeout_s).__name__}"
+        )
+    hunt_timeout_s = float(hunt_timeout_s)
+    if not 1.0 <= hunt_timeout_s <= 120.0:
+        raise ConfigError(f"llm.hunt_timeout_s must be in [1.0, 120.0], got {hunt_timeout_s!r}")
+
+    hunt_max_results = data.get("hunt_max_results", 100)
+    if (
+        not isinstance(hunt_max_results, int)
+        or isinstance(hunt_max_results, bool)
+        or not 1 <= hunt_max_results <= 10_000
+    ):
+        raise ConfigError(
+            f"llm.hunt_max_results must be an integer in [1, 10000], got {hunt_max_results!r}"
+        )
+
+    hunt_max_query_chars = data.get("hunt_max_query_chars", 512)
+    if (
+        not isinstance(hunt_max_query_chars, int)
+        or isinstance(hunt_max_query_chars, bool)
+        or not 16 <= hunt_max_query_chars <= 16_384
+    ):
+        raise ConfigError(
+            "llm.hunt_max_query_chars must be an integer in [16, 16384], "
+            f"got {hunt_max_query_chars!r}"
+        )
+
     return LLMConfig(
         backend=backend,
         model_path=model_path,
@@ -1040,6 +1091,11 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
         explanation_max_contributing_events=explanation_max_contributing_events,
         explanation_max_prompt_chars=explanation_max_prompt_chars,
         explanation_timeout_s=explanation_timeout_s,
+        hunt_cache_size=hunt_cache_size,
+        hunt_cache_ttl_s=hunt_cache_ttl_s,
+        hunt_timeout_s=hunt_timeout_s,
+        hunt_max_results=hunt_max_results,
+        hunt_max_query_chars=hunt_max_query_chars,
     )
 
 

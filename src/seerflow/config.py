@@ -229,6 +229,12 @@ class LLMConfig:
     explanation_max_contributing_events: int = 8
     explanation_max_prompt_chars: int = 8000
     explanation_timeout_s: float = 12.0
+    # Natural language hunt knobs (S-072).
+    hunt_cache_size: int = 256
+    hunt_cache_ttl_s: int = 3600
+    hunt_timeout_s: float = 12.0
+    hunt_max_results: int = 100
+    hunt_max_query_chars: int = 512
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
