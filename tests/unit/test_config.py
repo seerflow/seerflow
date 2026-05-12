@@ -1984,3 +1984,69 @@ class TestLLMHuntConfig:
         yaml_path.write_text(f"llm:\n  hunt_max_query_chars: {value}\n", encoding="utf-8")
         with pytest.raises(ConfigError, match=r"hunt_max_query_chars"):
             load_config(str(yaml_path))
+
+    # ---- S-098 Ollama config fields --------------------------------------
+
+    def test_ollama_model_default_is_phi4_mini(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.ollama_model == "phi4-mini"
+
+    def test_ollama_model_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_model: llama3.1:8b\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.ollama_model == "llama3.1:8b"
+
+    def test_ollama_model_empty_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_model: ''\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_model"):
+            load_config(str(yaml_path))
+
+    def test_ollama_model_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_model: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_model"):
+            load_config(str(yaml_path))
+
+    def test_ollama_model_too_long_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        oversized = "x" * 257
+        yaml_path.write_text(f"llm:\n  ollama_model: '{oversized}'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_model"):
+            load_config(str(yaml_path))
+
+    def test_ollama_timeout_s_default_is_30(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.ollama_timeout_s == pytest.approx(30.0)
+
+    def test_ollama_timeout_s_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: 5.5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.ollama_timeout_s == pytest.approx(5.5)
+
+    def test_ollama_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: 7\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.ollama_timeout_s == pytest.approx(7.0)
+
+    @pytest.mark.parametrize("value", [0.99, 600.01])
+    def test_ollama_timeout_s_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  ollama_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_ollama_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_ollama_timeout_s_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_timeout_s"):
+            load_config(str(yaml_path))
