@@ -50,14 +50,23 @@ def _filter_events_by_ids(
     Returns ``(picked, truncated)``. ``truncated`` is ``True`` when the
     picked count differs from ``len(wanted_ids)`` (stale event IDs) OR
     when the cap dropped events the alert referenced.
+
+    The prompt builder expects events oldest-first so it can drop oldest
+    on overflow. ``LogStore.query_events`` returns newest-first by
+    contract, so we sort by ``timestamp_ns`` ascending before applying
+    the cap. When the cap fires we keep the **newest** ``cap`` events
+    (the most relevant for explanation) and discard the older tail.
     """
     wanted_set = set(wanted_ids)
-    picked = tuple(e for e in events if e.event_id in wanted_set)
-    truncated_due_to_missing = len(picked) != len(wanted_ids)
-    if len(picked) > cap:
-        picked = picked[-cap:]  # keep newest by position in the returned page
+    matched = [e for e in events if e.event_id in wanted_set]
+    # Normalise to oldest-first regardless of storage order.
+    matched.sort(key=lambda e: e.timestamp_ns)
+    truncated_due_to_missing = len(matched) != len(wanted_ids)
+    if len(matched) > cap:
+        # Keep the newest ``cap`` events (still oldest-first within the slice).
+        picked = tuple(matched[-cap:])
         return picked, True
-    return picked, truncated_due_to_missing
+    return tuple(matched), truncated_due_to_missing
 
 
 class AlertExplanationService:
@@ -89,7 +98,7 @@ class AlertExplanationService:
         """
         cached = await self.cache.get(alert_id)
         if cached is not None:
-            _log.info("explanation: cache hit alert_id=%s", alert_id)
+            _log.debug("explanation: cache hit alert_id=%s", alert_id)
             return cached
 
         alert = await self.alert_store.get_alert_by_id(alert_id)
@@ -139,15 +148,15 @@ class AlertExplanationService:
                 timeout=self.cfg.explanation_timeout_s,
             )
         except TimeoutError:
+            # The route translates this to HTTP 502 and logs the
+            # traceback there; we only record the elapsed time which is
+            # not visible from the route handler.
             elapsed_ms = (time.monotonic() - t0) * 1000.0
-            _log.error(
+            _log.warning(
                 "explanation: backend timeout alert_id=%s elapsed_ms=%.1f",
                 alert_id,
                 elapsed_ms,
             )
-            raise
-        except Exception:
-            _log.error("explanation: backend failed alert_id=%s", alert_id, exc_info=True)
             raise
         latency_ms = (time.monotonic() - t0) * 1000.0
 

@@ -137,6 +137,45 @@ async def test_service_records_latency_and_backend_name() -> None:
 
 
 @pytest.mark.unit
+async def test_service_keeps_newest_when_cap_fires_regardless_of_storage_order() -> None:
+    """`LogStore` returns events newest-first; service must still keep the newest."""
+    backend = FakeLLMBackend()
+    ids = tuple(uuid.UUID(int=i + 200) for i in range(4))
+    # Build events with explicit, monotonically increasing timestamps.
+    events_oldest_first = []
+    for i, eid in enumerate(ids):
+        ev = make_event(
+            event_id=eid,
+            message=f"M{i}",
+            timestamp_ns=1_700_000_000_000_000_000 + i * 1_000_000_000,
+        )
+        events_oldest_first.append(ev)
+    # Storage returns NEWEST-FIRST (matches SqliteBackend's ORDER BY DESC).
+    storage_order = tuple(reversed(events_oldest_first))
+    alert = make_alert(contributing_events=ids)
+    alert_store = FakeAlertStore(alerts=(alert,))
+    log_store = FakeLogStore(events=storage_order)
+    cfg = LLMConfig(explanation_max_contributing_events=2)
+    cache = ExplanationCache(max_entries=4, ttl_seconds=60)
+    service = AlertExplanationService(
+        backend=backend,
+        cache=cache,
+        cfg=cfg,
+        alert_store=alert_store,
+        log_store=log_store,
+        baseline_store=None,
+    )
+    result = await service.explain(alert.alert_id)
+    assert result is not None
+    assert result.truncated is True
+    prompt = str(backend.last_args["prompt"])  # type: ignore[index]
+    # M3 (newest) and M2 must appear; M0 (oldest) must not.
+    assert "M3" in prompt
+    assert "M2" in prompt
+    assert "M0" not in prompt
+
+
+@pytest.mark.unit
 async def test_service_caps_contributing_events() -> None:
     """Service should pass at most ``explanation_max_contributing_events`` to the prompt."""
     backend = FakeLLMBackend()

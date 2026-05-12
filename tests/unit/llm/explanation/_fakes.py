@@ -143,13 +143,14 @@ _DEFAULT_EVENT_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
 def make_event(
     event_id: uuid.UUID | None = None,
     message: str = "ssh login from 10.0.0.1",
+    timestamp_ns: int = 1_700_000_000_000_000_000,
 ) -> SeerflowEvent:
     if event_id is None:
         event_id = _DEFAULT_EVENT_ID
     return SeerflowEvent(
         event_id=event_id,
-        timestamp_ns=1_700_000_000_000_000_000,
-        observed_ns=1_700_000_000_000_000_000,
+        timestamp_ns=timestamp_ns,
+        observed_ns=timestamp_ns,
         message=message,
         source_type="auth",
     )
