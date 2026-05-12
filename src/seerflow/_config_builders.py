@@ -115,6 +115,17 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
         valid = sorted(_VALID_STORAGE_BACKENDS)
         msg = f"Invalid storage.backend {backend!r}. Must be one of {valid}"
         raise ConfigError(msg)
+    # S-074: DSN must be non-empty when backend=postgresql. Fail at
+    # config-load so the operator sees the error in their YAML feedback
+    # loop, not at ``connect_storage`` time after process start-up.
+    postgresql_url = data.get("postgresql_url", "")
+    if backend == "postgresql" and not str(postgresql_url).strip():
+        msg = (
+            "storage.postgresql_url is required when storage.backend is "
+            "'postgresql' (set it in YAML, e.g. "
+            "postgresql_url: ${SEERFLOW_PG_URL})"
+        )
+        raise ConfigError(msg)
     # S-073: asyncpg pool knobs. Defaults match ``StorageConfig``;
     # validation runs unconditionally so an invalid value in the YAML
     # surfaces even when ``backend == "sqlite"`` (operators sometimes
@@ -127,7 +138,7 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
         backend=backend,
         data_dir=data_dir,
         sqlite_path=sqlite_path,
-        postgresql_url=data.get("postgresql_url", ""),
+        postgresql_url=postgresql_url,
         postgresql_pool_min_size=int(pool_min_size),
         postgresql_pool_max_size=int(pool_max_size),
         postgresql_command_timeout_s=float(command_timeout_s),
