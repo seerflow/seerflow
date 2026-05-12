@@ -248,7 +248,7 @@ async def test_migration_v3_backfills_existing_rows(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_migration_v3_tolerates_none_mitre_fields(tmp_path: Path) -> None:
     """Alerts whose decoded form has None tactic/technique fields don't abort."""
-    from seerflow.storage import migrations as migrations_module
+    from seerflow.storage import _mitre_backfill as _mitre_module
     from seerflow.storage.sqlite import _init_schema
 
     class _FakeAlert:
@@ -273,7 +273,10 @@ async def test_migration_v3_tolerates_none_mitre_fields(tmp_path: Path) -> None:
         )
         await conn.commit()
 
-        with patch.object(migrations_module.msgspec.msgpack, "decode", return_value=_FakeAlert()):
+        # Patch the shared decode helper to return an Alert-like object with
+        # ``None`` mitre fields. The S-073 refactor moved msgpack decode out
+        # of ``migrations.py`` into ``_mitre_backfill.decode_alert_for_backfill``.
+        with patch.object(_mitre_module.msgspec.msgpack, "decode", return_value=_FakeAlert()):
             await run_migrations(conn)
 
         assert await get_schema_version(conn) >= 3

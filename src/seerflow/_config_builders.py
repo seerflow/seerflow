@@ -115,12 +115,55 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
         valid = sorted(_VALID_STORAGE_BACKENDS)
         msg = f"Invalid storage.backend {backend!r}. Must be one of {valid}"
         raise ConfigError(msg)
+    # S-073: asyncpg pool knobs. Defaults match ``StorageConfig``;
+    # validation runs unconditionally so an invalid value in the YAML
+    # surfaces even when ``backend == "sqlite"`` (operators sometimes
+    # toggle the backend without re-reading the pool block).
+    pool_min_size = data.get("postgresql_pool_min_size", 2)
+    pool_max_size = data.get("postgresql_pool_max_size", 10)
+    command_timeout_s = data.get("postgresql_command_timeout_s", 30.0)
+    _validate_postgres_pool(pool_min_size, pool_max_size, command_timeout_s)
     return StorageConfig(
         backend=backend,
         data_dir=data_dir,
         sqlite_path=sqlite_path,
         postgresql_url=data.get("postgresql_url", ""),
+        postgresql_pool_min_size=int(pool_min_size),
+        postgresql_pool_max_size=int(pool_max_size),
+        postgresql_command_timeout_s=float(command_timeout_s),
     )
+
+
+def _validate_postgres_pool(
+    min_size: object,
+    max_size: object,
+    command_timeout_s: object,
+) -> None:
+    """Validate asyncpg connection-pool knobs.
+
+    All three checks run before ``StorageConfig`` is constructed so the
+    error message identifies the offending field rather than the dataclass
+    coercion failure.
+    """
+    if not isinstance(min_size, int) or isinstance(min_size, bool) or min_size < 1:
+        msg = f"storage.postgresql_pool_min_size must be a positive integer >= 1, got {min_size!r}"
+        raise ConfigError(msg)
+    if not isinstance(max_size, int) or isinstance(max_size, bool) or max_size < min_size:
+        msg = (
+            f"storage.postgresql_pool_max_size must be a positive integer >= "
+            f"postgresql_pool_min_size ({min_size}), got {max_size!r}"
+        )
+        raise ConfigError(msg)
+    if (
+        not isinstance(command_timeout_s, int | float)
+        or isinstance(command_timeout_s, bool)
+        or command_timeout_s <= 0
+    ):
+        msg = (
+            f"storage.postgresql_command_timeout_s must be a positive number, "
+            f"got {command_timeout_s!r}"
+        )
+        raise ConfigError(msg)
 
 
 def _build_webhook_configs(raw: Any) -> tuple[WebhookEndpointConfig, ...]:

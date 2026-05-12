@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from seerflow.graph.entity_graph import EntityGraph
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
-    from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.storage.factory import StorageBackend
     from seerflow.threat_intel.enricher import _IoCEnrichmentCounters
     from seerflow.threat_intel.matcher import IoCMatcher
     from seerflow.ueba.baseline import EntityBaseline, EntityType
@@ -66,7 +66,7 @@ def _dedup_window_ns(rule_name: str, alerting_config: AlertingConfig) -> int:
 
 def make_handler(
     ensemble: DetectionEnsemble,
-    storage: SqliteBackend,
+    storage: StorageBackend,
     save_interval_ns: int = 300_000_000_000,
     sigma_holder: EngineHolder[SigmaEngine | None] | None = None,
     entity_graph: EntityGraph | None = None,

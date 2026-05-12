@@ -63,6 +63,15 @@ llm-cpu = ["llama-cpp-python>=0.3.0"]
 # backend never need to install these; ``build_llm_backend`` degrades
 # gracefully on ImportError.
 llm-cloud = ["anthropic>=0.40", "openai>=1.55"]
+# S-073: PostgreSQL storage backend via asyncpg, with testcontainers for
+# Docker-gated integration tests. asyncpg ships pre-built manylinux wheels
+# (~3 MB) and is the fastest async PostgreSQL driver. testcontainers is
+# only pulled in for tests; the docker mark is deselected by default so the
+# main test suite stays runnable without Docker. ``connect_storage``
+# raises a ``ConfigError`` with a clear install hint when the extra is
+# absent, mirroring the ``llm-cpu`` / ``llm-cloud`` graceful-absence
+# pattern.
+postgres = ["asyncpg>=0.30", "testcontainers[postgres]>=4.0"]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
@@ -144,7 +153,16 @@ check_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["drain3.*", "igraph.*", "river.*", "aiosqlite.*", "scipy.*", "redis.*"]
+module = [
+    "drain3.*",
+    "igraph.*",
+    "river.*",
+    "aiosqlite.*",
+    "scipy.*",
+    "redis.*",
+    "asyncpg.*",
+    "testcontainers.*",
+]
 ignore_missing_imports = true
 
 [tool.bandit]
@@ -170,6 +188,15 @@ markers = [
 [tool.coverage.run]
 source = ["src/seerflow"]
 branch = true
+# PostgreSQL backend modules are exercised exclusively by docker-gated
+# integration tests (`pytest -m docker`). They are excluded from the
+# default coverage suite — see tests/integration/test_postgres_integration.py.
+omit = [
+    "src/seerflow/storage/postgres.py",
+    "src/seerflow/storage/_postgres_alerts.py",
+    "src/seerflow/storage/_postgres_sigma_state.py",
+    "src/seerflow/storage/postgres_migrations.py",
+]
 
 [tool.coverage.report]
 fail_under = 95

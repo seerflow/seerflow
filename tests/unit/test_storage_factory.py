@@ -1,12 +1,13 @@
-"""Tests for seerflow.storage.connect_storage factory (S-169)."""
+"""Tests for seerflow.storage.connect_storage factory (S-169, S-073)."""
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
-from seerflow.config import StorageConfig
+from seerflow.config import ConfigError, StorageConfig
 from seerflow.storage import connect_storage
 from seerflow.storage.sqlite import SqliteBackend
 
@@ -23,19 +24,56 @@ class TestConnectStorage:
         finally:
             await storage.close()
 
-    async def test_postgresql_raises_not_implemented(self) -> None:
-        cfg = StorageConfig(backend="postgresql")
-        with pytest.raises(NotImplementedError, match="postgresql"):
-            await connect_storage(cfg)
-
     async def test_unknown_backend_raises_value_error(self) -> None:
-        cfg = StorageConfig(backend="redis")
+        cfg = StorageConfig(backend="redis")  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="redis"):
             await connect_storage(cfg)
 
-    async def test_error_message_does_not_leak_credentials(self) -> None:
-        cfg = StorageConfig(backend="postgresql", postgresql_url="postgres://secret@host/db")
-        with pytest.raises(NotImplementedError) as exc:
+
+class TestPostgresFactoryDispatch:
+    """S-073: factory dispatches to PostgresBackend with graceful absence."""
+
+    async def test_missing_asyncpg_raises_config_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Simulate asyncpg not installed by stubbing the import to fail.
+
+        The factory's lazy ``import asyncpg`` lives inside
+        ``PostgresBackend.connect``; setting ``sys.modules['asyncpg'] = None``
+        is the canonical way to force ``ImportError`` without touching the
+        actual asyncpg package on disk. The ``seerflow.storage.postgres``
+        module is *not* purged — purging it forces a re-import that
+        creates a second module instance and breaks subsequent tests'
+        ``monkeypatch.setattr(pg_mod, ...)`` patches.
+        """
+        monkeypatch.setitem(sys.modules, "asyncpg", None)
+
+        cfg = StorageConfig(backend="postgresql", postgresql_url="postgresql://x/y")
+        with pytest.raises(ConfigError, match="uv sync --extra postgres"):
             await connect_storage(cfg)
-        assert "secret" not in str(exc.value)
-        assert "postgres://" not in str(exc.value)
+
+    async def test_missing_dsn_raises_config_error(self) -> None:
+        cfg = StorageConfig(backend="postgresql", postgresql_url="")
+        with pytest.raises(ConfigError, match="postgresql_url is required"):
+            await connect_storage(cfg)
+
+    async def test_dispatch_calls_postgres_backend_connect(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When asyncpg is present the factory routes to PostgresBackend.connect()."""
+        from seerflow.storage import postgres as pg_mod
+
+        calls: list[StorageConfig] = []
+
+        class _FakePostgresBackend:
+            @classmethod
+            async def connect(cls, config: StorageConfig) -> str:
+                calls.append(config)
+                return "sentinel-backend"
+
+        monkeypatch.setattr(pg_mod, "PostgresBackend", _FakePostgresBackend)
+        cfg = StorageConfig(backend="postgresql", postgresql_url="postgresql://x/y")
+        result = await connect_storage(cfg)
+        assert result == "sentinel-backend"
+        assert len(calls) == 1
+        assert calls[0].postgresql_url == "postgresql://x/y"

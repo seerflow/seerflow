@@ -37,12 +37,24 @@ from seerflow._config_validation import _require_valid_port as _require_valid_po
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class StorageConfig:
-    """Storage backend configuration."""
+    """Storage backend configuration.
+
+    The ``postgresql_*`` knobs apply only when ``backend == "postgresql"``;
+    they are accepted on every config so callers do not need to branch on
+    backend when reading them. Pool defaults (min=2, max=10, command
+    timeout 30s) are conservative — enough for a single Seerflow process
+    serving a dashboard plus the ingest pipeline.
+    """
 
     backend: str = "sqlite"
     data_dir: str = ""
     sqlite_path: str = ""
     postgresql_url: str = field(default="", repr=False)
+    # S-073: asyncpg connection-pool knobs. Defaults preserve existing
+    # SQLite-only behaviour and are validated by ``_validate_postgres_pool``.
+    postgresql_pool_min_size: int = 2
+    postgresql_pool_max_size: int = 10
+    postgresql_command_timeout_s: float = 30.0
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
