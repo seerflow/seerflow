@@ -1128,12 +1128,12 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
     if not isinstance(cloud_model, str):
         raise ConfigError(f"llm.cloud_model must be a string, got {type(cloud_model).__name__}")
     if len(cloud_model) > 256:
-        raise ConfigError(f"llm.cloud_model must be a string of length <= 256, got {cloud_model!r}")
+        raise ConfigError(
+            f"llm.cloud_model must be a string of length <= 256, got {cloud_model!r}"
+        )
 
     cloud_timeout_s_raw = data.get("cloud_timeout_s", 30.0)
-    if isinstance(cloud_timeout_s_raw, bool) or not isinstance(
-        cloud_timeout_s_raw, (int, float)
-    ):
+    if isinstance(cloud_timeout_s_raw, bool) or not isinstance(cloud_timeout_s_raw, (int, float)):
         raise ConfigError(
             f"llm.cloud_timeout_s must be a number, got {type(cloud_timeout_s_raw).__name__}"
         )

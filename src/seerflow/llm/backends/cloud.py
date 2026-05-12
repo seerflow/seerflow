@@ -128,9 +128,7 @@ class AnthropicBackend:
                 "anthropic SDK not installed (pip install seerflow[llm-cloud])"
             ) from exc
         if anthropic is None:  # ``sys.modules[...] = None`` poisons the lookup
-            raise ImportError(
-                "anthropic SDK not installed (pip install seerflow[llm-cloud])"
-            )
+            raise ImportError("anthropic SDK not installed (pip install seerflow[llm-cloud])")
         self.model = model
         self.timeout_s = float(timeout_s)
         self.base_url = base_url
@@ -193,8 +191,7 @@ class AnthropicBackend:
         content = getattr(response, "content", None)
         if not isinstance(content, list) or not content:
             raise CloudBackendError(
-                f"anthropic: malformed response from {_scrub(url)}: "
-                "empty or missing 'content'"
+                f"anthropic: malformed response from {_scrub(url)}: empty or missing 'content'"
             )
         block = content[0]
         block_type = getattr(block, "type", None)
@@ -237,9 +234,7 @@ class OpenAIBackend:
                 "openai SDK not installed (pip install seerflow[llm-cloud])"
             ) from exc
         if openai is None:
-            raise ImportError(
-                "openai SDK not installed (pip install seerflow[llm-cloud])"
-            )
+            raise ImportError("openai SDK not installed (pip install seerflow[llm-cloud])")
         self.model = model
         self.timeout_s = float(timeout_s)
         self.base_url = base_url
@@ -298,8 +293,7 @@ class OpenAIBackend:
         choices = getattr(response, "choices", None)
         if not isinstance(choices, list) or not choices:
             raise CloudBackendError(
-                f"openai: malformed response from {_scrub(url)}: "
-                "empty or missing 'choices'"
+                f"openai: malformed response from {_scrub(url)}: empty or missing 'choices'"
             )
         message = getattr(choices[0], "message", None)
         if message is None:

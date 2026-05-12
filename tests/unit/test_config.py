@@ -2180,9 +2180,7 @@ class TestLLMHuntConfig:
 
     def test_cloud_base_url_custom_value_parses(self, tmp_path: Path) -> None:
         yaml_path = tmp_path / "cfg.yaml"
-        yaml_path.write_text(
-            "llm:\n  cloud_base_url: https://proxy.example/\n", encoding="utf-8"
-        )
+        yaml_path.write_text("llm:\n  cloud_base_url: https://proxy.example/\n", encoding="utf-8")
         config = load_config(str(yaml_path))
         assert config.llm.cloud_base_url == "https://proxy.example/"
 
