@@ -2050,3 +2050,142 @@ class TestLLMHuntConfig:
         yaml_path.write_text("llm:\n  ollama_timeout_s: true\n", encoding="utf-8")
         with pytest.raises(ConfigError, match=r"ollama_timeout_s"):
             load_config(str(yaml_path))
+
+    # ---- S-099 Cloud config fields ---------------------------------------
+
+    def test_cloud_provider_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_provider == ""
+
+    @pytest.mark.parametrize("provider", ["anthropic", "openai"])
+    def test_cloud_provider_valid_values_parse(self, tmp_path: Path, provider: str) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  cloud_provider: {provider}\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_provider == provider
+
+    def test_cloud_provider_unknown_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_provider: azure\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_provider"):
+            load_config(str(yaml_path))
+
+    def test_cloud_provider_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_provider: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_provider"):
+            load_config(str(yaml_path))
+
+    def test_cloud_api_key_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_api_key == ""
+
+    def test_cloud_api_key_arbitrary_string_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_api_key: sk-test-abc\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_api_key == "sk-test-abc"
+
+    def test_cloud_api_key_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_api_key: 12345\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_api_key"):
+            load_config(str(yaml_path))
+
+    def test_cloud_api_key_env_var_interpolation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``${ANTHROPIC_API_KEY}`` is interpolated end-to-end (S-099 AC9)."""
+        monkeypatch.setenv("S099_TEST_ANTHROPIC_API_KEY", "sk-ant-resolved-via-env")
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  backend: cloud\n"
+            "  cloud_provider: anthropic\n"
+            "  cloud_api_key: ${S099_TEST_ANTHROPIC_API_KEY}\n"
+            "  cloud_model: claude-haiku-4-5\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_api_key == "sk-ant-resolved-via-env"
+
+    def test_cloud_api_key_repr_does_not_leak_secret(self) -> None:
+        """``repr=False`` regression guard for S-099 AC10."""
+        from seerflow.config import LLMConfig
+
+        cfg = LLMConfig(cloud_api_key="sk-test-secret-value")
+        assert "sk-test-secret-value" not in repr(cfg)
+
+    def test_cloud_model_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_model == ""
+
+    def test_cloud_model_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_model: gpt-4o-mini\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_model == "gpt-4o-mini"
+
+    def test_cloud_model_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_model: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_model"):
+            load_config(str(yaml_path))
+
+    def test_cloud_model_too_long_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        oversized = "x" * 257
+        yaml_path.write_text(f"llm:\n  cloud_model: '{oversized}'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_model"):
+            load_config(str(yaml_path))
+
+    def test_cloud_timeout_s_default_is_30(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_timeout_s == pytest.approx(30.0)
+
+    def test_cloud_timeout_s_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: 7.5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_timeout_s == pytest.approx(7.5)
+
+    def test_cloud_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: 5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_timeout_s == pytest.approx(5.0)
+
+    @pytest.mark.parametrize("value", [0.99, 600.01])
+    def test_cloud_timeout_s_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  cloud_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_cloud_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_cloud_timeout_s_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_cloud_base_url_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_base_url == ""
+
+    def test_cloud_base_url_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_base_url: https://proxy.example/\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_base_url == "https://proxy.example/"
+
+    def test_cloud_base_url_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_base_url: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_base_url"):
+            load_config(str(yaml_path))

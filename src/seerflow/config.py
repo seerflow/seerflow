@@ -200,17 +200,20 @@ class CorrelationConfig:
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class LLMConfig:
-    """LLM backend configuration (S-070).
+    """LLM backend configuration (S-070, S-098, S-099).
 
     ``backend`` selects the concrete implementation:
 
     - ``""``           — LLM features disabled (default)
     - ``"llama_cpp"``  — local CPU inference via ``llama-cpp-python`` (S-070)
-    - ``"ollama"``     — HTTP backend (S-098, deferred)
-    - ``"cloud"``      — Anthropic/OpenAI SDK backends (S-099, deferred)
+    - ``"ollama"``     — HTTP backend (S-098)
+    - ``"cloud"``      — Anthropic/OpenAI SDK backends (S-099)
 
     Numeric fields apply to ``llama_cpp`` only; they are accepted on every
     config so future backends can reuse them without a schema migration.
+
+    ``cloud_api_key`` has ``repr=False`` so ``repr(LLMConfig(...))`` never
+    echoes a secret (regression-guarded by a unit test).
     """
 
     backend: str = ""
@@ -219,6 +222,15 @@ class LLMConfig:
     # Ollama backend tuning (S-098). Defaults match FR-064 acceptance criteria.
     ollama_model: str = "phi4-mini"
     ollama_timeout_s: float = 30.0
+    # Cloud backend tuning (S-099). ``cloud_api_key`` has ``repr=False`` so
+    # ``repr(LLMConfig(...))`` never echoes a secret (mirrors
+    # ``StorageConfig.postgresql_url``). The remaining fields have safe
+    # defaults — empty values trigger graceful absence in the factory.
+    cloud_provider: str = ""
+    cloud_api_key: str = field(default="", repr=False)
+    cloud_model: str = ""
+    cloud_timeout_s: float = 30.0
+    cloud_base_url: str = ""
     # llama_cpp tuning (S-070).
     n_ctx: int = 4096
     n_threads: int | None = None

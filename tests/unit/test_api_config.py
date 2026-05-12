@@ -11,6 +11,7 @@ from seerflow.alerting.dispatcher import WebhookTarget
 from seerflow.api.routes.config import redact_config
 from seerflow.config import (
     AlertingConfig,
+    LLMConfig,
     ReceiverConfig,
     SeerflowConfig,
     StorageConfig,
@@ -77,6 +78,28 @@ class TestRedactConfig:
         data = redact_config(cfg)
         assert data["receivers"]["webhooks"][0]["auth_token"] == "***"
         assert data["receivers"]["webhooks"][0]["auth_header"] == "X-Auth-Token"
+
+    def test_llm_cloud_api_key_masked_when_set(self) -> None:
+        """S-099: ``cloud_api_key`` must be masked before leaving the process."""
+        cfg = SeerflowConfig(
+            llm=LLMConfig(
+                backend="cloud",
+                cloud_provider="anthropic",
+                cloud_api_key="sk-ant-secret-token-xyz",
+                cloud_model="claude-haiku-4-5",
+            )
+        )
+        data = redact_config(cfg)
+        assert data["llm"]["cloud_api_key"] == "***"
+        assert "sk-ant-secret-token-xyz" not in str(data)
+        # Non-secret fields stay visible for operational diagnostics.
+        assert data["llm"]["cloud_provider"] == "anthropic"
+        assert data["llm"]["cloud_model"] == "claude-haiku-4-5"
+
+    def test_llm_cloud_api_key_empty_stays_empty(self) -> None:
+        cfg = SeerflowConfig()
+        data = redact_config(cfg)
+        assert data["llm"]["cloud_api_key"] == ""
 
     def test_non_secret_fields_preserved(self) -> None:
         cfg = SeerflowConfig(
@@ -327,6 +350,7 @@ class TestSecretRegressionGuard:
         "alerting.telegram_targets[].bot_token",
         "alerting.whatsapp_targets[].access_token",
         "api_rate_limit_redis_url",
+        "llm.cloud_api_key",
     }
     # Internal fields on channel targets (rate-limit buckets, circuit breakers,
     # clock injectors) that are repr=False for noise reduction, not secrecy.

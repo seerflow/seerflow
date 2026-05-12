@@ -1,4 +1,4 @@
-"""Config-driven factory for ``LLMBackend`` instances (S-070, S-098).
+"""Config-driven factory for ``LLMBackend`` instances (S-070, S-098, S-099).
 
 Graceful absence is the explicit contract: when the operator has not
 configured a backend, or has configured one whose optional dependency is
@@ -22,14 +22,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from seerflow._config_validation import ConfigError
+from seerflow.llm.backends.cloud import AnthropicBackend, OpenAIBackend
 from seerflow.llm.backends.llama_cpp import LlamaCppBackend
-from seerflow.llm.backends.ollama import OllamaBackend
+from seerflow.llm.backends.ollama import OllamaBackend, _scrub
 
 if TYPE_CHECKING:
     from seerflow.config import LLMConfig
     from seerflow.llm.protocol import LLMBackend
 
 _VALID_BACKENDS: frozenset[str] = frozenset({"", "llama_cpp", "ollama", "cloud"})
+
+# S-099: known cloud providers. Empty / unknown surfaces as graceful absence
+# from ``_maybe_load_cloud`` (the config validator already rejects truly
+# unknown values; this is defence-in-depth).
+_VALID_CLOUD_PROVIDERS: frozenset[str] = frozenset({"anthropic", "openai"})
 
 
 def _maybe_load_ollama(cfg: LLMConfig, log: logging.Logger) -> LLMBackend | None:
@@ -60,6 +66,84 @@ def _maybe_load_ollama(cfg: LLMConfig, log: logging.Logger) -> LLMBackend | None
         cfg.ollama_url,
         cfg.ollama_model,
     )
+    return backend
+
+
+def _maybe_load_cloud(cfg: LLMConfig, log: logging.Logger) -> LLMBackend | None:
+    """Build a cloud ``LLMBackend`` from config; ``None`` on graceful absence.
+
+    Graceful-absence paths (return ``None`` + WARNING):
+
+    - empty ``cloud_provider``
+    - ``cloud_provider`` outside ``{"anthropic", "openai"}`` (defence in depth;
+      the config validator already rejects unknown values)
+    - empty ``cloud_api_key``
+    - empty ``cloud_model``
+    - SDK ``ImportError`` (optional dep ``seerflow[llm-cloud]`` not installed)
+
+    No network call is performed here — the SDK client constructor itself
+    is lazy (the official Anthropic / OpenAI clients only open sockets on
+    the first method call). Health surfaces *configuration* readiness, not
+    *runtime* API health.
+    """
+    provider = cfg.cloud_provider
+    if not provider:
+        log.warning("llm: cloud_provider missing → disabled")
+        return None
+    if provider not in _VALID_CLOUD_PROVIDERS:
+        log.warning(
+            "llm: cloud_provider %r is not one of %s → disabled",
+            provider,
+            sorted(_VALID_CLOUD_PROVIDERS),
+        )
+        return None
+    if not cfg.cloud_api_key:
+        log.warning("llm: cloud_api_key missing → disabled")
+        return None
+    if not cfg.cloud_model:
+        log.warning("llm: cloud_model missing → disabled")
+        return None
+
+    base_url = cfg.cloud_base_url or None
+    try:
+        if provider == "anthropic":
+            backend: LLMBackend = AnthropicBackend(
+                api_key=cfg.cloud_api_key,
+                model=cfg.cloud_model,
+                timeout_s=cfg.cloud_timeout_s,
+                base_url=base_url,
+            )
+        else:  # provider == "openai"
+            backend = OpenAIBackend(
+                api_key=cfg.cloud_api_key,
+                model=cfg.cloud_model,
+                timeout_s=cfg.cloud_timeout_s,
+                base_url=base_url,
+            )
+    except ImportError:
+        log.warning(
+            "llm: %s SDK not installed → disabled (pip install seerflow[llm-cloud])",
+            provider,
+        )
+        return None
+
+    # INFO log carries provider + model + (when set) base_url ONLY. The API
+    # key MUST NEVER appear in any log line. ``base_url`` is scrubbed
+    # through ``_scrub`` because an operator can embed ``user:pass@`` in a
+    # reverse-proxy URL — that must not surface in the log stream.
+    if base_url:
+        log.info(
+            "cloud: configured backend provider=%s model=%s base_url=%s",
+            provider,
+            cfg.cloud_model,
+            _scrub(base_url),
+        )
+    else:
+        log.info(
+            "cloud: configured backend provider=%s model=%s",
+            provider,
+            cfg.cloud_model,
+        )
     return backend
 
 
@@ -121,8 +205,7 @@ def build_llm_backend(cfg: LLMConfig, *, log: logging.Logger | None = None) -> L
         return _maybe_load_ollama(cfg, logger)
 
     if cfg.backend == "cloud":
-        logger.info("llm: backend=cloud deferred to S-099")
-        return None
+        return _maybe_load_cloud(cfg, logger)
 
     # cfg.backend == "llama_cpp"
     try:

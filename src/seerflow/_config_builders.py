@@ -889,6 +889,10 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
 
 _VALID_LLM_BACKENDS: frozenset[str] = frozenset({"", "llama_cpp", "ollama", "cloud"})
 
+# S-099: cloud-backend providers. Empty is legal (graceful absence handled by the
+# factory); only ``"anthropic"`` and ``"openai"`` are valid concrete values.
+_VALID_CLOUD_PROVIDERS: frozenset[str] = frozenset({"", "anthropic", "openai"})
+
 _LLAMA_CPP_MAX_TOKENS_CAP = 1024  # mirrors LLAMA_CPP_MAX_TOKENS_HARD_CAP
 
 
@@ -1098,6 +1102,53 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
             f"got {hunt_max_query_chars!r}"
         )
 
+    # S-099: Cloud backend knobs. Empty values are legal (graceful absence is
+    # handled by ``_maybe_load_cloud`` in the factory). The validator only
+    # rejects values that could surface a *worse* failure later (typed errors
+    # at boot are kinder than typed errors mid-request).
+    cloud_provider = data.get("cloud_provider", "")
+    if not isinstance(cloud_provider, str):
+        raise ConfigError(
+            f"llm.cloud_provider must be a string, got {type(cloud_provider).__name__}"
+        )
+    if cloud_provider not in _VALID_CLOUD_PROVIDERS:
+        raise ConfigError(
+            "llm.cloud_provider must be one of "
+            f"{sorted(p for p in _VALID_CLOUD_PROVIDERS if p)} or empty, "
+            f"got {cloud_provider!r}"
+        )
+
+    cloud_api_key = data.get("cloud_api_key", "")
+    if not isinstance(cloud_api_key, str):
+        raise ConfigError(
+            f"llm.cloud_api_key must be a string, got {type(cloud_api_key).__name__}"
+        )
+
+    cloud_model = data.get("cloud_model", "")
+    if not isinstance(cloud_model, str):
+        raise ConfigError(f"llm.cloud_model must be a string, got {type(cloud_model).__name__}")
+    if len(cloud_model) > 256:
+        raise ConfigError(
+            f"llm.cloud_model must be a string of length <= 256, got {cloud_model!r}"
+        )
+
+    cloud_timeout_s_raw = data.get("cloud_timeout_s", 30.0)
+    if isinstance(cloud_timeout_s_raw, bool) or not isinstance(cloud_timeout_s_raw, (int, float)):
+        raise ConfigError(
+            f"llm.cloud_timeout_s must be a number, got {type(cloud_timeout_s_raw).__name__}"
+        )
+    cloud_timeout_s = float(cloud_timeout_s_raw)
+    if not 1.0 <= cloud_timeout_s <= 600.0:
+        raise ConfigError(
+            f"llm.cloud_timeout_s must be in [1.0, 600.0], got {cloud_timeout_s_raw!r}"
+        )
+
+    cloud_base_url = data.get("cloud_base_url", "")
+    if not isinstance(cloud_base_url, str):
+        raise ConfigError(
+            f"llm.cloud_base_url must be a string, got {type(cloud_base_url).__name__}"
+        )
+
     return LLMConfig(
         backend=backend,
         model_path=model_path,
@@ -1120,6 +1171,11 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
         hunt_timeout_s=hunt_timeout_s,
         hunt_max_results=hunt_max_results,
         hunt_max_query_chars=hunt_max_query_chars,
+        cloud_provider=cloud_provider,
+        cloud_api_key=cloud_api_key,
+        cloud_model=cloud_model,
+        cloud_timeout_s=cloud_timeout_s,
+        cloud_base_url=cloud_base_url,
     )
 
 

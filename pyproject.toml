@@ -56,6 +56,13 @@ redis = ["redis>=5.0"]
 # LLM backend never need to install it. ``build_llm_backend`` degrades
 # gracefully when the import fails.
 llm-cpu = ["llama-cpp-python>=0.3.0"]
+# S-099: Anthropic + OpenAI cloud LLM SDKs. Pure-Python wheels (~10 MB each),
+# no native compilation. Lower bounds track the first stable releases with
+# full async support — ``anthropic>=0.40`` includes the stable Messages API,
+# ``openai>=1.55`` is well past the v1 rewrite. Operators not using a cloud
+# backend never need to install these; ``build_llm_backend`` degrades
+# gracefully on ImportError.
+llm-cloud = ["anthropic>=0.40", "openai>=1.55"]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"

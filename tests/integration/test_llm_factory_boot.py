@@ -74,8 +74,137 @@ def test_boot_with_missing_optional_dep_marks_degraded(
     assert _derive_health(backend, cfg) == "degraded"
 
 
-def test_boot_with_cloud_backend_marks_degraded_until_s099() -> None:
+def test_boot_with_cloud_backend_no_config_marks_degraded() -> None:
+    """S-099: ``backend=cloud`` with no provider configured → graceful absence.
+
+    Rewrites the S-070 ``"deferred"`` test. The branch is now real but
+    degrades cleanly when the operator has not finished wiring cloud
+    config — exactly the same observable behaviour from outside.
+    """
     cfg = LLMConfig(backend="cloud")
+    backend = build_llm_backend(cfg)
+    assert backend is None
+    assert _derive_health(backend, cfg) == "degraded"
+
+
+# ----- S-099: Cloud backend boot integration ------------------------------- #
+
+
+def test_boot_with_cloud_anthropic_valid_marks_ready_no_network_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-099: ``backend=cloud`` + ``provider=anthropic`` + valid config → ``ready``.
+
+    The factory must not perform any HTTP call at boot — the SDK client
+    constructors are lazy in real ``anthropic`` / ``openai`` releases, but
+    we mock the backend constructor anyway for hermeticity and to ensure
+    no future SDK version breaks this.
+    """
+    sentinel = object()
+    monkeypatch.setattr("seerflow.llm.factory.AnthropicBackend", lambda **_: sentinel)
+
+    cfg = LLMConfig(
+        backend="cloud",
+        cloud_provider="anthropic",
+        cloud_api_key="sk-ant-test",
+        cloud_model="claude-haiku-4-5",
+    )
+    backend: Any = build_llm_backend(cfg)
+    assert backend is sentinel
+    assert _derive_health(backend, cfg) == "ready"
+
+
+def test_boot_with_cloud_openai_valid_marks_ready_no_network_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-099: ``backend=cloud`` + ``provider=openai`` + valid config → ``ready``."""
+    sentinel = object()
+    monkeypatch.setattr("seerflow.llm.factory.OpenAIBackend", lambda **_: sentinel)
+
+    cfg = LLMConfig(
+        backend="cloud",
+        cloud_provider="openai",
+        cloud_api_key="sk-openai-test",
+        cloud_model="gpt-4o-mini",
+    )
+    backend: Any = build_llm_backend(cfg)
+    assert backend is sentinel
+    assert _derive_health(backend, cfg) == "ready"
+
+
+def test_boot_with_cloud_empty_provider_marks_degraded() -> None:
+    """S-099: blank ``cloud_provider`` → graceful absence → ``degraded``."""
+    cfg = LLMConfig(backend="cloud", cloud_provider="")
+    backend = build_llm_backend(cfg)
+    assert backend is None
+    assert _derive_health(backend, cfg) == "degraded"
+
+
+def test_boot_with_cloud_empty_api_key_marks_degraded() -> None:
+    """S-099: blank ``cloud_api_key`` → graceful absence → ``degraded``."""
+    cfg = LLMConfig(
+        backend="cloud",
+        cloud_provider="anthropic",
+        cloud_api_key="",
+        cloud_model="claude-haiku-4-5",
+    )
+    backend = build_llm_backend(cfg)
+    assert backend is None
+    assert _derive_health(backend, cfg) == "degraded"
+
+
+def test_boot_with_cloud_empty_model_marks_degraded() -> None:
+    """S-099: blank ``cloud_model`` → graceful absence → ``degraded``."""
+    cfg = LLMConfig(
+        backend="cloud",
+        cloud_provider="openai",
+        cloud_api_key="sk-x",
+        cloud_model="",
+    )
+    backend = build_llm_backend(cfg)
+    assert backend is None
+    assert _derive_health(backend, cfg) == "degraded"
+
+
+def test_boot_with_cloud_anthropic_sdk_missing_marks_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-099: ``anthropic`` SDK absent → graceful absence → ``degraded``.
+
+    Same posture as ``test_boot_with_missing_optional_dep_marks_degraded``
+    for ``llama_cpp``.
+    """
+
+    def _raise(**_: Any) -> Any:
+        raise ImportError("No module named 'anthropic'")
+
+    monkeypatch.setattr("seerflow.llm.factory.AnthropicBackend", _raise)
+    cfg = LLMConfig(
+        backend="cloud",
+        cloud_provider="anthropic",
+        cloud_api_key="sk-x",
+        cloud_model="claude-haiku-4-5",
+    )
+    backend = build_llm_backend(cfg)
+    assert backend is None
+    assert _derive_health(backend, cfg) == "degraded"
+
+
+def test_boot_with_cloud_openai_sdk_missing_marks_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-099: ``openai`` SDK absent → graceful absence → ``degraded``."""
+
+    def _raise(**_: Any) -> Any:
+        raise ImportError("No module named 'openai'")
+
+    monkeypatch.setattr("seerflow.llm.factory.OpenAIBackend", _raise)
+    cfg = LLMConfig(
+        backend="cloud",
+        cloud_provider="openai",
+        cloud_api_key="sk-x",
+        cloud_model="gpt-4o-mini",
+    )
     backend = build_llm_backend(cfg)
     assert backend is None
     assert _derive_health(backend, cfg) == "degraded"

@@ -113,6 +113,12 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
     if data.get("api_rate_limit_redis_url"):
         data["api_rate_limit_redis_url"] = _MASK
 
+    # llm — cloud-provider API keys (S-099). ``cloud_api_key`` is the only
+    # secret in the LLM block; the rest (provider, model, base_url, etc.) are
+    # operationally safe to expose via /api/v1/config.
+    if data.get("llm", {}).get("cloud_api_key"):
+        data["llm"]["cloud_api_key"] = _MASK
+
     return data
 
 
