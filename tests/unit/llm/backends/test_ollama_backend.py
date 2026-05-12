@@ -307,6 +307,27 @@ async def test_error_message_scrubs_bearer_token() -> None:
     assert not re.search(r"Bearer\s+\S+(?!<redacted>)", msg) or "<redacted>" in msg
 
 
+async def test_error_message_scrubs_url_embedded_userinfo() -> None:
+    """Defence-in-depth: ``user:pass@host`` in the URL is redacted in errors.
+
+    Ollama itself doesn't ship auth, but an operator placing it behind a
+    reverse proxy might embed credentials. We must not leak them in the
+    error message.
+    """
+    backend = OllamaBackend("http://admin:hunter2@gpu-host:11434", "m")
+    with aioresponses() as mock:
+        mock.post(
+            "http://admin:hunter2@gpu-host:11434/api/generate",
+            exception=aiohttp.ClientError("boom"),
+        )
+        with pytest.raises(OllamaBackendError) as exc:
+            await backend.complete("p")
+    msg = str(exc.value)
+    assert "hunter2" not in msg
+    assert "admin:hunter2" not in msg
+    assert "<redacted>" in msg
+
+
 async def test_http_error_body_snippet_truncated_to_200_chars() -> None:
     backend = OllamaBackend("http://test", "m")
     long_body = "x" * 1000

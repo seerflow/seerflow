@@ -23,12 +23,13 @@ Design constraints (see story S-098 design rationale for the full why):
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
 import aiohttp
 
-from seerflow.utils.http import _scrub
+from seerflow.utils.http import _scrub as _scrub_authz
 
 _log = logging.getLogger(__name__)
 
@@ -41,6 +42,18 @@ OLLAMA_MAX_TOKENS_HARD_CAP = 1024
 # Cap the body snippet included in HTTP-error messages. Long bodies clutter
 # logs and can include sensitive payloads (e.g. echoed prompts).
 _BODY_SNIPPET_MAX = 200
+
+# Defence-in-depth: redact ``user:pass@`` blocks embedded directly in URLs.
+# Ollama itself does not ship auth, but an operator might place it behind a
+# reverse proxy and embed credentials in ``ollama_url`` — those must never
+# surface in our error messages or logs.
+_URL_USERINFO_RE = re.compile(r"(://)[^/@\s]+:[^/@\s]+@")
+
+
+def _scrub(msg: str) -> str:
+    """Scrub ``Bearer``/``Basic`` auth blobs and URL-embedded userinfo."""
+    scrubbed = _scrub_authz(msg)
+    return _URL_USERINFO_RE.sub(r"\1<redacted>@", scrubbed)
 
 
 class OllamaBackendError(RuntimeError):
@@ -133,20 +146,22 @@ class OllamaBackend:
                 return await self._read_payload(resp, url)
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             raise OllamaBackendError(
-                f"ollama: request to {url} failed: {_scrub(repr(exc))}"
+                f"ollama: request to {_scrub(url)} failed: {_scrub(repr(exc))}"
             ) from exc
 
     async def _read_payload(self, resp: aiohttp.ClientResponse, url: str) -> Any:
         """Read + parse the response, raising ``OllamaBackendError`` on issues."""
         if resp.status >= 400:
             snippet = await self._read_snippet(resp)
-            raise OllamaBackendError(f"ollama: HTTP {resp.status} from {url}: {_scrub(snippet)}")
+            raise OllamaBackendError(
+                f"ollama: HTTP {resp.status} from {_scrub(url)}: {_scrub(snippet)}"
+            )
         try:
             return await resp.json(content_type=None)
         except (aiohttp.ContentTypeError, ValueError) as exc:
             snippet = await self._read_snippet(resp)
             raise OllamaBackendError(
-                f"ollama: malformed response from {url}: not JSON ({_scrub(snippet)!r})"
+                f"ollama: malformed response from {_scrub(url)}: not JSON ({_scrub(snippet)!r})"
             ) from exc
 
     @staticmethod
@@ -160,14 +175,15 @@ class OllamaBackend:
     @staticmethod
     def _extract_text(payload: Any, prompt: str, url: str) -> str:
         """Pull the ``response`` field out of the payload, normalising the prefix."""
+        scrubbed_url = _scrub(url)
         if not isinstance(payload, dict) or "response" not in payload:
             raise OllamaBackendError(
-                f"ollama: malformed response from {url}: missing 'response' field"
+                f"ollama: malformed response from {scrubbed_url}: missing 'response' field"
             )
         text = payload["response"]
         if not isinstance(text, str):
             raise OllamaBackendError(
-                f"ollama: malformed response from {url}: 'response' is "
+                f"ollama: malformed response from {scrubbed_url}: 'response' is "
                 f"{type(text).__name__}, expected str"
             )
         if text.startswith(prompt):
