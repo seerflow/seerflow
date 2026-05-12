@@ -119,9 +119,7 @@ class TestPartialConfig:
         # S-074: include a URL so the DSN-required check passes; this test
         # exercises partial-config merge behaviour, not URL validation.
         yaml_file.write_text(
-            "storage:\n"
-            "  backend: postgresql\n"
-            "  postgresql_url: postgresql://localhost/db\n"
+            "storage:\n  backend: postgresql\n  postgresql_url: postgresql://localhost/db\n"
         )
         config = load_config(str(yaml_file))
         assert config.storage.backend == "postgresql"
@@ -692,21 +690,13 @@ class TestStorageBackendDsnRequired:
 
     def test_empty_url_rejected(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
-        yaml_file.write_text(
-            "storage:\n"
-            "  backend: postgresql\n"
-            "  postgresql_url: ''\n"
-        )
+        yaml_file.write_text("storage:\n  backend: postgresql\n  postgresql_url: ''\n")
         with pytest.raises(ConfigError, match="postgresql_url"):
             load_config(str(yaml_file))
 
     def test_whitespace_url_rejected(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
-        yaml_file.write_text(
-            "storage:\n"
-            "  backend: postgresql\n"
-            "  postgresql_url: '   '\n"
-        )
+        yaml_file.write_text("storage:\n  backend: postgresql\n  postgresql_url: '   '\n")
         with pytest.raises(ConfigError, match="postgresql_url"):
             load_config(str(yaml_file))
 
@@ -719,9 +709,7 @@ class TestStorageBackendDsnRequired:
     def test_non_empty_url_accepted(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
         yaml_file.write_text(
-            "storage:\n"
-            "  backend: postgresql\n"
-            "  postgresql_url: postgresql://localhost/db\n"
+            "storage:\n  backend: postgresql\n  postgresql_url: postgresql://localhost/db\n"
         )
         cfg = load_config(str(yaml_file))
         assert cfg.storage.backend == "postgresql"

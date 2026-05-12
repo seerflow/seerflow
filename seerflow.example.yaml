@@ -5,9 +5,17 @@
 
 storage:
   backend: sqlite                        # sqlite | postgresql
+
+  # SQLite (default, zero-config) — single-writer, WAL mode, FTS5
   # data_dir: ~/.local/share/seerflow    # default XDG data dir; override with ${SEERFLOW_DATA_DIR}
   # sqlite_path: auto-derived from data_dir (data_dir/seerflow.db)
-  # postgresql_url: ${SEERFLOW_PG_URL}   # required when backend=postgresql
+
+  # PostgreSQL (production-scale) — install with: uv sync --extra postgres
+  # See STORAGE_MIGRATION.md for the SQLite -> PostgreSQL runbook.
+  # postgresql_url: ${SEERFLOW_PG_URL}        # required when backend=postgresql
+  # postgresql_pool_min_size: 2               # asyncpg pool floor; >= 1
+  # postgresql_pool_max_size: 10              # asyncpg pool ceiling; >= pool_min_size
+  # postgresql_command_timeout_s: 30.0        # per-query timeout in seconds; > 0
 
 receivers:
   # Network binding
