@@ -188,6 +188,15 @@ markers = [
 [tool.coverage.run]
 source = ["src/seerflow"]
 branch = true
+# PostgreSQL backend modules are exercised exclusively by docker-gated
+# integration tests (`pytest -m docker`). They are excluded from the
+# default coverage suite — see tests/integration/test_postgres_integration.py.
+omit = [
+    "src/seerflow/storage/postgres.py",
+    "src/seerflow/storage/_postgres_alerts.py",
+    "src/seerflow/storage/_postgres_sigma_state.py",
+    "src/seerflow/storage/postgres_migrations.py",
+]
 
 [tool.coverage.report]
 fail_under = 95
