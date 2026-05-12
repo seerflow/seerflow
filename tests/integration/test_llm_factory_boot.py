@@ -74,21 +74,57 @@ def test_boot_with_missing_optional_dep_marks_degraded(
     assert _derive_health(backend, cfg) == "degraded"
 
 
-def test_boot_with_ollama_backend_marks_degraded_until_s098() -> None:
-    """``ollama`` is a valid config value but the backend is deferred.
-
-    Operators who set ``backend: ollama`` today get ``degraded`` (their
-    intent could not be satisfied) until S-098 lands. The factory must
-    not raise, so boot continues serving non-LLM features.
-    """
-    cfg = LLMConfig(backend="ollama")
-    backend = build_llm_backend(cfg)
-    assert backend is None
-    assert _derive_health(backend, cfg) == "degraded"
-
-
 def test_boot_with_cloud_backend_marks_degraded_until_s099() -> None:
     cfg = LLMConfig(backend="cloud")
     backend = build_llm_backend(cfg)
     assert backend is None
     assert _derive_health(backend, cfg) == "degraded"
+
+
+# ----- S-098: Ollama backend boot integration ------------------------------- #
+
+
+def test_boot_with_ollama_defaults_marks_ready_no_network_call() -> None:
+    """S-098: ``backend=ollama`` + default url/model → ``ready``, no probe.
+
+    Critically, the factory must not perform any HTTP call at boot. We
+    register ``aioresponses`` with no expectations; any request would raise
+    ``ConnectionError`` from the mock, so a clean run proves no call was
+    made.
+    """
+    from aioresponses import aioresponses
+
+    from seerflow.llm.backends.ollama import OllamaBackend
+
+    with aioresponses() as mock:
+        cfg = LLMConfig(backend="ollama")  # defaults: url=localhost:11434, model=phi4-mini
+        backend = build_llm_backend(cfg)
+        assert isinstance(backend, OllamaBackend)
+        assert _derive_health(backend, cfg) == "ready"
+        # aioresponses keeps a ``requests`` dict keyed by (method, URL) and
+        # populates it on each match. Empty → zero HTTP calls at boot.
+        assert dict(mock.requests) == {}
+
+
+def test_boot_with_ollama_empty_url_marks_degraded_no_network_call() -> None:
+    """S-098: blank ``ollama_url`` → graceful absence → ``degraded``."""
+    from aioresponses import aioresponses
+
+    with aioresponses() as mock:
+        cfg = LLMConfig(backend="ollama", ollama_url="", ollama_model="phi4-mini")
+        backend = build_llm_backend(cfg)
+        assert backend is None
+        assert _derive_health(backend, cfg) == "degraded"
+        assert dict(mock.requests) == {}
+
+
+def test_boot_with_ollama_empty_model_marks_degraded_no_network_call() -> None:
+    """S-098: blank ``ollama_model`` → graceful absence → ``degraded``."""
+    from aioresponses import aioresponses
+
+    with aioresponses() as mock:
+        cfg = LLMConfig(backend="ollama", ollama_model="")
+        backend = build_llm_backend(cfg)
+        assert backend is None
+        assert _derive_health(backend, cfg) == "degraded"
+        assert dict(mock.requests) == {}
