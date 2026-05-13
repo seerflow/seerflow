@@ -279,32 +279,34 @@ def test_load_falkordb_returns_real_class_when_installed(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_add_edge_rejects_backtick_in_rel_type() -> None:
-    """Cypher-injection guard: backticks in ``rel_type`` are rejected."""
+@pytest.mark.parametrize("bad", ["bad`type", "has'quote", "has\\backslash"])
+async def test_add_edge_rejects_unsafe_chars_in_rel_type(bad: str) -> None:
+    """Cypher-injection guard: backtick / single quote / backslash rejected."""
     query = AsyncMock(return_value=_fake_result())
     backend = FalkorDBGraphBackend(client=_fake_client(query))
-    with pytest.raises(ValueError, match="backticks"):
-        await backend.add_edge("a", "b", "bad`type", 1)
+    with pytest.raises(ValueError, match="not allowed"):
+        await backend.add_edge("a", "b", bad, 1)
     query.assert_not_awaited()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_load_rejects_backtick_in_rel_type() -> None:
+async def test_load_rejects_unsafe_chars_in_rel_type() -> None:
     """Same guard applies to bulk-load rows."""
     query = AsyncMock(return_value=_fake_result())
     backend = FalkorDBGraphBackend(client=_fake_client(query))
-    with pytest.raises(ValueError, match="backticks"):
-        await backend.load([("a", "b", "bad`rel", 1, 5, 1)])
+    with pytest.raises(ValueError, match="not allowed"):
+        await backend.load([("a", "b", "bad'rel", 1, 5, 1)])
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_neighbors_rejects_backtick_in_rel_types() -> None:
+@pytest.mark.parametrize("bad", ["ba`d", "ba'd", "ba\\d"])
+async def test_get_neighbors_rejects_unsafe_chars_in_rel_types(bad: str) -> None:
     query = AsyncMock(return_value=_fake_result())
     backend = FalkorDBGraphBackend(client=_fake_client(query))
-    with pytest.raises(ValueError, match="backticks"):
-        await backend.get_neighbors("a", rel_types=("good", "ba`d"))
+    with pytest.raises(ValueError, match="not allowed"):
+        await backend.get_neighbors("a", rel_types=("good", bad))
 
 
 @pytest.mark.unit

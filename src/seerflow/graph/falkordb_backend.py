@@ -128,18 +128,14 @@ def _neighbors_cypher(rel_types: tuple[str, ...] | None, depth: int) -> str:
 
     ``rel_types`` is restricted via ``WHERE type(r) IN [...]`` instead of
     interpolated as a relationship-type pattern so the cypher stays a
-    single string (depth-2+ patterns get noisy fast). Strings are
-    sanitised by quoting only — no user-supplied identifiers reach the
-    cypher unsanitised.
+    single string (depth-2+ patterns get noisy fast). Each value is run
+    through :func:`_validate_rel_type` so backticks and single quotes
+    cannot escape the literal.
     """
     depth = max(1, int(depth))
     if rel_types:
-        # Whitelist: backtick-wrap each type identifier; reject any embedded
-        # backtick so the query stays unforgeable.
         for rt in rel_types:
-            if "`" in rt:
-                msg = f"invalid rel_type {rt!r}: backticks are not allowed"
-                raise ValueError(msg)
+            _validate_rel_type(rt)
         rel_list = ", ".join(f"'{rt}'" for rt in rel_types)
         return (
             f"MATCH (s:Entity {{name: $src}})-[r*1..{depth}]-(n:Entity) "
@@ -169,11 +165,16 @@ _SUBGRAPH_EDGES_CYPHER = (
 def _validate_rel_type(rel_type: str) -> str:
     """Reject relationship types containing characters that break cypher.
 
-    FalkorDB uses backticked relationship-type literals. Embedded
-    backticks would allow injection; reject them at the boundary.
+    FalkorDB uses backticked relationship-type literals in MERGE patterns
+    and single-quoted string literals in the rel-type WHERE filter.
+    Embedded backticks or single quotes would allow injection in either
+    context, so reject both at the boundary.
     """
-    if "`" in rel_type:
-        msg = f"invalid rel_type {rel_type!r}: backticks are not allowed"
+    if "`" in rel_type or "'" in rel_type or "\\" in rel_type:
+        msg = (
+            f"invalid rel_type {rel_type!r}: backticks, single quotes, "
+            "and backslashes are not allowed"
+        )
         raise ValueError(msg)
     return rel_type
 
