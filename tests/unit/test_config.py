@@ -1455,6 +1455,50 @@ class TestOtlpTlsConfig:
             _build_alerting({"otlp_tls": 1})
 
 
+class TestOtlpCustomCaAndMtlsFields:
+    """S-049b: custom CA bundle + mTLS configuration on AlertingConfig."""
+
+    # ----- Defaults -----
+
+    def test_otlp_tls_ca_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_tls_ca_file == ""
+
+    def test_otlp_mtls_cert_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_mtls_cert_file == ""
+
+    def test_otlp_mtls_key_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_mtls_key_file == ""
+
+    # ----- Type validation -----
+
+    def test_otlp_tls_ca_file_int_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": 1})
+
+    def test_otlp_mtls_cert_file_list_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_mtls_cert_file"):
+            _build_alerting({"otlp_mtls_cert_file": ["/path/a.pem"]})
+
+    def test_otlp_mtls_key_file_dict_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_mtls_key_file"):
+            _build_alerting({"otlp_mtls_key_file": {"path": "/etc/key.pem"}})
+
+
 class TestWebSocketConfig:
     def test_default_ws_fields(self) -> None:
         from seerflow.config import SeerflowConfig
