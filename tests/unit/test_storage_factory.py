@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from seerflow.config import ConfigError, StorageConfig
-from seerflow.storage import connect_storage
+from seerflow.storage import StorageBackend, connect_storage
 from seerflow.storage.sqlite import SqliteBackend
 
 if TYPE_CHECKING:
@@ -17,9 +17,12 @@ if TYPE_CHECKING:
 
 class TestConnectStorage:
     async def test_sqlite_returns_sqlite_backend(self, tmp_path: Path) -> None:
+        """Returned value must satisfy both the composite Protocol and the
+        concrete SqliteBackend class — dual compatibility (S-198 AC #8)."""
         cfg = StorageConfig(backend="sqlite", data_dir=str(tmp_path))
         storage = await connect_storage(cfg)
         try:
+            assert isinstance(storage, StorageBackend)
             assert isinstance(storage, SqliteBackend)
         finally:
             await storage.close()
