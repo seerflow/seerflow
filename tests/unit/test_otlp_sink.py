@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+
+if TYPE_CHECKING:
+    import pathlib
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -925,6 +929,123 @@ class TestOtlpSinkTlsInit:
         assert "mismatch" in message.lower() or "otlp_tls=false" in message.lower()
         # Endpoint must be masked.
         assert "https://host:4317" not in message
+
+
+class TestOtlpSinkCustomCaAndMtlsInit:
+    """S-049b: custom CA bundle + mTLS file kwargs read at sink construction."""
+
+    def test_init_with_empty_paths_keeps_pem_none(self) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        sink = OtlpSink(endpoint="https://host:4317", protocol="grpc")
+        assert sink._tls_ca_pem is None
+        assert sink._mtls_cert_pem is None
+        assert sink._mtls_key_pem is None
+
+    def test_init_accepts_tls_ca_file_kwarg(self, tmp_path: pathlib.Path) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        ca = tmp_path / "ca.pem"
+        ca.write_bytes(b"-----BEGIN CERTIFICATE-----\nstub-ca\n-----END CERTIFICATE-----\n")
+        sink = OtlpSink(
+            endpoint="https://host:4317",
+            protocol="grpc",
+            tls=True,
+            tls_ca_file=str(ca),
+        )
+        assert sink._tls_ca_pem == ca.read_bytes()
+        assert sink._mtls_cert_pem is None
+        assert sink._mtls_key_pem is None
+
+    def test_init_accepts_mtls_kwargs(self, tmp_path: pathlib.Path) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        cert = tmp_path / "client.crt"
+        cert.write_bytes(b"stub-cert")
+        key = tmp_path / "client.key"
+        key.write_bytes(b"stub-key")
+        sink = OtlpSink(
+            endpoint="https://host:4317",
+            protocol="grpc",
+            tls=True,
+            mtls_cert_file=str(cert),
+            mtls_key_file=str(key),
+        )
+        assert sink._mtls_cert_pem == b"stub-cert"
+        assert sink._mtls_key_pem == b"stub-key"
+        assert sink._tls_ca_pem is None
+
+    def test_init_full_triple_read_into_attributes(self, tmp_path: pathlib.Path) -> None:
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        ca = tmp_path / "ca.pem"
+        ca.write_bytes(b"ca-bytes")
+        cert = tmp_path / "client.crt"
+        cert.write_bytes(b"cert-bytes")
+        key = tmp_path / "client.key"
+        key.write_bytes(b"key-bytes")
+        sink = OtlpSink(
+            endpoint="host:4317",
+            protocol="grpc",
+            tls=True,
+            tls_ca_file=str(ca),
+            mtls_cert_file=str(cert),
+            mtls_key_file=str(key),
+        )
+        assert sink._tls_ca_pem == b"ca-bytes"
+        assert sink._mtls_cert_pem == b"cert-bytes"
+        assert sink._mtls_key_pem == b"key-bytes"
+
+    def test_init_warns_when_cert_paths_set_but_tls_disabled(
+        self,
+        tmp_path: pathlib.Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """S-049b brainstorm §6: cert paths held but TLS off → operator
+        misconfiguration smell; emit one WARN.
+        """
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        ca = tmp_path / "ca.pem"
+        ca.write_bytes(b"ca")
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(
+                endpoint="host:4317",
+                protocol="grpc",
+                tls=False,
+                tls_ca_file=str(ca),
+            )
+        warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+        # One warn: cert path with TLS off. The bare-endpoint warning is
+        # suppressed because tls=False is an explicit operator choice.
+        assert len(warns) == 1
+        msg = warns[0].message.lower()
+        assert "tls" in msg
+        assert "cert" in msg or "ca" in msg or "mtls" in msg
+        # Must NOT echo the actual file path.
+        assert str(ca) not in warns[0].message
+
+    def test_init_quiet_when_paths_match_tls_on(
+        self,
+        tmp_path: pathlib.Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import logging
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        ca = tmp_path / "ca.pem"
+        ca.write_bytes(b"ca")
+        with caplog.at_level(logging.WARNING, logger="seerflow"):
+            OtlpSink(
+                endpoint="https://host:4317",
+                protocol="grpc",
+                tls=True,
+                tls_ca_file=str(ca),
+            )
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
 
 
 class TestOtlpSinkHttpExhaustsRetries:

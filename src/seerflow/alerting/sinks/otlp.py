@@ -14,6 +14,7 @@ import logging
 # dispatcher, receivers/manager) use the qualified ``asyncio.QueueFull`` form
 # because their tests do not patch ``asyncio`` at all.
 from asyncio import QueueEmpty, QueueFull
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
@@ -251,12 +252,25 @@ class OtlpSink:
         max_pending: int = 10_000,
         *,
         tls: bool | None = None,
+        tls_ca_file: str = "",
+        mtls_cert_file: str = "",
+        mtls_key_file: str = "",
     ) -> None:
         self._endpoint = endpoint
         self._protocol = protocol
         self._export_interval = export_interval
         self._max_pending = max_pending
         self._use_tls = _resolve_tls(endpoint, tls)
+        # S-049b: read PEM bytes once at construction so the flush hot path
+        # never touches the filesystem. Matches grpc-python's import-time
+        # bundle behavior; rotation requires a process restart.
+        self._tls_ca_pem: bytes | None = Path(tls_ca_file).read_bytes() if tls_ca_file else None
+        self._mtls_cert_pem: bytes | None = (
+            Path(mtls_cert_file).read_bytes() if mtls_cert_file else None
+        )
+        self._mtls_key_pem: bytes | None = (
+            Path(mtls_key_file).read_bytes() if mtls_key_file else None
+        )
         self._pending: asyncio.Queue[Alert] = asyncio.Queue(maxsize=max_pending)
         self._stop_event: asyncio.Event = asyncio.Event()
         self._grpc_channel: grpc.aio.Channel | None = None
@@ -283,6 +297,19 @@ class OtlpSink:
                 "— defaulting to plaintext gRPC. Set otlp_tls: true or use an "
                 "https:// scheme to enable TLS.",
                 masked_url(endpoint),
+            )
+        # S-049b: separately warn when CA/mTLS paths are configured but the
+        # resolved transport is plaintext. The bytes are held in memory and
+        # ignored — operators staging certs for a later TLS flip will see this
+        # as a heads-up, not a silent no-op. Paths are deliberately omitted to
+        # avoid leaking filesystem layout into the log stream.
+        if not self._use_tls and any(
+            (self._tls_ca_pem, self._mtls_cert_pem, self._mtls_key_pem)
+        ):
+            _log.warning(
+                "OTLP sink: TLS disabled but CA/mTLS cert paths are configured "
+                "— PEM bytes held in memory but unused until TLS is enabled "
+                "(set otlp_tls: true or use an https:// endpoint).",
             )
 
     def enqueue(self, alert: Alert) -> None:
