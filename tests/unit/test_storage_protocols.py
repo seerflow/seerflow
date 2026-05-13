@@ -191,6 +191,7 @@ class TestExports:
             "LogStore",
             "ModelStore",
             "SqliteBackend",
+            "StorageBackend",
             "connect_storage",
         }
         assert expected == set(storage_mod.__all__)
