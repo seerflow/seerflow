@@ -1021,3 +1021,30 @@ class TestCLIGraphMigrateArgs:
         )
         assert args.config == "/tmp/c.yaml"
         assert args.command == "graph"
+
+    def test_main_dispatches_graph_migrate(self) -> None:
+        """main() routes ``graph migrate`` to ``run_graph_migrate`` via _run_async_int."""
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(
+            config=None,
+            command="graph",
+            graph_cmd="migrate",
+            from_backend="igraph",
+            to_backend="falkordb",
+            batch_size=5000,
+            dry_run=False,
+            wipe_destination=False,
+        )
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.__main__._run_async_int") as mock_runner,
+        ):
+            mock_runner.return_value = 0
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+            mock_runner.assert_called_once()

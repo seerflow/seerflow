@@ -92,6 +92,10 @@ def main() -> None:
             from seerflow.rules_cmd import run_rules_list
 
             sys.exit(run_rules_list(args))
+        elif args.command == "graph":
+            from seerflow.graph_migrate_cmd import run_graph_migrate
+
+            sys.exit(_run_async_int(run_graph_migrate(args)))
         else:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:
