@@ -78,9 +78,14 @@ def build_pipeline_metrics_provider(
         if get_stats is not None:
             events, _anomalies, _templates, _t0 = get_stats()
             event_count = int(events)
-        active = 0
-        if ensemble is not None:
-            active = int(ensemble.get_stats().get("source_count", 0))
+        ensemble_stats: dict[str, int] = ensemble.get_stats() if ensemble is not None else {}
+        active = int(ensemble_stats.get("source_count", 0))
+        # S-075: prefer the ensemble-derived ``total_model_count`` (precise count
+        # of trained detectors across all sources) when present. Falls back to
+        # the historical ``active * _DETECTORS_PER_SOURCE`` multiplier so
+        # partial mocks and ensembles that have not yet surfaced the new key
+        # keep working.
+        model_count = int(ensemble_stats.get("total_model_count", active * _DETECTORS_PER_SOURCE))
         taxii: TAXIIMetricsAggregate | None = None
         if taxii_registry is not None:
             taxii = taxii_registry.aggregate()
@@ -92,7 +97,7 @@ def build_pipeline_metrics_provider(
             started_monotonic=started_monotonic,
             total_events_processed=event_count,
             active_sources=active,
-            model_count=active * _DETECTORS_PER_SOURCE,
+            model_count=model_count,
             taxii=taxii,
             ioc_matcher=ioc_metrics,
             ioc_enrichment=ioc_enrichment,

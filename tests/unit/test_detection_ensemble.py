@@ -391,6 +391,38 @@ class TestEnsembleStats:
         stats = ensemble.get_stats()
         assert stats["max_sources"] == 256
 
+    def test_total_model_count_matches_detector_population(self) -> None:
+        """``total_model_count`` mirrors ``sum(len(d) for d in self._detectors.values())``.
+
+        S-075 follow-up to S-056: the metrics provider previously multiplied
+        ``source_count`` by a hardcoded ``_DETECTORS_PER_SOURCE = 4`` constant.
+        Heterogeneous ensembles need the precise count derived from internal
+        state, which ``get_stats`` now exposes for the provider to consume.
+        """
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        config = DetectionConfig(max_sources=10, hw_seasonal_period=10)
+        ensemble = DetectionEnsemble(config)
+        ensemble.process_event(_make_event(source_type="syslog"))
+        ensemble.process_event(_make_event(source_type="file"))
+        stats = ensemble.get_stats()
+        # Internal state is authoritative — assert the key matches the formula.
+        expected = sum(len(detectors) for detectors in ensemble._detectors.values())
+        assert stats["total_model_count"] == expected
+        # And it is non-zero when sources are present.
+        assert stats["total_model_count"] >= stats["source_count"]
+
+    def test_total_model_count_zero_for_empty_ensemble(self) -> None:
+        """Fresh ensemble with no sources reports ``total_model_count == 0``."""
+        from seerflow.config import DetectionConfig
+        from seerflow.detection.ensemble import DetectionEnsemble
+
+        ensemble = DetectionEnsemble(DetectionConfig())
+        stats = ensemble.get_stats()
+        assert stats["total_model_count"] == 0
+        assert stats["source_count"] == 0
+
 
 class TestEnsembleHardening:
     def test_nan_score_replaced_with_zero(self) -> None:

@@ -58,6 +58,27 @@ def _add_query_subparsers(subparsers: argparse._SubParsersAction) -> None:  # ty
     health.add_argument("--json", action="store_true", default=False, help="Output as JSON")
 
 
+_STATUS_TIMEOUT_MIN_S = 0.1
+_STATUS_TIMEOUT_MAX_S = 30.0
+
+
+def _status_timeout_arg(value: str) -> float:
+    """Parse ``--timeout`` for ``seerflow status``.
+
+    Bounded to ``[0.1, 30]`` seconds: shorter is impractical on a loopback
+    HTTP request, longer is operator-hostile (the CLI should fail fast on
+    a dead daemon).
+    """
+    parsed = float(value)
+    if parsed < _STATUS_TIMEOUT_MIN_S or parsed > _STATUS_TIMEOUT_MAX_S:
+        msg = (
+            f"--timeout must be between {_STATUS_TIMEOUT_MIN_S} and "
+            f"{_STATUS_TIMEOUT_MAX_S} seconds (got {parsed})"
+        )
+        raise argparse.ArgumentTypeError(msg)
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
@@ -76,6 +97,23 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.required = True
 
     subparsers.add_parser("start", help="Start the Seerflow pipeline")
+
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Show health and stats for a running Seerflow daemon",
+    )
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Output the merged health+stats document as JSON",
+    )
+    status_parser.add_argument(
+        "--timeout",
+        type=_status_timeout_arg,
+        default=3.0,
+        help="HTTP timeout per request in seconds (default: 3.0, range [0.1, 30])",
+    )
 
     tail_parser = subparsers.add_parser("tail", help="Monitor log files (no config needed)")
     tail_parser.add_argument("paths", nargs="+", help="File paths or glob patterns")

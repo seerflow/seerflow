@@ -459,13 +459,21 @@ class DetectionEnsemble:
         return dspot.threshold
 
     def get_stats(self) -> dict[str, int]:
-        """Return operational statistics about the ensemble."""
+        """Return operational statistics about the ensemble.
+
+        ``total_model_count`` is the precise number of trained detectors,
+        derived from internal state. It is exposed for callers such as
+        ``build_pipeline_metrics_provider`` (S-075) that need an accurate
+        model count for heterogeneous ensembles where the historical
+        ``source_count * _DETECTORS_PER_SOURCE`` multiplier is wrong.
+        """
         return {
             "source_count": len(self._detectors),
             "max_sources": self._max_sources,
             "eviction_count": self._eviction_count,
             "template_hw_count": len(self._template_hw),
             "entity_hw_count": len(self._entity_hw),
+            "total_model_count": sum(len(detectors) for detectors in self._detectors.values()),
         }
 
     def get_health(self) -> dict[str, Any]:

@@ -41,6 +41,10 @@ def main() -> None:
             from seerflow.pipeline.run import _run
 
             _run_async(_run(args.config))
+        elif args.command == "status":
+            from seerflow.status_cmd import run_status
+
+            sys.exit(_run_async_int(run_status(args)))
         elif args.command == "tail":
             from seerflow.pipeline.run import _run_with_config
             from seerflow.pipeline.tail import _build_tail_config
