@@ -208,6 +208,14 @@ class AlertingConfig:
     otlp_protocol: Literal["grpc", "http"] = "grpc"
     otlp_export_interval_seconds: int = 5
     otlp_tls: bool | None = None
+    # S-049b: custom CA bundle + mTLS for private OTLP collectors.
+    # Empty strings preserve S-049a behavior (grpc-python bundled Mozilla roots,
+    # no client cert). All three are PEM file paths read once at sink
+    # construction; rotation requires a process restart (matches Go ``tls.Config``
+    # / Java ``KeyStore`` / OpenSSL ``SSL_CTX`` semantics).
+    otlp_tls_ca_file: str = ""
+    otlp_mtls_cert_file: str = ""
+    otlp_mtls_key_file: str = ""
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

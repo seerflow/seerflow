@@ -807,9 +807,59 @@ def _validate_pagerduty_key(data: dict[str, Any]) -> str:
     return str(key)
 
 
-def _validate_otlp_settings(
-    data: dict[str, Any],
-) -> tuple[str, Literal["grpc", "http"], int, bool | None]:
+class _OtlpFields(NamedTuple):
+    """Validated OTLP-export settings extracted from ``alerting`` YAML (S-049b).
+
+    Introduced when S-049b added three new path fields, pushing the previous
+    4-tuple over the tasteful return-tuple ceiling. Internal to the builder
+    module — callers go through :func:`_build_alerting` and read fields off
+    :class:`AlertingConfig`.
+    """
+
+    endpoint: str
+    protocol: Literal["grpc", "http"]
+    interval: int
+    tls: bool | None
+    tls_ca_file: str
+    mtls_cert_file: str
+    mtls_key_file: str
+
+
+def _validate_otlp_str_path(field_name: str, value: Any) -> str:
+    """Validate that a YAML value is a string (path-shaped). Empty allowed.
+
+    Path readability is enforced separately by
+    :func:`_validate_readable_pem_path` so type errors surface before any
+    file-system I/O.
+    """
+    if not isinstance(value, str):
+        raise ConfigError(f"alerting.{field_name} must be a string, got {type(value).__name__}")
+    return value
+
+
+def _validate_readable_pem_path(field_name: str, path: str) -> None:
+    """Confirm a non-empty PEM path exists and is readable as bytes.
+
+    Empty paths are accepted (no-op) — they signal "no custom CA / no mTLS"
+    in the OTLP sink. Otherwise we open the file with
+    :meth:`pathlib.Path.read_bytes` so directories, missing files, and
+    permission errors all surface as :class:`ConfigError` with the field
+    name and path included.
+
+    Path content is NOT parsed here. PEM validity is enforced by the gRPC
+    stack at handshake time — surfacing a corrupted-PEM error at startup
+    would require pulling in ``cryptography`` for a side-effect-only
+    smoke parse, which is heavier than the bug it prevents.
+    """
+    if not path:
+        return
+    try:
+        Path(path).read_bytes()
+    except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
+        raise ConfigError(f"alerting.{field_name}: cannot read {path!r}: {exc}") from exc
+
+
+def _validate_otlp_settings(data: dict[str, Any]) -> _OtlpFields:
     endpoint = data.get("otlp_endpoint", "")
     if not isinstance(endpoint, str):
         raise ConfigError(
@@ -835,7 +885,37 @@ def _validate_otlp_settings(
         raise ConfigError(
             f"alerting.otlp_tls must be a boolean or null, got {type(tls_raw).__name__}"
         )
-    return endpoint, protocol, interval, tls_raw
+    # S-049b: custom CA bundle + mTLS file paths. Type-validate first, then
+    # readability-check each non-empty path so config-load fails fast with a
+    # clear message instead of a cryptic TLS handshake failure later.
+    tls_ca_file = _validate_otlp_str_path("otlp_tls_ca_file", data.get("otlp_tls_ca_file", ""))
+    mtls_cert_file = _validate_otlp_str_path(
+        "otlp_mtls_cert_file", data.get("otlp_mtls_cert_file", "")
+    )
+    mtls_key_file = _validate_otlp_str_path(
+        "otlp_mtls_key_file", data.get("otlp_mtls_key_file", "")
+    )
+    _validate_readable_pem_path("otlp_tls_ca_file", tls_ca_file)
+    _validate_readable_pem_path("otlp_mtls_cert_file", mtls_cert_file)
+    _validate_readable_pem_path("otlp_mtls_key_file", mtls_key_file)
+    # Partial mTLS is a config error — grpc.ssl_channel_credentials pairs
+    # certificate_chain and private_key, so accepting one without the other
+    # would produce a cryptic handshake failure at first send instead of a
+    # clear startup error. CA-only (no client cert) remains valid.
+    if bool(mtls_cert_file) != bool(mtls_key_file):
+        raise ConfigError(
+            "alerting.otlp_mtls_cert_file and alerting.otlp_mtls_key_file "
+            "must both be set or both be empty"
+        )
+    return _OtlpFields(
+        endpoint=endpoint,
+        protocol=protocol,
+        interval=interval,
+        tls=tls_raw,
+        tls_ca_file=tls_ca_file,
+        mtls_cert_file=mtls_cert_file,
+        mtls_key_file=mtls_key_file,
+    )
 
 
 def _collect_quiet_hours(
@@ -919,7 +999,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     default_routing = _build_default_routing(
         data.get("default_routing"), known_channels, has_rules=bool(routing_rules)
     )
-    otlp_endpoint, otlp_protocol, otlp_interval, otlp_tls = _validate_otlp_settings(data)
+    otlp_fields = _validate_otlp_settings(data)
 
     quiet_hours: list[tuple[str, QuietHours]] = list(
         _collect_quiet_hours(webhooks, webhook_targets)
@@ -943,10 +1023,13 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         quiet_hours_by_channel=tuple(quiet_hours),
         pagerduty_routing_key=_validate_pagerduty_key(data),
         dashboard_url=_validate_dashboard_url_field(data),
-        otlp_endpoint=otlp_endpoint,
-        otlp_protocol=otlp_protocol,
-        otlp_export_interval_seconds=otlp_interval,
-        otlp_tls=otlp_tls,
+        otlp_endpoint=otlp_fields.endpoint,
+        otlp_protocol=otlp_fields.protocol,
+        otlp_export_interval_seconds=otlp_fields.interval,
+        otlp_tls=otlp_fields.tls,
+        otlp_tls_ca_file=otlp_fields.tls_ca_file,
+        otlp_mtls_cert_file=otlp_fields.mtls_cert_file,
+        otlp_mtls_key_file=otlp_fields.mtls_key_file,
     )
 
 

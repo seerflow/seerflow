@@ -1455,6 +1455,145 @@ class TestOtlpTlsConfig:
             _build_alerting({"otlp_tls": 1})
 
 
+class TestOtlpCustomCaAndMtlsFields:
+    """S-049b: custom CA bundle + mTLS configuration on AlertingConfig."""
+
+    # ----- Defaults -----
+
+    def test_otlp_tls_ca_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_tls_ca_file == ""
+
+    def test_otlp_mtls_cert_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_mtls_cert_file == ""
+
+    def test_otlp_mtls_key_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_mtls_key_file == ""
+
+    # ----- Type validation -----
+
+    def test_otlp_tls_ca_file_int_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": 1})
+
+    def test_otlp_mtls_cert_file_list_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_mtls_cert_file"):
+            _build_alerting({"otlp_mtls_cert_file": ["/path/a.pem"]})
+
+    def test_otlp_mtls_key_file_dict_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_mtls_key_file"):
+            _build_alerting({"otlp_mtls_key_file": {"path": "/etc/key.pem"}})
+
+    # ----- Readability (S-049b Task 2) -----
+
+    def test_otlp_tls_ca_file_missing_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        missing = tmp_path / "does-not-exist.pem"
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": str(missing)})
+
+    def test_otlp_tls_ca_file_directory_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": str(tmp_path)})
+
+    def test_otlp_tls_ca_file_valid_path_accepted(self, tmp_path: Path) -> None:
+        from seerflow.config import _build_alerting
+
+        pem = tmp_path / "ca.pem"
+        pem.write_text("-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n")
+        result = _build_alerting({"otlp_tls_ca_file": str(pem)})
+        assert result.otlp_tls_ca_file == str(pem)
+
+    def test_otlp_mtls_cert_file_unreadable_raises(self, tmp_path: Path) -> None:
+        """File exists but has no read permission for the current user."""
+        import os
+        import stat
+
+        from seerflow.config import ConfigError, _build_alerting
+
+        if os.geteuid() == 0:  # pragma: no cover — root bypasses POSIX perms
+            pytest.skip("Running as root; chmod 000 is not enforced")
+        pem = tmp_path / "cert.pem"
+        pem.write_bytes(b"x")
+        pem.chmod(0)
+        try:
+            with pytest.raises(ConfigError, match="otlp_mtls_cert_file"):
+                _build_alerting(
+                    {
+                        "otlp_mtls_cert_file": str(pem),
+                        "otlp_mtls_key_file": str(pem),
+                    }
+                )
+        finally:
+            pem.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    # ----- Partial mTLS pairing (S-049b Task 3) -----
+
+    def test_otlp_mtls_cert_without_key_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        cert = tmp_path / "client.crt"
+        cert.write_text("stub")
+        with pytest.raises(ConfigError, match="otlp_mtls"):
+            _build_alerting({"otlp_mtls_cert_file": str(cert)})
+
+    def test_otlp_mtls_key_without_cert_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        key = tmp_path / "client.key"
+        key.write_text("stub")
+        with pytest.raises(ConfigError, match="otlp_mtls"):
+            _build_alerting({"otlp_mtls_key_file": str(key)})
+
+    def test_otlp_mtls_full_triple_accepted(self, tmp_path: Path) -> None:
+        from seerflow.config import _build_alerting
+
+        ca = tmp_path / "ca.pem"
+        ca.write_text("ca")
+        cert = tmp_path / "client.crt"
+        cert.write_text("cert")
+        key = tmp_path / "client.key"
+        key.write_text("key")
+        result = _build_alerting(
+            {
+                "otlp_tls_ca_file": str(ca),
+                "otlp_mtls_cert_file": str(cert),
+                "otlp_mtls_key_file": str(key),
+            }
+        )
+        assert result.otlp_tls_ca_file == str(ca)
+        assert result.otlp_mtls_cert_file == str(cert)
+        assert result.otlp_mtls_key_file == str(key)
+
+    def test_otlp_tls_ca_alone_accepted(self, tmp_path: Path) -> None:
+        """CA-only is valid — server cert verification against a private CA."""
+        from seerflow.config import _build_alerting
+
+        ca = tmp_path / "ca.pem"
+        ca.write_text("ca")
+        result = _build_alerting({"otlp_tls_ca_file": str(ca)})
+        assert result.otlp_tls_ca_file == str(ca)
+        assert result.otlp_mtls_cert_file == ""
+        assert result.otlp_mtls_key_file == ""
+
+
 class TestWebSocketConfig:
     def test_default_ws_fields(self) -> None:
         from seerflow.config import SeerflowConfig

@@ -712,6 +712,9 @@ async def _run_with_config(
             protocol=config.alerting.otlp_protocol,
             export_interval=config.alerting.otlp_export_interval_seconds,
             tls=config.alerting.otlp_tls,
+            tls_ca_file=config.alerting.otlp_tls_ca_file,
+            mtls_cert_file=config.alerting.otlp_mtls_cert_file,
+            mtls_key_file=config.alerting.otlp_mtls_key_file,
         )
         _otlp_task = asyncio.create_task(otlp_sink.run())
         _log.info(
