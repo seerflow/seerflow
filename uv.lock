@@ -649,6 +649,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/dc/83/4da2d3a11b5e0edf1a4f4c0c2dd42126d2eb1f31c733967edd3dfac1af94/drain3-0.9.11.tar.gz", hash = "sha256:9ab4b1407fad74f56554ae371ef019c3c7985861631f4bab46a0e92585125f75", size = 27960, upload-time = "2022-07-17T06:40:11.433Z" }
 
 [[package]]
+name = "falkordb"
+version = "1.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "redis" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/3a/58da510e5800a5cdbf9591111e4287cbf68b475bf074db12a94e5db8bcea/falkordb-1.6.1.tar.gz", hash = "sha256:bbef448a0b43e00ff3062bd6201368618d7b36e969d16ba71e8b8e3fa90873d4", size = 103185, upload-time = "2026-04-28T13:24:44.524Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/90/02/1cf9cef72228ca2b2776b4ed0cb2645298ddcc57c1fe2c545cd46bc11eae/falkordb-1.6.1-py3-none-any.whl", hash = "sha256:cf51caeb433c04db303de5967a0c2590675fcc0354e80997870b1e0497d30c34", size = 37802, upload-time = "2026-04-28T13:24:45.677Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.135.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2306,6 +2319,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+graph-falkordb = [
+    { name = "falkordb" },
+]
 llm-cloud = [
     { name = "anthropic" },
     { name = "openai" },
@@ -2347,6 +2363,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'llm-cloud'", specifier = ">=0.40" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30" },
     { name = "drain3", specifier = ">=0.9.11" },
+    { name = "falkordb", marker = "extra == 'graph-falkordb'", specifier = ">=1.6" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "grpcio", specifier = ">=1.78.0" },
     { name = "igraph", specifier = ">=1.0.0" },
@@ -2366,7 +2383,7 @@ requires-dist = [
     { name = "watchfiles", specifier = ">=1.1.1" },
     { name = "websockets", specifier = ">=13.0" },
 ]
-provides-extras = ["redis", "llm-cpu", "llm-cloud", "postgres"]
+provides-extras = ["redis", "llm-cpu", "llm-cloud", "postgres", "graph-falkordb"]
 
 [package.metadata.requires-dev]
 dev = [

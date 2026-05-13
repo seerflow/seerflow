@@ -35,6 +35,24 @@ class TestRedactConfig:
         data = redact_config(cfg)
         assert data["storage"]["postgresql_url"] == ""
 
+    def test_falkordb_url_masked_when_set(self) -> None:
+        # S-155-F1: ``falkordb_url`` may carry embedded credentials.
+        cfg = SeerflowConfig(
+            storage=StorageConfig(
+                backend="sqlite",
+                graph_backend="falkordb",
+                falkordb_url="falkor://user:PASSWORD@falkor.internal:6379",
+            )
+        )
+        data = redact_config(cfg)
+        assert data["storage"]["falkordb_url"] == "***"
+        assert "PASSWORD" not in str(data)
+
+    def test_falkordb_url_empty_stays_empty(self) -> None:
+        cfg = SeerflowConfig()
+        data = redact_config(cfg)
+        assert data["storage"]["falkordb_url"] == ""
+
     def test_pagerduty_routing_key_masked(self) -> None:
         cfg = SeerflowConfig(alerting=AlertingConfig(pagerduty_routing_key="secret-key-xyz"))
         data = redact_config(cfg)
@@ -341,6 +359,7 @@ class TestSecretRegressionGuard:
 
     _EXPECTED_SECRETS: ClassVar[set[str]] = {
         "storage.postgresql_url",
+        "storage.falkordb_url",
         "receivers.webhooks[].auth_token",
         "alerting.pagerduty_routing_key",
         "alerting.webhook_targets[].url",
