@@ -73,6 +73,51 @@ class TestBuildProvider:
         assert m.active_sources == 0
         assert m.model_count == 0
 
+    def test_provider_prefers_total_model_count_when_present(self) -> None:
+        """S-075: when ``ensemble.get_stats()`` exposes ``total_model_count``,
+        the provider must use that value instead of the
+        ``source_count * _DETECTORS_PER_SOURCE`` multiplier.
+
+        Heterogeneous ensembles (e.g. UEBA-disabled, Markov-off) report a
+        non-uniform per-source detector count; the multiplier is wrong for
+        those, while the ensemble-derived total is authoritative.
+        """
+        handler = type("H", (), {"get_stats": lambda self: (10, 0, {}, 0.0)})()
+        ensemble = type(
+            "E",
+            (),
+            {
+                "get_stats": lambda self: {
+                    "source_count": 3,
+                    "total_model_count": 7,  # heterogeneous — 3 * 4 = 12 would be wrong
+                }
+            },
+        )()
+        provider = build_pipeline_metrics_provider(
+            handler=handler,
+            ensemble=ensemble,
+            started_monotonic=0.0,
+        )
+        m = provider()
+        assert m.active_sources == 3
+        assert m.model_count == 7  # taken from total_model_count, not 3*4=12
+
+    def test_provider_falls_back_to_multiplier_when_total_missing(self) -> None:
+        """Backwards-compat: ensembles / mocks that do not surface
+        ``total_model_count`` keep the historical ``source_count * 4``
+        behaviour so existing tests and partial mocks remain green.
+        """
+        handler = type("H", (), {"get_stats": lambda self: (10, 0, {}, 0.0)})()
+        ensemble = type("E", (), {"get_stats": lambda self: {"source_count": 5}})()
+        provider = build_pipeline_metrics_provider(
+            handler=handler,
+            ensemble=ensemble,
+            started_monotonic=0.0,
+        )
+        m = provider()
+        assert m.active_sources == 5
+        assert m.model_count == 20  # fallback: 5 * _DETECTORS_PER_SOURCE (=4)
+
 
 def test_pipeline_metrics_includes_ioc_matcher_field() -> None:
     from seerflow.api.metrics import PipelineMetrics

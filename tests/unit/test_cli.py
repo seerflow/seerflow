@@ -33,6 +33,38 @@ class TestCLIArgs:
         assert exc.value.code == 2
 
 
+class TestCLIStatusArgs:
+    """Parser surface for ``seerflow status`` (S-075)."""
+
+    def test_status_command_default_flags(self) -> None:
+        args = parse_args(["status"])
+        assert args.command == "status"
+        assert args.json is False
+        assert args.timeout == 3.0
+
+    def test_status_json_flag(self) -> None:
+        args = parse_args(["status", "--json"])
+        assert args.command == "status"
+        assert args.json is True
+
+    def test_status_custom_timeout(self) -> None:
+        args = parse_args(["status", "--timeout", "10"])
+        assert args.timeout == 10.0
+
+    def test_status_timeout_too_small_rejected(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["status", "--timeout", "0"])
+
+    def test_status_timeout_too_large_rejected(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["status", "--timeout", "100"])
+
+    def test_status_inherits_config_flag(self) -> None:
+        args = parse_args(["--config", "/tmp/c.yaml", "status"])
+        assert args.command == "status"
+        assert args.config == "/tmp/c.yaml"
+
+
 class TestMainImport:
     def test_main_callable(self) -> None:
         from seerflow.__main__ import main
