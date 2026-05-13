@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import yaml
 
 from seerflow._config_validation import (
+    _VALID_GRAPH_BACKENDS,
     _VALID_STORAGE_BACKENDS,
     ConfigError,
     _is_pos_int,
@@ -134,6 +135,13 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
     pool_max_size = data.get("postgresql_pool_max_size", 10)
     command_timeout_s = data.get("postgresql_command_timeout_s", 30.0)
     _validate_postgres_pool(pool_min_size, pool_max_size, command_timeout_s)
+    # S-155: graph backend selector. Validated at config-load so a typo
+    # surfaces in the YAML feedback loop, not at ``connect_graph`` time.
+    graph_backend = data.get("graph_backend", "igraph")
+    if graph_backend not in _VALID_GRAPH_BACKENDS:
+        valid_graph = sorted(_VALID_GRAPH_BACKENDS)
+        msg = f"Invalid storage.graph_backend {graph_backend!r}. Must be one of {valid_graph}"
+        raise ConfigError(msg)
     return StorageConfig(
         backend=backend,
         data_dir=data_dir,
@@ -142,6 +150,7 @@ def _build_storage(data: dict[str, Any]) -> StorageConfig:
         postgresql_pool_min_size=int(pool_min_size),
         postgresql_pool_max_size=int(pool_max_size),
         postgresql_command_timeout_s=float(command_timeout_s),
+        graph_backend=graph_backend,
     )
 
 

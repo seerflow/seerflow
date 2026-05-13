@@ -45,6 +45,10 @@ class ConfigError(Exception):
 
 _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 _VALID_STORAGE_BACKENDS = frozenset({"sqlite", "postgresql"})
+# S-155: pluggable entity-graph backend identifiers. ``igraph`` is the
+# default; ``falkordb`` and ``postgres_age`` slot into follow-ups
+# S-155-F1 and S-155-F2 respectively.
+_VALID_GRAPH_BACKENDS = frozenset({"igraph", "falkordb", "postgres_age"})
 
 _CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 
