@@ -136,6 +136,76 @@ def _add_export_subparsers(subparsers: argparse._SubParsersAction) -> None:  # t
     )
 
 
+_TEMPLATES_DEFAULT_LIMIT = 100
+
+
+def _add_templates_subparsers(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow templates list|prune|reset`` subcommands (S-077)."""
+    tpl_parser = subparsers.add_parser(
+        "templates",
+        help="Manage Drain3 templates (list, prune, reset)",
+    )
+    tpl_sub = tpl_parser.add_subparsers(dest="templates_cmd")
+    tpl_sub.required = True
+
+    # --- templates list ---
+    lst = tpl_sub.add_parser("list", help="List persisted Drain3 templates")
+    lst.add_argument(
+        "--limit",
+        type=int,
+        default=_TEMPLATES_DEFAULT_LIMIT,
+        help=f"Maximum rows to print (default: {_TEMPLATES_DEFAULT_LIMIT}, max: 10000)",
+    )
+    lst.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit JSON instead of a table",
+    )
+
+    # --- templates prune ---
+    prn = tpl_sub.add_parser(
+        "prune",
+        help="Delete templates whose event_count is below the threshold",
+    )
+    prn.add_argument(
+        "--min-count",
+        type=int,
+        required=True,
+        help="Delete templates with event_count strictly less than N (N >= 0)",
+    )
+    prn.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Skip the interactive confirmation prompt",
+    )
+    prn.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit a one-line JSON summary instead of human-readable text",
+    )
+
+    # --- templates reset ---
+    rst = tpl_sub.add_parser(
+        "reset",
+        help="Wipe all templates AND delete the persisted Drain3 parser state",
+    )
+    rst.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Skip the interactive confirmation prompt",
+    )
+    rst.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit a one-line JSON summary instead of human-readable text",
+    )
+
+
 _STATUS_TIMEOUT_MIN_S = 0.1
 _STATUS_TIMEOUT_MAX_S = 30.0
 
@@ -232,6 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
     hunt_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
 
     _add_export_subparsers(subparsers)
+
+    _add_templates_subparsers(subparsers)
 
     rules_parser = subparsers.add_parser("rules", help="Inspect loaded Sigma rules")
     rules_sub = rules_parser.add_subparsers(dest="rules_cmd")

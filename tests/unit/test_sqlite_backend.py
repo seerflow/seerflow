@@ -1565,6 +1565,88 @@ class TestTemplateTable:
             await backend.close()
 
 
+class TestPruneResetTemplates:
+    """S-077 — prune/reset on the templates table."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def _seed(
+        self,
+        backend: SqliteBackend,
+        counts: tuple[int, ...],
+    ) -> None:
+        from seerflow.storage.sqlite import TemplateInfo
+
+        templates = [
+            TemplateInfo(
+                template_id=i,
+                template_str=f"T-{i}",
+                first_seen_ns=1,
+                last_seen_ns=1,
+                event_count=c,
+                example_message=f"msg-{i}",
+            )
+            for i, c in enumerate(counts, start=1)
+        ]
+        await backend.write_templates(templates)
+
+    async def test_prune_removes_below_threshold(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await self._seed(backend, (1, 2, 3, 5))
+            removed = await backend.prune_templates(3)
+            assert removed == 2
+            remaining = await backend.get_templates()
+            assert sorted(t.event_count for t in remaining) == [3, 5]
+        finally:
+            await backend.close()
+
+    async def test_prune_returns_zero_on_empty(self) -> None:
+        backend = await self._make_backend()
+        try:
+            removed = await backend.prune_templates(10)
+            assert removed == 0
+        finally:
+            await backend.close()
+
+    async def test_prune_min_count_zero_is_noop(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await self._seed(backend, (1, 2, 3))
+            removed = await backend.prune_templates(0)
+            assert removed == 0
+            assert len(await backend.get_templates()) == 3
+        finally:
+            await backend.close()
+
+    async def test_prune_negative_threshold_rejected(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="must be >= 0"):
+                await backend.prune_templates(-1)
+        finally:
+            await backend.close()
+
+    async def test_reset_clears_all_rows(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await self._seed(backend, (1, 2, 3))
+            deleted = await backend.reset_templates()
+            assert deleted == 3
+            assert await backend.get_templates() == []
+        finally:
+            await backend.close()
+
+    async def test_reset_on_empty_returns_zero(self) -> None:
+        backend = await self._make_backend()
+        try:
+            assert await backend.reset_templates() == 0
+        finally:
+            await backend.close()
+
+
 class TestFlush:
     @pytest.mark.asyncio
     async def test_flush_empty_buffer_does_not_raise(self) -> None:

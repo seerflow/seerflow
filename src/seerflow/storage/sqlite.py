@@ -487,6 +487,48 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
             rows = await cursor.fetchall()
         return [TemplateInfo(*row) for row in rows]
 
+    async def prune_templates(self, min_count: int) -> int:
+        """Delete templates with ``event_count < min_count``.
+
+        Returns the number of rows removed. ``min_count == 0`` is a no-op
+        (event_count is always >= 1 — no row can satisfy ``< 0``, and
+        ``< 0`` is equivalent to deleting nothing). Raises ``ValueError``
+        when ``min_count`` is negative.
+        """
+        if min_count < 0:
+            msg = f"min_count must be >= 0, got {min_count!r}"
+            raise ValueError(msg)
+        if min_count == 0:
+            return 0
+        try:
+            async with await self._conn.execute(
+                "DELETE FROM templates WHERE event_count < ?", [min_count]
+            ) as cursor:
+                removed = cursor.rowcount
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("prune_templates failed (min_count=%d)", min_count)
+            raise
+        return int(removed)
+
+    async def reset_templates(self) -> int:
+        """Delete every row from the templates table.
+
+        Returns the number of rows removed. The Drain3 in-memory parse
+        tree is **not** affected — operators wanting a full reset should
+        also delete the ``drain3:global`` ``model_state`` row.
+        """
+        try:
+            async with await self._conn.execute("DELETE FROM templates") as cursor:
+                removed = cursor.rowcount
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("reset_templates failed")
+            raise
+        return int(removed)
+
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]:
         """Query events with composable filters and pagination."""
         where, join_str, params = _build_query(filters)

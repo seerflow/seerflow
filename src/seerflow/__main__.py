@@ -84,6 +84,10 @@ def main() -> None:
             from seerflow.export_cmd import run_export
 
             sys.exit(_run_async_int(run_export(args)))
+        elif args.command == "templates":
+            from seerflow.templates_cmd import run_templates
+
+            sys.exit(_run_async_int(run_templates(args)))
         elif args.command == "rules":
             from seerflow.rules_cmd import run_rules_list
 
