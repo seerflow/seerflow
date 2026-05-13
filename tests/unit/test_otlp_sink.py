@@ -931,6 +931,150 @@ class TestOtlpSinkTlsInit:
         assert "https://host:4317" not in message
 
 
+class TestOtlpSinkGrpcCustomCreds:
+    """S-049b: ``_send_grpc`` chooses zero-arg vs triple-arg credentials based
+    on whether any of the three PEM byte-buffers are set."""
+
+    @pytest.mark.asyncio
+    async def test_grpc_uses_system_roots_when_no_paths(self) -> None:
+        """Existing S-049a behaviour: zero-arg ssl_channel_credentials when
+        no custom CA / no client cert is configured."""
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(endpoint="host:4317", protocol="grpc", tls=True)
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel),
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+            patch("grpc.ssl_channel_credentials") as creds,
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        creds.assert_called_once_with()  # no kwargs → grpc bundled roots
+
+    @pytest.mark.asyncio
+    async def test_grpc_uses_custom_ca_when_ca_file_set(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        ca = tmp_path / "ca.pem"
+        ca.write_bytes(b"ca-bytes")
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(
+            endpoint="host:4317",
+            protocol="grpc",
+            tls=True,
+            tls_ca_file=str(ca),
+        )
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel),
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+            patch("grpc.ssl_channel_credentials") as creds,
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        creds.assert_called_once_with(
+            root_certificates=b"ca-bytes",
+            private_key=None,
+            certificate_chain=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_grpc_uses_full_mtls_when_triple_set(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        ca = tmp_path / "ca.pem"
+        ca.write_bytes(b"ca")
+        cert = tmp_path / "client.crt"
+        cert.write_bytes(b"cert")
+        key = tmp_path / "client.key"
+        key.write_bytes(b"key")
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(
+            endpoint="host:4317",
+            protocol="grpc",
+            tls=True,
+            tls_ca_file=str(ca),
+            mtls_cert_file=str(cert),
+            mtls_key_file=str(key),
+        )
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel),
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+            patch("grpc.ssl_channel_credentials") as creds,
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        creds.assert_called_once_with(
+            root_certificates=b"ca",
+            private_key=b"key",
+            certificate_chain=b"cert",
+        )
+
+    @pytest.mark.asyncio
+    async def test_grpc_uses_mtls_only_when_cert_and_key_set(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """mTLS without custom CA — client cert against grpc's bundled roots."""
+        import grpc.aio
+
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        cert = tmp_path / "client.crt"
+        cert.write_bytes(b"cert-bytes")
+        key = tmp_path / "client.key"
+        key.write_bytes(b"key-bytes")
+        mock_stub = MagicMock()
+        mock_stub.Export = AsyncMock()
+        mock_channel = MagicMock()
+
+        sink = OtlpSink(
+            endpoint="host:4317",
+            protocol="grpc",
+            tls=True,
+            mtls_cert_file=str(cert),
+            mtls_key_file=str(key),
+        )
+
+        with (
+            patch.object(grpc.aio, "secure_channel", return_value=mock_channel),
+            patch("seerflow.alerting.sinks.otlp.LogsServiceStub", return_value=mock_stub),
+            patch("grpc.ssl_channel_credentials") as creds,
+        ):
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        creds.assert_called_once_with(
+            root_certificates=None,
+            private_key=b"key-bytes",
+            certificate_chain=b"cert-bytes",
+        )
+
+
 class TestOtlpSinkCustomCaAndMtlsInit:
     """S-049b: custom CA bundle + mTLS file kwargs read at sink construction."""
 

@@ -393,7 +393,21 @@ class OtlpSink:
         if self._grpc_channel is None:
             target = _normalize_grpc_endpoint(self._endpoint)
             if self._use_tls:
-                creds = grpc.ssl_channel_credentials()
+                # S-049b: pass custom CA / client cert / private key when any
+                # are configured; otherwise fall back to grpc-python's bundled
+                # Mozilla roots (S-049a baseline). ``ssl_channel_credentials``
+                # is None-safe for each argument — omitting and passing None
+                # are equivalent at the API surface, but spelling each kwarg
+                # explicitly keeps the credential shape legible at the diff
+                # level and makes the mocked unit tests precise.
+                if any((self._tls_ca_pem, self._mtls_cert_pem, self._mtls_key_pem)):
+                    creds = grpc.ssl_channel_credentials(
+                        root_certificates=self._tls_ca_pem,
+                        private_key=self._mtls_key_pem,
+                        certificate_chain=self._mtls_cert_pem,
+                    )
+                else:
+                    creds = grpc.ssl_channel_credentials()
                 self._grpc_channel = grpc.aio.secure_channel(target, creds)
             else:
                 self._grpc_channel = grpc.aio.insecure_channel(target)
