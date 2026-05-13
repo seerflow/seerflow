@@ -56,10 +56,16 @@ _TEMPLATE_DISPLAY_WIDTH = 80
 
 
 def _isatty() -> bool:
-    """Whether stdin is attached to a TTY. Wrapped for test injection."""
+    """Whether stdin is attached to a TTY.
+
+    Wrapped for test injection. Catches ``AttributeError`` (some test
+    doubles do not implement ``isatty()``) and ``OSError`` (closed or
+    detached stdin in a forked subprocess) — both must not crash the
+    confirmation gate.
+    """
     try:
         return sys.stdin.isatty()
-    except (AttributeError, OSError):  # pragma: no cover — defensive
+    except (AttributeError, OSError):
         return False
 
 
