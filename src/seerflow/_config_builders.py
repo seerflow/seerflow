@@ -839,6 +839,28 @@ def _validate_otlp_str_path(field_name: str, value: Any) -> str:
     return value
 
 
+def _validate_readable_pem_path(field_name: str, path: str) -> None:
+    """Confirm a non-empty PEM path exists and is readable as bytes.
+
+    Empty paths are accepted (no-op) — they signal "no custom CA / no mTLS"
+    in the OTLP sink. Otherwise we open the file with
+    :meth:`pathlib.Path.read_bytes` so directories, missing files, and
+    permission errors all surface as :class:`ConfigError` with the field
+    name and path included.
+
+    Path content is NOT parsed here. PEM validity is enforced by the gRPC
+    stack at handshake time — surfacing a corrupted-PEM error at startup
+    would require pulling in ``cryptography`` for a side-effect-only
+    smoke parse, which is heavier than the bug it prevents.
+    """
+    if not path:
+        return
+    try:
+        Path(path).read_bytes()
+    except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
+        raise ConfigError(f"alerting.{field_name}: cannot read {path!r}: {exc}") from exc
+
+
 def _validate_otlp_settings(data: dict[str, Any]) -> _OtlpFields:
     endpoint = data.get("otlp_endpoint", "")
     if not isinstance(endpoint, str):
@@ -865,8 +887,9 @@ def _validate_otlp_settings(data: dict[str, Any]) -> _OtlpFields:
         raise ConfigError(
             f"alerting.otlp_tls must be a boolean or null, got {type(tls_raw).__name__}"
         )
-    # S-049b: custom CA bundle + mTLS file paths. Type-validate here; readability
-    # and partial-mTLS-pairing are enforced in dedicated helpers (Task 2 / 3).
+    # S-049b: custom CA bundle + mTLS file paths. Type-validate first, then
+    # readability-check each non-empty path so config-load fails fast with a
+    # clear message instead of a cryptic TLS handshake failure later.
     tls_ca_file = _validate_otlp_str_path("otlp_tls_ca_file", data.get("otlp_tls_ca_file", ""))
     mtls_cert_file = _validate_otlp_str_path(
         "otlp_mtls_cert_file", data.get("otlp_mtls_cert_file", "")
@@ -874,6 +897,9 @@ def _validate_otlp_settings(data: dict[str, Any]) -> _OtlpFields:
     mtls_key_file = _validate_otlp_str_path(
         "otlp_mtls_key_file", data.get("otlp_mtls_key_file", "")
     )
+    _validate_readable_pem_path("otlp_tls_ca_file", tls_ca_file)
+    _validate_readable_pem_path("otlp_mtls_cert_file", mtls_cert_file)
+    _validate_readable_pem_path("otlp_mtls_key_file", mtls_key_file)
     return _OtlpFields(
         endpoint=endpoint,
         protocol=protocol,

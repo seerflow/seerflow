@@ -1498,6 +1498,52 @@ class TestOtlpCustomCaAndMtlsFields:
         with pytest.raises(ConfigError, match="otlp_mtls_key_file"):
             _build_alerting({"otlp_mtls_key_file": {"path": "/etc/key.pem"}})
 
+    # ----- Readability (S-049b Task 2) -----
+
+    def test_otlp_tls_ca_file_missing_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        missing = tmp_path / "does-not-exist.pem"
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": str(missing)})
+
+    def test_otlp_tls_ca_file_directory_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": str(tmp_path)})
+
+    def test_otlp_tls_ca_file_valid_path_accepted(self, tmp_path: Path) -> None:
+        from seerflow.config import _build_alerting
+
+        pem = tmp_path / "ca.pem"
+        pem.write_text("-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n")
+        result = _build_alerting({"otlp_tls_ca_file": str(pem)})
+        assert result.otlp_tls_ca_file == str(pem)
+
+    def test_otlp_mtls_cert_file_unreadable_raises(self, tmp_path: Path) -> None:
+        """File exists but has no read permission for the current user."""
+        import os
+        import stat
+
+        from seerflow.config import ConfigError, _build_alerting
+
+        if os.geteuid() == 0:  # pragma: no cover — root bypasses POSIX perms
+            pytest.skip("Running as root; chmod 000 is not enforced")
+        pem = tmp_path / "cert.pem"
+        pem.write_bytes(b"x")
+        pem.chmod(0)
+        try:
+            with pytest.raises(ConfigError, match="otlp_mtls_cert_file"):
+                _build_alerting(
+                    {
+                        "otlp_mtls_cert_file": str(pem),
+                        "otlp_mtls_key_file": str(pem),
+                    }
+                )
+        finally:
+            pem.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
 
 class TestWebSocketConfig:
     def test_default_ws_fields(self) -> None:
