@@ -107,6 +107,43 @@ def _print_progress(written: int, total: int) -> None:
     print(f"migrated {written} / {total} edges...", file=sys.stderr)
 
 
+async def _stream_edges(
+    dest: GraphBackend,
+    rows: list[tuple[str, str, str, int, int, int]],
+    batch_size: int,
+) -> int:
+    """Replay ``rows`` into ``dest`` in ``batch_size`` chunks.
+
+    Returns the number of edges written (always equals ``len(rows)``;
+    returned for clarity in the success summary).
+    """
+    total = len(rows)
+    written = 0
+    for chunk_start in range(0, total, batch_size):
+        chunk = rows[chunk_start : chunk_start + batch_size]
+        for src, tgt, rel, _first, last, _count in chunk:
+            await dest.add_edge(src, tgt, rel, last)
+        written += len(chunk)
+        _print_progress(written, total)
+    return written
+
+
+def _report_verification_failure(
+    *,
+    source_edge_count: int,
+    source_vertex_count: int,
+    dest_edge_count: int,
+    dest_vertex_count: int,
+) -> None:
+    """Emit the stderr diagnostic for a count-mismatch verification failure."""
+    print(
+        "error: verification failed — count mismatch after migration "
+        f"(source: {source_edge_count} edges / {source_vertex_count} vertices, "
+        f"dest: {dest_edge_count} edges / {dest_vertex_count} vertices)",
+        file=sys.stderr,
+    )
+
+
 async def run_graph_migrate(args: argparse.Namespace) -> int:
     """Migrate the entity graph from ``args.from_backend`` to ``args.to_backend``.
 
@@ -132,9 +169,7 @@ async def run_graph_migrate(args: argparse.Namespace) -> int:
         return _EXIT_BAD_ARGS
 
     cfg = load_config(args.config)
-
-    source_storage = replace(cfg.storage, graph_backend=from_backend)
-    source = await connect_graph(source_storage)
+    source = await connect_graph(replace(cfg.storage, graph_backend=from_backend))
 
     try:
         rows = await source.export_edges()
@@ -151,22 +186,13 @@ async def run_graph_migrate(args: argparse.Namespace) -> int:
             print(f"dry-run: would migrate {total} edges to {to_backend!r}")
             return _EXIT_OK
 
-        dest_storage = replace(cfg.storage, graph_backend=to_backend)
-        dest = await connect_graph(dest_storage)
-
+        dest = await connect_graph(replace(cfg.storage, graph_backend=to_backend))
         try:
             if wipe_destination:
                 await dest.load([])
 
             t0 = time.monotonic()
-            written = 0
-            for chunk_start in range(0, total, batch_size):
-                chunk = rows[chunk_start : chunk_start + batch_size]
-                for src, tgt, rel, _first, last, _count in chunk:
-                    await dest.add_edge(src, tgt, rel, last)
-                written += len(chunk)
-                _print_progress(written, total)
-
+            written = await _stream_edges(dest, rows, batch_size)
             await _maybe_refresh_counts(dest)
             elapsed = time.monotonic() - t0
 
@@ -181,11 +207,11 @@ async def run_graph_migrate(args: argparse.Namespace) -> int:
                 strict=wipe_destination,
             )
             if not verify_ok:
-                print(
-                    "error: verification failed — count mismatch after migration "
-                    f"(source: {source_edge_count} edges / {source_vertex_count} vertices, "
-                    f"dest: {dest_edge_count} edges / {dest_vertex_count} vertices)",
-                    file=sys.stderr,
+                _report_verification_failure(
+                    source_edge_count=source_edge_count,
+                    source_vertex_count=source_vertex_count,
+                    dest_edge_count=dest_edge_count,
+                    dest_vertex_count=dest_vertex_count,
                 )
                 return _EXIT_VERIFY_FAILED
 
