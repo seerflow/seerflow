@@ -131,3 +131,35 @@ class TestAttackCoverageIntegration:
         assert "T1053.005" not in techniques
         assert techniques["T1053"]["alert_count"] == 2
         assert techniques["T1053"]["detected"] is True
+
+    def test_module_anchor_stays_inside_default_coverage_window(self) -> None:
+        """Tripwire for SEE-252 (S-228): regression-prevention.
+
+        The original bug was test fixtures binding ``timestamp_ns`` to a
+        hard-coded future literal (``1_775_736_000_000_000_000`` ≈ 2026-04-09).
+        Once wall-clock crossed 2026-05-09 the seeded alerts aged out of the
+        ``/api/v1/attack/coverage`` default 30-day window and the rollup tests
+        silently broke for two weeks.
+
+        Guard the invariant directly: the module-level ``_FIXED_NOW_NS``
+        anchor must always sit inside ``[now - 30 days, now]`` at collection
+        time. If someone re-introduces a hard-coded literal here this test
+        fails immediately instead of waiting for the next wall-clock cliff.
+        """
+        from seerflow.api.routes.attack import _DEFAULT_WINDOW_DAYS
+
+        now_ns = time.time_ns()
+        window_ns = _DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1_000_000_000
+        # Allow a generous 60s upper slack — the anchor is bound at module
+        # import time, which is always slightly earlier than ``now`` here.
+        upper_slack_ns = 60 * 1_000_000_000
+
+        assert now_ns + upper_slack_ns >= _FIXED_NOW_NS, (
+            "_FIXED_NOW_NS is in the future beyond import-time slack — "
+            "did someone hard-code a timestamp literal?"
+        )
+        assert now_ns - window_ns <= _FIXED_NOW_NS, (
+            "_FIXED_NOW_NS is older than the coverage endpoint's default "
+            f"{_DEFAULT_WINDOW_DAYS}-day window — seeded alerts will age out "
+            "and rollup tests will start failing silently."
+        )
