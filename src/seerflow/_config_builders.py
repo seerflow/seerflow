@@ -900,6 +900,15 @@ def _validate_otlp_settings(data: dict[str, Any]) -> _OtlpFields:
     _validate_readable_pem_path("otlp_tls_ca_file", tls_ca_file)
     _validate_readable_pem_path("otlp_mtls_cert_file", mtls_cert_file)
     _validate_readable_pem_path("otlp_mtls_key_file", mtls_key_file)
+    # Partial mTLS is a config error — grpc.ssl_channel_credentials pairs
+    # certificate_chain and private_key, so accepting one without the other
+    # would produce a cryptic handshake failure at first send instead of a
+    # clear startup error. CA-only (no client cert) remains valid.
+    if bool(mtls_cert_file) != bool(mtls_key_file):
+        raise ConfigError(
+            "alerting.otlp_mtls_cert_file and alerting.otlp_mtls_key_file "
+            "must both be set or both be empty"
+        )
     return _OtlpFields(
         endpoint=endpoint,
         protocol=protocol,

@@ -1544,6 +1544,55 @@ class TestOtlpCustomCaAndMtlsFields:
         finally:
             pem.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
+    # ----- Partial mTLS pairing (S-049b Task 3) -----
+
+    def test_otlp_mtls_cert_without_key_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        cert = tmp_path / "client.crt"
+        cert.write_text("stub")
+        with pytest.raises(ConfigError, match="otlp_mtls"):
+            _build_alerting({"otlp_mtls_cert_file": str(cert)})
+
+    def test_otlp_mtls_key_without_cert_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        key = tmp_path / "client.key"
+        key.write_text("stub")
+        with pytest.raises(ConfigError, match="otlp_mtls"):
+            _build_alerting({"otlp_mtls_key_file": str(key)})
+
+    def test_otlp_mtls_full_triple_accepted(self, tmp_path: Path) -> None:
+        from seerflow.config import _build_alerting
+
+        ca = tmp_path / "ca.pem"
+        ca.write_text("ca")
+        cert = tmp_path / "client.crt"
+        cert.write_text("cert")
+        key = tmp_path / "client.key"
+        key.write_text("key")
+        result = _build_alerting(
+            {
+                "otlp_tls_ca_file": str(ca),
+                "otlp_mtls_cert_file": str(cert),
+                "otlp_mtls_key_file": str(key),
+            }
+        )
+        assert result.otlp_tls_ca_file == str(ca)
+        assert result.otlp_mtls_cert_file == str(cert)
+        assert result.otlp_mtls_key_file == str(key)
+
+    def test_otlp_tls_ca_alone_accepted(self, tmp_path: Path) -> None:
+        """CA-only is valid — server cert verification against a private CA."""
+        from seerflow.config import _build_alerting
+
+        ca = tmp_path / "ca.pem"
+        ca.write_text("ca")
+        result = _build_alerting({"otlp_tls_ca_file": str(ca)})
+        assert result.otlp_tls_ca_file == str(ca)
+        assert result.otlp_mtls_cert_file == ""
+        assert result.otlp_mtls_key_file == ""
+
 
 class TestWebSocketConfig:
     def test_default_ws_fields(self) -> None:
