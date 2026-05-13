@@ -2322,6 +2322,9 @@ dependencies = [
 graph-falkordb = [
     { name = "falkordb" },
 ]
+graph-postgres-age = [
+    { name = "asyncpg" },
+]
 llm-cloud = [
     { name = "anthropic" },
     { name = "openai" },
@@ -2361,6 +2364,7 @@ requires-dist = [
     { name = "aiosmtplib", specifier = ">=5.1.0" },
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "anthropic", marker = "extra == 'llm-cloud'", specifier = ">=0.40" },
+    { name = "asyncpg", marker = "extra == 'graph-postgres-age'", specifier = ">=0.30" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30" },
     { name = "drain3", specifier = ">=0.9.11" },
     { name = "falkordb", marker = "extra == 'graph-falkordb'", specifier = ">=1.6" },
@@ -2383,7 +2387,7 @@ requires-dist = [
     { name = "watchfiles", specifier = ">=1.1.1" },
     { name = "websockets", specifier = ">=13.0" },
 ]
-provides-extras = ["redis", "llm-cpu", "llm-cloud", "postgres", "graph-falkordb"]
+provides-extras = ["redis", "llm-cpu", "llm-cloud", "postgres", "graph-falkordb", "graph-postgres-age"]
 
 [package.metadata.requires-dev]
 dev = [

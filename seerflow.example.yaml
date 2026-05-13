@@ -20,7 +20,11 @@ storage:
   # Entity-graph backend (S-155). ``igraph`` is the in-process default;
   # ``falkordb`` (S-155-F1) is available with ``uv sync --extra
   # graph-falkordb`` and a ``falkordb_url`` below. ``postgres_age``
-  # (S-155-F2) is still reserved and currently raises NotImplementedError.
+  # (S-155-F2) is available with ``uv sync --extra graph-postgres-age``
+  # and reuses ``postgresql_url`` above — AGE lives inside the same
+  # Postgres instance, no separate DSN. The AGE extension must be
+  # installed on the server (``CREATE EXTENSION age``); on managed
+  # Postgres services confirm AGE is in the provider's allowlist first.
   # graph_backend: igraph                     # igraph | falkordb | postgres_age
   # falkordb_url: ${SEERFLOW_FALKORDB_URL:-falkor://localhost:6379}  # required when graph_backend=falkordb
 

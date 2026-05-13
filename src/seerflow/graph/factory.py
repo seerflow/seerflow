@@ -13,8 +13,11 @@ Backend routing:
   the ``graph-falkordb`` optional extra and a non-empty
   ``storage.falkordb_url``. Missing extra surfaces as
   :class:`ConfigError` with an install hint.
-* ``"postgres_age"`` → S-155-F2 (Cypher-over-asyncpg via Apache AGE),
-  still deferred. Branch raises :class:`NotImplementedError`.
+* ``"postgres_age"`` → :class:`PostgresAGEGraphBackend` (S-155-F2).
+  Requires the ``graph-postgres-age`` optional extra and a non-empty
+  ``storage.postgresql_url`` (the same DSN the storage backend uses;
+  AGE lives inside the same Postgres instance). Missing extra surfaces
+  as :class:`ConfigError` with an install hint.
 """
 
 from __future__ import annotations
@@ -47,9 +50,9 @@ async def connect_graph(config: StorageConfig) -> GraphBackend:
     Raises:
         ConfigError: When ``graph_backend == "falkordb"`` and either the
             ``graph-falkordb`` extra is missing or ``falkordb_url`` is
-            empty.
-        NotImplementedError: When ``graph_backend == "postgres_age"`` —
-            still tracked in S-155-F2.
+            empty. Same shape for ``graph_backend == "postgres_age"``
+            with the ``graph-postgres-age`` extra and
+            ``postgresql_url``.
         ValueError: For any other unknown value (config validation should
             catch this earlier; this is the defence-in-depth path).
     """
@@ -66,11 +69,16 @@ async def connect_graph(config: StorageConfig) -> GraphBackend:
 
         return await FalkorDBGraphBackend.connect(url=config.falkordb_url)
     if backend == "postgres_age":
-        msg = (
-            "PostgreSQL AGE graph backend is not yet implemented — "
-            "tracked in S-155-F2. Use graph_backend: igraph (default) "
-            "until the follow-up lands."
+        if not config.postgresql_url:
+            msg = "storage.postgresql_url is required when storage.graph_backend == 'postgres_age'"
+            raise ConfigError(msg)
+        from seerflow.graph.postgres_age_backend import PostgresAGEGraphBackend
+
+        return await PostgresAGEGraphBackend.connect(
+            url=config.postgresql_url,
+            min_size=config.postgresql_pool_min_size,
+            max_size=config.postgresql_pool_max_size,
+            command_timeout=config.postgresql_command_timeout_s,
         )
-        raise NotImplementedError(msg)
     msg = f"Unsupported storage.graph_backend: {backend!r}"
     raise ValueError(msg)
