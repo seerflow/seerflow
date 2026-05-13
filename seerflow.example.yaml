@@ -25,6 +25,12 @@ storage:
   # Postgres instance, no separate DSN. The AGE extension must be
   # installed on the server (``CREATE EXTENSION age``); on managed
   # Postgres services confirm AGE is in the provider's allowlist first.
+  # To move an existing entity graph between backends use the migration
+  # CLI (S-155-F3):
+  #   seerflow graph migrate --from igraph --to falkordb
+  #   seerflow graph migrate --from falkordb --to igraph     # downgrade
+  # See ``seerflow graph migrate --help`` for --dry-run and
+  # --wipe-destination flags.
   # graph_backend: igraph                     # igraph | falkordb | postgres_age
   # falkordb_url: ${SEERFLOW_FALKORDB_URL:-falkor://localhost:6379}  # required when graph_backend=falkordb
 
