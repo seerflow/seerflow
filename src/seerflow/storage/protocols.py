@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from seerflow.graph.entity_graph import EntityGraph
+    from seerflow.llm.rule_suggestion.aggregator import PatternFeedbackRow
     from seerflow.models._types import FeedbackType
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
@@ -126,6 +127,40 @@ class AlertStore(Protocol):  # pragma: no cover
         self, alert_id: str, page: int = 1, limit: int = 50
     ) -> Page[FeedbackEvent]:
         """Return feedback audit-log entries newest-first, paginated."""
+        ...
+
+    async def aggregate_tp_feedback(
+        self,
+        *,
+        min_tp: int,
+        window_ns: int | None = None,
+        now_ns: int | None = None,
+        limit: int = 50_000,
+    ) -> tuple[PatternFeedbackRow, ...]:
+        """Aggregate TP feedback rows by ``(alert_type, rule_name, entity_type)``.
+
+        Used by the rule-suggestion service (S-100, FR-066) to surface ML
+        patterns that have accumulated ``tp_count >= min_tp`` distinct TP
+        verdicts. Only the **latest** verdict per ``alert_id`` is counted,
+        so a TP→FP→TP flip-flop registers as one TP, not two.
+
+        Args:
+            min_tp: Filter floor — patterns with fewer TPs are omitted.
+            window_ns: If provided (non-``None``), consider only feedback
+                events with ``submitted_at_ns >= now_ns - window_ns``.
+                ``None`` (default) means all-time.
+            now_ns: Reference clock for ``window_ns``. Backends fall back
+                to their own wall-clock when ``None``.
+            limit: Scan ceiling — the row count actually inspected by the
+                SQL query, **not** the returned row count. Protects
+                long-running deployments where the feedback log grows
+                into the millions; the result is conservative
+                (under-counted patterns), never wrong.
+
+        Returns:
+            Tuple of ``PatternFeedbackRow`` instances ordered
+            ``tp_count DESC, most_recent_tp_ns DESC``.
+        """
         ...
 
     async def count_by_severity(self) -> dict[str, int]:

@@ -2349,3 +2349,80 @@ class TestLLMHuntConfig:
         yaml_path.write_text("llm:\n  cloud_base_url: 42\n", encoding="utf-8")
         with pytest.raises(ConfigError, match=r"cloud_base_url"):
             load_config(str(yaml_path))
+
+
+class TestLLMRuleSuggestionConfig:
+    """Validation for the S-100 ``rule_suggestion_*`` LLMConfig fields."""
+
+    def test_defaults(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.rule_suggestion_cache_size == 64
+        assert config.llm.rule_suggestion_cache_ttl_s == 21_600
+        assert config.llm.rule_suggestion_min_tp == 3
+        assert config.llm.rule_suggestion_window_days == 0
+        assert config.llm.rule_suggestion_timeout_s == pytest.approx(30.0)
+
+    def test_custom_values_parse(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  rule_suggestion_cache_size: 128\n"
+            "  rule_suggestion_cache_ttl_s: 3600\n"
+            "  rule_suggestion_min_tp: 5\n"
+            "  rule_suggestion_window_days: 30\n"
+            "  rule_suggestion_timeout_s: 45.0\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.rule_suggestion_cache_size == 128
+        assert config.llm.rule_suggestion_cache_ttl_s == 3600
+        assert config.llm.rule_suggestion_min_tp == 5
+        assert config.llm.rule_suggestion_window_days == 30
+        assert config.llm.rule_suggestion_timeout_s == pytest.approx(45.0)
+
+    @pytest.mark.parametrize("value", [-1, 4097])
+    def test_cache_size_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_cache_size: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_cache_size"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 86_401])
+    def test_cache_ttl_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_cache_ttl_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_cache_ttl_s"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 101])
+    def test_min_tp_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_min_tp: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_min_tp"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [-1, 366])
+    def test_window_days_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_window_days: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_window_days"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0.5, 121.0])
+    def test_timeout_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_min_tp_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  rule_suggestion_min_tp: 'three'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_min_tp"):
+            load_config(str(yaml_path))
+
+    def test_timeout_non_numeric_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  rule_suggestion_timeout_s: 'fast'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_timeout_s"):
+            load_config(str(yaml_path))

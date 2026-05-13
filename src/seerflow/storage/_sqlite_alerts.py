@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 import msgspec
 
+from seerflow.llm.rule_suggestion.aggregator import PatternFeedbackRow
+from seerflow.llm.rule_suggestion.pattern_keys import derive_pattern_key
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.models.feedback import FeedbackEvent
@@ -29,6 +31,11 @@ if TYPE_CHECKING:
     from seerflow.models._types import FeedbackType
     from seerflow.models.feedback import FeedbackOrigin
     from seerflow.models.query import AlertQuery, TimeRange
+
+# Hard cap (mirrors ``aggregator._MAX_CONTRIBUTING_ALERT_IDS``). Re-declared
+# here to keep the SQL/Python boundary self-contained — the aggregator
+# wrapper clips a second time defensively.
+_AGG_MAX_CONTRIB_IDS = 16
 
 _log = logging.getLogger(__name__)
 
@@ -440,6 +447,129 @@ class _SqliteAlertMixin:
             for r in rows
         )
         return Page(items=items, total=total, page=page, limit=limit)
+
+    async def aggregate_tp_feedback(
+        self,
+        *,
+        min_tp: int,
+        window_ns: int | None = None,
+        now_ns: int | None = None,
+        limit: int = 50_000,
+    ) -> tuple[PatternFeedbackRow, ...]:
+        """Aggregate TP feedback by ``(alert_type, rule_name, entity_type)``.
+
+        Implementation of :py:meth:`AlertStore.aggregate_tp_feedback` for the
+        SQLite backend. The query has two layers:
+
+        1. A CTE (``latest_per_alert``) picks the **newest** feedback row
+           per ``alert_id`` so flip-flop verdict sequences (TP → FP → TP)
+           collapse to a single row per alert. This matches the contract
+           in the Protocol docstring.
+        2. The outer query groups latest TPs by the pattern triple,
+           filters with ``HAVING COUNT(*) >= :min_tp``, aggregates
+           ``alert_id``s into a ``|``-separated string ordered newest-TP
+           first, and orders the rows by ``tp_count DESC, most_recent DESC``.
+
+        ``window_ns`` (when non-``None``) clips feedback rows older than
+        ``now_ns - window_ns``. The Python side splits the ``GROUP_CONCAT``
+        string and caps the per-pattern ID list at ``_AGG_MAX_CONTRIB_IDS``.
+
+        The function never mutates state and is safe to call concurrently.
+        """
+        # Compute the time-window predicate parameters once. SQLite has no
+        # truly-null behaviour in arithmetic, so we encode "no window" by
+        # leaving ``window_floor_ns`` at ``None`` and using a sentinel in
+        # the WHERE clause.
+        if window_ns is not None and window_ns > 0:
+            reference_ns = now_ns if now_ns is not None else time.time_ns()
+            window_floor_ns: int | None = reference_ns - window_ns
+        else:
+            window_floor_ns = None
+
+        # Newest-first ordering inside the per-pattern ``GROUP_CONCAT`` is
+        # tricky in SQLite — there is no ``GROUP_CONCAT(... ORDER BY ...)``
+        # in versions before 3.44. We sort the rows by
+        # ``most_recent_per_alert DESC`` in a subquery so the CONCAT
+        # consumes them in the correct order. Newer SQLite would let us
+        # use ``GROUP_CONCAT(... ORDER BY ...)`` directly; the subquery
+        # form is portable and still planner-friendly.
+        sql = """
+            WITH latest_per_alert AS (
+                SELECT
+                    e.alert_id,
+                    e.feedback,
+                    MAX(e.submitted_at_ns) AS most_recent_per_alert
+                FROM alert_feedback_events e
+                WHERE (:window_floor IS NULL OR e.submitted_at_ns >= :window_floor)
+                GROUP BY e.alert_id
+            ),
+            tp_alerts AS (
+                SELECT
+                    l.alert_id,
+                    l.most_recent_per_alert,
+                    a.alert_type,
+                    a.rule_name,
+                    a.entity_type
+                FROM latest_per_alert l
+                JOIN alerts a ON a.alert_id = l.alert_id
+                WHERE l.feedback = 'tp'
+            ),
+            ordered_tp AS (
+                SELECT *
+                FROM tp_alerts
+                ORDER BY most_recent_per_alert DESC
+            )
+            SELECT
+                alert_type,
+                rule_name,
+                entity_type,
+                COUNT(*)                       AS tp_count,
+                MAX(most_recent_per_alert)     AS most_recent_tp_ns,
+                GROUP_CONCAT(alert_id, '|')    AS alert_ids
+            FROM ordered_tp
+            GROUP BY alert_type, rule_name, entity_type
+            HAVING COUNT(*) >= :min_tp
+            ORDER BY tp_count DESC, most_recent_tp_ns DESC
+            LIMIT :row_limit
+        """  # parameters are bound, not interpolated
+        params = {
+            "window_floor": window_floor_ns,
+            "min_tp": int(min_tp),
+            "row_limit": int(limit),
+        }
+        async with await self._conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+
+        out: list[PatternFeedbackRow] = []
+        for r in rows:
+            alert_type, rule_name, entity_type, tp_count, most_recent_tp_ns, alert_ids = r
+            # Synthesise a temporary ``Alert`` for ``derive_pattern_key`` so
+            # the SQL output and the Python helper share a single source of
+            # truth for sanitisation. Costs are negligible vs. the round
+            # trip and saves duplicating the regex here.
+            key_alert = Alert(
+                alert_id="",
+                alert_type=alert_type,
+                timestamp_ns=0,
+                severity_id=SeverityLevel.INFORMATIONAL,
+                rule_name=rule_name,
+                description="",
+                entity_uuid="",
+                entity_value="",
+                entity_type=entity_type,
+                contributing_events=(),
+            )
+            pattern_key = derive_pattern_key(key_alert)
+            id_tuple = tuple((alert_ids or "").split("|"))[:_AGG_MAX_CONTRIB_IDS]
+            out.append(
+                PatternFeedbackRow(
+                    pattern_key=pattern_key,
+                    tp_count=int(tp_count),
+                    most_recent_tp_ns=int(most_recent_tp_ns),
+                    contributing_alert_ids=id_tuple,
+                )
+            )
+        return tuple(out)
 
     async def count_by_severity(self) -> dict[str, int]:
         """Return alert counts grouped by severity name (lowercase).

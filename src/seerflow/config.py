@@ -262,6 +262,15 @@ class LLMConfig:
     hunt_timeout_s: float = 12.0
     hunt_max_results: int = 100
     hunt_max_query_chars: int = 512
+    # Sigma rule suggestion knobs (S-100, FR-066). The drafting prompt is
+    # heavier than alert explanation (structured YAML output, validator
+    # round-trip), so the timeout sits higher than ``explanation_timeout_s``
+    # and the cache TTL is longer (operators rarely re-draft within a session).
+    rule_suggestion_cache_size: int = 64
+    rule_suggestion_cache_ttl_s: int = 21_600  # 6 hours
+    rule_suggestion_min_tp: int = 3  # mirrors FR-066 acceptance criteria
+    rule_suggestion_window_days: int = 0  # 0 = all-time
+    rule_suggestion_timeout_s: float = 30.0
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

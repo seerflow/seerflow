@@ -571,6 +571,26 @@ async def _run_with_config(
             log_store=storage,
         )
 
+    # Sigma rule-suggestion service (S-100, FR-066). Same lifecycle as the
+    # explanation + hunt services: only constructed when the LLM backend
+    # is ready; the three routes return 503 with the ``health_state["llm"]``
+    # status otherwise.
+    from seerflow.llm.rule_suggestion import RuleSuggestionCache, RuleSuggestionService
+
+    rule_suggestion_service: RuleSuggestionService | None = None
+    if llm_backend is not None:
+        rule_suggestion_cache = RuleSuggestionCache(
+            max_entries=config.llm.rule_suggestion_cache_size,
+            ttl_seconds=config.llm.rule_suggestion_cache_ttl_s,
+        )
+        rule_suggestion_service = RuleSuggestionService(
+            backend=llm_backend,
+            cache=rule_suggestion_cache,
+            cfg=config.llm,
+            alert_store=storage,
+            log_store=storage,
+        )
+
     api_app = make_api_app(
         log_store=storage,
         alert_store=storage,
@@ -586,6 +606,7 @@ async def _run_with_config(
         ensemble=ensemble,
         explanation_service=explanation_service,
         hunt_service=hunt_service,
+        rule_suggestion_service=rule_suggestion_service,
     )
     ws_manager: ConnectionManager = api_app.state.ws_manager
     uvicorn_config = uvicorn.Config(

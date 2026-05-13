@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.llm.explanation.service import AlertExplanationService
     from seerflow.llm.hunt.service import NaturalLanguageHuntService
+    from seerflow.llm.rule_suggestion.service import RuleSuggestionService
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -146,4 +147,19 @@ def get_hunt_service(request: Request) -> NaturalLanguageHuntService | None:
     response with the ``health_state["llm"]`` status.
     """
     service: NaturalLanguageHuntService | None = getattr(request.app.state, "hunt_service", None)
+    return service
+
+
+def get_rule_suggestion_service(request: Request) -> RuleSuggestionService | None:
+    """FastAPI Depends provider — returns the rule-suggestion service or None.
+
+    Returns the service stashed at ``app.state.rule_suggestion_service`` (S-100),
+    or ``None`` if the attribute is missing (LLM disabled / degraded / API
+    running without a pipeline). Callers translate ``None`` to a 503
+    response with the ``health_state["llm"]`` status — same pattern as the
+    explanation + hunt services.
+    """
+    service: RuleSuggestionService | None = getattr(
+        request.app.state, "rule_suggestion_service", None
+    )
     return service

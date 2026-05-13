@@ -1203,6 +1203,69 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
             f"llm.cloud_base_url must be a string, got {type(cloud_base_url).__name__}"
         )
 
+    # S-100: Sigma rule suggestion knobs (FR-066). All defaults preserve
+    # current behaviour. Ranges are deliberately wider than the
+    # explanation knobs because the drafting workflow is slower and the
+    # cached suggestion is reviewed less frequently.
+    rule_suggestion_cache_size = data.get("rule_suggestion_cache_size", 64)
+    if (
+        not isinstance(rule_suggestion_cache_size, int)
+        or isinstance(rule_suggestion_cache_size, bool)
+        or not 0 <= rule_suggestion_cache_size <= 4096
+    ):
+        raise ConfigError(
+            "llm.rule_suggestion_cache_size must be an integer in [0, 4096], "
+            f"got {rule_suggestion_cache_size!r}"
+        )
+
+    rule_suggestion_cache_ttl_s = data.get("rule_suggestion_cache_ttl_s", 21_600)
+    if (
+        not isinstance(rule_suggestion_cache_ttl_s, int)
+        or isinstance(rule_suggestion_cache_ttl_s, bool)
+        or not 1 <= rule_suggestion_cache_ttl_s <= 86_400
+    ):
+        raise ConfigError(
+            "llm.rule_suggestion_cache_ttl_s must be an integer in [1, 86400], "
+            f"got {rule_suggestion_cache_ttl_s!r}"
+        )
+
+    rule_suggestion_min_tp = data.get("rule_suggestion_min_tp", 3)
+    if (
+        not isinstance(rule_suggestion_min_tp, int)
+        or isinstance(rule_suggestion_min_tp, bool)
+        or not 1 <= rule_suggestion_min_tp <= 100
+    ):
+        raise ConfigError(
+            "llm.rule_suggestion_min_tp must be an integer in [1, 100], "
+            f"got {rule_suggestion_min_tp!r}"
+        )
+
+    rule_suggestion_window_days = data.get("rule_suggestion_window_days", 0)
+    if (
+        not isinstance(rule_suggestion_window_days, int)
+        or isinstance(rule_suggestion_window_days, bool)
+        or not 0 <= rule_suggestion_window_days <= 365
+    ):
+        raise ConfigError(
+            "llm.rule_suggestion_window_days must be an integer in [0, 365], "
+            f"got {rule_suggestion_window_days!r}"
+        )
+
+    rule_suggestion_timeout_raw = data.get("rule_suggestion_timeout_s", 30.0)
+    if isinstance(rule_suggestion_timeout_raw, bool) or not isinstance(
+        rule_suggestion_timeout_raw, (int, float)
+    ):
+        raise ConfigError(
+            "llm.rule_suggestion_timeout_s must be a number, "
+            f"got {type(rule_suggestion_timeout_raw).__name__}"
+        )
+    rule_suggestion_timeout_s = float(rule_suggestion_timeout_raw)
+    if not 1.0 <= rule_suggestion_timeout_s <= 120.0:
+        raise ConfigError(
+            "llm.rule_suggestion_timeout_s must be in [1.0, 120.0], "
+            f"got {rule_suggestion_timeout_raw!r}"
+        )
+
     return LLMConfig(
         backend=backend,
         model_path=model_path,
@@ -1230,6 +1293,11 @@ def _build_llm(data: dict[str, Any]) -> LLMConfig:
         cloud_model=cloud_model,
         cloud_timeout_s=cloud_timeout_s,
         cloud_base_url=cloud_base_url,
+        rule_suggestion_cache_size=rule_suggestion_cache_size,
+        rule_suggestion_cache_ttl_s=rule_suggestion_cache_ttl_s,
+        rule_suggestion_min_tp=rule_suggestion_min_tp,
+        rule_suggestion_window_days=rule_suggestion_window_days,
+        rule_suggestion_timeout_s=rule_suggestion_timeout_s,
     )
 
 

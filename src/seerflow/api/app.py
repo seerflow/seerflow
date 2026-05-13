@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.llm.explanation.service import AlertExplanationService
     from seerflow.llm.hunt.service import NaturalLanguageHuntService
+    from seerflow.llm.rule_suggestion.service import RuleSuggestionService
     from seerflow.models.alert import CorrelationRule
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.sigma.state import SigmaRuleStateStore
@@ -243,6 +244,7 @@ def create_api_app(
     ensemble: DetectionEnsemble | None = None,
     explanation_service: AlertExplanationService | None = None,
     hunt_service: NaturalLanguageHuntService | None = None,
+    rule_suggestion_service: RuleSuggestionService | None = None,
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -279,6 +281,10 @@ def create_api_app(
         hunt_service: Optional ``NaturalLanguageHuntService`` powering the
             ``POST /api/v1/hunt`` endpoint (S-072). ``None`` when the LLM
             backend is disabled or degraded — the route returns 503.
+        rule_suggestion_service: Optional ``RuleSuggestionService`` powering
+            the ``/api/v1/sigma/rule-suggestions`` endpoints (S-100, FR-066).
+            ``None`` when the LLM backend is disabled or degraded — all
+            three routes return 503.
     """
     app = FastAPI(
         title="Seerflow API",
@@ -311,6 +317,7 @@ def create_api_app(
     )
     app.state.explanation_service = explanation_service
     app.state.hunt_service = hunt_service
+    app.state.rule_suggestion_service = rule_suggestion_service
     app.state.anomaly_timeline_ring = AnomalyTimelineRing()
     app.state.ws_manager = ws_manager or _build_ws_manager(
         alert_store, config, app.state.anomaly_timeline_ring
