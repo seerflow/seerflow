@@ -58,6 +58,84 @@ def _add_query_subparsers(subparsers: argparse._SubParsersAction) -> None:  # ty
     health.add_argument("--json", action="store_true", default=False, help="Output as JSON")
 
 
+_EXPORT_DEFAULT_LIMIT = 100_000
+
+_EXPORT_FORMATS = ("json", "csv")
+
+
+def _add_export_subparsers(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow export events|alerts`` subcommands (S-076)."""
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export stored events or alerts (NDJSON or CSV)",
+    )
+    export_sub = export_parser.add_subparsers(dest="export_type")
+    export_sub.required = True
+
+    # --- export events ---
+    ev = export_sub.add_parser("events", help="Export stored events")
+    ev.add_argument(
+        "--format",
+        choices=_EXPORT_FORMATS,
+        default="json",
+        help="Output format (default: json — NDJSON)",
+    )
+    ev.add_argument(
+        "--since",
+        type=str,
+        default="24h",
+        help="Time window relative to now (default: 24h; e.g. 1h, 30m, 7d)",
+    )
+    ev.add_argument("--source", type=str, default=None, help="Filter by source type")
+    ev.add_argument("--severity", type=int, default=None, help="Minimum severity (0-6)")
+    ev.add_argument(
+        "--limit",
+        type=int,
+        default=_EXPORT_DEFAULT_LIMIT,
+        help=f"Maximum rows to export (default: {_EXPORT_DEFAULT_LIMIT:,})",
+    )
+    ev.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output file path (default: stdout)",
+    )
+
+    # --- export alerts ---
+    al = export_sub.add_parser("alerts", help="Export stored alerts")
+    al.add_argument(
+        "--format",
+        choices=_EXPORT_FORMATS,
+        default="json",
+        help="Output format (default: json — NDJSON)",
+    )
+    al.add_argument(
+        "--since",
+        type=str,
+        default="24h",
+        help="Time window relative to now (default: 24h; e.g. 1h, 30m, 7d)",
+    )
+    al.add_argument(
+        "--type",
+        type=str,
+        default=None,
+        help="Alert type filter (ml, sigma, correlation, ueba, ioc)",
+    )
+    al.add_argument("--severity", type=int, default=None, help="Minimum severity (0-6)")
+    al.add_argument(
+        "--limit",
+        type=int,
+        default=_EXPORT_DEFAULT_LIMIT,
+        help=f"Maximum rows to export (default: {_EXPORT_DEFAULT_LIMIT:,})",
+    )
+    al.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output file path (default: stdout)",
+    )
+
+
 _STATUS_TIMEOUT_MIN_S = 0.1
 _STATUS_TIMEOUT_MAX_S = 30.0
 
@@ -152,6 +230,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Database path (default: from config)",
     )
     hunt_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
+
+    _add_export_subparsers(subparsers)
 
     rules_parser = subparsers.add_parser("rules", help="Inspect loaded Sigma rules")
     rules_sub = rules_parser.add_subparsers(dest="rules_cmd")

@@ -1,12 +1,16 @@
-"""CLI handler for ``seerflow hunt`` command (S-072, FR-057).
+"""CLI handler for ``seerflow hunt`` command (S-072 + S-076, FR-045 / FR-057).
 
-Loads the seerflow config, builds the LLM backend + ``NaturalLanguageHuntService``,
-and dispatches the natural-language query. Prints results as a table by default
-or as a JSON envelope when ``--json`` is set.
+Two routes:
+- **Entity mode** (S-076) — when the query string is a recognisable IP /
+  hostname / user principal / UUID, build a structured ``EventQuery`` keyed
+  on ``entity_uuid`` and bypass the LLM entirely.
+- **Natural language mode** (S-072) — otherwise, dispatch the LLM-backed
+  ``NaturalLanguageHuntService``.
 
-When the LLM backend is unavailable (disabled / degraded / dep missing) the
-command falls back gracefully — it prints a helpful pointer at the structured
-``seerflow query events`` syntax and exits 0 (degraded, not crashed).
+When the LLM backend is unavailable (disabled / degraded / dep missing),
+the entity path still works. The NL path falls back gracefully — prints a
+helpful pointer at the structured ``seerflow query events`` syntax and
+exits 0 (degraded, not crashed).
 """
 # ruff: noqa: T201 — print() is the correct output mechanism for CLI commands.
 
@@ -14,26 +18,31 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from typing import TYPE_CHECKING
 
 import msgspec.json
 
+from seerflow._entity_detect import EntityHit, detect_entity
 from seerflow.cli_format import format_table
 from seerflow.config import load_config
 from seerflow.llm import build_llm_backend
 from seerflow.llm.hunt.cache import HuntCache
+from seerflow.llm.hunt.result import HuntResult
 from seerflow.llm.hunt.service import NaturalLanguageHuntService
+from seerflow.models.query import EventQuery
 from seerflow.query import format_timestamp
 from seerflow.storage import connect_storage
 
 if TYPE_CHECKING:
     import argparse
 
-    from seerflow.llm.hunt.result import HuntResult
     from seerflow.storage.factory import StorageBackend
 
 
 _log = logging.getLogger("seerflow")
+
+_ENTITY_DEFAULT_LIMIT = 100
 
 
 async def _build_service_and_storage(
@@ -120,13 +129,68 @@ def _print_table(result: HuntResult) -> None:
     print(f"\n{result.total} event(s) total, showing {len(result.events)}")
 
 
+async def _run_entity_hunt(
+    args: argparse.Namespace,
+    storage: StorageBackend,
+    hit: EntityHit,
+) -> int:
+    """Run the entity-mode hunt path (S-076).
+
+    Builds an ``EventQuery`` keyed on the resolved ``entity_uuid`` and
+    queries storage directly. Does not require an LLM backend.
+    """
+    started_ns = time.time_ns()
+    limit = args.limit or _ENTITY_DEFAULT_LIMIT
+    try:
+        query = EventQuery(entity_uuid=hit.entity_uuid, limit=limit)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        page = await storage.query_events(query)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        _log.exception("entity hunt failed")
+        return 1
+
+    latency_ms = (time.time_ns() - started_ns) / 1_000_000
+    result = HuntResult(
+        query=hit.entity_value,
+        filters={
+            "mode": "entity",
+            "entity_type": hit.entity_type,
+            "entity_uuid": hit.entity_uuid,
+            "entity_value": hit.entity_value,
+        },
+        events=tuple(page.items),
+        total=page.total,
+        model="entity",
+        generated_at_ns=started_ns,
+        latency_ms=latency_ms,
+        cached=False,
+        truncated=len(page.items) < page.total,
+    )
+
+    if args.json:
+        _print_json(result)
+    else:
+        _print_table(result)
+    return 0
+
+
 async def run_hunt(args: argparse.Namespace) -> int:
     """Run the ``seerflow hunt`` command. Returns a process exit code."""
     service, storage = await _build_service_and_storage(args)
     try:
+        hit = detect_entity(args.query)
+        if hit is not None:
+            return await _run_entity_hunt(args, storage, hit)
+
         if service is None:
             _print_fallback()
             return 0
+
         try:
             result = await service.hunt(args.query)
         except ValueError as exc:

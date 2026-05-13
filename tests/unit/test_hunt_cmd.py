@@ -217,3 +217,164 @@ async def test_build_service_and_storage_returns_service_when_llm_ready(
         service, storage = await hunt_cmd._build_service_and_storage(args)
     assert service is not None
     assert storage is fake_storage
+
+
+# ---------------------------------------------------------------------------
+# S-076: entity-mode routing tests
+# ---------------------------------------------------------------------------
+
+
+class _FakeStorage:
+    """Minimal storage stub for entity-mode tests."""
+
+    def __init__(self, events: tuple[SeerflowEvent, ...]) -> None:
+        self._events = events
+        self.last_query: Any = None
+        self.closed = False
+
+    async def query_events(self, query: Any) -> Any:
+        self.last_query = query
+        from seerflow.models.query import Page
+
+        return Page(items=self._events, total=len(self._events), page=1, limit=query.limit)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _ip_event() -> SeerflowEvent:
+    return SeerflowEvent(
+        event_id=uuid.uuid4(),
+        timestamp_ns=1_700_000_000_000_000_000,
+        observed_ns=1_700_000_000_000_000_000,
+        message="connection from 10.0.0.5",
+        source_type="auth",
+    )
+
+
+@pytest.mark.unit
+async def test_run_hunt_entity_ip_path_skips_llm(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When query is an IP, entity path runs; service.hunt is never called."""
+    svc = _FakeService()
+    storage = _FakeStorage((_ip_event(),))
+    with patch.object(hunt_cmd, "_build_service_and_storage") as builder:
+        builder.return_value = (svc, storage)
+        rc = await hunt_cmd.run_hunt(_args(query="10.0.0.5"))
+    assert rc == 0
+    assert svc.call_count == 0
+    out = capsys.readouterr().out
+    assert "entity" in out
+    assert "10.0.0.5" in out
+
+
+@pytest.mark.unit
+async def test_run_hunt_entity_uuid_path(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A UUID-shaped query routes via entity path."""
+    svc = _FakeService()
+    storage = _FakeStorage((_ip_event(),))
+    target = str(uuid.uuid4())
+    with patch.object(hunt_cmd, "_build_service_and_storage") as builder:
+        builder.return_value = (svc, storage)
+        rc = await hunt_cmd.run_hunt(_args(query=target))
+    assert rc == 0
+    assert svc.call_count == 0
+    assert storage.last_query is not None
+    assert storage.last_query.entity_uuid == target
+
+
+@pytest.mark.unit
+async def test_run_hunt_entity_when_llm_disabled(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Entity path runs even when LLM backend is unavailable."""
+    storage = _FakeStorage((_ip_event(),))
+    with patch.object(hunt_cmd, "_build_service_and_storage") as builder:
+        builder.return_value = (None, storage)
+        rc = await hunt_cmd.run_hunt(_args(query="10.0.0.5"))
+    assert rc == 0
+    out = capsys.readouterr().out
+    err = capsys.readouterr().err
+    # No fallback message — entity path served it.
+    assert "seerflow query events" not in err
+    assert "entity" in out
+    assert "10.0.0.5" in out
+
+
+@pytest.mark.unit
+async def test_run_hunt_entity_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Entity-mode JSON output includes mode + entity_uuid in filters."""
+    storage = _FakeStorage((_ip_event(),))
+    with patch.object(hunt_cmd, "_build_service_and_storage") as builder:
+        builder.return_value = (None, storage)
+        rc = await hunt_cmd.run_hunt(_args(query="10.0.0.5", json=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["filters"]["mode"] == "entity"
+    assert payload["filters"]["entity_type"] == "ip"
+    assert payload["filters"]["entity_value"] == "10.0.0.5"
+    assert "entity_uuid" in payload["filters"]
+
+
+@pytest.mark.unit
+async def test_run_hunt_free_text_still_goes_to_llm(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A free-text multi-word query bypasses entity detection."""
+    svc = _FakeService()
+    storage = _FakeStorage(())
+    with patch.object(hunt_cmd, "_build_service_and_storage") as builder:
+        builder.return_value = (svc, storage)
+        rc = await hunt_cmd.run_hunt(_args(query="failed login attempts"))
+    assert rc == 0
+    assert svc.call_count == 1
+    # Storage entity path was NOT invoked.
+    assert storage.last_query is None
+
+
+class _FailingStorage:
+    """Storage stub that raises on query_events. Used for entity error paths."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+        self.closed = False
+
+    async def query_events(self, _query: Any) -> Any:
+        raise self._exc
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.unit
+async def test_run_hunt_entity_storage_exception_returns_1(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A storage exception during entity hunt returns exit code 1."""
+    storage = _FailingStorage(RuntimeError("db gone"))
+    with patch.object(hunt_cmd, "_build_service_and_storage") as builder:
+        builder.return_value = (None, storage)
+        rc = await hunt_cmd.run_hunt(_args(query="10.0.0.5"))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "db gone" in err or "Error" in err
+
+
+@pytest.mark.unit
+async def test_run_hunt_entity_invalid_limit_returns_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An out-of-range ``--limit`` triggers EventQuery validation → exit 2."""
+    storage = _FakeStorage(())
+    with patch.object(hunt_cmd, "_build_service_and_storage") as builder:
+        builder.return_value = (None, storage)
+        rc = await hunt_cmd.run_hunt(_args(query="10.0.0.5", limit=999999))
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "limit" in err.lower() or "Error" in err
