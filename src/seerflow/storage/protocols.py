@@ -46,6 +46,25 @@ class LogStore(Protocol):  # pragma: no cover
         """
         ...
 
+    async def prune_templates(self, min_count: int) -> int:
+        """Delete templates whose ``event_count`` is strictly less than
+        ``min_count``. Returns the number of rows removed.
+
+        ``min_count == 0`` is a no-op (no row can have negative count).
+        Negative ``min_count`` raises ``ValueError`` — callers must
+        validate before calling.
+        """
+        ...
+
+    async def reset_templates(self) -> int:
+        """Delete every row from the templates table.
+
+        Returns the number of rows removed. Does NOT touch the in-memory
+        Drain3 parse tree — callers wanting a hard reset should also
+        delete the ``drain3:global`` row via ``ModelStore.delete_state``.
+        """
+        ...
+
     async def flush(self) -> None: ...
 
 

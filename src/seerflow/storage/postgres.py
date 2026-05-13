@@ -63,6 +63,22 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
+def _parse_delete_status(status: str) -> int:
+    """Extract the affected-row count from an asyncpg DELETE status string.
+
+    asyncpg returns strings like ``"DELETE 4"`` from ``conn.execute()``.
+    Returns ``0`` when the status cannot be parsed (defensive — should
+    never happen for a well-formed DELETE).
+    """
+    parts = status.split()
+    if len(parts) >= 2 and parts[0] == "DELETE":
+        try:
+            return int(parts[1])
+        except ValueError:  # pragma: no cover — defensive
+            return 0
+    return 0  # pragma: no cover — defensive
+
+
 def _sanitize_pg_fts_query(query: str) -> str:
     """Sanitise a user-supplied FTS string before handing it to ``plainto_tsquery``.
 
@@ -524,6 +540,24 @@ class PostgresBackend(_PostgresAlertMixin, _PostgresSigmaStateMixin):
             )
             for row in rows
         ]
+
+    async def prune_templates(self, min_count: int) -> int:
+        """Delete templates with ``event_count < min_count``. See SQLite impl."""
+        if min_count < 0:
+            msg = f"min_count must be >= 0, got {min_count!r}"
+            raise ValueError(msg)
+        if min_count == 0:
+            return 0
+        async with self._pool.acquire() as conn:
+            # asyncpg returns a status string like "DELETE 4". Parse the count.
+            status = await conn.execute("DELETE FROM templates WHERE event_count < $1", min_count)
+        return _parse_delete_status(status)
+
+    async def reset_templates(self) -> int:
+        """Delete every row from the templates table. See SQLite impl."""
+        async with self._pool.acquire() as conn:
+            status = await conn.execute("DELETE FROM templates")
+        return _parse_delete_status(status)
 
     # ------------------------------------------------------------------
     # EntityStore
