@@ -21,8 +21,6 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-_USED_ENTITY_TYPES = frozenset({"ip", "user", "host"})
-
 
 class EventNormalizer:
     """Transforms RawEvent into SeerflowEvent.
@@ -43,9 +41,7 @@ class EventNormalizer:
         entity_extractor: EntityExtractor | None = None,
     ) -> None:
         self._parser = drain_parser or DrainParser()
-        self._extractor = entity_extractor or EntityExtractor(
-            enabled_types=_USED_ENTITY_TYPES,
-        )
+        self._extractor = entity_extractor or EntityExtractor()
 
     def normalize(self, raw: RawEvent) -> SeerflowEvent:
         """Convert a RawEvent to a SeerflowEvent."""
@@ -95,4 +91,7 @@ class EventNormalizer:
             related_ips=tuple(e.value for e in tagged.get("ip", [])),
             related_users=tuple(e.value for e in tagged.get("user", [])),
             related_hosts=tuple(e.value for e in tagged.get("host", [])),
+            related_files=tuple(e.value for e in tagged.get("file", [])),
+            related_domains=tuple(e.value for e in tagged.get("domain", [])),
+            related_processes=tuple(e.value for e in tagged.get("process", [])),
         )

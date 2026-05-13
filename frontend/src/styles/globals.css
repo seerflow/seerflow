@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Seerflow primary tokens (story-required) */
+    --bg: 0 0% 100%;
+    --fg: 222.2 84% 4.9%;
+    --muted: 210 40% 96.1%;
+    --accent: 210 40% 96.1%;
+
+    /* shadcn/ui compatibility tokens (HSL, no space-or-commas for bg/text utilities) */
+    --background: var(--bg);
+    --foreground: var(--fg);
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+
+    /* Anomaly timeline chart (S-059) */
+    --color-chart-score: #3b82f6;
+    --color-chart-threshold: #ef4444;
+    --color-chart-alert: #f59e0b;
+
+    color-scheme: light;
+  }
+
+  [data-theme="dark"] {
+    /* Matches the dark wordmark background (#0e1c29). */
+    --bg: 209 49% 11%;
+    --fg: 210 40% 98%;
+    --muted: 209 35% 18%;
+    --accent: 209 35% 18%;
+
+    --background: var(--bg);
+    --foreground: var(--fg);
+    --card: 209 49% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 209 49% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+
+    /* Anomaly timeline chart (S-059) */
+    --color-chart-score: #60a5fa;
+    --color-chart-threshold: #f87171;
+    --color-chart-alert: #fbbf24;
+
+    color-scheme: dark;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+}
+
+/* ATT&CK heatmap cell states */
+@layer utilities {
+  .cell-detected {
+    @apply bg-blue-600 dark:bg-blue-500;
+  }
+  .cell-covered {
+    @apply bg-blue-200 dark:bg-blue-800;
+  }
+  .cell-gap {
+    @apply bg-zinc-100 dark:bg-zinc-800;
+  }
+}

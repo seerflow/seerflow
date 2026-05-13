@@ -14,8 +14,15 @@ import uuid
 
 import msgspec
 
-# Bounded type for event attribute values — terminal types only.
-AttrValue = str | int | float | bool | None
+# Bounded type for event attribute values.
+# Terminal scalars + one level of structured payloads (lists of
+# string-keyed dicts of scalars + lists-of-strings) used by enrichment
+# blocks like ``ioc_matches`` (S-069). Deeper structures must be
+# encoded by the producer.
+_AttrLeaf = str | int | float | bool | None
+_AttrStructFieldValue = _AttrLeaf | list[str]
+_AttrStruct = dict[str, _AttrStructFieldValue]
+AttrValue = _AttrLeaf | list[_AttrStruct]
 
 
 class SeverityLevel(int, enum.Enum):
@@ -33,6 +40,12 @@ class SeverityLevel(int, enum.Enum):
     def text(self) -> str:
         """Human-readable severity label."""
         return self.name.capitalize()
+
+
+# Public severity bounds — imported by api/ws.py and api/routes/alerts.py
+# to prevent drift between REST and WebSocket validation.
+SEVERITY_MIN: int = SeverityLevel.TRACE
+SEVERITY_MAX: int = SeverityLevel.FATAL
 
 
 class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
@@ -54,6 +67,11 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
 
     OCSF invariant: ``type_uid = class_uid * 100 + activity_id``. Callers
     setting any of these three fields must set all three consistently.
+
+    Entity fields: ``related_ips``, ``related_users``, ``related_hosts``,
+    ``related_files``, ``related_domains``, ``related_processes`` carry raw
+    extracted values.  ``entity_refs`` holds deterministic UUID5 strings
+    resolved from the raw values (see ``resolve_entities``).
 
     ``related_hashes`` format: ``"<algo>:<lowercase-hex-digest>"``, e.g.
     ``"sha256:e3b0c44298fc1c14..."``  Validation is enforced at the
@@ -107,6 +125,9 @@ class SeerflowEvent(msgspec.Struct, frozen=True, gc=False, tag=True):
     related_ips: tuple[str, ...] = ()
     related_users: tuple[str, ...] = ()
     related_hosts: tuple[str, ...] = ()
+    related_files: tuple[str, ...] = ()
+    related_domains: tuple[str, ...] = ()
+    related_processes: tuple[str, ...] = ()
     related_hashes: tuple[str, ...] = ()  # File/process hashes for IoC matching
 
     # MITRE ATT&CK

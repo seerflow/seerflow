@@ -4,25 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-from seerflow.config import StorageConfig
 from seerflow.parsing.drain import DrainParser
 from seerflow.parsing.drain_persistence import load_drain_state, save_drain_state
-from seerflow.storage.sqlite import SqliteBackend
 
-
-@pytest.fixture
-async def backend(tmp_path: Path) -> AsyncIterator[SqliteBackend]:
-    db_path = str(tmp_path / "test.db")
-    config = StorageConfig(backend="sqlite", sqlite_path=db_path)
-    backend = await SqliteBackend.connect(config)
-    yield backend
-    await backend.close()
+if TYPE_CHECKING:
+    from seerflow.storage.sqlite import SqliteBackend
 
 
 class TestDrainSqlitePersistence:

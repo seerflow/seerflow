@@ -109,7 +109,7 @@ class TestAlertQuery:
         with pytest.raises(ValueError):
             AlertQuery(limit=0)
         with pytest.raises(ValueError):
-            AlertQuery(limit=1001)
+            AlertQuery(limit=10_001)
 
 
 class TestPage:

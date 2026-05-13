@@ -33,6 +33,38 @@ class TestCLIArgs:
         assert exc.value.code == 2
 
 
+class TestCLIStatusArgs:
+    """Parser surface for ``seerflow status`` (S-075)."""
+
+    def test_status_command_default_flags(self) -> None:
+        args = parse_args(["status"])
+        assert args.command == "status"
+        assert args.json is False
+        assert args.timeout == 3.0
+
+    def test_status_json_flag(self) -> None:
+        args = parse_args(["status", "--json"])
+        assert args.command == "status"
+        assert args.json is True
+
+    def test_status_custom_timeout(self) -> None:
+        args = parse_args(["status", "--timeout", "10"])
+        assert args.timeout == 10.0
+
+    def test_status_timeout_too_small_rejected(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["status", "--timeout", "0"])
+
+    def test_status_timeout_too_large_rejected(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["status", "--timeout", "100"])
+
+    def test_status_inherits_config_flag(self) -> None:
+        args = parse_args(["--config", "/tmp/c.yaml", "status"])
+        assert args.command == "status"
+        assert args.config == "/tmp/c.yaml"
+
+
 class TestMainImport:
     def test_main_callable(self) -> None:
         from seerflow.__main__ import main
@@ -87,19 +119,19 @@ class TestRunLoop:
         assert processed[0].source_type == "test"
 
     async def test_make_handler_processes_event(self) -> None:
-        """_make_handler creates a handler that processes events through ensemble."""
+        """make_handler creates a handler that processes events through ensemble."""
         from unittest.mock import AsyncMock
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"test message",
@@ -161,7 +193,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig(
@@ -171,7 +203,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_templates = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         # Send 55 events — each should call write_events individually
         for i in range(55):
@@ -201,7 +233,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -209,7 +241,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_templates = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         # Send 55 events — template flush triggers at event_count % 10 == 0
         for i in range(55):
@@ -243,7 +275,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -251,7 +283,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_templates = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         with caplog.at_level(logging.INFO, logger="seerflow"):
             event = RawEvent(
@@ -273,7 +305,7 @@ class TestRunLoop:
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.alert import Alert
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -286,7 +318,11 @@ class TestRunLoop:
         mock_sigma = MagicMock()
         mock_sigma.evaluate.return_value = [mock_alert]
 
-        handler = _make_handler(ensemble, mock_storage, sigma_engine=mock_sigma)
+        from seerflow.correlation.holders import EngineHolder
+
+        handler = make_handler(
+            ensemble, mock_storage, sigma_holder=EngineHolder(engine=mock_sigma)
+        )
 
         event = RawEvent(
             data=b"test message",
@@ -305,8 +341,9 @@ class TestRunLoop:
         from unittest.mock import AsyncMock, MagicMock
 
         from seerflow.config import SeerflowConfig
+        from seerflow.correlation.holders import EngineHolder
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -317,7 +354,9 @@ class TestRunLoop:
         mock_sigma = MagicMock()
         mock_sigma.evaluate.side_effect = RuntimeError("sigma broke")
 
-        handler = _make_handler(ensemble, mock_storage, sigma_engine=mock_sigma)
+        handler = make_handler(
+            ensemble, mock_storage, sigma_holder=EngineHolder(engine=mock_sigma)
+        )
 
         event = RawEvent(
             data=b"test message",
@@ -340,32 +379,32 @@ class TestRunLoop:
     def test_main_calls_parse_args_and_run(self) -> None:
         """main() wires parse_args → asyncio.run(_run) for 'start' command."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 
         mock_args = argparse.Namespace(config=None, command="start")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock()
+            mock_run_async.return_value = None
             main()
-            mock_asyncio.run.assert_called_once()
+            mock_run_async.assert_called_once()
 
     def test_main_handles_keyboard_interrupt(self) -> None:
         """main() exits cleanly on KeyboardInterrupt."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 
         mock_args = argparse.Namespace(config=None, command="start")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock(side_effect=KeyboardInterrupt)
+            mock_run_async.side_effect = KeyboardInterrupt
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
@@ -377,14 +416,14 @@ class TestRunLoop:
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.event import SeverityLevel
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"kernel panic - not syncing",
@@ -405,14 +444,14 @@ class TestRunLoop:
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.event import SeverityLevel
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"normal log line",
@@ -432,14 +471,14 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"Failed login from 192.168.1.1 by user root on host web01",
@@ -469,14 +508,14 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"simple log message with no entities",
@@ -499,7 +538,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -507,7 +546,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_alert = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         anomaly_result = DetectionResult(
             score=0.95,
@@ -540,7 +579,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -548,7 +587,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_alert = AsyncMock()
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         event = RawEvent(
             data=b"normal log message",
@@ -567,7 +606,7 @@ class TestRunLoop:
 
         from seerflow.config import SeerflowConfig
         from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.receivers.base import RawEvent
 
         config = SeerflowConfig()
@@ -575,7 +614,7 @@ class TestRunLoop:
         mock_storage = AsyncMock()
         mock_storage.write_events = AsyncMock()
         mock_storage.write_alert = AsyncMock(side_effect=Exception("disk full"))
-        handler = _make_handler(ensemble, mock_storage)
+        handler = make_handler(ensemble, mock_storage)
 
         anomaly_result = DetectionResult(
             score=0.95,
@@ -666,7 +705,7 @@ class TestTailSubcommand:
     def test_main_dispatches_tail(self) -> None:
         """main() dispatches to _build_tail_config + _run_with_config for tail."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 
@@ -674,9 +713,338 @@ class TestTailSubcommand:
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.pipeline.tail._build_tail_config") as mock_build,
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock()
+            mock_run_async.return_value = None
             main()
             mock_build.assert_called_once_with(["/tmp/test.log"], config_path=None)
-            mock_asyncio.run.assert_called_once()
+            mock_run_async.assert_called_once()
+
+
+class TestQueryHealthParsing:
+    """S-140: query health subcommand parsing."""
+
+    def test_query_health_parses(self) -> None:
+        args = parse_args(["query", "health"])
+        assert args.command == "query"
+        assert args.query_type == "health"
+        assert args.json is False
+
+    def test_query_health_json_flag(self) -> None:
+        args = parse_args(["query", "health", "--json"])
+        assert args.json is True
+
+
+class TestGracefulStartupError:
+    """S-141: Clean error when all receivers fail to start."""
+
+    @pytest.mark.asyncio
+    async def test_all_receivers_fail_exits_with_code_1(self) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.pipeline.run import _run_with_config
+
+        mock_config = AsyncMock()
+        mock_config.log_level = "INFO"
+        mock_config.storage.data_dir = "/tmp/seerflow-test"
+        mock_config.storage.sqlite_path = ":memory:"
+
+        with (
+            patch("seerflow.pipeline.run.build_pipeline", new_callable=AsyncMock) as mock_build,
+            patch("seerflow.pipeline.run.connect_storage", new_callable=AsyncMock),
+            patch("seerflow.llm.build_llm_backend", return_value=None),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            mock_build.side_effect = RuntimeError("All receivers failed to start: ['syslog']")
+            await _run_with_config(mock_config)
+
+        assert exc_info.value.code == 1
+
+    @pytest.mark.asyncio
+    async def test_all_receivers_fail_logs_suggestions(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        from seerflow.pipeline.run import _run_with_config
+
+        mock_config = AsyncMock()
+        mock_config.log_level = "INFO"
+        mock_config.storage.data_dir = "/tmp/seerflow-test"
+        mock_config.storage.sqlite_path = ":memory:"
+
+        with (
+            patch("seerflow.pipeline.run.build_pipeline", new_callable=AsyncMock) as mock_build,
+            patch("seerflow.pipeline.run.connect_storage", new_callable=AsyncMock),
+            patch("seerflow.llm.build_llm_backend", return_value=None),
+            caplog.at_level(logging.ERROR, logger="seerflow"),
+            pytest.raises(SystemExit),
+        ):
+            mock_build.side_effect = RuntimeError("All receivers failed to start: ['syslog']")
+            await _run_with_config(mock_config)
+
+        assert any("Startup failed" in r.message for r in caplog.records)
+        assert any("seerflow.yaml" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_logs_warning_and_continues(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When some receivers fail but build_pipeline succeeds, no SystemExit."""
+        import logging
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from seerflow.pipeline import build_pipeline
+
+        mock_mgr = MagicMock()
+        mock_mgr._receivers = {"syslog": MagicMock(), "file": MagicMock()}
+        mock_mgr.start = AsyncMock(return_value=["file"])  # file failed
+        mock_mgr.stop = AsyncMock()
+        # syslog is healthy, file is not
+        mock_mgr._receivers["syslog"].is_healthy.return_value = True
+        mock_mgr._receivers["file"].is_healthy.return_value = False
+
+        mock_config = MagicMock()
+
+        with (
+            patch("seerflow.pipeline.ReceiverManager", return_value=mock_mgr),
+            caplog.at_level(logging.WARNING),
+        ):
+            pipeline = await build_pipeline(mock_config)
+
+        assert pipeline is not None
+        assert any("Some receivers failed" in r.message for r in caplog.records)
+
+
+class TestRulesSubcommand:
+    def test_parse_rules_list_no_filters(self) -> None:
+        from seerflow.cli import parse_args
+
+        ns = parse_args(["rules", "list"])
+        assert ns.command == "rules"
+        assert ns.rules_cmd == "list"
+        assert ns.technique is None
+        assert ns.tactic is None
+        assert ns.format == "table"
+
+    def test_parse_rules_list_with_all_filters(self) -> None:
+        from seerflow.cli import parse_args
+
+        ns = parse_args(
+            [
+                "rules",
+                "list",
+                "--technique",
+                "T1053",
+                "--tactic",
+                "persistence",
+                "--format",
+                "json",
+            ]
+        )
+        assert ns.technique == "T1053"
+        assert ns.tactic == "persistence"
+        assert ns.format == "json"
+
+    def test_parse_rules_list_rejects_unknown_format(self) -> None:
+        from seerflow.cli import parse_args
+
+        with pytest.raises(SystemExit):
+            parse_args(["rules", "list", "--format", "yaml"])
+
+
+class TestCLIExportArgs:
+    """Parser surface for ``seerflow export`` (S-076)."""
+
+    def test_parse_export_events_defaults(self) -> None:
+        args = parse_args(["export", "events"])
+        assert args.command == "export"
+        assert args.export_type == "events"
+        assert args.format == "json"
+        assert args.since == "24h"
+        assert args.limit == 100_000
+        assert args.output is None
+        assert args.source is None
+        assert args.severity is None
+
+    def test_parse_export_events_full(self) -> None:
+        args = parse_args(
+            [
+                "export",
+                "events",
+                "--format",
+                "csv",
+                "--since",
+                "1h",
+                "--source",
+                "auth",
+                "--severity",
+                "3",
+                "--limit",
+                "50",
+                "--output",
+                "/tmp/out.csv",
+            ],
+        )
+        assert args.export_type == "events"
+        assert args.format == "csv"
+        assert args.since == "1h"
+        assert args.source == "auth"
+        assert args.severity == 3
+        assert args.limit == 50
+        assert args.output == "/tmp/out.csv"
+
+    def test_parse_export_alerts_full(self) -> None:
+        args = parse_args(
+            [
+                "export",
+                "alerts",
+                "--format",
+                "csv",
+                "--since",
+                "7d",
+                "--type",
+                "ml",
+                "--severity",
+                "4",
+                "--output",
+                "/tmp/x.csv",
+            ],
+        )
+        assert args.export_type == "alerts"
+        assert args.format == "csv"
+        assert args.type == "ml"
+        assert args.severity == 4
+        assert args.output == "/tmp/x.csv"
+
+    def test_parse_export_alerts_defaults(self) -> None:
+        args = parse_args(["export", "alerts"])
+        assert args.export_type == "alerts"
+        assert args.format == "json"
+        assert args.type is None
+
+    def test_parse_export_rejects_unknown_format(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["export", "events", "--format", "xml"])
+
+    def test_parse_export_requires_export_type(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["export"])
+
+
+class TestCLIGraphMigrateArgs:
+    """Parser surface for ``seerflow graph migrate`` (S-155-F3)."""
+
+    def test_parse_graph_migrate_required_flags(self) -> None:
+        args = parse_args(["graph", "migrate", "--from", "igraph", "--to", "falkordb"])
+        assert args.command == "graph"
+        assert args.graph_cmd == "migrate"
+        assert args.from_backend == "igraph"
+        assert args.to_backend == "falkordb"
+        assert args.batch_size == 5000
+        assert args.dry_run is False
+        assert args.wipe_destination is False
+
+    def test_parse_graph_migrate_all_flags(self) -> None:
+        args = parse_args(
+            [
+                "graph",
+                "migrate",
+                "--from",
+                "falkordb",
+                "--to",
+                "postgres_age",
+                "--batch-size",
+                "100",
+                "--dry-run",
+                "--wipe-destination",
+            ],
+        )
+        assert args.from_backend == "falkordb"
+        assert args.to_backend == "postgres_age"
+        assert args.batch_size == 100
+        assert args.dry_run is True
+        assert args.wipe_destination is True
+
+    def test_parse_graph_migrate_rejects_invalid_from_backend(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate", "--from", "neo4j", "--to", "igraph"])
+
+    def test_parse_graph_migrate_rejects_invalid_to_backend(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate", "--from", "igraph", "--to", "neo4j"])
+
+    def test_parse_graph_migrate_requires_from_and_to(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate"])
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate", "--from", "igraph"])
+
+    def test_parse_graph_migrate_rejects_zero_batch_size(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(
+                ["graph", "migrate", "--from", "igraph", "--to", "falkordb", "--batch-size", "0"],
+            )
+
+    def test_parse_graph_migrate_rejects_negative_batch_size(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(
+                [
+                    "graph",
+                    "migrate",
+                    "--from",
+                    "igraph",
+                    "--to",
+                    "falkordb",
+                    "--batch-size",
+                    "-1",
+                ],
+            )
+
+    def test_parse_graph_requires_subcommand(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph"])
+
+    def test_parse_graph_migrate_inherits_config_flag(self) -> None:
+        args = parse_args(
+            [
+                "--config",
+                "/tmp/c.yaml",
+                "graph",
+                "migrate",
+                "--from",
+                "igraph",
+                "--to",
+                "falkordb",
+            ],
+        )
+        assert args.config == "/tmp/c.yaml"
+        assert args.command == "graph"
+
+    def test_main_dispatches_graph_migrate(self) -> None:
+        """main() routes ``graph migrate`` to ``run_graph_migrate`` via _run_async_int."""
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(
+            config=None,
+            command="graph",
+            graph_cmd="migrate",
+            from_backend="igraph",
+            to_backend="falkordb",
+            batch_size=5000,
+            dry_run=False,
+            wipe_destination=False,
+        )
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.__main__._run_async_int") as mock_runner,
+        ):
+            mock_runner.return_value = 0
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+            mock_runner.assert_called_once()

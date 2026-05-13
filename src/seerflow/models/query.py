@@ -11,10 +11,12 @@ String interpolation into SQL or query DSL strings is forbidden.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 if TYPE_CHECKING:
     from seerflow.models._types import AlertType
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +54,14 @@ class EventQuery:
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class AlertQuery:
-    """Composable filter for alert queries. None fields are not applied."""
+    """Composable filter for alert queries. None fields are not applied.
+
+    The ``limit`` upper bound of 10 000 exists to support internal scan
+    operations (e.g. ``/api/v1/attack/coverage`` which replaces the prior
+    10-page x 1 000-row loop with a single SQL query). Public API DoS
+    concerns are handled by per-endpoint rate limiting, not by capping
+    this internal query primitive.
+    """
 
     time_range: TimeRange | None = None
     alert_type: AlertType | None = None
@@ -66,15 +75,15 @@ class AlertQuery:
     def __post_init__(self) -> None:
         if self.page < 1:
             raise ValueError(f"page must be >= 1, got {self.page}")
-        if not (1 <= self.limit <= 1000):
-            raise ValueError(f"limit must be between 1 and 1000, got {self.limit}")
+        if not (1 <= self.limit <= 10_000):
+            raise ValueError(f"limit must be between 1 and 10000, got {self.limit}")
 
 
 @dataclass(frozen=True, slots=True)
-class Page[T]:
+class Page(Generic[_T]):
     """Paginated result wrapper returned by storage queries."""
 
-    items: tuple[T, ...]
+    items: tuple[_T, ...]
     total: int
     page: int
     limit: int

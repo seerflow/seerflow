@@ -7,7 +7,7 @@ name = "seerflow"
 version = "0.4.0"
 description = "Streaming log intelligence agent — detects operational failures and security threats with online ML"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = "AGPL-3.0-only"
 authors = [{ name = "Fernando Flores", email = "ferjflores@gmail.com" }]
 keywords = ["log-analysis", "anomaly-detection", "siem", "observability", "streaming", "machine-learning", "syslog", "opentelemetry"]
@@ -16,7 +16,10 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Logging",
     "Topic :: System :: Monitoring",
     "Topic :: Security",
@@ -27,17 +30,59 @@ classifiers = [
 
 dependencies = [
     "aiohttp>=3.13.3",
+    "aiosmtplib>=5.1.0",
     "aiosqlite>=0.22.1",
     "drain3>=0.9.11",
+    "fastapi>=0.115",
     "grpcio>=1.78.0",
     "igraph>=1.0.0",
     "msgspec>=0.20.0",
     "opentelemetry-proto>=1.40.0",
     "pysigma>=1.2.0",
     "pyyaml>=6.0.3",
-    "river>=0.23.0",
+    "river>=0.24.2",
+    "slowapi>=0.1.9,<0.2.0",
+    "stix2~=3.0",
+    "uvicorn>=0.30",
+    "websockets>=13.0",
+    "uvloop>=0.22.1; sys_platform != 'win32'",
     "watchfiles>=1.1.1",
 ]
+
+[project.optional-dependencies]
+redis = ["redis>=5.0"]
+# S-070: local CPU LLM inference via llama-cpp-python. Optional because the
+# wheel is platform-specific and ~50 MB; operators who do not configure an
+# LLM backend never need to install it. ``build_llm_backend`` degrades
+# gracefully when the import fails.
+llm-cpu = ["llama-cpp-python>=0.3.0"]
+# S-099: Anthropic + OpenAI cloud LLM SDKs. Pure-Python wheels (~10 MB each),
+# no native compilation. Lower bounds track the first stable releases with
+# full async support — ``anthropic>=0.40`` includes the stable Messages API,
+# ``openai>=1.55`` is well past the v1 rewrite. Operators not using a cloud
+# backend never need to install these; ``build_llm_backend`` degrades
+# gracefully on ImportError.
+llm-cloud = ["anthropic>=0.40", "openai>=1.55"]
+# S-073: PostgreSQL storage backend via asyncpg, with testcontainers for
+# Docker-gated integration tests. asyncpg ships pre-built manylinux wheels
+# (~3 MB) and is the fastest async PostgreSQL driver. testcontainers is
+# only pulled in for tests; the docker mark is deselected by default so the
+# main test suite stays runnable without Docker. ``connect_storage``
+# raises a ``ConfigError`` with a clear install hint when the extra is
+# absent, mirroring the ``llm-cpu`` / ``llm-cloud`` graceful-absence
+# pattern.
+postgres = ["asyncpg>=0.30", "testcontainers[postgres]>=4.0"]
+# S-155-F1: FalkorDB graph backend. Optional because the falkordb client
+# pulls in redis-py; default deployments using graph_backend: igraph never
+# need it. ``connect_graph`` raises ConfigError with an install hint when
+# the import fails, mirroring the ``postgres`` extra pattern.
+graph-falkordb = ["falkordb>=1.6"]
+# S-155-F2: PostgreSQL AGE graph backend. AGE itself is a server-side
+# Postgres extension, so the only Python dependency is asyncpg (same lower
+# bound as the ``postgres`` storage extra). ``connect_graph`` raises
+# ConfigError with an install hint when the import fails, mirroring the
+# ``postgres`` and ``graph-falkordb`` extra patterns.
+graph-postgres-age = ["asyncpg>=0.30"]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
@@ -51,6 +96,13 @@ seerflow = "seerflow.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/seerflow"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# Ship the built React dashboard (S-057). Produced by
+# ``./build_frontend.sh`` before ``uv build --wheel``. The destination
+# path matches the package-relative directory used by
+# ``seerflow.web.static._DEFAULT_DIST``.
+"src/seerflow/web/dist" = "seerflow/web/dist"
+
 [dependency-groups]
 dev = [
     "ruff>=0.11",
@@ -60,14 +112,20 @@ dev = [
     "pytest-asyncio>=0.25",
     "pytest-cov>=6.0",
     "types-pyyaml>=6.0.12.20250915",
+    "httpx>=0.28",
     "pytest-benchmark>=5.2.3",
     "types-grpcio>=1.0.0.20251009",
     "types-protobuf>=6.32.1.20260221",
     "pre-commit>=4.5.1",
+    "aiosmtpd>=1.4.6",
+    "aioresponses>=0.7.8",
+    # S-049b: needed by tests/integration/test_otlp_mtls.py to generate a
+    # self-signed CA + server cert + client cert for the gRPC mTLS handshake.
+    "cryptography>=44.0",
 ]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py311"
 line-length = 99
 src = ["src"]
 
@@ -99,7 +157,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -109,28 +167,53 @@ check_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["drain3.*", "igraph.*", "river.*", "aiosqlite.*", "scipy.*"]
+module = [
+    "drain3.*",
+    "igraph.*",
+    "river.*",
+    "aiosqlite.*",
+    "scipy.*",
+    "redis.*",
+    "asyncpg.*",
+    "testcontainers.*",
+    "falkordb.*",
+]
 ignore_missing_imports = true
 
 [tool.bandit]
 targets = ["src"]
 exclude_dirs = ["tests"]
-skips = ["B101"]
+# B101 = assert statements (harmless in src). B311 = stdlib `random` (used
+# only for retry-backoff jitter and TAXII startup jitter — never for
+# secrets, tokens, or crypto material).
+skips = ["B101", "B311"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
+addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e and not requires_falkordb and not requires_postgres_age' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
 markers = [
     "benchmark: performance benchmarks",
     "docker: integration tests requiring Docker daemon",
     "e2e: end-to-end pipeline integration tests",
+    "requires_falkordb: integration tests requiring a live FalkorDB instance",
+    "requires_postgres_age: integration tests requiring an AGE-enabled PostgreSQL instance",
     "slow: heavyweight benchmarks, run with pytest -m slow",
+    "unit: fast isolated unit tests",
 ]
 
 [tool.coverage.run]
 source = ["src/seerflow"]
 branch = true
+# PostgreSQL backend modules are exercised exclusively by docker-gated
+# integration tests (`pytest -m docker`). They are excluded from the
+# default coverage suite — see tests/integration/test_postgres_integration.py.
+omit = [
+    "src/seerflow/storage/postgres.py",
+    "src/seerflow/storage/_postgres_alerts.py",
+    "src/seerflow/storage/_postgres_sigma_state.py",
+    "src/seerflow/storage/postgres_migrations.py",
+]
 
 [tool.coverage.report]
 fail_under = 95

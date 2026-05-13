@@ -10,6 +10,7 @@ import aiosqlite
 import msgspec
 import pytest
 
+from seerflow.api.constants import MAX_ALERT_SCAN
 from seerflow.config import ConfigError, StorageConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent, SeverityLevel
@@ -392,8 +393,7 @@ class TestWriteEvents:
         try:
             events = [_make_event(message=f"event {i}") for i in range(5)]
             await backend.write_events(events)
-            assert backend._write_buffer is not None
-            await backend._write_buffer.flush()
+            await backend.flush()
             cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
             row = await cursor.fetchone()
             assert row[0] == 5
@@ -428,8 +428,7 @@ class TestWriteEvents:
         # Don't flush manually — close should flush
         # We need to check before close destroys the connection
         # So we flush + check, then close
-        assert backend._write_buffer is not None
-        await backend._write_buffer.flush()
+        await backend.flush()
         cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
         row = await cursor.fetchone()
         assert row[0] == 5
@@ -694,16 +693,20 @@ class TestBuildQuery:
 
 def _make_alert(
     *,
+    alert_id: str = "",
     alert_type: str = "ml",
     message: str = "test alert",
     entity_uuid: str = "entity-aaa",
     dedup_key: str = "",
     severity: SeverityLevel = SeverityLevel.WARNING,
+    timestamp_ns: int = 1_710_000_000_000_000_000,
+    mitre_tactics: tuple[str, ...] = (),
+    mitre_techniques: tuple[str, ...] = (),
 ) -> Alert:
     return Alert(
-        alert_id=str(uuid.uuid4()),
+        alert_id=alert_id or str(uuid.uuid4()),
         alert_type=alert_type,
-        timestamp_ns=1_710_000_000_000_000_000,
+        timestamp_ns=timestamp_ns,
         severity_id=severity,
         rule_name="test-rule",
         description=message,
@@ -712,6 +715,8 @@ def _make_alert(
         entity_type="ip",
         contributing_events=(uuid.uuid4(),),
         dedup_key=dedup_key or str(uuid.uuid4()),
+        mitre_tactics=mitre_tactics,
+        mitre_techniques=mitre_techniques,
     )
 
 
@@ -803,6 +808,185 @@ class TestWriteAlert:
             await backend.close()
 
 
+class TestWriteAlertJunctions:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_populates_junction_tables(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(
+                dedup_key="k1",
+                mitre_tactics=("discovery",),
+                mitre_techniques=("T1059.001",),
+            )
+            await backend.write_alert(alert)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1'"
+            ) as cur:
+                rows = [r[0] for r in await cur.fetchall()]
+            assert rows == ["discovery"]
+            async with await backend._conn.execute(
+                "SELECT technique FROM alert_techniques WHERE dedup_key='k1'"
+            ) as cur:
+                rows = [r[0] for r in await cur.fetchall()]
+            assert rows == ["T1059.001"]
+        finally:
+            await backend.close()
+
+    async def test_upsert_replaces_junction_rows(self) -> None:
+        """Window-reset (outside dedup window) replaces junction rows."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            first = _make_alert(
+                dedup_key="k1",
+                timestamp_ns=base_ns,
+                mitre_tactics=("discovery", "execution"),
+                mitre_techniques=("T1059", "T1059.001"),
+            )
+            await backend.write_alert(first)
+            # Outside the default 900s dedup window → window-reset path
+            second = _make_alert(
+                dedup_key="k1",
+                alert_id="new-id",
+                timestamp_ns=base_ns + 1_000_000_000_000,  # +1000s
+                mitre_tactics=("execution",),
+                mitre_techniques=("T1059.001",),
+            )
+            await backend.write_alert(second)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1' ORDER BY tactic"
+            ) as cur:
+                tactics = [r[0] for r in await cur.fetchall()]
+            async with await backend._conn.execute(
+                "SELECT technique FROM alert_techniques WHERE dedup_key='k1'"
+            ) as cur:
+                techs = [r[0] for r in await cur.fetchall()]
+            assert tactics == ["execution"]
+            assert techs == ["T1059.001"]
+        finally:
+            await backend.close()
+
+    async def test_dedup_bump_within_window_preserves_junction_rows(self) -> None:
+        """Within-window dedup bump keeps the stored alert and its junction rows."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            first = _make_alert(
+                dedup_key="k1",
+                timestamp_ns=base_ns,
+                mitre_tactics=("discovery",),
+            )
+            await backend.write_alert(first)
+            # Dedup bump within window (default 900s) with EMPTY tactics
+            second = _make_alert(
+                dedup_key="k1",
+                alert_id="new-id",
+                timestamp_ns=base_ns + 60_000_000_000,  # +60s
+                mitre_tactics=(),
+            )
+            await backend.write_alert(second)
+            async with await backend._conn.execute(
+                "SELECT tactic FROM alert_tactics WHERE dedup_key='k1'"
+            ) as cur:
+                tactics = [r[0] for r in await cur.fetchall()]
+            # Original junction rows preserved because stored alert is unchanged
+            assert tactics == ["discovery"]
+        finally:
+            await backend.close()
+
+
+class TestDedupWindow:
+    """Time-windowed dedup: within window increments count, outside resets."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_within_window_increments_count(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_100s_ns = 100_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="win-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="win-key", timestamp_ns=base_ns + gap_100s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            async with await backend._conn.execute(
+                "SELECT dedup_count FROM alerts WHERE dedup_key = 'win-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == 2
+        finally:
+            await backend.close()
+
+    async def test_outside_window_resets_count(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_1000s_ns = 1_000_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="out-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="out-key", timestamp_ns=base_ns + gap_1000s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            async with await backend._conn.execute(
+                "SELECT dedup_count FROM alerts WHERE dedup_key = 'out-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == 1
+        finally:
+            await backend.close()
+
+    async def test_window_preserves_original_timestamp(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_100s_ns = 100_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="ts-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="ts-key", timestamp_ns=base_ns + gap_100s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            async with await backend._conn.execute(
+                "SELECT timestamp_ns FROM alerts WHERE dedup_key = 'ts-key'"
+            ) as cur:
+                row = await cur.fetchone()
+            assert row[0] == base_ns
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_late_arriving_event_within_window_deduplicates(self) -> None:
+        """Late-arriving alert (earlier timestamp) within window still deduplicates."""
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            gap_100s_ns = 100_000_000_000
+            window_900s_ns = 900_000_000_000
+
+            a1 = _make_alert(dedup_key="late-key", timestamp_ns=base_ns + gap_100s_ns)
+            a2 = _make_alert(dedup_key="late-key", timestamp_ns=base_ns)  # earlier!
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+
+            page = await backend.query_alerts(AlertQuery())
+            deduped = [a for a in page.items if a.dedup_key == "late-key"]
+            assert len(deduped) == 1
+            assert deduped[0].dedup_count == 2
+        finally:
+            await backend.close()
+
+
 class TestQueryAlerts:
     async def _make_backend_with_alerts(self, alerts: list[Alert] | None = None) -> SqliteBackend:
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
@@ -883,6 +1067,200 @@ class TestQueryAlerts:
             assert len(page1.items) == 2
             assert page1.total == 5
             assert page1.has_next is True
+        finally:
+            await backend.close()
+
+
+def _make_mitre_alert(
+    *,
+    alert_id: str,
+    ts_ns: int,
+    tactics: tuple[str, ...] = (),
+    techniques: tuple[str, ...] = (),
+    dedup_key: str | None = None,
+) -> Alert:
+    return Alert(
+        alert_id=alert_id,
+        alert_type="sigma",
+        timestamp_ns=ts_ns,
+        severity_id=SeverityLevel.WARNING,
+        rule_name="test",
+        description="",
+        entity_uuid="e1",
+        entity_value="1.2.3.4",
+        entity_type="ip",
+        contributing_events=(),
+        mitre_tactics=tactics,
+        mitre_techniques=techniques,
+        dedup_key=dedup_key or f"test:{alert_id}",
+    )
+
+
+class TestQueryAlertsMitreFilter:
+    async def _make_backend_with_alerts(self, alerts: list[Alert] | None = None) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        if alerts is not None:
+            for alert in alerts:
+                await backend.write_alert(alert)
+        return backend
+
+    async def test_filter_by_tactic_present(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+            _make_mitre_alert(
+                alert_id="a2", ts_ns=2_000, tactics=("execution",), techniques=("t1059",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="discovery"))
+            assert page.total == 1
+            assert [a.alert_id for a in page.items] == ["a1"]
+        finally:
+            await backend.close()
+
+    async def test_filter_by_tactic_absent(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="nonexistent"))
+            assert page.total == 0
+            assert page.items == ()
+        finally:
+            await backend.close()
+
+    async def test_filter_by_technique_case_insensitive(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+            _make_mitre_alert(
+                alert_id="a2", ts_ns=2_000, tactics=("execution",), techniques=("t1059",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(technique="T1033"))
+            assert page.total == 1
+            assert page.items[0].alert_id == "a1"
+        finally:
+            await backend.close()
+
+    async def test_filter_by_tactic_and_technique(self) -> None:
+        alerts = [
+            _make_mitre_alert(
+                alert_id="a1", ts_ns=1_000, tactics=("discovery",), techniques=("t1033",)
+            ),
+            _make_mitre_alert(
+                alert_id="a2", ts_ns=2_000, tactics=("discovery",), techniques=("t1087",)
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="discovery", technique="T1033"))
+            assert page.total == 1
+            assert page.items[0].alert_id == "a1"
+        finally:
+            await backend.close()
+
+    async def test_pagination_under_filter_preserves_total(self) -> None:
+        backend = await self._make_backend_with_alerts()
+        try:
+            for i in range(MAX_ALERT_SCAN + 50):
+                await backend.write_alert(
+                    _make_mitre_alert(
+                        alert_id=f"a{i}",
+                        ts_ns=1_000 + i,
+                        tactics=("discovery",),
+                        techniques=("t1033",),
+                        dedup_key=f"test:a{i}",
+                    )
+                )
+            page = await backend.query_alerts(AlertQuery(tactic="discovery", page=1, limit=50))
+            assert page.total == MAX_ALERT_SCAN + 50
+            assert len(page.items) == 50
+        finally:
+            await backend.close()
+
+    async def test_technique_filter_case_insensitive_sql(self) -> None:
+        backend = await self._make_backend_with_alerts(
+            [
+                _make_mitre_alert(
+                    alert_id="k1",
+                    ts_ns=1_000,
+                    tactics=("discovery",),
+                    techniques=("T1059.001",),
+                    dedup_key="k1",
+                ),
+            ]
+        )
+        try:
+            page = await backend.query_alerts(AlertQuery(technique="t1059.001", page=1, limit=10))
+            assert page.total == 1
+        finally:
+            await backend.close()
+
+    async def test_unfiltered_and_tactic_filter_agree_on_overlap(self) -> None:
+        """Unfiltered query and ``tactic="discovery"`` must agree on the
+        discovery-tagged subset. Locks in the invariant that both paths
+        return consistent data now that both are SQL-level.
+        """
+        alerts = [
+            _make_mitre_alert(
+                alert_id=f"a{i}",
+                ts_ns=10_000 + i,
+                tactics=("discovery",) if i % 2 == 0 else ("execution",),
+                techniques=("t1033",) if i % 2 == 0 else ("t1059",),
+                dedup_key=f"test:fs:a{i}",
+            )
+            for i in range(6)
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            unfiltered = await backend.query_alerts(AlertQuery(limit=100))
+            filtered = await backend.query_alerts(AlertQuery(tactic="discovery", limit=100))
+            assert unfiltered.total == 6
+            assert filtered.total == 3
+            unfiltered_discovery_ids = {
+                a.alert_id for a in unfiltered.items if "discovery" in a.mitre_tactics
+            }
+            filtered_ids = {a.alert_id for a in filtered.items}
+            assert unfiltered_discovery_ids == filtered_ids
+        finally:
+            await backend.close()
+
+    async def test_tactic_filter_is_case_sensitive_by_contract(self) -> None:
+        """Plan decision 2: tactics are a canonical snake_case enum and
+        the filter is case-sensitive. This test locks in the semantics
+        — non-canonical values written to the store (e.g. via a
+        misbehaving rule writer) are NOT matched and drop silently.
+        """
+        alerts = [
+            _make_mitre_alert(
+                alert_id="canonical",
+                ts_ns=1_000,
+                tactics=("discovery",),
+                techniques=("t1033",),
+            ),
+            _make_mitre_alert(
+                alert_id="uppercase",
+                ts_ns=2_000,
+                tactics=("Discovery",),
+                techniques=("t1033",),
+            ),
+        ]
+        backend = await self._make_backend_with_alerts(alerts)
+        try:
+            page = await backend.query_alerts(AlertQuery(tactic="discovery"))
+            assert page.total == 1
+            assert [a.alert_id for a in page.items] == ["canonical"]
         finally:
             await backend.close()
 
@@ -1010,6 +1388,49 @@ class TestModelStore:
             ) as cur:
                 row = await cur.fetchone()
             assert before_ns <= row[0] <= after_ns
+        finally:
+            await backend.close()
+
+    async def test_delete_state_removes_existing_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("k", b"body")
+            await backend.delete_state("k")
+            assert await backend.load_state("k") is None
+        finally:
+            await backend.close()
+
+    async def test_delete_state_noop_on_missing_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.delete_state("never_saved")
+            assert await backend.load_state("never_saved") is None
+        finally:
+            await backend.close()
+
+    async def test_delete_state_idempotent(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.save_state("k", b"body")
+            await backend.delete_state("k")
+            await backend.delete_state("k")
+            assert await backend.load_state("k") is None
+        finally:
+            await backend.close()
+
+    async def test_delete_state_rejects_empty_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="empty"):
+                await backend.delete_state("")
+        finally:
+            await backend.close()
+
+    async def test_delete_state_rejects_long_key(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="exceeds"):
+                await backend.delete_state("a" * 257)
         finally:
             await backend.close()
 
@@ -1142,3 +1563,296 @@ class TestTemplateTable:
             assert [t.template_id for t in result] == [2, 1, 3]
         finally:
             await backend.close()
+
+
+class TestPruneResetTemplates:
+    """S-077 — prune/reset on the templates table."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def _seed(
+        self,
+        backend: SqliteBackend,
+        counts: tuple[int, ...],
+    ) -> None:
+        from seerflow.storage.sqlite import TemplateInfo
+
+        templates = [
+            TemplateInfo(
+                template_id=i,
+                template_str=f"T-{i}",
+                first_seen_ns=1,
+                last_seen_ns=1,
+                event_count=c,
+                example_message=f"msg-{i}",
+            )
+            for i, c in enumerate(counts, start=1)
+        ]
+        await backend.write_templates(templates)
+
+    async def test_prune_removes_below_threshold(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await self._seed(backend, (1, 2, 3, 5))
+            removed = await backend.prune_templates(3)
+            assert removed == 2
+            remaining = await backend.get_templates()
+            assert sorted(t.event_count for t in remaining) == [3, 5]
+        finally:
+            await backend.close()
+
+    async def test_prune_returns_zero_on_empty(self) -> None:
+        backend = await self._make_backend()
+        try:
+            removed = await backend.prune_templates(10)
+            assert removed == 0
+        finally:
+            await backend.close()
+
+    async def test_prune_min_count_zero_is_noop(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await self._seed(backend, (1, 2, 3))
+            removed = await backend.prune_templates(0)
+            assert removed == 0
+            assert len(await backend.get_templates()) == 3
+        finally:
+            await backend.close()
+
+    async def test_prune_negative_threshold_rejected(self) -> None:
+        backend = await self._make_backend()
+        try:
+            with pytest.raises(ValueError, match="must be >= 0"):
+                await backend.prune_templates(-1)
+        finally:
+            await backend.close()
+
+    async def test_reset_clears_all_rows(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await self._seed(backend, (1, 2, 3))
+            deleted = await backend.reset_templates()
+            assert deleted == 3
+            assert await backend.get_templates() == []
+        finally:
+            await backend.close()
+
+    async def test_reset_on_empty_returns_zero(self) -> None:
+        backend = await self._make_backend()
+        try:
+            assert await backend.reset_templates() == 0
+        finally:
+            await backend.close()
+
+
+class TestFlush:
+    @pytest.mark.asyncio
+    async def test_flush_empty_buffer_does_not_raise(self) -> None:
+        """flush() on an empty buffer completes without error."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            assert hasattr(backend, "flush")
+            await backend.flush()  # Should not raise even when buffer is empty
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_flush_writes_pending_events(self) -> None:
+        """Public flush() drains the write buffer and persists events."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            events = [_make_event(message=f"flush-test {i}") for i in range(3)]
+            await backend.write_events(events)
+            await backend.flush()
+            cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
+            row = await cursor.fetchone()
+            assert row[0] == 3
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_flush_idempotent(self) -> None:
+        """Calling flush() twice does not duplicate events."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        try:
+            events = [_make_event(message=f"idem {i}") for i in range(2)]
+            await backend.write_events(events)
+            await backend.flush()
+            await backend.flush()  # second flush on empty buffer — safe
+            cursor = await backend._conn.execute("SELECT COUNT(*) FROM events")
+            row = await cursor.fetchone()
+            assert row[0] == 2
+        finally:
+            await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_flush_after_close_does_not_raise(self) -> None:
+        """flush() on an already-closed backend must not raise."""
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        backend = await SqliteBackend.connect(config)
+        await backend.close()
+        await backend.flush()  # Must not raise ProgrammingError
+
+
+class TestFeedbackStorage:
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_get_alert_by_id_returns_alert(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(alert_id="test-123")
+            await backend.write_alert(alert, dedup_window_ns=0)
+            result = await backend.get_alert_by_id("test-123")
+            assert result is not None
+            assert result.alert_id == "test-123"
+        finally:
+            await backend.close()
+
+    async def test_get_alert_by_id_returns_none_for_missing(self) -> None:
+        backend = await self._make_backend()
+        try:
+            result = await backend.get_alert_by_id("nonexistent")
+            assert result is None
+        finally:
+            await backend.close()
+
+    async def test_get_feedback_stats_empty(self) -> None:
+        backend = await self._make_backend()
+        try:
+            stats = await backend.get_feedback_stats()
+            assert stats == {"tp": 0, "fp": 0, "total": 0}
+        finally:
+            await backend.close()
+
+    async def test_get_feedback_stats_with_data(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert1 = _make_alert(alert_id="a1")
+            alert2 = _make_alert(alert_id="a2")
+            alert3 = _make_alert(alert_id="a3")
+            await backend.write_alert(alert1, dedup_window_ns=0)
+            await backend.write_alert(alert2, dedup_window_ns=0)
+            await backend.write_alert(alert3, dedup_window_ns=0)
+            await backend.update_feedback("a1", "tp")
+            await backend.update_feedback("a2", "fp")
+            await backend.update_feedback("a3", "tp")
+            stats = await backend.get_feedback_stats()
+            assert stats == {"tp": 2, "fp": 1, "total": 3}
+        finally:
+            await backend.close()
+
+
+class TestWriteAlertDedupReturn:
+    """write_alert() return value: True on new insert, False on dedup bump."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_new_insert_returns_true(self) -> None:
+        backend = await self._make_backend()
+        try:
+            alert = _make_alert(dedup_key="fresh-key")
+            result = await backend.write_alert(alert)
+            assert result is True
+        finally:
+            await backend.close()
+
+    async def test_dedup_bump_returns_false(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            window_900s_ns = 900_000_000_000
+            a1 = _make_alert(dedup_key="dedup-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="dedup-key", timestamp_ns=base_ns + 100_000_000_000)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            result = await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+            assert result is False
+        finally:
+            await backend.close()
+
+    async def test_window_reset_returns_true(self) -> None:
+        backend = await self._make_backend()
+        try:
+            base_ns = 1_710_000_000_000_000_000
+            window_900s_ns = 900_000_000_000
+            gap_1000s_ns = 1_000_000_000_000
+            a1 = _make_alert(dedup_key="reset-key", timestamp_ns=base_ns)
+            a2 = _make_alert(dedup_key="reset-key", timestamp_ns=base_ns + gap_1000s_ns)
+            await backend.write_alert(a1, dedup_window_ns=window_900s_ns)
+            result = await backend.write_alert(a2, dedup_window_ns=window_900s_ns)
+            assert result is True
+        finally:
+            await backend.close()
+
+
+class TestCountBySeverity:
+    """Tests for SqliteBackend.count_by_severity."""
+
+    async def _make_backend(self) -> SqliteBackend:
+        config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
+        return await SqliteBackend.connect(config)
+
+    async def test_empty_returns_empty_dict(self) -> None:
+        backend = await self._make_backend()
+        try:
+            counts = await backend.count_by_severity()
+            assert counts == {}
+        finally:
+            await backend.close()
+
+    async def test_mixed_severities(self) -> None:
+        backend = await self._make_backend()
+        try:
+            for i in range(3):
+                await backend.write_alert(
+                    _make_alert(alert_id=f"a{i}", severity=SeverityLevel.ERROR)
+                )
+            for i in range(2):
+                await backend.write_alert(
+                    _make_alert(alert_id=f"b{i}", severity=SeverityLevel.CRITICAL)
+                )
+            await backend.write_alert(_make_alert(alert_id="c0", severity=SeverityLevel.WARNING))
+
+            counts = await backend.count_by_severity()
+            assert counts == {"error": 3, "critical": 2, "warning": 1}
+        finally:
+            await backend.close()
+
+    async def test_unknown_severity_bucketed(self) -> None:
+        backend = await self._make_backend()
+        try:
+            await backend.write_alert(_make_alert(alert_id="a0", severity=SeverityLevel.ERROR))
+            # Poison a row with an out-of-range severity_id to simulate dirty data.
+            await backend._conn.execute("UPDATE alerts SET severity_id = 99 WHERE alert_id = 'a0'")
+            await backend._conn.commit()
+            # Insert a second known-severity alert so both buckets are present.
+            await backend.write_alert(_make_alert(alert_id="b0", severity=SeverityLevel.ERROR))
+
+            counts = await backend.count_by_severity()
+            assert counts.get("error") == 1
+            assert counts.get("unknown") == 1
+        finally:
+            await backend.close()
+
+
+def test_sqlite_backend_has_no_dict():
+    """Guard: SqliteBackend + mixin MUST preserve __slots__.
+
+    Skip __init__ to isolate the slot-discipline check from constructor
+    behavior. If any class in the MRO forgets ``__slots__ = ()``, the
+    resulting instance gains a ``__dict__`` regardless of __init__.
+    """
+    from seerflow.storage.sqlite import SqliteBackend
+
+    backend = object.__new__(SqliteBackend)
+    assert not hasattr(backend, "__dict__"), (
+        "SqliteBackend gained a __dict__ — a mixin in the MRO is missing __slots__ = ()"
+    )

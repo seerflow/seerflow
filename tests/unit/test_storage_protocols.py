@@ -9,6 +9,7 @@ import seerflow.storage as storage_mod
 from seerflow.storage import AlertStore, EntityStore, GraphStore, LogStore, ModelStore
 
 if TYPE_CHECKING:
+    from seerflow.graph.entity_graph import EntityGraph
     from seerflow.models._types import FeedbackType
     from seerflow.models.alert import Alert
     from seerflow.models.event import SeerflowEvent
@@ -22,17 +23,45 @@ class _MockLogStore(LogStore):
     async def write_events(self, events: list[SeerflowEvent]) -> None: ...
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]: ...
     async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]: ...
+    async def prune_templates(self, min_count: int) -> int:
+        return 0
+
+    async def reset_templates(self) -> int:
+        return 0
+
+    async def flush(self) -> None: ...
 
 
 class _MockAlertStore(AlertStore):
-    async def write_alert(self, alert: Alert) -> None: ...
+    async def write_alert(self, alert: Alert, dedup_window_ns: int = 900_000_000_000) -> bool: ...
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]: ...
-    async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None: ...
+    async def update_feedback(
+        self,
+        alert_id: str,
+        feedback: FeedbackType,
+        note: str = "",
+        origin: str = "api",
+    ) -> None: ...
+    async def append_feedback_event(self, *args: object, **kwargs: object) -> None: ...
+    async def list_feedback_events(self, *args: object, **kwargs: object) -> Page[object]:
+        from seerflow.models.query import Page
+
+        return Page(items=(), total=0, page=1, limit=50)
+
+    async def get_alert_by_id(self, alert_id: str) -> Alert | None:
+        return None
+
+    async def get_feedback_stats(self) -> dict[str, int]:
+        return {"tp": 0, "fp": 0, "total": 0}
+
+    async def count_by_severity(self) -> dict[str, int]:
+        return {}
 
 
 class _MockModelStore(ModelStore):
     async def save_state(self, key: str, data: bytes) -> None: ...
     async def load_state(self, key: str) -> bytes | None: ...
+    async def delete_state(self, key: str) -> None: ...
 
 
 class _MockEntityStore(EntityStore):
@@ -40,6 +69,7 @@ class _MockEntityStore(EntityStore):
         self, entity_uuid: str, time_range: TimeRange
     ) -> list[SeerflowEvent]: ...
     async def get_related(self, entity_uuid: str) -> list[EntityRelation]: ...
+    def set_entity_graph(self, graph: EntityGraph) -> None: ...
 
 
 class _MockGraphStore(GraphStore):
@@ -86,6 +116,13 @@ class _SyncLogStore:
     def write_events(self, events: list[SeerflowEvent]) -> None: ...
     def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]: ...
     def search_text(self, query: str, limit: int) -> list[SeerflowEvent]: ...
+    def prune_templates(self, min_count: int) -> int:
+        return 0
+
+    def reset_templates(self) -> int:
+        return 0
+
+    def flush(self) -> None: ...
 
 
 # -- Tests ------------------------------------------------------------------
@@ -154,6 +191,8 @@ class TestExports:
             "LogStore",
             "ModelStore",
             "SqliteBackend",
+            "StorageBackend",
+            "connect_storage",
         }
         assert expected == set(storage_mod.__all__)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import unicodedata
 import uuid
 from typing import TYPE_CHECKING
 
@@ -158,11 +159,14 @@ def normalize_username(raw: str, default_domain: str = "") -> tuple[str, str]:
 
 def generate_user_id(username: str, domain: str) -> uuid.UUID:
     """Deterministic UUID5 for a user entity."""
-    username = username.strip()
+    username = unicodedata.normalize("NFC", username.strip())
     if not username:
         msg = "username is empty"
         raise ValueError(msg)
     canonical = f"{domain}:{username}" if domain else username
+    if "\x00" in canonical:
+        msg = "username contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_USER, canonical)
 
 
@@ -175,11 +179,14 @@ def generate_ip_id(raw: str) -> uuid.UUID:
 
 def generate_host_id(hostname: str, domain: str = "") -> uuid.UUID:
     """Deterministic UUID5 for a host entity."""
-    h = hostname.strip().lower().rstrip(".")
+    h = unicodedata.normalize("NFC", hostname.strip().lower().rstrip("."))
     if not h:
         msg = "hostname is empty"
         raise ValueError(msg)
     canonical = f"{h}.{domain}" if domain and "." not in h else h
+    if "\x00" in canonical:
+        msg = "hostname contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_HOST, canonical)
 
 
@@ -188,23 +195,32 @@ def generate_process_id(hostname: str, pid: int, start_time: int) -> uuid.UUID:
     if pid < 0:
         msg = f"pid must be >= 0, got {pid}"
         raise ValueError(msg)
+    if "\x00" in hostname:
+        msg = "hostname contains null byte"
+        raise ValueError(msg)
     return uuid.uuid5(NS_PROCESS, f"{hostname}:{pid}:{start_time}")
 
 
 def generate_file_id(path: str) -> uuid.UUID:
     """Deterministic UUID5 for a file entity."""
-    canonical = path.strip()
+    canonical = unicodedata.normalize("NFC", path.strip())
     if not canonical:
         msg = "file path is empty"
+        raise ValueError(msg)
+    if "\x00" in canonical:
+        msg = "file path contains null byte"
         raise ValueError(msg)
     return uuid.uuid5(NS_FILE, canonical)
 
 
 def generate_domain_id(domain: str) -> uuid.UUID:
     """Deterministic UUID5 for a domain entity."""
-    canonical = domain.strip().lower().rstrip(".")
+    canonical = unicodedata.normalize("NFC", domain.strip().lower().rstrip("."))
     if not canonical:
         msg = "domain is empty"
+        raise ValueError(msg)
+    if "\x00" in canonical:
+        msg = "domain contains null byte"
         raise ValueError(msg)
     return uuid.uuid5(NS_DOMAIN, canonical)
 
@@ -214,22 +230,95 @@ def generate_domain_id(domain: str) -> uuid.UUID:
 # ---------------------------------------------------------------------------
 
 
-def _sanitize_for_log(value: str) -> str:
-    """Strip control characters that enable log injection."""
-    return value.replace("\n", "\\n").replace("\r", "\\r").replace("\x1b", "\\x1b")
+_LOG_CONTROL_CHARS = str.maketrans(
+    {
+        "\n": "\\n",
+        "\r": "\\r",
+        "\x1b": "\\x1b",
+        "\t": "\\t",
+        "\x00": "\\x00",
+        "\u2028": "\\u2028",
+        "\u2029": "\\u2029",
+    }
+)
+
+
+def sanitize_for_log(value: str) -> str:
+    """Escape control characters that enable log injection."""
+    return value.translate(_LOG_CONTROL_CHARS)
+
+
+def _parse_process_string(raw: str) -> tuple[str | None, int | None]:
+    """Parse process extraction format into (name, pid) components.
+
+    Formats: "name:pid" -> (name, pid), bare digits -> (None, pid), bare name -> (name, None).
+    """
+    if ":" in raw:
+        parts = raw.rsplit(":", 1)
+        try:
+            return parts[0], int(parts[1])
+        except (ValueError, IndexError):
+            return raw, None
+    if raw.isdigit():
+        return None, int(raw)
+    return raw, None
+
+
+def _resolve_processes(raw_processes: tuple[str, ...]) -> list[str]:
+    """Resolve process strings to UUID5 with cross-format dedup.
+
+    Dedup rule: bare PIDs are dropped when a name:pid entry shares the same PID.
+    """
+    parsed: list[tuple[str, str | None, int | None]] = []
+    for raw in raw_processes:
+        name, pid = _parse_process_string(raw.strip())
+        parsed.append((raw, name, pid))
+
+    # Build set of PIDs that appear in name:pid entries
+    named_pids: set[int] = set()
+    for _raw, name, pid in parsed:
+        if name is not None and pid is not None:
+            named_pids.add(pid)
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for raw, name, pid in parsed:
+        # Drop bare PIDs that are covered by a name:pid entry
+        if name is None and pid is not None and pid in named_pids:
+            continue
+
+        try:
+            if name is not None and pid is not None:
+                uid = str(uuid.uuid5(NS_PROCESS, f"{name}:{pid}"))
+            elif name is not None:
+                uid = str(uuid.uuid5(NS_PROCESS, name))
+            else:
+                uid = str(uuid.uuid5(NS_PROCESS, str(pid)))
+
+            if uid not in seen:
+                seen.add(uid)
+                resolved.append(uid)
+        except (ValueError, TypeError):
+            _log.warning("Skipping malformed process: %s", sanitize_for_log(raw))
+
+    return resolved
 
 
 def resolve_entities(
     ips: tuple[str, ...],
     users: tuple[str, ...],
     hosts: tuple[str, ...],
+    *,
+    files: tuple[str, ...] = (),
+    domains: tuple[str, ...] = (),
+    processes: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     """Resolve raw entity values to deterministic UUID5 strings.
 
     Calls the type-specific ``generate_*_id()`` for each value.
     Values that fail normalization (e.g. malformed IPs) are skipped
     with a warning log.  Returns a tuple of UUID5 string representations
-    in order: IPs, then users, then hosts.
+    in priority order: IPs, users, hosts, domains, files, processes.
     """
     resolved: list[str] = []
 
@@ -239,7 +328,7 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed IP: %s",
-                _sanitize_for_log(raw_ip),
+                sanitize_for_log(raw_ip),
             )
 
     for raw_user in users:
@@ -249,7 +338,7 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed user: %s",
-                _sanitize_for_log(raw_user),
+                sanitize_for_log(raw_user),
             )
 
     for raw_host in hosts:
@@ -258,8 +347,28 @@ def resolve_entities(
         except (ValueError, TypeError):
             _log.warning(
                 "Skipping malformed host: %s",
-                _sanitize_for_log(raw_host),
+                sanitize_for_log(raw_host),
             )
+
+    for raw_domain in domains:
+        try:
+            resolved.append(str(generate_domain_id(raw_domain)))
+        except (ValueError, TypeError):
+            _log.warning(
+                "Skipping malformed domain: %s",
+                sanitize_for_log(raw_domain),
+            )
+
+    for raw_file in files:
+        try:
+            resolved.append(str(generate_file_id(raw_file)))
+        except (ValueError, TypeError):
+            _log.warning(
+                "Skipping malformed file: %s",
+                sanitize_for_log(raw_file),
+            )
+
+    resolved.extend(_resolve_processes(processes))
 
     return tuple(resolved)
 
@@ -267,29 +376,50 @@ def resolve_entities(
 def primary_entity_value(event: SeerflowEvent) -> str:
     """Return the raw display value for the highest-priority entity.
 
-    Priority: ip > user > host.  Returns ``""`` when no related
-    fields are populated.  Shares the same priority order as
-    :func:`infer_entity_type`.
+    Priority: ip > user > host > domain > file > process.
+    Returns ``""`` when no related fields are populated.
+    Validates IPs before returning to stay in sync with resolve_entities().
     """
     if event.related_ips:
-        return event.related_ips[0]
+        try:
+            ipaddress.ip_address(event.related_ips[0].strip())
+            return event.related_ips[0]
+        except ValueError:
+            pass  # fall through to next type
     if event.related_users:
         return event.related_users[0]
     if event.related_hosts:
         return event.related_hosts[0]
+    if event.related_domains:
+        return event.related_domains[0]
+    if event.related_files:
+        return event.related_files[0]
+    if event.related_processes:
+        return event.related_processes[0]
     return ""
 
 
 def infer_entity_type(event: SeerflowEvent) -> EntityType:
     """Infer the primary entity type from populated related_* fields.
 
-    Priority: ip > user > host.  Falls back to ``"ip"`` when no
-    related fields are populated (matches current default behaviour).
+    Priority: ip > user > host > domain > file > process.
+    Validates first IP to stay in sync with primary_entity_value().
+    Falls back to ``"ip"`` when no related fields are populated.
     """
     if event.related_ips:
-        return "ip"
+        try:
+            ipaddress.ip_address(event.related_ips[0].strip())
+            return "ip"
+        except ValueError:
+            pass  # fall through to next type
     if event.related_users:
         return "user"
     if event.related_hosts:
         return "host"
+    if event.related_domains:
+        return "domain"
+    if event.related_files:
+        return "file"
+    if event.related_processes:
+        return "process"
     return "ip"

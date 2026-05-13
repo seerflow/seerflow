@@ -27,6 +27,7 @@ from sigma.types import SigmaString, SpecialChars
 
 from seerflow.models.event import SeverityLevel
 from seerflow.sigma.attack import is_valid_tactic
+from seerflow.sigma.ids import compute_rule_id
 from seerflow.sigma.pipeline import TUPLE_FIELDS
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 class CompiledRule:
     """A Sigma rule compiled for in-memory evaluation."""
 
+    rule_id: str
     rule_name: str
     description: str
     severity: SeverityLevel
@@ -134,6 +136,7 @@ def compile_rule(rule: SigmaRule) -> CompiledRule:
     severity = _SIGMA_LEVEL_MAP.get(level_str, SeverityLevel.INFORMATIONAL)
 
     return CompiledRule(
+        rule_id=compute_rule_id(rule),
         rule_name=rule.title or "Untitled",
         description=rule.description or "",
         severity=severity,

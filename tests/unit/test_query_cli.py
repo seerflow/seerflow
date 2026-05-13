@@ -236,8 +236,7 @@ class TestRunQueryEvents:
             template_id=5,
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             last=None, template=None, source=None, severity=None, limit=50, json=False
@@ -275,8 +274,7 @@ class TestRunQueryEvents:
             source_type="file",
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             last=None, template=None, source=None, severity=None, limit=50, json=True
@@ -313,8 +311,7 @@ class TestRunQueryEvents:
             source_type="syslog",
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             last="1h", template=None, source=None, severity=None, limit=50, json=False
@@ -766,6 +763,133 @@ class TestRunQueryAlerts:
         await storage.close()
 
 
+class TestQueryAlertsTypeFilter:
+    """Tests for the --type filter on the query alerts subcommand."""
+
+    def test_parse_alerts_with_type_filter(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "alerts", "--type", "correlation"])
+        assert args.type == "correlation"
+
+    def test_parse_alerts_type_default_none(self) -> None:
+        from seerflow.cli import parse_args
+
+        args = parse_args(["query", "alerts"])
+        assert args.type is None
+
+    async def test_type_filter_returns_only_matching_alerts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--type filter only returns alerts whose alert_type matches."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert_ml = Alert(
+            alert_id="alert-ml-type",
+            alert_type="ml",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="hst-anomaly",
+            description="ML anomaly detected",
+            entity_uuid="ent-1",
+            entity_value="10.0.0.1",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            risk_score=0.70,
+            dedup_key="ml:type-test",
+        )
+        alert_corr = Alert(
+            alert_id="alert-corr-type",
+            alert_type="correlation",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.ERROR,
+            rule_name="corr-rule",
+            description="Correlation alert",
+            entity_uuid="ent-2",
+            entity_value="10.0.0.2",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            risk_score=0.90,
+            dedup_key="corr:type-test",
+        )
+        await storage.write_alert(alert_ml)
+        await storage.write_alert(alert_corr)
+
+        args = argparse.Namespace(
+            last=None,
+            type="correlation",
+            severity=None,
+            limit=50,
+            json=False,
+            tactic=None,
+            technique=None,
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+
+        assert "corr-rule" in captured.out
+        assert "hst-anomaly" not in captured.out
+        assert "1 alert(s) total" in captured.out
+
+        await storage.close()
+
+    async def test_type_filter_no_match_shows_empty(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--type filter with no matching alerts prints 'No alerts found'."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert_ml = Alert(
+            alert_id="alert-ml-only",
+            alert_type="ml",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.WARNING,
+            rule_name="hst-anomaly",
+            description="ML alert only",
+            entity_uuid="ent-1",
+            entity_value="10.0.0.1",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            risk_score=0.70,
+            dedup_key="ml:only-test",
+        )
+        await storage.write_alert(alert_ml)
+
+        args = argparse.Namespace(
+            last=None,
+            type="sigma",
+            severity=None,
+            limit=50,
+            json=False,
+            tactic=None,
+            technique=None,
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+
+        assert "No alerts found" in captured.out
+
+        await storage.close()
+
+
 class TestRunQueryTemplates:
     async def test_templates_table_output(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -996,18 +1120,18 @@ class TestMainDispatch:
     def test_main_dispatches_query(self) -> None:
         """main() dispatches to run_query for query subcommand."""
         import argparse
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from seerflow.__main__ import main
 
         mock_args = argparse.Namespace(config=None, command="query", query_type="events")
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.__main__.asyncio") as mock_asyncio,
+            patch("seerflow.__main__._run_async") as mock_run_async,
         ):
-            mock_asyncio.run = MagicMock()
+            mock_run_async.return_value = None
             main()
-            mock_asyncio.run.assert_called_once()
+            mock_run_async.assert_called_once()
 
 
 class TestQueryTimelineArgparse:
@@ -1125,8 +1249,7 @@ class TestRunQueryTimeline:
             entity_refs=(entity_uuid,),
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             entity_uuid=entity_uuid,
@@ -1176,8 +1299,7 @@ class TestRunQueryTimeline:
             entity_refs=(entity_uuid,),
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             entity_uuid=entity_uuid,
@@ -1306,8 +1428,7 @@ class TestRunQueryTimeline:
             entity_refs=(entity_uuid,),
         )
         await storage.write_events([event])
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         args = argparse.Namespace(
             entity_uuid=entity_uuid,

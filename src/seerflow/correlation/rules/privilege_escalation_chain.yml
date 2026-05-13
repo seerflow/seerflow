@@ -1,0 +1,19 @@
+name: privilege-escalation-chain
+description: "Privilege elevation followed by access to sensitive system files — potential privilege escalation chain"
+entity_type: user
+window_seconds: 600
+min_sources: 2
+alert_severity: 5
+mitre_tactics:
+  - privilege-escalation
+mitre_techniques:
+  - T1548
+sources:
+  - source_type: syslog
+    conditions:
+      message: "(?i)(sudo\\b|su\\b|privilege[^\n]{0,200}change|role[^\n]{0,200}change|usermod\\b|passwd\\b|chmod[^\n]{0,200}\\+s)"
+    min_count: 1
+  - source_type: syslog
+    conditions:
+      message: "(?i)(/etc/shadow|/etc/sudoers|/etc/passwd|root[^\n]{0,200}shell|sensitive[^\n]{0,200}file)"
+    min_count: 1

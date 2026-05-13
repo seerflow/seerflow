@@ -138,3 +138,101 @@ class TestSigmaEngineEvaluate:
         assert len(alerts) == 1
         assert alerts[0].entity_uuid == event.entity_refs[0]
         assert alerts[0].entity_value == event.related_ips[0]
+
+
+class TestEventToDict:
+    """S-149: _event_to_dict includes all SeerflowEvent fields dynamically."""
+
+    def test_includes_all_struct_fields(self) -> None:
+        import msgspec.structs
+
+        from seerflow.sigma.engine import _event_to_dict
+        from tests.helpers import make_event
+
+        event = make_event(message="test", related_ips=("10.0.0.1",))
+        d = _event_to_dict(event)
+
+        expected_fields = {f.name for f in msgspec.structs.fields(event)} - {"body", "raw_event"}
+        assert set(d.keys()) == expected_fields
+
+    def test_excludes_body_and_raw_event(self) -> None:
+        from seerflow.sigma.engine import _event_to_dict
+        from tests.helpers import make_event
+
+        event = make_event()
+        d = _event_to_dict(event)
+        assert "body" not in d
+        assert "raw_event" not in d
+
+    def test_severity_id_converted_to_value(self) -> None:
+        from seerflow.sigma.engine import _event_to_dict
+        from tests.helpers import make_event
+
+        event = make_event()
+        d = _event_to_dict(event)
+        assert isinstance(d["severity_id"], int)
+
+    def test_related_domains_available(self) -> None:
+        import uuid
+
+        from seerflow.models.event import SeerflowEvent
+        from seerflow.sigma.engine import _event_to_dict
+
+        event = SeerflowEvent(
+            event_id=uuid.uuid4(),
+            timestamp_ns=1_700_000_000_000_000_000,
+            observed_ns=1_700_000_000_000_000_000,
+            message="test",
+            related_domains=("evil.com",),
+        )
+        d = _event_to_dict(event)
+        assert d["related_domains"] == ("evil.com",)
+
+
+class TestMakeEventExpansion:
+    """S-149: make_event accepts all commonly-used SeerflowEvent fields."""
+
+    def test_new_fields_accepted(self) -> None:
+        from tests.helpers import make_event
+
+        event = make_event(
+            template_str="Failed login for <*>",
+            related_domains=("evil.com",),
+            related_files=("/etc/passwd",),
+            related_processes=("sshd",),
+            event_kind="alert",
+            event_category="authentication",
+            event_type="start",
+            event_action="logon-failed",
+            event_outcome="failure",
+        )
+        assert event.template_str == "Failed login for <*>"
+        assert event.related_domains == ("evil.com",)
+        assert event.related_files == ("/etc/passwd",)
+        assert event.related_processes == ("sshd",)
+        assert event.event_kind == "alert"
+        assert event.event_category == "authentication"
+        assert event.event_type == "start"
+        assert event.event_action == "logon-failed"
+        assert event.event_outcome == "failure"
+
+
+class TestSigmaEngineIterCompiledRules:
+    def test_empty_engine_yields_nothing(self) -> None:
+        engine = SigmaEngine()
+        assert list(engine.iter_compiled_rules()) == []
+
+    def test_yields_every_loaded_rule(self) -> None:
+        from seerflow.sigma.matcher import CompiledRule
+
+        engine = SigmaEngine()
+        engine.load_rules([FIXTURES / "test_whoami.yml", FIXTURES / "test_ssh_brute.yml"])
+        rules = list(engine.iter_compiled_rules())
+        assert len(rules) == engine.rule_count == 2
+        assert all(isinstance(r, CompiledRule) for r in rules)
+
+    def test_returns_iterator(self) -> None:
+        from collections.abc import Iterator
+
+        engine = SigmaEngine()
+        assert isinstance(engine.iter_compiled_rules(), Iterator)

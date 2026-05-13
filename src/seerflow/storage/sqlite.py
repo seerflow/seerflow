@@ -21,9 +21,16 @@ import aiosqlite
 import msgspec
 
 from seerflow.config import ConfigError, StorageConfig
-from seerflow.models.alert import Alert
 from seerflow.models.event import SeerflowEvent
-from seerflow.models.query import AlertQuery, EventQuery, Page, TimeRange
+from seerflow.models.query import EventQuery, Page, TimeRange
+from seerflow.storage._sqlite_alerts import (
+    _INSERT_ALERT_SQL,  # re-exported for backwards compatibility with tests
+    _build_alert_query,  # re-exported for backwards compatibility with tests
+    _SqliteAlertMixin,
+)
+from seerflow.storage._sqlite_sigma_state import _SqliteSigmaStateMixin
+
+__all__ = ["_INSERT_ALERT_SQL", "SqliteBackend", "TemplateInfo", "_build_alert_query"]
 
 _log = logging.getLogger(__name__)
 
@@ -31,7 +38,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from seerflow.graph.entity_graph import EntityGraph
-    from seerflow.models._types import FeedbackType
     from seerflow.models.query import EntityRelation
 
 
@@ -232,6 +238,7 @@ CREATE TABLE IF NOT EXISTS templates (
 
 
 _PRAGMAS = (
+    "PRAGMA page_size=8192",  # 8 KiB pages — must be set before journal_mode on new DBs
     "PRAGMA journal_mode=WAL",  # concurrent reads during writes
     "PRAGMA synchronous=NORMAL",  # fsync on checkpoint only — ~100ms loss on power fail
     "PRAGMA cache_size=-64000",  # 64 MiB in-memory page cache
@@ -265,28 +272,6 @@ ON CONFLICT(template_id) DO UPDATE SET
 """
 
 
-def _build_alert_query(filters: AlertQuery) -> tuple[str, list[Any]]:
-    """Build WHERE clause and params from AlertQuery."""
-    clauses: list[str] = []
-    params: list[Any] = []
-    if filters.time_range is not None:
-        clauses.append("a.timestamp_ns >= ?")
-        params.append(filters.time_range.start_ns)
-        clauses.append("a.timestamp_ns <= ?")
-        params.append(filters.time_range.end_ns)
-    if filters.alert_type is not None:
-        clauses.append("a.alert_type = ?")
-        params.append(filters.alert_type)
-    if filters.severity_min is not None:
-        clauses.append("a.severity_id >= ?")
-        params.append(filters.severity_min)
-    if filters.entity_uuid is not None:
-        clauses.append("a.entity_uuid = ?")
-        params.append(filters.entity_uuid)
-    where = " AND ".join(clauses) if clauses else "1=1"
-    return where, params
-
-
 _MAX_STATE_KEY_LENGTH = 256
 
 
@@ -305,6 +290,7 @@ def _validate_state_key(key: str) -> None:
 
 _SAVE_STATE_SQL = "INSERT OR REPLACE INTO model_state (key, data, updated_at) VALUES (?, ?, ?)"
 _LOAD_STATE_SQL = "SELECT data FROM model_state WHERE key = ?"
+_DELETE_STATE_SQL = "DELETE FROM model_state WHERE key = ?"
 
 _UPSERT_EDGE_SQL = """\
 INSERT INTO graph_edges (source_id, target_id, rel_type, first_seen, last_seen, event_count)
@@ -313,17 +299,6 @@ ON CONFLICT(source_id, target_id, rel_type) DO UPDATE SET
     first_seen = MIN(first_seen, excluded.first_seen),
     last_seen = MAX(last_seen, excluded.last_seen),
     event_count = event_count + 1"""
-
-_INSERT_ALERT_SQL = """\
-INSERT INTO alerts (
-    alert_id, alert_type, timestamp_ns, severity_id, rule_name,
-    entity_uuid, entity_type, entity_value, dedup_key, dedup_count,
-    risk_score, feedback, data
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(dedup_key) DO UPDATE SET
-    dedup_count = dedup_count + 1,
-    alert_id = excluded.alert_id,
-    data = excluded.data"""
 
 
 async def _init_schema(conn: aiosqlite.Connection) -> None:
@@ -412,15 +387,16 @@ class WriteBuffer:
 # ---------------------------------------------------------------------------
 
 
-class SqliteBackend:
+class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
     """SQLite storage backend implementing LogStore.write_events."""
 
-    __slots__ = ("_closed", "_conn", "_write_buffer")
+    __slots__ = ("_closed", "_conn", "_entity_graph", "_write_buffer")
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
         self._write_buffer: WriteBuffer | None = None
         self._closed = False
+        self._entity_graph: EntityGraph | None = None
 
     @classmethod
     async def connect(cls, config: StorageConfig) -> SqliteBackend:
@@ -463,6 +439,12 @@ class SqliteBackend:
         finally:
             await self._conn.close()
 
+    async def flush(self) -> None:
+        """Flush pending writes to the database."""
+        if self._closed or self._write_buffer is None:
+            return
+        await self._write_buffer.flush()
+
     async def write_events(self, events: list[SeerflowEvent]) -> None:
         """Buffer events for batched writing to SQLite."""
         if not events:
@@ -504,6 +486,48 @@ class SqliteBackend:
         async with await self._conn.execute(sql, [clamped]) as cursor:
             rows = await cursor.fetchall()
         return [TemplateInfo(*row) for row in rows]
+
+    async def prune_templates(self, min_count: int) -> int:
+        """Delete templates with ``event_count < min_count``.
+
+        Returns the number of rows removed. ``min_count == 0`` is a no-op
+        (event_count is always >= 1 — no row can satisfy ``< 0``, and
+        ``< 0`` is equivalent to deleting nothing). Raises ``ValueError``
+        when ``min_count`` is negative.
+        """
+        if min_count < 0:
+            msg = f"min_count must be >= 0, got {min_count!r}"
+            raise ValueError(msg)
+        if min_count == 0:
+            return 0
+        try:
+            async with await self._conn.execute(
+                "DELETE FROM templates WHERE event_count < ?", [min_count]
+            ) as cursor:
+                removed = cursor.rowcount
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("prune_templates failed (min_count=%d)", min_count)
+            raise
+        return int(removed)
+
+    async def reset_templates(self) -> int:
+        """Delete every row from the templates table.
+
+        Returns the number of rows removed. The Drain3 in-memory parse
+        tree is **not** affected — operators wanting a full reset should
+        also delete the ``drain3:global`` ``model_state`` row.
+        """
+        try:
+            async with await self._conn.execute("DELETE FROM templates") as cursor:
+                removed = cursor.rowcount
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("reset_templates failed")
+            raise
+        return int(removed)
 
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]:
         """Query events with composable filters and pagination."""
@@ -574,6 +598,16 @@ class SqliteBackend:
 
         return [msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows]
 
+    def set_entity_graph(self, graph: EntityGraph) -> None:
+        """Set the EntityGraph for relationship queries."""
+        self._entity_graph = graph
+
+    async def get_related(self, entity_uuid: str) -> list[EntityRelation]:
+        """Get entities related to the given entity via graph edges."""
+        if self._entity_graph is None:
+            return []
+        return get_related_from_graph(self._entity_graph, entity_uuid)
+
     async def search_text(self, query: str, limit: int) -> list[SeerflowEvent]:
         """Full-text search using FTS5 phrase matching."""
         safe_query = _sanitize_fts_query(query)
@@ -591,90 +625,6 @@ class SqliteBackend:
         async with await self._conn.execute(sql, [safe_query, clamped_limit]) as cursor:
             rows = await cursor.fetchall()
         return [msgspec.msgpack.decode(row[0], type=SeerflowEvent) for row in rows]
-
-    async def write_alert(self, alert: Alert) -> None:
-        """Persist an alert with dedup upsert on conflict."""
-        data = msgspec.msgpack.encode(alert)
-        params = (
-            alert.alert_id,
-            alert.alert_type,
-            alert.timestamp_ns,
-            int(alert.severity_id),
-            alert.rule_name,
-            alert.entity_uuid,
-            alert.entity_type,
-            alert.entity_value,
-            alert.dedup_key,
-            alert.dedup_count,
-            alert.risk_score,
-            alert.feedback,
-            data,
-        )
-        try:
-            await self._conn.execute(_INSERT_ALERT_SQL, params)
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("write_alert failed for alert %s", alert.alert_id)
-            raise
-
-    async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
-        """Query alerts with composable filters and pagination."""
-        where, params = _build_alert_query(filters)
-
-        # where clause assembled from hardcoded SQL fragments in _build_alert_query().
-        # All user values are bound via params. No user data is interpolated.
-        count_sql = f"SELECT COUNT(*) FROM alerts a WHERE {where}"  # noqa: S608  # nosec B608
-        async with await self._conn.execute(count_sql, params) as cursor:
-            row = await cursor.fetchone()
-            total = row[0] if row else 0
-
-        offset = (filters.page - 1) * filters.limit
-        # where clause assembled from hardcoded SQL fragments in _build_alert_query().
-        # All user values are bound via params. No user data is interpolated.
-        data_sql = (
-            f"SELECT a.data, a.dedup_count FROM alerts a WHERE {where} "  # noqa: S608  # nosec B608
-            f"ORDER BY a.timestamp_ns DESC LIMIT ? OFFSET ?"
-        )
-        async with await self._conn.execute(data_sql, [*params, filters.limit, offset]) as cursor:
-            rows = await cursor.fetchall()
-
-        items = tuple(
-            msgspec.structs.replace(
-                msgspec.msgpack.decode(row[0], type=Alert),
-                dedup_count=row[1],
-            )
-            for row in rows
-        )
-        return Page(items=items, total=total, page=filters.page, limit=filters.limit)
-
-    async def update_feedback(self, alert_id: str, feedback: FeedbackType) -> None:
-        """Update alert feedback and re-encode the BLOB.
-
-        Implementation note: this performs a SELECT then UPDATE. On the SQLite
-        backend this is safe because a single aiosqlite connection serializes
-        all operations. A PostgreSQL backend MUST use SELECT ... FOR UPDATE
-        inside a transaction to prevent a concurrent write from being lost.
-        """
-        async with await self._conn.execute(
-            "SELECT data FROM alerts WHERE alert_id = ?", [alert_id]
-        ) as cursor:
-            row = await cursor.fetchone()
-        if row is None:
-            return
-        alert = msgspec.msgpack.decode(row[0], type=Alert)
-        updated = msgspec.structs.replace(alert, feedback=feedback)
-        data = msgspec.msgpack.encode(updated)
-        try:
-            await self._conn.execute(
-                "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
-                [feedback, data, alert_id],
-            )
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("update_feedback failed for alert %s", alert_id)
-            raise
 
     async def save_state(self, key: str, data: bytes) -> None:
         """Persist serialized model state (upsert by key)."""
@@ -694,6 +644,17 @@ class SqliteBackend:
         async with await self._conn.execute(_LOAD_STATE_SQL, [key]) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else None
+
+    async def delete_state(self, key: str) -> None:
+        """Delete serialized model state for ``key`` (no-op if absent)."""
+        _validate_state_key(key)
+        try:
+            await self._conn.execute(_DELETE_STATE_SQL, [key])
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            _log.exception("delete_state failed for key %s", key)
+            raise
 
     async def write_edge(
         self,
@@ -769,30 +730,18 @@ def get_related_from_graph(
     graph: EntityGraph,
     entity_uuid: str,
 ) -> list[EntityRelation]:
-    """Get related entities from the in-memory EntityGraph.
-
-    Delegates to EntityGraph.get_neighbors() and maps results
-    to EntityRelation objects.  Edge metadata (rel_type) is resolved
-    by inspecting incident edges in both directions.
-    """
+    """Get related entities from the in-memory EntityGraph."""
     from seerflow.models.query import EntityRelation
 
-    neighbors = graph.get_neighbors(entity_uuid, depth=1)
+    neighbors = graph.get_neighbors_with_rel(entity_uuid)
     if not neighbors:
         return []
 
-    src_idx = graph._vertex_map.get(entity_uuid)
-    if src_idx is None:
-        return []
-
     results: list[EntityRelation] = []
-    for neighbor in neighbors:
-        neighbor_id = neighbor["entity_id"]
-        tgt_idx = graph._vertex_map.get(neighbor_id)
-        if tgt_idx is None:
+    for neighbor_id, rel_type in neighbors:
+        if not rel_type:
+            _log.debug("No rel_type for edge %s -> %s", entity_uuid, neighbor_id)
             continue
-
-        rel_type = _find_edge_rel_type(graph, src_idx, tgt_idx)
         results.append(
             EntityRelation(
                 entity_uuid=neighbor_id,
@@ -802,17 +751,3 @@ def get_related_from_graph(
             )
         )
     return results
-
-
-def _find_edge_rel_type(
-    graph: EntityGraph,
-    src_idx: int,
-    tgt_idx: int,
-) -> str:
-    """Find the rel_type of the edge connecting two vertices (either direction)."""
-    for eid in graph._graph.incident(src_idx, mode="all"):
-        edge = graph._graph.es[eid]
-        other = edge.target if edge.source == src_idx else edge.source
-        if other == tgt_idx:
-            return str(edge["rel_type"])
-    return ""

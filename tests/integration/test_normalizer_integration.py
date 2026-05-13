@@ -79,14 +79,14 @@ class TestHandlerNormalizerIntegration:
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import EventQuery
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.storage.sqlite import SqliteBackend
 
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble, storage)
+        handler = make_handler(ensemble, storage)
 
         event = RawEvent(
             data=b"kernel: segfault at 0000000000000000",
@@ -98,8 +98,7 @@ class TestHandlerNormalizerIntegration:
         await handler(event)
 
         # Flush WriteBuffer before querying
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_events(EventQuery(limit=10))
         assert len(result.items) == 1
@@ -112,14 +111,14 @@ class TestHandlerNormalizerIntegration:
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.query import EventQuery
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.storage.sqlite import SqliteBackend
 
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble, storage)
+        handler = make_handler(ensemble, storage)
 
         event = RawEvent(
             data=b"plain log line from file tail",
@@ -130,8 +129,7 @@ class TestHandlerNormalizerIntegration:
         )
         await handler(event)
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_events(EventQuery(limit=10))
         assert len(result.items) == 1
@@ -147,14 +145,14 @@ class TestHandlerNormalizerIntegration:
         from seerflow.detection.ensemble import DetectionEnsemble
         from seerflow.models.entity import resolve_entities
         from seerflow.models.query import EventQuery
-        from seerflow.pipeline.handler import _make_handler
+        from seerflow.pipeline.handler import make_handler
         from seerflow.storage.sqlite import SqliteBackend
 
         storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
         storage = await SqliteBackend.connect(storage_cfg)
         config = SeerflowConfig()
         ensemble = DetectionEnsemble(config.detection)
-        handler = _make_handler(ensemble, storage)
+        handler = make_handler(ensemble, storage)
 
         event = RawEvent(
             data=b"Failed login from 10.0.1.5 by user admin",
@@ -165,8 +163,7 @@ class TestHandlerNormalizerIntegration:
         )
         await handler(event)
 
-        assert storage._write_buffer is not None
-        await storage._write_buffer.flush()
+        await storage.flush()
 
         result = await storage.query_events(EventQuery(limit=10))
         assert len(result.items) == 1

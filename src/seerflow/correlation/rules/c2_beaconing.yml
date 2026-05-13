@@ -1,0 +1,15 @@
+name: c2-beaconing
+description: "Repeated outbound connections with beacon-like patterns — potential command and control communication"
+entity_type: ip
+window_seconds: 1800
+min_sources: 1
+alert_severity: 5
+mitre_tactics:
+  - command-and-control
+mitre_techniques:
+  - T1071
+sources:
+  - source_type: syslog
+    conditions:
+      message: "(?i)(beacon|callback|connect[^\n]{0,200}external|outbound[^\n]{0,200}http|reverse[^\n]{0,200}shell|established[^\n]{0,200}\\b\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b)"
+    min_count: 5

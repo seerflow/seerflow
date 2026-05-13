@@ -88,6 +88,11 @@ class MarkovDetector:
         self._max_entities = max_entities
         self._models: OrderedDict[str, _EntityModel] = OrderedDict()
 
+    @property
+    def entity_count(self) -> int:
+        """Return the number of tracked entity models."""
+        return len(self._models)
+
     def score(self, event: SeerflowEvent) -> float:
         """Return sequence anomaly score for the event's primary entity."""
         entity = event.entity_refs[0] if event.entity_refs else None

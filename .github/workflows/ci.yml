@@ -9,17 +9,20 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.11"]') || fromJSON('["3.11", "3.12", "3.13", "3.14"]') }}
     permissions:
       contents: write  # required by benchmark-action auto-push to gh-pages
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
-      - name: Set up Python
-        run: uv python install 3.13
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: uv sync
@@ -37,7 +40,7 @@ jobs:
         run: uv run bandit -r src/ -c pyproject.toml
 
       - name: Tests with coverage
-        run: uv run pytest --cov=src/seerflow --cov-branch --cov-report=xml --cov-report=term-missing -v
+        run: uv run pytest --cov=src/seerflow --cov-branch --cov-report=xml --cov-report=term-missing --cov-fail-under=95 -v
 
       - name: Coverage summary
         if: success()
@@ -77,15 +80,108 @@ jobs:
           " >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      # Benchmark history publishing is disabled until a gh-pages branch is
+      # provisioned on the repo. The github-action-benchmark step always
+      # fetches `gh-pages` (even with auto-push: false) to compare against
+      # historical data, and the missing branch makes it fail. Re-enable
+      # this step once gh-pages exists.
       - name: Store benchmark result
-        if: github.ref == 'refs/heads/dev'
+        if: false
         uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c  # v1.9.0
         with:
           tool: 'pytest'
           output-file-path: benchmark-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
+          auto-push: false
           alert-threshold: '110%'
           comment-on-alert: true
           fail-on-alert: false
           benchmark-data-dir-path: 'benchmarks'
+
+  frontend-e2e:
+    # Path-filtered (see `filter` step) so Python-only PRs skip the job.
+    # Runs on pull_request + push; dev / main runs catch drift outside PRs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - 'src/seerflow/web/**'
+              - '.github/workflows/ci.yml'
+
+      - name: Set up Node
+        if: steps.filter.outputs.frontend == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install npm deps
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Resolve Playwright version
+        if: steps.filter.outputs.frontend == 'true'
+        id: pw-version
+        working-directory: frontend
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        if: steps.filter.outputs.frontend == 'true'
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.filter.outputs.frontend == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit)
+        if: steps.filter.outputs.frontend == 'true' && steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: frontend
+        run: npx playwright install-deps chromium
+
+      - name: Build frontend
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Playwright (e2e project)
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        env:
+          RUN_E2E: '1'
+        run: npx playwright test --project=e2e
+
+      - name: Run Playwright (quarantine project, non-blocking)
+        if: steps.filter.outputs.frontend == 'true'
+        working-directory: frontend
+        continue-on-error: true
+        env:
+          RUN_E2E: '1'
+        run: npx playwright test --project=quarantine
+
+      - name: Upload Playwright artefacts on failure
+        # `always()` so a failed quarantine step (which runs with
+        # `continue-on-error: true` and therefore does not fail the job)
+        # still uploads its trace. The `if:` cost is one empty upload on
+        # green runs, which the `if-no-files-found: ignore` guard zeros out.
+        if: steps.filter.outputs.frontend == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts-${{ github.run_id }}
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

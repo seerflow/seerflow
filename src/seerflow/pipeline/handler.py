@@ -5,43 +5,104 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import msgspec.structs
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Mapping
 
+    from seerflow.alerting.dispatcher import AlertDispatcher
+    from seerflow.alerting.sinks.otlp import OtlpSink
+    from seerflow.alerting.sinks.pagerduty import PagerDutySink
+    from seerflow.api.ws import ConnectionManager
+    from seerflow.config import AlertingConfig
+    from seerflow.correlation.engine import CorrelationEngine
+    from seerflow.correlation.graph_structural import GraphStructuralEvaluator
+    from seerflow.correlation.holders import EngineHolder
+    from seerflow.correlation.kill_chain import KillChainTracker
     from seerflow.correlation.risk import RiskRegister
     from seerflow.correlation.watermark import Watermark
     from seerflow.correlation.window import EntityWindowBuffer
+    from seerflow.detection.attack_mapping import AttackMapper
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.graph.entity_graph import EntityGraph
     from seerflow.receivers.base import RawEvent
     from seerflow.sigma.engine import SigmaEngine
-    from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.storage.factory import StorageBackend
+    from seerflow.threat_intel.enricher import _IoCEnrichmentCounters
+    from seerflow.threat_intel.matcher import IoCMatcher
+    from seerflow.ueba.baseline import EntityBaseline, EntityType
+    from seerflow.ueba.engine import UEBAEngine
+    from seerflow.ueba.store import BaselineStore
 
 _log = logging.getLogger("seerflow")
 
 
-def _make_handler(
+@dataclass(frozen=True, slots=True)
+class EntityDispatch:
+    """Named dispatch record for entity resolution."""
+
+    type_name: str
+    raw_vals: tuple[str, ...]
+    ips: tuple[str, ...]
+    users: tuple[str, ...]
+    hosts: tuple[str, ...]
+    kwargs: Mapping[str, tuple[str, ...]]
+
+
+def _dedup_window_ns(rule_name: str, alerting_config: AlertingConfig) -> int:
+    """Return the dedup window in nanoseconds for a given rule name.
+
+    Checks ``alerting_config.dedup_window_overrides`` for a per-rule override;
+    falls back to the global ``dedup_window_seconds``.
+    """
+    for override_name, seconds in alerting_config.dedup_window_overrides:
+        if rule_name == override_name:
+            return seconds * 1_000_000_000
+    return alerting_config.dedup_window_seconds * 1_000_000_000
+
+
+def make_handler(
     ensemble: DetectionEnsemble,
-    storage: SqliteBackend,
+    storage: StorageBackend,
     save_interval_ns: int = 300_000_000_000,
-    sigma_engine: SigmaEngine | None = None,
+    sigma_holder: EngineHolder[SigmaEngine | None] | None = None,
     entity_graph: EntityGraph | None = None,
     graph_algo_interval: int = 500,
     window_buffer: EntityWindowBuffer | None = None,
     watermark: Watermark | None = None,
     risk_register: RiskRegister | None = None,
+    correlation_holder: EngineHolder[CorrelationEngine | None] | None = None,
+    alerting_config: AlertingConfig | None = None,
+    alert_dispatcher: AlertDispatcher | None = None,
+    pagerduty_sink: PagerDutySink | None = None,
+    otlp_sink: OtlpSink | None = None,
+    attack_mapper: AttackMapper | None = None,
+    graph_structural: GraphStructuralEvaluator | None = None,
+    kill_chain_tracker: KillChainTracker | None = None,
+    ws_manager: ConnectionManager | None = None,
+    baseline_store: BaselineStore | None = None,
+    ueba_engine: UEBAEngine | None = None,
+    ueba_alert_cooldown_ns: int = 900_000_000_000,
+    ioc_matcher: IoCMatcher | None = None,
+    ioc_enrichment_counters: _IoCEnrichmentCounters | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
+    from seerflow.config import AlertingConfig as _AlertingConfig
     from seerflow.graph.edges import infer_edges
-    from seerflow.models.alert import create_ml_alert
-    from seerflow.models.entity import resolve_entities
+    from seerflow.models.alert import Alert, create_ml_alerts
+    from seerflow.models.entity import resolve_entities, sanitize_for_log
     from seerflow.parsing import EventNormalizer
     from seerflow.storage.sqlite import TemplateInfo
+    from seerflow.threat_intel.enricher import (
+        IoCAlertBuilder,
+        _clamp_confidence,
+        _IoCEnrichmentCounters,
+    )
 
+    _alerting = alerting_config if alerting_config is not None else _AlertingConfig()
     normalizer = EventNormalizer()
     event_count = 0
     anomaly_count = 0
@@ -50,23 +111,213 @@ def _make_handler(
     last_save_ns = time.time_ns()
     risk_alerted: set[str] = set()  # entities that already fired a risk alert
 
+    _ioc_builder = IoCAlertBuilder() if ioc_matcher is not None else None
+    _ioc_counters = (
+        ioc_enrichment_counters
+        if ioc_enrichment_counters is not None
+        else _IoCEnrichmentCounters()
+    )
+
+    async def _feed_kill_chain(alert: Alert) -> None:
+        """Feed an alert to the kill-chain tracker and write any resulting alerts."""
+        if kill_chain_tracker is None:
+            return
+        for kc in kill_chain_tracker.record_alert(alert):
+            try:
+                is_new = await storage.write_alert(
+                    kc,
+                    dedup_window_ns=_dedup_window_ns(kc.rule_name, _alerting),
+                )
+                if is_new:
+                    if alert_dispatcher is not None:
+                        alert_dispatcher.enqueue(kc)
+                    if pagerduty_sink is not None:
+                        pagerduty_sink.enqueue_trigger(kc)
+                    if otlp_sink is not None:
+                        otlp_sink.enqueue(kc)
+                    if ws_manager is not None:
+                        ws_manager.broadcast_alert(kc)
+            except Exception:
+                _log.warning("Kill-chain alert write failed", exc_info=True)
+
     async def handler(event: RawEvent) -> None:
         nonlocal event_count, anomaly_count, last_save_ns
         seerflow_event = normalizer.normalize(event)
 
-        # Resolve entities to deterministic UUID5 strings
-        entity_refs = resolve_entities(
-            seerflow_event.related_ips,
-            seerflow_event.related_users,
-            seerflow_event.related_hosts,
-        )
+        # Resolve entities to deterministic UUID5 strings.
+        # Resolve each type separately to build both entity_refs (flat tuple
+        # for correlation/risk) and typed_for_edges (typed pairs for edge
+        # inference) in a single pass.
+        typed_for_edges: list[tuple[str, str]] = []
+        entity_refs_list: list[str] = []
+        _ips = seerflow_event.related_ips
+        _users = seerflow_event.related_users
+        _hosts = seerflow_event.related_hosts
+        _domains = seerflow_event.related_domains
+        _files = seerflow_event.related_files
+        _procs = seerflow_event.related_processes
+        for d in (
+            EntityDispatch("ip", _ips, _ips, (), (), {}),
+            EntityDispatch("user", _users, (), _users, (), {}),
+            EntityDispatch("host", _hosts, (), (), _hosts, {}),
+            EntityDispatch(
+                "domain",
+                _domains,
+                (),
+                (),
+                (),
+                {"domains": _domains},
+            ),
+            EntityDispatch(
+                "file",
+                _files,
+                (),
+                (),
+                (),
+                {"files": _files},
+            ),
+            EntityDispatch(
+                "process",
+                _procs,
+                (),
+                (),
+                (),
+                {"processes": _procs},
+            ),
+        ):
+            if d.raw_vals:
+                for _uid in resolve_entities(d.ips, d.users, d.hosts, **d.kwargs):
+                    typed_for_edges.append((d.type_name, _uid))
+                    entity_refs_list.append(_uid)
+        entity_refs = tuple(entity_refs_list)
         if entity_refs:
             seerflow_event = msgspec.structs.replace(
                 seerflow_event,
                 entity_refs=entity_refs,
             )
 
+        # UEBA: capture pre-event baseline snapshot and update per entity.
+        # typed_for_edges is built in the same order as entity_refs_list, so
+        # the type tuple aligns positionally with entity_refs. Each
+        # ``type_name`` is one of the EntityDispatch literal seeds
+        # ("ip"/"user"/"host"/"domain"/"file"/"process"), all valid EntityType
+        # values — cast narrows ``str`` to the Literal at the call boundary.
+        ueba_snapshot: EntityBaseline | None = None
+        ueba_entity_types: tuple[EntityType, ...] = ()
+        if baseline_store is not None and entity_refs:
+            ueba_entity_types = cast(
+                "tuple[EntityType, ...]",
+                tuple(t for t, _u in typed_for_edges),
+            )
+            ueba_snapshot = baseline_store.snapshot_and_learn(
+                seerflow_event,
+                entity_types=ueba_entity_types,
+            )
+
+        # UEBA scoring (S-065): score against the pre-update snapshot and
+        # fold the composite into risk_score. Emit a ueba.deviation alert
+        # on threshold crossing, dispatching through the same path as
+        # every other alert source.
+        if ueba_engine is not None and entity_refs and ueba_entity_types:
+            ueba_breakdown, ueba_alert = ueba_engine.score_and_maybe_alert(
+                seerflow_event,
+                baseline=ueba_snapshot,
+                entity_type=ueba_entity_types[0],
+            )
+            if ueba_breakdown.composite > seerflow_event.risk_score:
+                seerflow_event = msgspec.structs.replace(
+                    seerflow_event,
+                    risk_score=ueba_breakdown.composite,
+                )
+            if ueba_alert is not None:
+                try:
+                    is_new = await storage.write_alert(
+                        ueba_alert,
+                        dedup_window_ns=ueba_alert_cooldown_ns,
+                    )
+                    if is_new:
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(ueba_alert)
+                        if pagerduty_sink is not None:
+                            pagerduty_sink.enqueue_trigger(ueba_alert)
+                        if otlp_sink is not None:
+                            otlp_sink.enqueue(ueba_alert)
+                        if ws_manager is not None:
+                            ws_manager.broadcast_alert(ueba_alert)
+                    await _feed_kill_chain(ueba_alert)
+                except Exception:
+                    _log.warning("UEBA alert write failed", exc_info=True)
+
+        # ── IoC threat-intel enrichment (S-069) ────────────────────────
+        if _ioc_builder is not None and ioc_matcher is not None and entity_refs:
+            ioc_matches = ioc_matcher.check_event(seerflow_event)
+            if ioc_matches:
+                for _m in ioc_matches:
+                    uid, val, etype = _ioc_builder.select_entity_uuid(
+                        seerflow_event,
+                        _m,
+                        entity_refs,
+                        typed_for_edges,
+                    )
+                    if not uid:
+                        _ioc_counters.dropped_entity_uuid_lookups_total += 1
+                        continue
+                    try:
+                        ioc_alert = _ioc_builder.build_alert(
+                            _m,
+                            seerflow_event,
+                            entity_uuid=uid,
+                            entity_value=val,
+                            entity_type=etype,
+                        )
+                        is_new = await storage.write_alert(
+                            ioc_alert,
+                            dedup_window_ns=_dedup_window_ns(ioc_alert.rule_name, _alerting),
+                        )
+                        if is_new:
+                            _ioc_counters.alerts_emitted_total += 1
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(ioc_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(ioc_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(ioc_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(ioc_alert)
+                            await _feed_kill_chain(ioc_alert)
+                            if risk_register is not None and ioc_alert.entity_uuid:
+                                from seerflow.correlation.risk import RiskEntry
+
+                                risk_register.add_risk(
+                                    ioc_alert.entity_uuid,
+                                    RiskEntry(
+                                        timestamp_ns=seerflow_event.timestamp_ns,
+                                        risk_points=ioc_alert.risk_score * 20,
+                                        source="ioc",
+                                        rule_name=ioc_alert.rule_name,
+                                        mitre_tactics=ioc_alert.mitre_tactics,
+                                        mitre_techniques=ioc_alert.mitre_techniques,
+                                    ),
+                                )
+                                _ioc_counters.risk_register_updates_total += 1
+                        else:
+                            _ioc_counters.alerts_deduped_total += 1
+                    except Exception:
+                        _log.warning("IoC alert write failed", exc_info=True)
+                # Enrich the event after all alerts; one msgspec.replace call.
+                max_conf = max(_clamp_confidence(_m.indicator.confidence) for _m in ioc_matches)
+                new_attrs = _ioc_builder.enriched_attributes(seerflow_event, ioc_matches)
+                seerflow_event = msgspec.structs.replace(
+                    seerflow_event,
+                    attributes=new_attrs,
+                    risk_score=max(seerflow_event.risk_score, max_conf / 100.0),
+                )
+
         # Advance watermark and check for late events
+        # Note: from here on, `seerflow_event` may carry `attributes["ioc_matches"]`
+        # and a bumped `risk_score` from the S-069 IoC enrichment block above.
+        # Downstream consumers (window buffer, correlation, WS broadcast,
+        # storage write) all see the enriched event.
         if watermark is not None:
             watermark.advance(seerflow_event.timestamp_ns)
 
@@ -83,9 +334,53 @@ def _make_handler(
                 for entity_uuid in entity_refs:
                     window_buffer.add_event(entity_uuid, seerflow_event)
 
+        # Evaluate correlation rules (skip late events)
+        is_late = watermark is not None and watermark.is_late(seerflow_event.timestamp_ns)
+        correlation_engine = correlation_holder.engine if correlation_holder is not None else None
+        if correlation_engine is not None and entity_refs and not is_late:
+            try:
+                corr_alerts = correlation_engine.evaluate(seerflow_event, entity_refs)
+                for corr_alert in corr_alerts:
+                    try:
+                        is_new = await storage.write_alert(
+                            corr_alert,
+                            dedup_window_ns=_dedup_window_ns(corr_alert.rule_name, _alerting),
+                        )
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(corr_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(corr_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(corr_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(corr_alert)
+                        await _feed_kill_chain(corr_alert)
+                    except Exception:
+                        _log.warning("Correlation alert write failed", exc_info=True)
+
+                    # Feed correlation alerts into risk register
+                    if risk_register is not None and corr_alert.entity_uuid:
+                        from seerflow.correlation.risk import RiskEntry
+
+                        risk_entry = RiskEntry(
+                            timestamp_ns=seerflow_event.timestamp_ns,
+                            risk_points=corr_alert.risk_score * 20,
+                            source="correlation",
+                            rule_name=corr_alert.rule_name,
+                            mitre_tactics=corr_alert.mitre_tactics,
+                            mitre_techniques=corr_alert.mitre_techniques,
+                        )
+                        risk_register.add_risk(corr_alert.entity_uuid, risk_entry)
+            except Exception:
+                _log.warning("Correlation evaluation failed", exc_info=True)
+
+        # Dedup typed_for_edges to avoid redundant edge inference
+        typed_for_edges = list(dict.fromkeys(typed_for_edges))
+
         # Update entity graph with inferred edges
-        if entity_graph is not None and entity_refs:
-            edges = infer_edges(seerflow_event)
+        if entity_graph is not None and typed_for_edges:
+            edges = infer_edges(typed_for_edges)
             for edge in edges:
                 entity_graph.add_edge(
                     edge.source_id,
@@ -103,13 +398,44 @@ def _make_handler(
                 except Exception:
                     _log.warning("Graph edge write failed", exc_info=True)
 
+            # Check community-crossing after all edges are added
+            if graph_structural is not None:
+                for edge in edges:
+                    cc_alerts = graph_structural.check_community_crossing(
+                        edge.source_id,
+                        edge.target_id,
+                        edge.rel_type,
+                        seerflow_event.timestamp_ns,
+                    )
+                    for cc_alert in cc_alerts:
+                        try:
+                            is_new = await storage.write_alert(
+                                cc_alert,
+                                dedup_window_ns=_dedup_window_ns(cc_alert.rule_name, _alerting),
+                            )
+                            if is_new:
+                                if alert_dispatcher is not None:
+                                    alert_dispatcher.enqueue(cc_alert)
+                                if pagerduty_sink is not None:
+                                    pagerduty_sink.enqueue_trigger(cc_alert)
+                                if otlp_sink is not None:
+                                    otlp_sink.enqueue(cc_alert)
+                                if ws_manager is not None:
+                                    ws_manager.broadcast_alert(cc_alert)
+                            await _feed_kill_chain(cc_alert)
+                        except Exception:
+                            _log.warning(
+                                "Graph structural alert write failed",
+                                exc_info=True,
+                            )
+
         # Track template metadata
         if seerflow_event.template_id != -1:
             if seerflow_event.template_id not in template_meta:
                 _log.info(
                     "New template discovered: [%d] %s",
                     seerflow_event.template_id,
-                    seerflow_event.template_str[:120],
+                    seerflow_event.template_str[:120].replace("\x00", ""),
                 )
                 template_meta[seerflow_event.template_id] = TemplateInfo(
                     template_id=seerflow_event.template_id,
@@ -135,6 +461,12 @@ def _make_handler(
 
         result = ensemble.process_event(seerflow_event)
         event_count += 1
+
+        if ws_manager is not None:
+            try:
+                ws_manager.broadcast_event(seerflow_event, detection=result)
+            except Exception:
+                _log.warning("ws broadcast_event failed", exc_info=True)
 
         # Flush template metadata every 10 events
         if event_count % 10 == 0 and template_meta:
@@ -173,7 +505,7 @@ def _make_handler(
             _log.warning(
                 "  template: [%d] %s",
                 seerflow_event.template_id,
-                seerflow_event.template_str[:120],
+                seerflow_event.template_str[:120].replace("\x00", ""),
             )
             _log.debug(
                 "  message:  %s",
@@ -181,25 +513,53 @@ def _make_handler(
             )
 
             # Type-prefixed entity logging for safe, structured triage.
-            # Strip newlines/ANSI to prevent log injection from crafted input.
-            def _safe(v: str) -> str:
-                return v.replace("\n", "").replace("\r", "").replace("\x1b", "")
-
+            # Escape control chars to prevent log injection from crafted input.
             entity_parts: list[str] = []
             for label, vals in (
                 ("IPs", seerflow_event.related_ips),
                 ("Users", seerflow_event.related_users),
                 ("Hosts", seerflow_event.related_hosts),
+                ("Domains", seerflow_event.related_domains),
+                ("Files", seerflow_event.related_files),
+                ("Processes", seerflow_event.related_processes),
             ):
                 if vals:
-                    entity_parts.append(f"{label}: {', '.join(_safe(v) for v in vals[:5])}")
+                    entity_parts.append(
+                        f"{label}: {', '.join(sanitize_for_log(v) for v in vals[:5])}"
+                    )
             if entity_parts:
                 _log.warning("  entities: %s", ", ".join(entity_parts))
-            alert = create_ml_alert(seerflow_event, result)
-            try:
-                await storage.write_alert(alert)
-            except Exception:
-                _log.warning("Alert write failed", exc_info=True)
+            _mitre_tactics: tuple[str, ...] = ()
+            _mitre_techniques: tuple[str, ...] = ()
+            if attack_mapper is not None and seerflow_event.template_str:
+                _mitre_tactics, _mitre_techniques = attack_mapper.lookup(
+                    seerflow_event.template_str
+                )
+            alerts = create_ml_alerts(
+                seerflow_event,
+                result,
+                typed_for_edges,
+                mitre_tactics=_mitre_tactics,
+                mitre_techniques=_mitre_techniques,
+            )
+            for alert in alerts:
+                try:
+                    is_new = await storage.write_alert(
+                        alert,
+                        dedup_window_ns=_dedup_window_ns(alert.rule_name, _alerting),
+                    )
+                    if is_new:
+                        if alert_dispatcher is not None:
+                            alert_dispatcher.enqueue(alert)
+                        if pagerduty_sink is not None:
+                            pagerduty_sink.enqueue_trigger(alert)
+                        if otlp_sink is not None:
+                            otlp_sink.enqueue(alert)
+                        if ws_manager is not None:
+                            ws_manager.broadcast_alert(alert)
+                    await _feed_kill_chain(alert)
+                except Exception:
+                    _log.warning("Alert write failed", exc_info=True)
 
             # Add risk for ML anomaly
             if risk_register is not None and entity_refs:
@@ -211,18 +571,32 @@ def _make_handler(
                         risk_points=result.score * 10,
                         source="ml",
                         rule_name="hst-anomaly",
-                        mitre_tactics=(),
-                        mitre_techniques=(),
+                        mitre_tactics=_mitre_tactics,
+                        mitre_techniques=_mitre_techniques,
                     )
                     risk_register.add_risk(entity_uuid, risk_entry)
 
         # Sigma rule evaluation
+        sigma_engine = sigma_holder.engine if sigma_holder is not None else None
         if sigma_engine is not None:
             try:
                 sigma_alerts = sigma_engine.evaluate(seerflow_event)
                 for sigma_alert in sigma_alerts:
                     try:
-                        await storage.write_alert(sigma_alert)
+                        is_new = await storage.write_alert(
+                            sigma_alert,
+                            dedup_window_ns=_dedup_window_ns(sigma_alert.rule_name, _alerting),
+                        )
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(sigma_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(sigma_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(sigma_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(sigma_alert)
+                        await _feed_kill_chain(sigma_alert)
                     except Exception:
                         _log.warning("Sigma alert write failed", exc_info=True)
 
@@ -274,7 +648,19 @@ def _make_handler(
                         dedup_key=f"risk:{entity_uuid}",
                     )
                     try:
-                        await storage.write_alert(risk_alert)
+                        is_new = await storage.write_alert(
+                            risk_alert,
+                            dedup_window_ns=_dedup_window_ns(risk_alert.rule_name, _alerting),
+                        )
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(risk_alert)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(risk_alert)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(risk_alert)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(risk_alert)
                     except Exception:
                         _log.warning("Risk alert write failed", exc_info=True)
 
@@ -293,10 +679,12 @@ def _make_handler(
                     )
 
         # Run graph algorithms periodically
+        _algo_ran = False
         if entity_graph is not None and entity_graph.vertex_count > 0:
             try:
                 if event_count % graph_algo_interval == 0:
                     entity_graph.run_algorithms()
+                    _algo_ran = True
                     _log.info(
                         "Graph algorithms: %d vertices, %d edges",
                         entity_graph.vertex_count,
@@ -304,6 +692,33 @@ def _make_handler(
                     )
             except Exception:
                 _log.warning("Graph algorithm execution failed", exc_info=True)
+
+            # Evaluate post-algorithm graph-structural anomalies (only if algorithms ran)
+            if graph_structural is not None and _algo_ran:
+                post_alerts = graph_structural.check_post_algorithms(
+                    timestamp_ns=seerflow_event.timestamp_ns,
+                )
+                for pa in post_alerts:
+                    try:
+                        is_new = await storage.write_alert(
+                            pa,
+                            dedup_window_ns=_dedup_window_ns(pa.rule_name, _alerting),
+                        )
+                        if is_new:
+                            if alert_dispatcher is not None:
+                                alert_dispatcher.enqueue(pa)
+                            if pagerduty_sink is not None:
+                                pagerduty_sink.enqueue_trigger(pa)
+                            if otlp_sink is not None:
+                                otlp_sink.enqueue(pa)
+                            if ws_manager is not None:
+                                ws_manager.broadcast_alert(pa)
+                        await _feed_kill_chain(pa)
+                    except Exception:
+                        _log.warning(
+                            "Graph structural alert write failed",
+                            exc_info=True,
+                        )
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
     return handler

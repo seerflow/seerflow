@@ -11,16 +11,19 @@ import re
 import sys
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import msgspec.json
+import yaml
 
+from seerflow.cli_format import format_table
 from seerflow.sigma.attack import format_tactic, format_technique
+from seerflow.storage import connect_storage
 
 if TYPE_CHECKING:
     import argparse
 
-    from seerflow.storage.sqlite import SqliteBackend
+    from seerflow.storage.factory import StorageBackend
 
 
 _DURATION_RE = re.compile(r"^(\d+)([mhd])$")
@@ -56,29 +59,7 @@ def format_timestamp(ns: int) -> str:
     return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def format_table(headers: list[str], rows: list[list[str]]) -> str:
-    """Format headers and rows into an auto-sized text table.
-
-    Computes maximum width per column, pads with spaces, and adds
-    a separator line of dashes below the header row.
-    """
-    if not headers:
-        return ""
-    col_widths = [len(h) for h in headers]
-    for row in rows:
-        for i, cell in enumerate(row):
-            if i < len(col_widths):
-                col_widths[i] = max(col_widths[i], len(cell))
-    fmt = "  ".join(f"{{:<{w}}}" for w in col_widths)
-    lines = [fmt.format(*headers)]
-    lines.append("  ".join("-" * w for w in col_widths))
-    for row in rows:
-        padded = row + [""] * (len(headers) - len(row))
-        lines.append(fmt.format(*padded[: len(headers)]))
-    return "\n".join(lines) + "\n"
-
-
-async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_events(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute event query and print results."""
     from seerflow.models.query import EventQuery, TimeRange
 
@@ -149,7 +130,7 @@ async def run_query_events(storage: SqliteBackend, args: argparse.Namespace) -> 
     print(f"\n{result.total} event(s) total, showing {len(result.items)}")
 
 
-async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_alerts(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute alert query and print results."""
     from seerflow.models.query import AlertQuery, TimeRange
 
@@ -270,7 +251,7 @@ async def run_query_alerts(storage: SqliteBackend, args: argparse.Namespace) -> 
     print(f"\n{result.total} alert(s) total, showing {len(result.items)}")
 
 
-async def run_query_templates(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_templates(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute template query and print results."""
     templates = await storage.get_templates(limit=args.limit)
 
@@ -313,7 +294,7 @@ async def run_query_templates(storage: SqliteBackend, args: argparse.Namespace) 
 _DEFAULT_TIMELINE_WINDOW_NS = 24 * 3_600_000_000_000  # 24 hours
 
 
-async def run_query_timeline(storage: SqliteBackend, args: argparse.Namespace) -> None:
+async def run_query_timeline(storage: StorageBackend, args: argparse.Namespace) -> None:
     """Execute entity timeline query and print results."""
     import uuid as _uuid_mod
 
@@ -392,13 +373,108 @@ async def run_query_timeline(storage: SqliteBackend, args: argparse.Namespace) -
     print(f"\n{len(events)} event(s)")
 
 
+def _format_bytes(n: int) -> str:
+    """Format byte count as human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:,.0f} KB"
+    return f"{n / (1024 * 1024):,.1f} MB"
+
+
+def format_health_table(health: dict[str, Any]) -> str:
+    """Format health dict as a human-readable table."""
+    lines: list[str] = []
+    src = health["source_count"]
+    mx = health["max_sources"]
+    pct = (src / mx * 100) if mx > 0 else 0.0
+
+    lines.append("Detection Ensemble Health")
+    lines.append("=" * 40)
+    lines.append(f"Sources:       {src} / {mx}  ({pct:.1f}%)")
+    lines.append(f"Evictions:     {health['eviction_count']}  (source)")
+    lines.append(
+        f"               {health['template_hw_eviction_count']}  (template HW)"
+        f"  {health['entity_hw_eviction_count']}  (entity HW)"
+    )
+    lines.append("")
+
+    mem = health["memory_by_type"]
+    rows = [
+        ["HST", str(src), _format_bytes(mem["hst"])],
+        ["HW (source)", str(src), _format_bytes(mem["hw_source"])],
+        ["HW (template)", str(health["template_hw_count"]), _format_bytes(mem["hw_template"])],
+        ["HW (entity)", str(health["entity_hw_count"]), _format_bytes(mem["hw_entity"])],
+        ["CUSUM", str(src), _format_bytes(mem["cusum"])],
+        ["DSPOT", str(src), _format_bytes(mem["dspot"])],
+        [
+            "Markov",
+            str(sum(health.get("markov_entity_counts", {}).values())),
+            _format_bytes(mem["markov"]),
+        ],
+    ]
+
+    lines.append(format_table(["DETECTOR", "COUNT", "MEMORY"], rows))
+    lines.append(f"Total: {_format_bytes(health['estimated_memory_bytes'])}")
+
+    markov = health.get("markov_entity_counts", {})
+    if markov:
+        lines.append("")
+        lines.append("Markov Entities by Source")
+        lines.append("-" * 30)
+        entity_rows = [[s, str(c)] for s, c in sorted(markov.items(), key=lambda x: -x[1])]
+        lines.append(format_table(["SOURCE", "ENTITIES"], entity_rows))
+
+    return "\n".join(lines)
+
+
+async def run_query_health(args: argparse.Namespace) -> None:
+    """Execute health query — load ensemble from storage, print stats."""
+    from seerflow.config import ConfigError, load_config
+    from seerflow.detection.ensemble import DetectionEnsemble
+
+    try:
+        config = load_config(args.config)
+    except (ConfigError, FileNotFoundError, yaml.YAMLError) as exc:
+        print(f"Error loading config: {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        storage = await connect_storage(config.storage)
+    except OSError as exc:
+        print(f"Error connecting to storage: {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        ensemble = DetectionEnsemble(config.detection)
+        await ensemble.load_all_state(storage)
+        health = ensemble.get_health()
+    # Broad catch: storage backend raises unknown types (sqlite3.Error, OSError,
+    # backend-specific) at the CLI boundary — friendly-message them here.
+    except Exception as exc:
+        await storage.close()
+        print(f"Error loading ensemble state: {exc}", file=sys.stderr)
+        sys.exit(1)
+    else:
+        await storage.close()
+
+    if args.json:
+        encoded = msgspec.json.encode(health)
+        sys.stdout.buffer.write(encoded)
+        print()
+    else:
+        print(format_health_table(health))
+
+
 async def run_query(args: argparse.Namespace) -> None:
     """Top-level query dispatcher — load config, connect storage, route."""
+    # Health manages its own config/storage (needs config.detection for ensemble).
+    if args.query_type == "health":
+        await run_query_health(args)
+        return
+
     from seerflow.config import load_config
-    from seerflow.storage.sqlite import SqliteBackend
 
     config = load_config(args.config)
-    storage = await SqliteBackend.connect(config.storage)
+    storage = await connect_storage(config.storage)
     try:
         if args.query_type == "events":
             await run_query_events(storage, args)

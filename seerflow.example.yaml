@@ -5,9 +5,34 @@
 
 storage:
   backend: sqlite                        # sqlite | postgresql
+
+  # SQLite (default, zero-config) — single-writer, WAL mode, FTS5
   # data_dir: ~/.local/share/seerflow    # default XDG data dir; override with ${SEERFLOW_DATA_DIR}
   # sqlite_path: auto-derived from data_dir (data_dir/seerflow.db)
-  # postgresql_url: ${SEERFLOW_PG_URL}   # required when backend=postgresql
+
+  # PostgreSQL (production-scale) — install with: uv sync --extra postgres
+  # See STORAGE_MIGRATION.md for the SQLite -> PostgreSQL runbook.
+  # postgresql_url: ${SEERFLOW_PG_URL}        # required when backend=postgresql
+  # postgresql_pool_min_size: 2               # asyncpg pool floor; >= 1
+  # postgresql_pool_max_size: 10              # asyncpg pool ceiling; >= pool_min_size
+  # postgresql_command_timeout_s: 30.0        # per-query timeout in seconds; > 0
+
+  # Entity-graph backend (S-155). ``igraph`` is the in-process default;
+  # ``falkordb`` (S-155-F1) is available with ``uv sync --extra
+  # graph-falkordb`` and a ``falkordb_url`` below. ``postgres_age``
+  # (S-155-F2) is available with ``uv sync --extra graph-postgres-age``
+  # and reuses ``postgresql_url`` above — AGE lives inside the same
+  # Postgres instance, no separate DSN. The AGE extension must be
+  # installed on the server (``CREATE EXTENSION age``); on managed
+  # Postgres services confirm AGE is in the provider's allowlist first.
+  # To move an existing entity graph between backends use the migration
+  # CLI (S-155-F3):
+  #   seerflow graph migrate --from igraph --to falkordb
+  #   seerflow graph migrate --from falkordb --to igraph     # downgrade
+  # See ``seerflow graph migrate --help`` for --dry-run and
+  # --wipe-destination flags.
+  # graph_backend: igraph                     # igraph | falkordb | postgres_age
+  # falkordb_url: ${SEERFLOW_FALKORDB_URL:-falkor://localhost:6379}  # required when graph_backend=falkordb
 
 receivers:
   # Network binding
@@ -85,4 +110,5 @@ alerting:
 #   ollama_url: http://localhost:11434
 
 dashboard_port: 8080
+health_bind_address: "127.0.0.1"         # address to bind health endpoint; use 0.0.0.0 for container access
 log_level: INFO                          # DEBUG | INFO | WARNING | ERROR

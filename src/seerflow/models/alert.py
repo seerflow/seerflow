@@ -5,14 +5,27 @@ CorrelationRule defines YAML-loaded cross-source correlation rules.
 SourceCondition defines per-source match conditions within a rule.
 """
 
+import logging
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast, get_args
 
 import msgspec
 
 from seerflow.models._types import AlertType, EntityType, FeedbackType
 from seerflow.models.entity import infer_entity_type, primary_entity_value
 from seerflow.models.event import SeverityLevel
+
+_log = logging.getLogger(__name__)
+_VALID_ENTITY_TYPES: frozenset[str] = frozenset(get_args(EntityType))
+assert _VALID_ENTITY_TYPES, (
+    "get_args(EntityType) returned an empty set — "
+    "EntityType must be a plain Literal at module scope"
+)
+# Keys must match EntityType members — update both together when adding a type.
+_TYPE_TO_RAW_KEYS: frozenset[str] = frozenset({"ip", "user", "host", "domain", "file", "process"})
+assert _VALID_ENTITY_TYPES == _TYPE_TO_RAW_KEYS, (
+    f"type_to_raw keys {_TYPE_TO_RAW_KEYS} must match EntityType {_VALID_ENTITY_TYPES}"
+)
 
 if TYPE_CHECKING:
     from seerflow.detection.ensemble import DetectionResult
@@ -96,9 +109,89 @@ class Alert(msgspec.Struct, frozen=True):
     dedup_key: str = ""
     dedup_count: int = 1
     feedback: FeedbackType = ""
+    feedback_note: str = ""  # NEW — trailing field for msgpack back-compat
 
 
-def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
+def create_ml_alerts(
+    event: "SeerflowEvent",
+    result: "DetectionResult",
+    typed_entities: list[tuple[str, str]],
+    *,
+    mitre_tactics: tuple[str, ...] = (),
+    mitre_techniques: tuple[str, ...] = (),
+) -> list[Alert]:
+    """Create one ML anomaly Alert per entity.
+
+    Each alert gets a unique alert_id and dedup_key incorporating the entity UUID.
+    Falls back to a single alert with empty entity if typed_entities is empty.
+    """
+    if not typed_entities:
+        return [
+            create_ml_alert(
+                event,
+                result,
+                mitre_tactics=mitre_tactics,
+                mitre_techniques=mitre_techniques,
+            )
+        ]
+
+    # Build a type -> ordered raw values map from the event.
+    type_to_raw: dict[str, tuple[str, ...]] = {
+        "ip": event.related_ips,
+        "user": event.related_users,
+        "host": event.related_hosts,
+        "domain": event.related_domains,
+        "file": event.related_files,
+        "process": event.related_processes,
+    }
+
+    # Single-pass: resolve raw value by index, validate type, create alert.
+    type_counters: dict[str, int] = {}
+    alerts: list[Alert] = []
+    for entity_type, entity_uuid in typed_entities:
+        if entity_type not in _VALID_ENTITY_TYPES:
+            _log.warning("Skipping unknown entity_type %r in create_ml_alerts", entity_type)
+            continue
+        idx = type_counters.get(entity_type, 0)
+        raw_vals = type_to_raw.get(entity_type, ())
+        entity_value = raw_vals[idx] if idx < len(raw_vals) else ""
+        type_counters[entity_type] = idx + 1
+        alert = Alert(
+            alert_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_DNS,
+                    f"hst:{event.template_id}:{event.source_type}:{event.timestamp_ns}:{entity_uuid}",
+                )
+            ),
+            alert_type="ml",
+            timestamp_ns=event.timestamp_ns,
+            severity_id=event.severity_id,
+            rule_name="hst-anomaly",
+            description=(
+                f"Anomaly detected: score={result.score:.3f} "
+                f"threshold={result.upper_threshold:.3f} "
+                f"direction={result.anomaly_direction}"
+            ),
+            entity_uuid=entity_uuid,
+            entity_value=entity_value,
+            entity_type=cast("EntityType", entity_type),
+            contributing_events=(event.event_id,),
+            mitre_tactics=mitre_tactics,
+            mitre_techniques=mitre_techniques,
+            risk_score=max(0.0, min(1.0, result.score)),
+            dedup_key=f"hst:{event.template_id}:{event.source_type}:{entity_uuid}",
+        )
+        alerts.append(alert)
+    return alerts
+
+
+def create_ml_alert(
+    event: "SeerflowEvent",
+    result: "DetectionResult",
+    *,
+    mitre_tactics: tuple[str, ...] = (),
+    mitre_techniques: tuple[str, ...] = (),
+) -> Alert:
     """Create an ML anomaly Alert from a SeerflowEvent and DetectionResult.
 
     Uses the first entity from ``event.entity_refs`` as ``entity_uuid``
@@ -127,6 +220,8 @@ def create_ml_alert(event: "SeerflowEvent", result: "DetectionResult") -> Alert:
         entity_value=primary_entity_value(event),
         entity_type=infer_entity_type(event),
         contributing_events=(event.event_id,),
-        risk_score=result.score,
+        mitre_tactics=mitre_tactics,
+        mitre_techniques=mitre_techniques,
+        risk_score=max(0.0, min(1.0, result.score)),
         dedup_key=f"hst:{event.template_id}:{event.source_type}",
     )

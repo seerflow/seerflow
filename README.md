@@ -8,7 +8,7 @@ A streaming, entity-centric log intelligence agent that detects operational fail
 
 [![CI](https://github.com/seerflow/seerflow/actions/workflows/ci.yml/badge.svg)](https://github.com/seerflow/seerflow/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/seerflow)](https://pypi.org/project/seerflow/)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-green)](LICENSE)
 
 ## Quick Start
@@ -22,9 +22,17 @@ uv sync
 # Copy and edit the example config
 cp seerflow.example.yaml seerflow.yaml
 
-# Start the pipeline
+# Start the pipeline (also serves the React dashboard)
 uv run python -m seerflow start
+# → React dashboard:  http://127.0.0.1:8080/
+# → REST API:         http://127.0.0.1:8080/api/v1/
+# → WebSocket stream: ws://127.0.0.1:8080/api/v1/ws
 ```
+
+A single `seerflow start` boots the receivers, detection engines, and the
+FastAPI dashboard on `dashboard_port` (default `8080`). No second uvicorn
+process is required — the wheel ships the built React assets and the CLI
+mounts them via the same FastAPI app that exposes `/api/v1/*`.
 
 ### Command Line
 
@@ -37,6 +45,23 @@ uv run python -m seerflow --config /path/to/seerflow.yaml start
 
 # Show version
 uv run python -m seerflow --version
+```
+
+### Inspect loaded detection rules
+
+```bash
+# List everything
+uv run python -m seerflow rules list
+
+# Only rules tagged with a MITRE technique (prefix match includes sub-techniques)
+uv run python -m seerflow rules list --technique T1053
+
+# Filter by tactic (name or ATT&CK ID)
+uv run python -m seerflow rules list --tactic persistence
+uv run python -m seerflow rules list --tactic TA0003
+
+# JSON for scripting
+uv run python -m seerflow rules list --format json
 ```
 
 ### Docker
@@ -177,7 +202,7 @@ Log Sources → Receivers → Drain3 → UUID5 Entities → ML Ensemble → Sigm
 
 ## Development
 
-Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 # Install dependencies

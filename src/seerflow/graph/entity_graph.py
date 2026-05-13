@@ -91,6 +91,18 @@ class EntityGraph:
                 }
         return None
 
+    def get_neighbors_with_rel(self, entity_id: str) -> list[tuple[str, str]]:
+        """Return (neighbor_id, rel_type) pairs for immediate neighbors."""
+        start = self._vertex_map.get(entity_id)
+        if start is None:
+            return []
+        result: list[tuple[str, str]] = []
+        for eid in self._graph.incident(start, mode="all"):
+            edge = self._graph.es[eid]
+            neighbor = edge.target if edge.source == start else edge.source
+            result.append((self._graph.vs[neighbor]["name"], str(edge["rel_type"])))
+        return result
+
     def get_neighbors(
         self,
         entity_id: str,
@@ -271,6 +283,10 @@ class EntityGraph:
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
+
+    def all_entity_ids(self) -> list[str]:
+        """Return all entity IDs currently in the graph."""
+        return list(self._vertex_map.keys())
 
     @property
     def vertex_count(self) -> int:

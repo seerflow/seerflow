@@ -9,9 +9,11 @@ import pytest
 from seerflow.config import (
     ConfigError,
     SeerflowConfig,
+    StorageConfig,
     WebhookEndpointConfig,
     _build_correlation,
     _build_detection,
+    _build_receivers,
     load_config,
 )
 
@@ -63,7 +65,13 @@ class TestEnvVarInterpolation:
     def test_env_var_substitution(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEST_SEERFLOW_BACKEND", "postgresql")
         yaml_file = tmp_path / "seerflow.yaml"
-        yaml_file.write_text("storage:\n  backend: ${TEST_SEERFLOW_BACKEND}\n")
+        # S-074: include a URL so the DSN-required check passes; the env-var
+        # interpolation is what this test exercises.
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: ${TEST_SEERFLOW_BACKEND}\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+        )
         config = load_config(str(yaml_file))
         assert config.storage.backend == "postgresql"
 
@@ -108,7 +116,11 @@ class TestEnvVarInterpolation:
 class TestPartialConfig:
     def test_partial_merge_preserves_defaults(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
-        yaml_file.write_text("storage:\n  backend: postgresql\n")
+        # S-074: include a URL so the DSN-required check passes; this test
+        # exercises partial-config merge behaviour, not URL validation.
+        yaml_file.write_text(
+            "storage:\n  backend: postgresql\n  postgresql_url: postgresql://localhost/db\n"
+        )
         config = load_config(str(yaml_file))
         assert config.storage.backend == "postgresql"
         assert config.receivers.syslog_udp_port == 514
@@ -367,51 +379,51 @@ class TestReceiverConfigCompleteness:
 
 class TestDetectionValidation:
     def test_invalid_weight_negative(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="weights_content"):
             _build_detection({"weights_content": -0.5})
 
     def test_invalid_weight_nan(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="weights_content"):
             _build_detection({"weights_content": float("nan")})
 
     def test_invalid_weight_inf(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="weights_volume"):
             _build_detection({"weights_volume": float("inf")})
 
     def test_invalid_model_save_interval(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="model_save_interval_seconds"):
             _build_detection({"model_save_interval_seconds": 0})
 
     def test_invalid_model_save_interval_negative(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="model_save_interval_seconds"):
             _build_detection({"model_save_interval_seconds": -1})
 
     def test_invalid_markov_max_entities_too_high(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="markov_max_entities"):
             _build_detection({"markov_max_entities": 200_000})
 
     def test_invalid_markov_max_entities_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="markov_max_entities"):
             _build_detection({"markov_max_entities": 0})
 
     def test_invalid_max_sources_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="max_sources"):
             _build_detection({"max_sources": 0})
 
     def test_invalid_max_sources_too_high(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="max_sources"):
             _build_detection({"max_sources": 20_000})
 
     def test_invalid_cusum_ema_alpha_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="cusum_ema_alpha"):
             _build_detection({"cusum_ema_alpha": 0.0})
 
     def test_invalid_cusum_ema_alpha_one(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="cusum_ema_alpha"):
             _build_detection({"cusum_ema_alpha": 1.0})
 
     def test_invalid_cusum_warmup_buckets_zero(self) -> None:
-        with pytest.raises(ConfigError):
+        with pytest.raises(ConfigError, match="cusum_warmup_buckets"):
             _build_detection({"cusum_warmup_buckets": 0})
 
     def test_nested_hw_config(self) -> None:
@@ -556,6 +568,259 @@ class TestDetectionValidation:
         assert config.cusum_warmup_buckets == 30
         assert config.weights_content == 0.30
 
+    # --- S-146: Missing detection validations ---
+
+    def test_hst_window_size_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="hst_window_size"):
+            _build_detection({"hst_window_size": 0})
+
+    def test_hst_window_size_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="hst_window_size"):
+            _build_detection({"hst_window_size": -1})
+
+    def test_hst_n_trees_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="hst_n_trees"):
+            _build_detection({"hst_n_trees": 0})
+
+    def test_dspot_calibration_window_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_calibration_window"):
+            _build_detection({"dspot": {"calibration_window": 0}})
+
+    def test_dspot_risk_level_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_risk_level"):
+            _build_detection({"dspot": {"risk_level": 0.0}})
+
+    def test_dspot_risk_level_one_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_risk_level"):
+            _build_detection({"dspot": {"risk_level": 1.0}})
+
+    def test_dspot_risk_level_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_risk_level"):
+            _build_detection({"dspot": {"risk_level": -0.1}})
+
+    def test_dspot_initial_percentile_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_initial_percentile"):
+            _build_detection({"dspot": {"initial_percentile": 0}})
+
+    def test_dspot_initial_percentile_101_raises(self) -> None:
+        with pytest.raises(ConfigError, match="dspot_initial_percentile"):
+            _build_detection({"dspot": {"initial_percentile": 101}})
+
+    def test_markov_min_events_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="markov_min_events"):
+            _build_detection({"markov": {"min_events": 0}})
+
+    def test_markov_min_events_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="markov_min_events"):
+            _build_detection({"markov": {"min_events": -5}})
+
+
+class TestReceiverUpperBounds:
+    """S-146: Upper-bound checks to prevent OOM."""
+
+    def test_queue_maxsize_too_large_raises(self) -> None:
+        with pytest.raises(ConfigError, match="queue_maxsize"):
+            _build_receivers({"queue_maxsize": 1_000_001})
+
+    def test_otlp_http_max_request_bytes_too_large_raises(self) -> None:
+        with pytest.raises(ConfigError, match="otlp_http_max_request_bytes"):
+            _build_receivers({"otlp_http_max_request_bytes": 100_000_001})
+
+    def test_queue_maxsize_at_upper_bound_valid(self) -> None:
+        cfg = _build_receivers({"queue_maxsize": 1_000_000})
+        assert cfg.queue_maxsize == 1_000_000
+
+    def test_otlp_http_max_request_bytes_at_upper_bound_valid(self) -> None:
+        cfg = _build_receivers({"otlp_http_max_request_bytes": 100_000_000})
+        assert cfg.otlp_http_max_request_bytes == 100_000_000
+
+
+class TestStorageConfigRepr:
+    """S-146: postgresql_url must not leak in repr."""
+
+    def test_postgresql_url_not_in_repr(self) -> None:
+        cfg = StorageConfig(postgresql_url="postgres://user:secret@host/db")
+        assert "secret" not in repr(cfg)
+        assert "postgresql_url" not in repr(cfg)
+
+
+class TestStorageBackendLiteral:
+    """S-074: ``StorageConfig.backend`` is a ``Literal["sqlite", "postgresql"]``.
+
+    The narrowing happens at the dataclass annotation, so the runtime
+    behaviour is unchanged — these tests document the contract and prevent
+    accidental widening back to ``str``. mypy is the real enforcer for
+    static-typo detection at call sites; this class is the runtime witness.
+    """
+
+    def test_sqlite_value_accepted(self) -> None:
+        cfg = StorageConfig(backend="sqlite")
+        assert cfg.backend == "sqlite"
+
+    def test_postgresql_value_accepted(self) -> None:
+        cfg = StorageConfig(backend="postgresql", postgresql_url="postgresql://x")
+        assert cfg.backend == "postgresql"
+
+    def test_backend_field_annotation_is_literal(self) -> None:
+        """Inspect the dataclass annotation to confirm the Literal narrowing.
+
+        Uses string-form inspection (not ``typing.get_type_hints``) to avoid
+        importing the alerting/* TYPE_CHECKING-guarded symbols. The annotation
+        must mention both literal values; we accept any well-formed
+        ``Literal[...]`` spelling.
+        """
+        import dataclasses
+
+        fields = {f.name: f for f in dataclasses.fields(StorageConfig)}
+        ann = str(fields["backend"].type)
+        # Tolerate either "Literal['sqlite', 'postgresql']" or
+        # "typing.Literal['sqlite', 'postgresql']" depending on PEP 563 status.
+        assert "Literal" in ann
+        assert "sqlite" in ann
+        assert "postgresql" in ann
+
+
+class TestStorageBackendDsnRequired:
+    """S-074: ``postgresql`` backend requires a non-empty ``postgresql_url``.
+
+    The check fires at config-load time (``_build_storage``) rather than at
+    ``connect_storage`` time so the operator sees the error in their YAML
+    feedback loop, not in a runtime traceback after process start-up.
+    """
+
+    def test_empty_url_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n  postgresql_url: ''\n")
+        with pytest.raises(ConfigError, match="postgresql_url"):
+            load_config(str(yaml_file))
+
+    def test_whitespace_url_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n  postgresql_url: '   '\n")
+        with pytest.raises(ConfigError, match="postgresql_url"):
+            load_config(str(yaml_file))
+
+    def test_missing_url_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n")
+        with pytest.raises(ConfigError, match="postgresql_url"):
+            load_config(str(yaml_file))
+
+    def test_non_empty_url_accepted(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n  backend: postgresql\n  postgresql_url: postgresql://localhost/db\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert cfg.storage.backend == "postgresql"
+        assert cfg.storage.postgresql_url == "postgresql://localhost/db"
+
+    def test_sqlite_does_not_require_postgresql_url(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: sqlite\n")
+        cfg = load_config(str(yaml_file))
+        assert cfg.storage.backend == "sqlite"
+        assert cfg.storage.postgresql_url == ""
+
+    def test_error_message_mentions_required_and_field(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: postgresql\n")
+        with pytest.raises(ConfigError) as exc_info:
+            load_config(str(yaml_file))
+        msg = str(exc_info.value)
+        assert "postgresql_url" in msg
+        assert "required" in msg.lower()
+
+
+class TestPostgresPoolConfig:
+    """S-073: connection-pool knobs on ``StorageConfig``."""
+
+    def test_default_pool_min_size(self) -> None:
+        assert StorageConfig().postgresql_pool_min_size == 2
+
+    def test_default_pool_max_size(self) -> None:
+        assert StorageConfig().postgresql_pool_max_size == 10
+
+    def test_default_command_timeout(self) -> None:
+        assert StorageConfig().postgresql_command_timeout_s == 30.0
+
+    def test_yaml_overrides_pool_knobs(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_pool_min_size: 4\n"
+            "  postgresql_pool_max_size: 16\n"
+            "  postgresql_command_timeout_s: 5.0\n"
+        )
+        cfg = load_config(str(yaml_file))
+        assert cfg.storage.postgresql_pool_min_size == 4
+        assert cfg.storage.postgresql_pool_max_size == 16
+        assert cfg.storage.postgresql_command_timeout_s == 5.0
+
+    def test_invalid_pool_min_size_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_pool_min_size: 0\n"
+        )
+        with pytest.raises(ConfigError, match="postgresql_pool_min_size"):
+            load_config(str(yaml_file))
+
+    def test_max_less_than_min_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_pool_min_size: 5\n"
+            "  postgresql_pool_max_size: 3\n"
+        )
+        with pytest.raises(ConfigError, match="postgresql_pool_max_size"):
+            load_config(str(yaml_file))
+
+    def test_negative_command_timeout_rejected(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "storage:\n"
+            "  backend: postgresql\n"
+            "  postgresql_url: postgresql://localhost/db\n"
+            "  postgresql_command_timeout_s: 0\n"
+        )
+        with pytest.raises(ConfigError, match="postgresql_command_timeout_s"):
+            load_config(str(yaml_file))
+
+
+class TestDetectionBoundaryValid:
+    """S-146: Boundary valid tests for new detection params."""
+
+    def test_hst_window_size_at_lower_bound(self) -> None:
+        config = _build_detection({"hst_window_size": 1})
+        assert config.hst_window_size == 1
+
+    def test_hst_n_trees_at_lower_bound(self) -> None:
+        config = _build_detection({"hst_n_trees": 1})
+        assert config.hst_n_trees == 1
+
+    def test_dspot_calibration_window_at_lower_bound(self) -> None:
+        config = _build_detection({"dspot": {"calibration_window": 1}})
+        assert config.dspot_calibration_window == 1
+
+    def test_dspot_initial_percentile_at_lower_bound(self) -> None:
+        config = _build_detection({"dspot": {"initial_percentile": 1}})
+        assert config.dspot_initial_percentile == 1
+
+    def test_dspot_initial_percentile_at_upper_bound(self) -> None:
+        config = _build_detection({"dspot": {"initial_percentile": 100}})
+        assert config.dspot_initial_percentile == 100
+
+    def test_markov_min_events_at_lower_bound(self) -> None:
+        config = _build_detection({"markov": {"min_events": 1}})
+        assert config.markov_min_events == 1
+
 
 class TestSigmaRulesDirsConfig:
     def test_default_is_empty_tuple(self) -> None:
@@ -637,6 +902,10 @@ class TestCorrelationConfig:
         with pytest.raises(ConfigError, match="late_tolerance_seconds must be >= 0"):
             _build_correlation({"late_tolerance_seconds": -1})
 
+    def test_default_rule_dirs_empty(self) -> None:
+        config = SeerflowConfig()
+        assert config.correlation.rule_dirs == ()
+
     def test_correlation_config_is_frozen(self) -> None:
         config = SeerflowConfig()
         with pytest.raises(AttributeError):
@@ -697,3 +966,1602 @@ class TestRiskConfig:
     def test_risk_max_entities_negative_raises(self) -> None:
         with pytest.raises(ConfigError, match="risk_max_entities must be >= 1"):
             _build_detection({"risk_max_entities": -5})
+
+
+class TestGranularHWConfig:
+    """S-138: Config params for per-template and per-entity HW detection."""
+
+    def test_defaults(self) -> None:
+        config = _build_detection({})
+        assert config.max_template_hw == 500
+        assert config.max_entity_hw == 500
+        assert config.min_events_for_scoring == 50
+        assert config.weights_template_volume == 0.15
+        assert config.weights_entity_volume == 0.15
+
+    def test_custom_values(self) -> None:
+        config = _build_detection(
+            {
+                "max_template_hw": 1000,
+                "max_entity_hw": 2000,
+                "min_events_for_scoring": 100,
+                "weights_template_volume": 0.10,
+                "weights_entity_volume": 0.20,
+            }
+        )
+        assert config.max_template_hw == 1000
+        assert config.max_entity_hw == 2000
+        assert config.min_events_for_scoring == 100
+        assert config.weights_template_volume == 0.10
+        assert config.weights_entity_volume == 0.20
+
+    def test_max_template_hw_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_template_hw"):
+            _build_detection({"max_template_hw": 0})
+
+    def test_max_template_hw_too_high_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_template_hw"):
+            _build_detection({"max_template_hw": 100_001})
+
+    def test_max_template_hw_at_lower_bound(self) -> None:
+        config = _build_detection({"max_template_hw": 1})
+        assert config.max_template_hw == 1
+
+    def test_max_template_hw_at_upper_bound(self) -> None:
+        config = _build_detection({"max_template_hw": 100_000})
+        assert config.max_template_hw == 100_000
+
+    def test_max_entity_hw_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_entity_hw"):
+            _build_detection({"max_entity_hw": 0})
+
+    def test_max_entity_hw_too_high_raises(self) -> None:
+        with pytest.raises(ConfigError, match="max_entity_hw"):
+            _build_detection({"max_entity_hw": 100_001})
+
+    def test_max_entity_hw_at_lower_bound(self) -> None:
+        config = _build_detection({"max_entity_hw": 1})
+        assert config.max_entity_hw == 1
+
+    def test_max_entity_hw_at_upper_bound(self) -> None:
+        config = _build_detection({"max_entity_hw": 100_000})
+        assert config.max_entity_hw == 100_000
+
+    def test_min_events_for_scoring_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="min_events_for_scoring"):
+            _build_detection({"min_events_for_scoring": 0})
+
+    def test_min_events_for_scoring_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="min_events_for_scoring"):
+            _build_detection({"min_events_for_scoring": -1})
+
+    def test_min_events_for_scoring_at_lower_bound(self) -> None:
+        config = _build_detection({"min_events_for_scoring": 1})
+        assert config.min_events_for_scoring == 1
+
+    def test_min_events_for_scoring_above_upper_bound_raises(self) -> None:
+        with pytest.raises(ConfigError, match="min_events_for_scoring"):
+            _build_detection({"min_events_for_scoring": 100_001})
+
+    def test_min_events_for_scoring_at_upper_bound(self) -> None:
+        config = _build_detection({"min_events_for_scoring": 100_000})
+        assert config.min_events_for_scoring == 100_000
+
+    def test_weights_template_volume_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_template_volume"):
+            _build_detection({"weights_template_volume": -0.1})
+
+    def test_weights_template_volume_nan_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_template_volume"):
+            _build_detection({"weights_template_volume": float("nan")})
+
+    def test_weights_template_volume_inf_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_template_volume"):
+            _build_detection({"weights_template_volume": float("inf")})
+
+    def test_weights_entity_volume_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_entity_volume"):
+            _build_detection({"weights_entity_volume": -0.1})
+
+    def test_weights_entity_volume_nan_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_entity_volume"):
+            _build_detection({"weights_entity_volume": float("nan")})
+
+    def test_weights_entity_volume_inf_raises(self) -> None:
+        with pytest.raises(ConfigError, match="weights_entity_volume"):
+            _build_detection({"weights_entity_volume": float("inf")})
+
+    def test_weights_template_volume_zero_valid(self) -> None:
+        config = _build_detection({"weights_template_volume": 0.0})
+        assert config.weights_template_volume == 0.0
+
+    def test_weights_entity_volume_zero_valid(self) -> None:
+        config = _build_detection({"weights_entity_volume": 0.0})
+        assert config.weights_entity_volume == 0.0
+
+    def test_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "detection:\n"
+            "  max_template_hw: 250\n"
+            "  max_entity_hw: 300\n"
+            "  min_events_for_scoring: 25\n"
+            "  weights_template_volume: 0.12\n"
+            "  weights_entity_volume: 0.18\n"
+        )
+        config = load_config(str(yaml_file))
+        assert config.detection.max_template_hw == 250
+        assert config.detection.max_entity_hw == 300
+        assert config.detection.min_events_for_scoring == 25
+        assert config.detection.weights_template_volume == 0.12
+        assert config.detection.weights_entity_volume == 0.18
+
+
+class TestHealthBindAddress:
+    def test_default_is_localhost(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.health_bind_address == "127.0.0.1"
+
+    def test_yaml_override(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text('health_bind_address: "0.0.0.0"\n')
+        config = load_config(str(yaml_file))
+        assert config.health_bind_address == "0.0.0.0"  # noqa: S104
+
+    def test_non_string_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("health_bind_address: 12345\n")
+        with pytest.raises(ConfigError, match="health_bind_address"):
+            load_config(str(yaml_file))
+
+    def test_invalid_ip_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text('health_bind_address: "not-an-ip"\n')
+        with pytest.raises(ConfigError, match="not a valid IP address"):
+            load_config(str(yaml_file))
+
+
+class TestDedupWindowOverrides:
+    def test_overrides_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n"
+            "  dedup_window_overrides:\n"
+            "    hst-anomaly: 300\n"
+            "    sigma-brute-force: 3600\n"
+        )
+        config = load_config(str(yaml_file))
+        assert config.alerting.dedup_window_overrides == (
+            ("hst-anomaly", 300),
+            ("sigma-brute-force", 3600),
+        )
+
+    def test_overrides_default_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.alerting.dedup_window_overrides == ()
+
+    def test_overrides_non_dict_ignored(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_overrides: not-a-dict\n")
+        config = load_config(str(yaml_file))
+        assert config.alerting.dedup_window_overrides == ()
+
+    def test_overrides_non_integer_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_overrides:\n    hst-anomaly: fast\n")
+        with pytest.raises(ConfigError, match="must be an integer"):
+            load_config(str(yaml_file))
+
+    def test_overrides_zero_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_overrides:\n    hst-anomaly: 0\n")
+        with pytest.raises(ConfigError, match="must be >= 1"):
+            load_config(str(yaml_file))
+
+    def test_dedup_window_seconds_zero_raises(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("alerting:\n  dedup_window_seconds: 0\n")
+        with pytest.raises(ConfigError, match="must be an integer >= 1"):
+            load_config(str(yaml_file))
+
+
+class TestWebhookConfigParsing:
+    def test_webhooks_parsed_from_yaml(self, tmp_path: Path) -> None:
+        from seerflow.alerting import WebhookTarget
+
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n"
+            "  webhooks:\n"
+            "    - url: https://hooks.slack.com/xxx\n"
+            "      format: slack\n"
+            "    - url: https://outlook.webhook.office.com/xxx\n"
+            "      format: teams\n"
+            "      min_severity: 4\n"
+        )
+        config = load_config(str(yaml_file))
+        assert len(config.alerting.webhook_targets) == 2
+        assert isinstance(config.alerting.webhook_targets[0], WebhookTarget)
+        assert config.alerting.webhook_targets[0].url == "https://hooks.slack.com/xxx"
+        assert config.alerting.webhook_targets[0].format == "slack"
+        assert config.alerting.webhook_targets[0].min_severity == 0
+        assert config.alerting.webhook_targets[1].url == "https://outlook.webhook.office.com/xxx"
+        assert config.alerting.webhook_targets[1].format == "teams"
+        assert config.alerting.webhook_targets[1].min_severity == 4
+
+    def test_webhooks_default_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.alerting.webhook_targets == ()
+
+    def test_webhook_targets_is_tuple(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n  webhooks:\n    - url: https://hooks.slack.com/xxx\n      format: slack\n"
+        )
+        config = load_config(str(yaml_file))
+        assert isinstance(config.alerting.webhook_targets, tuple)
+
+    def test_webhook_target_frozen(self, tmp_path: Path) -> None:
+        from seerflow.alerting import WebhookTarget
+
+        target = WebhookTarget(name="t", url="https://example.com", format="json")
+        with pytest.raises((AttributeError, TypeError)):
+            target.url = "https://other.com"  # type: ignore[misc]
+
+    def test_invalid_url_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="url"):
+            _build_alerting({"webhooks": [{"url": "", "format": "slack"}]})
+
+    def test_invalid_format_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="format"):
+            _build_alerting({"webhooks": [{"url": "https://example.com", "format": "discord"}]})
+
+    def test_negative_min_severity_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="min_severity"):
+            _build_alerting(
+                {
+                    "webhooks": [
+                        {"url": "https://example.com", "format": "json", "min_severity": -1}
+                    ]
+                }
+            )
+
+    def test_json_format_valid(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"webhooks": [{"url": "https://example.com", "format": "json"}]})
+        assert result.webhook_targets[0].format == "json"
+
+    def test_webhook_raw_dicts_preserved(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n  webhooks:\n    - url: https://hooks.slack.com/xxx\n      format: slack\n"
+        )
+        config = load_config(str(yaml_file))
+        assert isinstance(config.alerting.webhooks, tuple)
+        assert config.alerting.webhooks[0]["format"] == "slack"
+
+    def test_dashboard_url_read_from_data(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"dashboard_url": "https://dash.example.com"})
+        assert result.dashboard_url == "https://dash.example.com"
+
+    def test_dashboard_url_defaults_to_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.dashboard_url == ""
+
+    def test_dashboard_url_non_string_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="dashboard_url must be a string"):
+            _build_alerting({"dashboard_url": 123})
+
+    def test_dashboard_url_rejects_javascript_scheme(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="must use http or https"):
+            _build_alerting({"dashboard_url": "javascript:alert(1)"})
+
+    def test_dashboard_url_rejects_no_hostname(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="must include a hostname"):
+            _build_alerting({"dashboard_url": "https://"})
+
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "127.0.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.0.1",
+            "0.0.0.0",  # noqa: S104
+            "100.64.0.1",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:100.64.0.1",
+        ],
+    )
+    def test_webhook_private_ip_rejected(self, ip: str) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        host = f"[{ip}]" if ":" in ip else ip
+        with pytest.raises(ConfigError, match=r"private|reserved|loopback"):
+            _build_alerting({"webhooks": [{"url": f"https://{host}/hook", "format": "json"}]})
+
+    def test_webhook_public_ip_accepted(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"webhooks": [{"url": "https://8.8.8.8/hook", "format": "json"}]})
+        assert len(result.webhook_targets) == 1
+
+    def test_webhook_hostname_not_blocked(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting(
+            {"webhooks": [{"url": "https://hooks.slack.com/services/T00", "format": "slack"}]}
+        )
+        assert len(result.webhook_targets) == 1
+
+    def test_dashboard_url_private_ip_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match=r"private|reserved|loopback"):
+            _build_alerting({"dashboard_url": "https://192.168.1.1/dashboard"})
+
+    def test_pagerduty_routing_key_valid_hex(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"pagerduty_routing_key": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"})
+        assert result.pagerduty_routing_key == "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+
+    def test_pagerduty_routing_key_empty_allowed(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.pagerduty_routing_key == ""
+
+    def test_pagerduty_routing_key_invalid_format_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="32-character hex"):
+            _build_alerting({"pagerduty_routing_key": "not-a-valid-key"})
+
+    def test_pagerduty_routing_key_wrong_length_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="32-character hex"):
+            _build_alerting({"pagerduty_routing_key": "abcdef1234"})
+
+    def test_otlp_endpoint_default_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_endpoint == ""
+
+    def test_otlp_endpoint_set(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_endpoint": "http://collector:4317"})
+        assert result.otlp_endpoint == "http://collector:4317"
+
+    def test_otlp_endpoint_bare_host_port_valid(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_endpoint": "localhost:4317"})
+        assert result.otlp_endpoint == "localhost:4317"
+
+    def test_otlp_endpoint_unsupported_scheme_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="unsupported scheme"):
+            _build_alerting({"otlp_endpoint": "ftp://evil.host/exfil"})
+
+    def test_otlp_endpoint_file_scheme_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="unsupported scheme"):
+            _build_alerting({"otlp_endpoint": "file:///etc/passwd"})
+
+    def test_otlp_protocol_default_grpc(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_protocol == "grpc"
+
+    def test_otlp_protocol_http_valid(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_protocol": "http"})
+        assert result.otlp_protocol == "http"
+
+    def test_otlp_protocol_invalid_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_protocol"):
+            _build_alerting({"otlp_protocol": "websocket"})
+
+    def test_otlp_export_interval_default_5(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_export_interval_seconds == 5
+
+    def test_otlp_export_interval_custom(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_export_interval_seconds": 10})
+        assert result.otlp_export_interval_seconds == 10
+
+    def test_otlp_export_interval_zero_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_export_interval_seconds"):
+            _build_alerting({"otlp_export_interval_seconds": 0})
+
+    def test_otlp_export_interval_negative_raises(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_export_interval_seconds"):
+            _build_alerting({"otlp_export_interval_seconds": -1})
+
+
+class TestOtlpTlsConfig:
+    def test_otlp_tls_true_accepted(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_tls": True})
+        assert result.otlp_tls is True
+
+    def test_otlp_tls_false_accepted(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_tls": False})
+        assert result.otlp_tls is False
+
+    def test_otlp_tls_omitted_defaults_to_none(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_tls is None
+
+    def test_otlp_tls_explicit_null_is_none(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_tls": None})
+        assert result.otlp_tls is None
+
+    def test_otlp_tls_string_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls"):
+            _build_alerting({"otlp_tls": "true"})
+
+    def test_otlp_tls_int_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls"):
+            _build_alerting({"otlp_tls": 1})
+
+
+class TestOtlpCustomCaAndMtlsFields:
+    """S-049b: custom CA bundle + mTLS configuration on AlertingConfig."""
+
+    # ----- Defaults -----
+
+    def test_otlp_tls_ca_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_tls_ca_file == ""
+
+    def test_otlp_mtls_cert_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_mtls_cert_file == ""
+
+    def test_otlp_mtls_key_file_defaults_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({})
+        assert result.otlp_mtls_key_file == ""
+
+    # ----- Type validation -----
+
+    def test_otlp_tls_ca_file_int_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": 1})
+
+    def test_otlp_mtls_cert_file_list_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_mtls_cert_file"):
+            _build_alerting({"otlp_mtls_cert_file": ["/path/a.pem"]})
+
+    def test_otlp_mtls_key_file_dict_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_mtls_key_file"):
+            _build_alerting({"otlp_mtls_key_file": {"path": "/etc/key.pem"}})
+
+    # ----- Readability (S-049b Task 2) -----
+
+    def test_otlp_tls_ca_file_missing_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        missing = tmp_path / "does-not-exist.pem"
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": str(missing)})
+
+    def test_otlp_tls_ca_file_directory_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="otlp_tls_ca_file"):
+            _build_alerting({"otlp_tls_ca_file": str(tmp_path)})
+
+    def test_otlp_tls_ca_file_valid_path_accepted(self, tmp_path: Path) -> None:
+        from seerflow.config import _build_alerting
+
+        pem = tmp_path / "ca.pem"
+        pem.write_text("-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n")
+        result = _build_alerting({"otlp_tls_ca_file": str(pem)})
+        assert result.otlp_tls_ca_file == str(pem)
+
+    def test_otlp_mtls_cert_file_unreadable_raises(self, tmp_path: Path) -> None:
+        """File exists but has no read permission for the current user."""
+        import os
+        import stat
+
+        from seerflow.config import ConfigError, _build_alerting
+
+        if os.geteuid() == 0:  # pragma: no cover — root bypasses POSIX perms
+            pytest.skip("Running as root; chmod 000 is not enforced")
+        pem = tmp_path / "cert.pem"
+        pem.write_bytes(b"x")
+        pem.chmod(0)
+        try:
+            with pytest.raises(ConfigError, match="otlp_mtls_cert_file"):
+                _build_alerting(
+                    {
+                        "otlp_mtls_cert_file": str(pem),
+                        "otlp_mtls_key_file": str(pem),
+                    }
+                )
+        finally:
+            pem.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    # ----- Partial mTLS pairing (S-049b Task 3) -----
+
+    def test_otlp_mtls_cert_without_key_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        cert = tmp_path / "client.crt"
+        cert.write_text("stub")
+        with pytest.raises(ConfigError, match="otlp_mtls"):
+            _build_alerting({"otlp_mtls_cert_file": str(cert)})
+
+    def test_otlp_mtls_key_without_cert_raises(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        key = tmp_path / "client.key"
+        key.write_text("stub")
+        with pytest.raises(ConfigError, match="otlp_mtls"):
+            _build_alerting({"otlp_mtls_key_file": str(key)})
+
+    def test_otlp_mtls_full_triple_accepted(self, tmp_path: Path) -> None:
+        from seerflow.config import _build_alerting
+
+        ca = tmp_path / "ca.pem"
+        ca.write_text("ca")
+        cert = tmp_path / "client.crt"
+        cert.write_text("cert")
+        key = tmp_path / "client.key"
+        key.write_text("key")
+        result = _build_alerting(
+            {
+                "otlp_tls_ca_file": str(ca),
+                "otlp_mtls_cert_file": str(cert),
+                "otlp_mtls_key_file": str(key),
+            }
+        )
+        assert result.otlp_tls_ca_file == str(ca)
+        assert result.otlp_mtls_cert_file == str(cert)
+        assert result.otlp_mtls_key_file == str(key)
+
+    def test_otlp_tls_ca_alone_accepted(self, tmp_path: Path) -> None:
+        """CA-only is valid — server cert verification against a private CA."""
+        from seerflow.config import _build_alerting
+
+        ca = tmp_path / "ca.pem"
+        ca.write_text("ca")
+        result = _build_alerting({"otlp_tls_ca_file": str(ca)})
+        assert result.otlp_tls_ca_file == str(ca)
+        assert result.otlp_mtls_cert_file == ""
+        assert result.otlp_mtls_key_file == ""
+
+
+class TestWebSocketConfig:
+    def test_default_ws_fields(self) -> None:
+        from seerflow.config import SeerflowConfig
+
+        config = SeerflowConfig()
+        assert config.ws_max_connections == 20
+        assert config.ws_queue_maxlen == 1000
+        assert config.ws_tick_interval_s == 0.01
+        assert config.ws_batch_max_events == 10
+        assert config.ws_status_interval_s == 5.0
+
+    def test_ws_fields_can_be_overridden(self) -> None:
+        from seerflow.config import SeerflowConfig
+
+        config = SeerflowConfig(
+            ws_max_connections=5,
+            ws_queue_maxlen=500,
+            ws_tick_interval_s=0.02,
+            ws_batch_max_events=20,
+            ws_status_interval_s=10.0,
+        )
+        assert config.ws_max_connections == 5
+        assert config.ws_queue_maxlen == 500
+
+    def test_ws_fields_loaded_from_yaml(self, tmp_path: Path) -> None:
+        """YAML ``ws_*`` fields must reach SeerflowConfig via load_config."""
+        from seerflow.config import load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text(
+            "ws_max_connections: 7\n"
+            "ws_queue_maxlen: 250\n"
+            "ws_tick_interval_s: 0.05\n"
+            "ws_batch_max_events: 3\n"
+            "ws_status_interval_s: 2.5\n"
+        )
+        config = load_config(path=str(yaml_path))
+        assert config.ws_max_connections == 7
+        assert config.ws_queue_maxlen == 250
+        assert config.ws_tick_interval_s == 0.05
+        assert config.ws_batch_max_events == 3
+        assert config.ws_status_interval_s == 2.5
+
+    def test_ws_max_connections_must_be_positive_int(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_max_connections: 0\n")
+        with pytest.raises(ConfigError, match="ws_max_connections"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_tick_interval_must_be_positive(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_tick_interval_s: -0.1\n")
+        with pytest.raises(ConfigError, match="ws_tick_interval_s"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_queue_maxlen_must_be_int(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_queue_maxlen: not-a-number\n")
+        with pytest.raises(ConfigError, match="ws_queue_maxlen"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_max_connections_rejects_bool(self, tmp_path: Path) -> None:
+        """``ws_max_connections: true`` must raise, not silently become 1."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_max_connections: true\n")
+        with pytest.raises(ConfigError, match="ws_max_connections"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_queue_maxlen_ceiling_enforced(self, tmp_path: Path) -> None:
+        """Values above the 100k ceiling must be rejected."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_queue_maxlen: 1000000\n")
+        with pytest.raises(ConfigError, match="ws_queue_maxlen"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_max_connections_ceiling_enforced(self, tmp_path: Path) -> None:
+        """Values above the 1000 ceiling on ws_max_connections must be rejected."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_max_connections: 9999\n")
+        with pytest.raises(ConfigError, match="ws_max_connections"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_batch_max_events_ceiling_enforced(self, tmp_path: Path) -> None:
+        """Values above the 1000 ceiling on ws_batch_max_events must be rejected."""
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_batch_max_events: 5000\n")
+        with pytest.raises(ConfigError, match="ws_batch_max_events"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_allowed_origins_defaults_to_empty(self) -> None:
+        """Default SeerflowConfig has an empty origins tuple — app.py derives the default."""
+        from seerflow.config import SeerflowConfig
+
+        assert SeerflowConfig().ws_allowed_origins == ()
+
+    def test_ws_allowed_origins_loaded_from_yaml(self, tmp_path: Path) -> None:
+        """YAML list of origins flows into SeerflowConfig.ws_allowed_origins."""
+        from seerflow.config import load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text(
+            "ws_allowed_origins:\n  - http://dashboard.local\n  - http://10.0.0.1:8080\n"
+        )
+        config = load_config(path=str(yaml_path))
+        assert config.ws_allowed_origins == (
+            "http://dashboard.local",
+            "http://10.0.0.1:8080",
+        )
+
+    def test_ws_allowed_origins_rejects_non_list(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text('ws_allowed_origins: "http://localhost"\n')
+        with pytest.raises(ConfigError, match="ws_allowed_origins"):
+            load_config(path=str(yaml_path))
+
+    def test_ws_allowed_origins_rejects_non_string_items(self, tmp_path: Path) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "seerflow.yaml"
+        yaml_path.write_text("ws_allowed_origins:\n  - 42\n")
+        with pytest.raises(ConfigError, match="ws_allowed_origins"):
+            load_config(path=str(yaml_path))
+
+
+def test_parse_ws_fields_returns_named_tuple() -> None:
+    """_parse_ws_fields must return a _WsFields NamedTuple with named access."""
+    from seerflow.config import _parse_ws_fields, _WsFields
+
+    result = _parse_ws_fields({})
+    assert isinstance(result, _WsFields)
+    assert result.ws_max_connections == 20
+    assert result.ws_queue_maxlen == 1000
+    assert result.ws_tick_interval_s == 0.01
+    assert result.ws_batch_max_events == 10
+    assert result.ws_status_interval_s == 5.0
+    assert result.ws_allowed_origins == ()
+
+
+def test_ws_filter_min_interval_ms_default_is_100() -> None:
+    from seerflow.config import SeerflowConfig
+
+    cfg = SeerflowConfig()
+    assert cfg.ws_filter_min_interval_ms == 100
+
+
+def test_parse_ws_fields_includes_filter_min_interval_ms() -> None:
+    from seerflow.config import _parse_ws_fields
+
+    result = _parse_ws_fields({"ws_filter_min_interval_ms": 250})
+    assert result.ws_filter_min_interval_ms == 250
+
+
+def test_ws_filter_min_interval_ms_rejects_negative() -> None:
+    import pytest
+
+    from seerflow.config import ConfigError, _parse_ws_fields
+
+    with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
+        _parse_ws_fields({"ws_filter_min_interval_ms": -1})
+
+
+def test_ws_filter_min_interval_ms_accepts_zero() -> None:
+    """Zero means no throttle — must be accepted."""
+    from seerflow.config import _parse_ws_fields
+
+    result = _parse_ws_fields({"ws_filter_min_interval_ms": 0})
+    assert result.ws_filter_min_interval_ms == 0
+
+
+def test_ws_filter_min_interval_ms_rejects_bool() -> None:
+    """Bool is an int subclass; must be rejected explicitly."""
+    import pytest
+
+    from seerflow.config import ConfigError, _parse_ws_fields
+
+    with pytest.raises(ConfigError, match="ws_filter_min_interval_ms"):
+        _parse_ws_fields({"ws_filter_min_interval_ms": True})
+
+
+# ---------------------------------------------------------------------------
+# API hardening (S-181)
+# ---------------------------------------------------------------------------
+
+
+class TestApiConfig:
+    def test_api_rate_limit_defaults_from_empty_yaml(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text("storage:\n  backend: sqlite\n  path: ':memory:'\n")
+        cfg = load_config(cfg_path)
+        assert cfg.api_rate_limit_enabled is True
+        assert cfg.api_rate_limit_redis_url is None
+        assert cfg.api_allowed_origins == ()
+        assert cfg.api_list_rate_limit == "60/minute"
+        assert cfg.api_detail_rate_limit == "300/minute"
+        assert cfg.api_trust_proxy_headers is False
+
+    def test_api_rate_limit_invalid_list_string_rejected(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_list_rate_limit: '60/blarg'\n"
+        )
+        with pytest.raises(ConfigError, match="api_list_rate_limit"):
+            load_config(cfg_path)
+
+    def test_api_allowed_origins_parsed_as_tuple(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
+            "api_allowed_origins:\n  - https://dash.example.com\n"
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.api_allowed_origins == ("https://dash.example.com",)
+
+    def test_api_rate_limit_redis_url_rejects_empty_string(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_rate_limit_redis_url: ''\n"
+        )
+        with pytest.raises(ConfigError, match="api_rate_limit_redis_url"):
+            load_config(cfg_path)
+
+    def test_api_allowed_origins_rejects_non_string_entries(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_allowed_origins:\n  - 42\n"
+        )
+        with pytest.raises(ConfigError, match="api_allowed_origins"):
+            load_config(cfg_path)
+
+    def test_api_allowed_origins_rejects_wildcard(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\napi_allowed_origins:\n  - '*'\n"
+        )
+        with pytest.raises(ConfigError, match="must not contain"):
+            load_config(cfg_path)
+
+    def test_api_allowed_origins_rejects_schemeless_entries(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "seerflow.yaml"
+        cfg_path.write_text(
+            "storage:\n  backend: sqlite\n  path: ':memory:'\n"
+            "api_allowed_origins:\n  - 'dash.example.com'\n"
+        )
+        with pytest.raises(ConfigError, match="http://"):
+            load_config(cfg_path)
+
+
+def test_api_coverage_rate_limit_default() -> None:
+    cfg = SeerflowConfig()
+    assert cfg.api_coverage_rate_limit == "10/minute"
+
+
+def test_api_coverage_rate_limit_loader_roundtrip(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "seerflow.yaml"
+    yaml_path.write_text("api_coverage_rate_limit: 5/minute\n")
+    cfg = load_config(str(yaml_path))
+    assert cfg.api_coverage_rate_limit == "5/minute"
+
+
+def test_api_coverage_rate_limit_invalid_raises(tmp_path: Path) -> None:
+    yaml_path = tmp_path / "seerflow.yaml"
+    yaml_path.write_text("api_coverage_rate_limit: not-a-limit\n")
+    with pytest.raises(ConfigError, match="api_coverage_rate_limit"):
+        load_config(str(yaml_path))
+
+
+class TestDspotThresholdCapMultiplier:
+    def test_default_is_5(self) -> None:
+        from seerflow.config import DetectionConfig
+
+        cfg = DetectionConfig()
+        assert cfg.dspot_threshold_cap_multiplier == 5.0
+
+    def test_yaml_override(self, tmp_path: Path) -> None:
+        from seerflow.config import load_config
+
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "detection:\n  dspot:\n    threshold_cap_multiplier: 3.5\n",
+            encoding="utf-8",
+        )
+        cfg = load_config(str(yaml_path))
+        assert cfg.detection.dspot_threshold_cap_multiplier == 3.5
+
+    @pytest.mark.parametrize("bad", [0.5, 1.0, 0.0, -1.0])
+    def test_numeric_invalid_multiplier_rejected(self, tmp_path: Path, bad: float) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            f"detection:\n  dspot:\n    threshold_cap_multiplier: {bad}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match="threshold_cap_multiplier"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("yaml_special", [".inf", "-.inf", ".nan"])
+    def test_nonfinite_multiplier_rejected(self, tmp_path: Path, yaml_special: str) -> None:
+        from seerflow.config import ConfigError, load_config
+
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            f"detection:\n  dspot:\n    threshold_cap_multiplier: {yaml_special}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match="threshold_cap_multiplier"):
+            load_config(str(yaml_path))
+
+
+class TestLLMConfig:
+    """``LLMConfig`` + ``_build_llm`` validation (S-070)."""
+
+    def test_defaults_apply_when_no_block(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.backend == ""
+        assert config.llm.model_path == ""
+        assert config.llm.n_ctx == 4096
+        assert config.llm.n_threads is None
+        assert config.llm.n_gpu_layers == 0
+        assert config.llm.max_tokens_default == 256
+        assert config.llm.temperature_default == pytest.approx(0.2)
+        assert config.llm.seed == 42
+
+    def test_full_block_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  backend: llama_cpp\n"
+            "  model_path: /models/phi4.gguf\n"
+            "  n_ctx: 2048\n"
+            "  n_threads: 3\n"
+            "  n_gpu_layers: 1\n"
+            "  max_tokens_default: 512\n"
+            "  temperature_default: 0.7\n"
+            "  seed: 7\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.backend == "llama_cpp"
+        assert config.llm.model_path == "/models/phi4.gguf"
+        assert config.llm.n_ctx == 2048
+        assert config.llm.n_threads == 3
+        assert config.llm.n_gpu_layers == 1
+        assert config.llm.max_tokens_default == 512
+        assert config.llm.temperature_default == pytest.approx(0.7)
+        assert config.llm.seed == 7
+
+    def test_unknown_backend_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  backend: garbage\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.backend"):
+            load_config(str(yaml_path))
+
+    def test_backend_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  backend: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.backend"):
+            load_config(str(yaml_path))
+
+    def test_model_path_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  model_path: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.model_path"):
+            load_config(str(yaml_path))
+
+    def test_ollama_url_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_url: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.ollama_url"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [128, 511, 32769, 999999])
+    def test_n_ctx_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  n_ctx: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_ctx"):
+            load_config(str(yaml_path))
+
+    def test_n_ctx_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_ctx: 'big'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_ctx"):
+            load_config(str(yaml_path))
+
+    def test_n_ctx_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_ctx: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_ctx"):
+            load_config(str(yaml_path))
+
+    def test_n_threads_zero_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_threads: 0\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_threads"):
+            load_config(str(yaml_path))
+
+    def test_n_threads_negative_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_threads: -1\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_threads"):
+            load_config(str(yaml_path))
+
+    def test_n_threads_null_accepted(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_threads: null\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.n_threads is None
+
+    def test_n_gpu_layers_negative_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  n_gpu_layers: -1\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.n_gpu_layers"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 1025, 999999])
+    def test_max_tokens_default_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  max_tokens_default: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.max_tokens_default"):
+            load_config(str(yaml_path))
+
+    def test_max_tokens_default_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  max_tokens_default: 'lots'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.max_tokens_default"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [-0.1, 2.0001, 10.0])
+    def test_temperature_default_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  temperature_default: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.temperature_default"):
+            load_config(str(yaml_path))
+
+    def test_temperature_default_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: 'hot'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.temperature_default"):
+            load_config(str(yaml_path))
+
+    def test_temperature_default_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.temperature_default"):
+            load_config(str(yaml_path))
+
+    def test_temperature_default_zero_accepted(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: 0.0\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.temperature_default == pytest.approx(0.0)
+
+    def test_temperature_default_integer_coerced(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  temperature_default: 1\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.temperature_default == pytest.approx(1.0)
+
+    def test_seed_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  seed: 'random'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.seed"):
+            load_config(str(yaml_path))
+
+    def test_seed_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  seed: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"llm\.seed"):
+            load_config(str(yaml_path))
+
+
+class TestLLMExplanationConfig:
+    """``LLMConfig`` explanation-knob validation (S-071)."""
+
+    def test_explanation_defaults(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.explanation_cache_size == 256
+        assert config.llm.explanation_cache_ttl_s == 3600
+        assert config.llm.explanation_max_contributing_events == 8
+        assert config.llm.explanation_max_prompt_chars == 8000
+        assert config.llm.explanation_timeout_s == pytest.approx(12.0)
+
+    def test_full_explanation_block_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  explanation_cache_size: 512\n"
+            "  explanation_cache_ttl_s: 600\n"
+            "  explanation_max_contributing_events: 16\n"
+            "  explanation_max_prompt_chars: 4096\n"
+            "  explanation_timeout_s: 8.0\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.explanation_cache_size == 512
+        assert config.llm.explanation_cache_ttl_s == 600
+        assert config.llm.explanation_max_contributing_events == 16
+        assert config.llm.explanation_max_prompt_chars == 4096
+        assert config.llm.explanation_timeout_s == pytest.approx(8.0)
+
+    @pytest.mark.parametrize("value", [-1, 100_001])
+    def test_explanation_cache_size_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_cache_size: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_size"):
+            load_config(str(yaml_path))
+
+    def test_explanation_cache_size_zero_accepted(self, tmp_path: Path) -> None:
+        """``0`` disables the cache layer."""
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_cache_size: 0\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.explanation_cache_size == 0
+
+    def test_explanation_cache_size_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_cache_size: 'big'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_size"):
+            load_config(str(yaml_path))
+
+    def test_explanation_cache_size_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_cache_size: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_size"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 86_401])
+    def test_explanation_cache_ttl_s_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_cache_ttl_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_cache_ttl_s"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 65])
+    def test_explanation_max_contributing_events_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            f"llm:\n  explanation_max_contributing_events: {value}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match=r"explanation_max_contributing_events"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [511, 32_001])
+    def test_explanation_max_prompt_chars_out_of_range_rejected(
+        self, tmp_path: Path, value: int
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_max_prompt_chars: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_max_prompt_chars"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0.9, 120.1])
+    def test_explanation_timeout_s_out_of_range_rejected(
+        self, tmp_path: Path, value: float
+    ) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  explanation_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_explanation_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_explanation_timeout_s_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_timeout_s: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"explanation_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_explanation_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  explanation_timeout_s: 5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.explanation_timeout_s == pytest.approx(5.0)
+
+
+class TestLLMHuntConfig:
+    """``LLMConfig`` hunt-knob validation (S-072)."""
+
+    def test_hunt_defaults(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.hunt_cache_size == 256
+        assert config.llm.hunt_cache_ttl_s == 3600
+        assert config.llm.hunt_timeout_s == pytest.approx(12.0)
+        assert config.llm.hunt_max_results == 100
+        assert config.llm.hunt_max_query_chars == 512
+
+    def test_full_hunt_block_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  hunt_cache_size: 64\n"
+            "  hunt_cache_ttl_s: 900\n"
+            "  hunt_timeout_s: 5.0\n"
+            "  hunt_max_results: 50\n"
+            "  hunt_max_query_chars: 256\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.hunt_cache_size == 64
+        assert config.llm.hunt_cache_ttl_s == 900
+        assert config.llm.hunt_timeout_s == pytest.approx(5.0)
+        assert config.llm.hunt_max_results == 50
+        assert config.llm.hunt_max_query_chars == 256
+
+    @pytest.mark.parametrize("value", [-1, 100_001])
+    def test_hunt_cache_size_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_cache_size: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_cache_size"):
+            load_config(str(yaml_path))
+
+    def test_hunt_cache_size_zero_accepted(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_cache_size: 0\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.hunt_cache_size == 0
+
+    def test_hunt_cache_size_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_cache_size: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_cache_size"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 86_401])
+    def test_hunt_cache_ttl_s_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_cache_ttl_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_cache_ttl_s"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0.9, 120.1])
+    def test_hunt_timeout_s_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_hunt_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_hunt_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  hunt_timeout_s: 7\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.hunt_timeout_s == pytest.approx(7.0)
+
+    @pytest.mark.parametrize("value", [0, 10_001])
+    def test_hunt_max_results_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_max_results: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_max_results"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [15, 16_385])
+    def test_hunt_max_query_chars_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  hunt_max_query_chars: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"hunt_max_query_chars"):
+            load_config(str(yaml_path))
+
+    # ---- S-098 Ollama config fields --------------------------------------
+
+    def test_ollama_model_default_is_phi4_mini(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.ollama_model == "phi4-mini"
+
+    def test_ollama_model_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_model: llama3.1:8b\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.ollama_model == "llama3.1:8b"
+
+    def test_ollama_model_empty_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_model: ''\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_model"):
+            load_config(str(yaml_path))
+
+    def test_ollama_model_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_model: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_model"):
+            load_config(str(yaml_path))
+
+    def test_ollama_model_too_long_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        oversized = "x" * 257
+        yaml_path.write_text(f"llm:\n  ollama_model: '{oversized}'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_model"):
+            load_config(str(yaml_path))
+
+    def test_ollama_timeout_s_default_is_30(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.ollama_timeout_s == pytest.approx(30.0)
+
+    def test_ollama_timeout_s_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: 5.5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.ollama_timeout_s == pytest.approx(5.5)
+
+    def test_ollama_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: 7\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.ollama_timeout_s == pytest.approx(7.0)
+
+    @pytest.mark.parametrize("value", [0.99, 600.01])
+    def test_ollama_timeout_s_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  ollama_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_ollama_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_ollama_timeout_s_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  ollama_timeout_s: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"ollama_timeout_s"):
+            load_config(str(yaml_path))
+
+    # ---- S-099 Cloud config fields ---------------------------------------
+
+    def test_cloud_provider_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_provider == ""
+
+    @pytest.mark.parametrize("provider", ["anthropic", "openai"])
+    def test_cloud_provider_valid_values_parse(self, tmp_path: Path, provider: str) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  cloud_provider: {provider}\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_provider == provider
+
+    def test_cloud_provider_unknown_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_provider: azure\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_provider"):
+            load_config(str(yaml_path))
+
+    def test_cloud_provider_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_provider: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_provider"):
+            load_config(str(yaml_path))
+
+    def test_cloud_api_key_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_api_key == ""
+
+    def test_cloud_api_key_arbitrary_string_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_api_key: sk-test-abc\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_api_key == "sk-test-abc"
+
+    def test_cloud_api_key_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_api_key: 12345\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_api_key"):
+            load_config(str(yaml_path))
+
+    def test_cloud_api_key_env_var_interpolation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``${ANTHROPIC_API_KEY}`` is interpolated end-to-end (S-099 AC9)."""
+        monkeypatch.setenv("S099_TEST_ANTHROPIC_API_KEY", "sk-ant-resolved-via-env")
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  backend: cloud\n"
+            "  cloud_provider: anthropic\n"
+            "  cloud_api_key: ${S099_TEST_ANTHROPIC_API_KEY}\n"
+            "  cloud_model: claude-haiku-4-5\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_api_key == "sk-ant-resolved-via-env"
+
+    def test_cloud_api_key_repr_does_not_leak_secret(self) -> None:
+        """``repr=False`` regression guard for S-099 AC10."""
+        from seerflow.config import LLMConfig
+
+        cfg = LLMConfig(cloud_api_key="sk-test-secret-value")
+        assert "sk-test-secret-value" not in repr(cfg)
+
+    def test_cloud_model_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_model == ""
+
+    def test_cloud_model_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_model: gpt-4o-mini\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_model == "gpt-4o-mini"
+
+    def test_cloud_model_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_model: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_model"):
+            load_config(str(yaml_path))
+
+    def test_cloud_model_too_long_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        oversized = "x" * 257
+        yaml_path.write_text(f"llm:\n  cloud_model: '{oversized}'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_model"):
+            load_config(str(yaml_path))
+
+    def test_cloud_timeout_s_default_is_30(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_timeout_s == pytest.approx(30.0)
+
+    def test_cloud_timeout_s_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: 7.5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_timeout_s == pytest.approx(7.5)
+
+    def test_cloud_timeout_s_integer_coerced_to_float(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: 5\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_timeout_s == pytest.approx(5.0)
+
+    @pytest.mark.parametrize("value", [0.99, 600.01])
+    def test_cloud_timeout_s_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  cloud_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_cloud_timeout_s_non_number_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: 'slow'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_cloud_timeout_s_boolean_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_timeout_s: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_cloud_base_url_default_is_empty(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.cloud_base_url == ""
+
+    def test_cloud_base_url_custom_value_parses(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_base_url: https://proxy.example/\n", encoding="utf-8")
+        config = load_config(str(yaml_path))
+        assert config.llm.cloud_base_url == "https://proxy.example/"
+
+    def test_cloud_base_url_non_string_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  cloud_base_url: 42\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"cloud_base_url"):
+            load_config(str(yaml_path))
+
+
+class TestLLMRuleSuggestionConfig:
+    """Validation for the S-100 ``rule_suggestion_*`` LLMConfig fields."""
+
+    def test_defaults(self, tmp_path: Path) -> None:
+        config = load_config(None, search_dir=tmp_path)
+        assert config.llm.rule_suggestion_cache_size == 64
+        assert config.llm.rule_suggestion_cache_ttl_s == 21_600
+        assert config.llm.rule_suggestion_min_tp == 3
+        assert config.llm.rule_suggestion_window_days == 0
+        assert config.llm.rule_suggestion_timeout_s == pytest.approx(30.0)
+
+    def test_custom_values_parse(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(
+            "llm:\n"
+            "  rule_suggestion_cache_size: 128\n"
+            "  rule_suggestion_cache_ttl_s: 3600\n"
+            "  rule_suggestion_min_tp: 5\n"
+            "  rule_suggestion_window_days: 30\n"
+            "  rule_suggestion_timeout_s: 45.0\n",
+            encoding="utf-8",
+        )
+        config = load_config(str(yaml_path))
+        assert config.llm.rule_suggestion_cache_size == 128
+        assert config.llm.rule_suggestion_cache_ttl_s == 3600
+        assert config.llm.rule_suggestion_min_tp == 5
+        assert config.llm.rule_suggestion_window_days == 30
+        assert config.llm.rule_suggestion_timeout_s == pytest.approx(45.0)
+
+    @pytest.mark.parametrize("value", [-1, 4097])
+    def test_cache_size_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_cache_size: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_cache_size"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 86_401])
+    def test_cache_ttl_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_cache_ttl_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_cache_ttl_s"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0, 101])
+    def test_min_tp_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_min_tp: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_min_tp"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [-1, 366])
+    def test_window_days_out_of_range_rejected(self, tmp_path: Path, value: int) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_window_days: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_window_days"):
+            load_config(str(yaml_path))
+
+    @pytest.mark.parametrize("value", [0.5, 121.0])
+    def test_timeout_out_of_range_rejected(self, tmp_path: Path, value: float) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text(f"llm:\n  rule_suggestion_timeout_s: {value}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_timeout_s"):
+            load_config(str(yaml_path))
+
+    def test_min_tp_non_integer_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  rule_suggestion_min_tp: 'three'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_min_tp"):
+            load_config(str(yaml_path))
+
+    def test_timeout_non_numeric_rejected(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "cfg.yaml"
+        yaml_path.write_text("llm:\n  rule_suggestion_timeout_s: 'fast'\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match=r"rule_suggestion_timeout_s"):
+            load_config(str(yaml_path))

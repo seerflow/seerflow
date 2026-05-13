@@ -30,8 +30,11 @@ from seerflow.models.entity import (
     normalize_username,
     primary_entity_value,
     resolve_entities,
+    sanitize_for_log,
 )
 from seerflow.models.event import AttrValue, SeerflowEvent, SeverityLevel
+from seerflow.models.indicator import Indicator, IndicatorSnapshot, IndicatorType
+from seerflow.models.ioc_match import IoCMatch
 from seerflow.models.query import (
     AlertQuery,
     EntityRelation,
@@ -60,6 +63,10 @@ __all__ = [
     "FileEntity",
     "HostEntity",
     "IPEntity",
+    "Indicator",
+    "IndicatorSnapshot",
+    "IndicatorType",
+    "IoCMatch",
     "Page",
     "ProcessEntity",
     "SecurityEntity",
@@ -78,4 +85,5 @@ __all__ = [
     "normalize_username",
     "primary_entity_value",
     "resolve_entities",
+    "sanitize_for_log",
 ]
