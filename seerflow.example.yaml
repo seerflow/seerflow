@@ -18,9 +18,11 @@ storage:
   # postgresql_command_timeout_s: 30.0        # per-query timeout in seconds; > 0
 
   # Entity-graph backend (S-155). ``igraph`` is the in-process default;
-  # ``falkordb`` (S-155-F1) and ``postgres_age`` (S-155-F2) are reserved
-  # for future scale-out backends and currently raise NotImplementedError.
+  # ``falkordb`` (S-155-F1) is available with ``uv sync --extra
+  # graph-falkordb`` and a ``falkordb_url`` below. ``postgres_age``
+  # (S-155-F2) is still reserved and currently raises NotImplementedError.
   # graph_backend: igraph                     # igraph | falkordb | postgres_age
+  # falkordb_url: ${SEERFLOW_FALKORDB_URL:-falkor://localhost:6379}  # required when graph_backend=falkordb
 
 receivers:
   # Network binding

@@ -72,6 +72,11 @@ llm-cloud = ["anthropic>=0.40", "openai>=1.55"]
 # absent, mirroring the ``llm-cpu`` / ``llm-cloud`` graceful-absence
 # pattern.
 postgres = ["asyncpg>=0.30", "testcontainers[postgres]>=4.0"]
+# S-155-F1: FalkorDB graph backend. Optional because the falkordb client
+# pulls in redis-py; default deployments using graph_backend: igraph never
+# need it. ``connect_graph`` raises ConfigError with an install hint when
+# the import fails, mirroring the ``postgres`` extra pattern.
+graph-falkordb = ["falkordb>=1.6"]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
@@ -162,6 +167,7 @@ module = [
     "redis.*",
     "asyncpg.*",
     "testcontainers.*",
+    "falkordb.*",
 ]
 ignore_missing_imports = true
 
@@ -176,11 +182,12 @@ skips = ["B101", "B311"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
+addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e and not requires_falkordb' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
 markers = [
     "benchmark: performance benchmarks",
     "docker: integration tests requiring Docker daemon",
     "e2e: end-to-end pipeline integration tests",
+    "requires_falkordb: integration tests requiring a live FalkorDB instance",
     "slow: heavyweight benchmarks, run with pytest -m slow",
     "unit: fast isolated unit tests",
 ]

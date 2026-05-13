@@ -6,14 +6,15 @@ factory hands back a connected :class:`GraphBackend`. The default branch
 returns the in-memory igraph adapter — zero behaviour change for any
 existing deployment.
 
-Two backend names route to deferred follow-ups:
+Backend routing:
 
-* ``"falkordb"`` → S-155-F1 (Redis-fork with openCypher).
-* ``"postgres_age"`` → S-155-F2 (Cypher-over-asyncpg via Apache AGE).
-
-Both branches raise :class:`NotImplementedError` with a message naming
-the follow-up so operators understand why the value is reserved but not
-yet usable.
+* ``"igraph"`` → in-memory ``InMemoryIgraphBackend`` (default).
+* ``"falkordb"`` → :class:`FalkorDBGraphBackend` (S-155-F1). Requires
+  the ``graph-falkordb`` optional extra and a non-empty
+  ``storage.falkordb_url``. Missing extra surfaces as
+  :class:`ConfigError` with an install hint.
+* ``"postgres_age"`` → S-155-F2 (Cypher-over-asyncpg via Apache AGE),
+  still deferred. Branch raises :class:`NotImplementedError`.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from seerflow.config import ConfigError
 from seerflow.graph.backends import InMemoryIgraphBackend
 
 if TYPE_CHECKING:
@@ -43,9 +45,11 @@ async def connect_graph(config: StorageConfig) -> GraphBackend:
         A connected backend ready for use.
 
     Raises:
-        NotImplementedError: When ``graph_backend`` names a backend whose
-            implementation is deferred to a follow-up story (FalkorDB or
-            PostgreSQL AGE).
+        ConfigError: When ``graph_backend == "falkordb"`` and either the
+            ``graph-falkordb`` extra is missing or ``falkordb_url`` is
+            empty.
+        NotImplementedError: When ``graph_backend == "postgres_age"`` —
+            still tracked in S-155-F2.
         ValueError: For any other unknown value (config validation should
             catch this earlier; this is the defence-in-depth path).
     """
@@ -55,12 +59,12 @@ async def connect_graph(config: StorageConfig) -> GraphBackend:
     if backend == "igraph":
         return InMemoryIgraphBackend()
     if backend == "falkordb":
-        msg = (
-            "FalkorDB graph backend is not yet implemented — tracked in "
-            "S-155-F1. Use graph_backend: igraph (default) until the "
-            "follow-up lands."
-        )
-        raise NotImplementedError(msg)
+        if not config.falkordb_url:
+            msg = "storage.falkordb_url is required when storage.graph_backend == 'falkordb'"
+            raise ConfigError(msg)
+        from seerflow.graph.falkordb_backend import FalkorDBGraphBackend
+
+        return await FalkorDBGraphBackend.connect(url=config.falkordb_url)
     if backend == "postgres_age":
         msg = (
             "PostgreSQL AGE graph backend is not yet implemented — "

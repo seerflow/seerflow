@@ -73,6 +73,10 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
     # storage
     if data["storage"].get("postgresql_url"):
         data["storage"]["postgresql_url"] = _MASK
+    # S-155-F1: falkordb_url may contain embedded credentials
+    # (``falkor://user:password@host``); mask the same way.
+    if data["storage"].get("falkordb_url"):
+        data["storage"]["falkordb_url"] = _MASK
 
     # alerting — typed WebhookTarget list
     if data["alerting"].get("pagerduty_routing_key"):

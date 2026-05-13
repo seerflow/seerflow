@@ -56,10 +56,16 @@ class StorageConfig:
     postgresql_pool_max_size: int = 10
     postgresql_command_timeout_s: float = 30.0
     # S-155: pluggable entity-graph backend. ``igraph`` is the in-process
-    # default; ``falkordb`` and ``postgres_age`` are deferred to S-155-F1
-    # and S-155-F2 respectively and currently raise ``NotImplementedError``
-    # at :func:`seerflow.graph.factory.connect_graph` time.
+    # default; ``falkordb`` lands via S-155-F1 (requires the
+    # ``graph-falkordb`` extra) and ``postgres_age`` is deferred to
+    # S-155-F2 (still raises ``NotImplementedError`` at
+    # :func:`seerflow.graph.factory.connect_graph` time).
     graph_backend: Literal["igraph", "falkordb", "postgres_age"] = "igraph"
+    # S-155-F1: FalkorDB connection URL. Required when
+    # ``graph_backend == "falkordb"``; ignored otherwise. ``repr=False``
+    # mirrors ``postgresql_url`` so accidental config dumps never log
+    # embedded credentials.
+    falkordb_url: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
