@@ -852,3 +852,82 @@ class TestRulesSubcommand:
 
         with pytest.raises(SystemExit):
             parse_args(["rules", "list", "--format", "yaml"])
+
+
+class TestCLIExportArgs:
+    """Parser surface for ``seerflow export`` (S-076)."""
+
+    def test_parse_export_events_defaults(self) -> None:
+        args = parse_args(["export", "events"])
+        assert args.command == "export"
+        assert args.export_type == "events"
+        assert args.format == "json"
+        assert args.since == "24h"
+        assert args.limit == 100_000
+        assert args.output is None
+        assert args.source is None
+        assert args.severity is None
+
+    def test_parse_export_events_full(self) -> None:
+        args = parse_args(
+            [
+                "export",
+                "events",
+                "--format",
+                "csv",
+                "--since",
+                "1h",
+                "--source",
+                "auth",
+                "--severity",
+                "3",
+                "--limit",
+                "50",
+                "--output",
+                "/tmp/out.csv",
+            ],
+        )
+        assert args.export_type == "events"
+        assert args.format == "csv"
+        assert args.since == "1h"
+        assert args.source == "auth"
+        assert args.severity == 3
+        assert args.limit == 50
+        assert args.output == "/tmp/out.csv"
+
+    def test_parse_export_alerts_full(self) -> None:
+        args = parse_args(
+            [
+                "export",
+                "alerts",
+                "--format",
+                "csv",
+                "--since",
+                "7d",
+                "--type",
+                "ml",
+                "--severity",
+                "4",
+                "--output",
+                "/tmp/x.csv",
+            ],
+        )
+        assert args.export_type == "alerts"
+        assert args.format == "csv"
+        assert args.type == "ml"
+        assert args.severity == 4
+        assert args.output == "/tmp/x.csv"
+
+    def test_parse_export_alerts_defaults(self) -> None:
+        args = parse_args(["export", "alerts"])
+        assert args.export_type == "alerts"
+        assert args.format == "json"
+        assert args.type is None
+
+    def test_parse_export_rejects_unknown_format(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["export", "events", "--format", "xml"])
+
+    def test_parse_export_requires_export_type(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["export"])

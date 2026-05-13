@@ -80,6 +80,10 @@ def main() -> None:
             from seerflow.hunt_cmd import run_hunt
 
             sys.exit(_run_async_int(run_hunt(args)))
+        elif args.command == "export":
+            from seerflow.export_cmd import run_export
+
+            sys.exit(_run_async_int(run_export(args)))
         elif args.command == "rules":
             from seerflow.rules_cmd import run_rules_list
 
