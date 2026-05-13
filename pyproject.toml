@@ -77,6 +77,12 @@ postgres = ["asyncpg>=0.30", "testcontainers[postgres]>=4.0"]
 # need it. ``connect_graph`` raises ConfigError with an install hint when
 # the import fails, mirroring the ``postgres`` extra pattern.
 graph-falkordb = ["falkordb>=1.6"]
+# S-155-F2: PostgreSQL AGE graph backend. AGE itself is a server-side
+# Postgres extension, so the only Python dependency is asyncpg (same lower
+# bound as the ``postgres`` storage extra). ``connect_graph`` raises
+# ConfigError with an install hint when the import fails, mirroring the
+# ``postgres`` and ``graph-falkordb`` extra patterns.
+graph-postgres-age = ["asyncpg>=0.30"]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
@@ -182,12 +188,13 @@ skips = ["B101", "B311"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e and not requires_falkordb' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
+addopts = "-ra --strict-markers -m 'not slow and not docker and not e2e and not requires_falkordb and not requires_postgres_age' --benchmark-min-rounds=10 --benchmark-storage=.benchmarks"
 markers = [
     "benchmark: performance benchmarks",
     "docker: integration tests requiring Docker daemon",
     "e2e: end-to-end pipeline integration tests",
     "requires_falkordb: integration tests requiring a live FalkorDB instance",
+    "requires_postgres_age: integration tests requiring an AGE-enabled PostgreSQL instance",
     "slow: heavyweight benchmarks, run with pytest -m slow",
     "unit: fast isolated unit tests",
 ]
