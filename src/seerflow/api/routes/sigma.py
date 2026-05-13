@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import Path as FPath
 from fastapi.responses import JSONResponse
 
@@ -25,11 +25,15 @@ from seerflow.api.deps import (
     DetectionEngines,
     StorageDeps,
     get_engines,
+    get_health_state,
+    get_rule_suggestion_service,
     get_storage,
 )
-from seerflow.api.limits import limiter, list_limit, sigma_upload_limit
+from seerflow.api.limits import detail_limit, limiter, list_limit, sigma_upload_limit
 from seerflow.api.schemas import (
     PaginatedResponse,
+    RuleSuggestionPattern,
+    RuleSuggestionResponse,
     SigmaRuleDetail,
     SigmaRuleSummary,
     SigmaRuleTimelineBucket,
@@ -44,12 +48,20 @@ from seerflow.sigma.ids import compute_rule_id
 from seerflow.sigma.validator import SigmaRuleValidationError, validate_yaml
 
 if TYPE_CHECKING:
+    from seerflow.llm.rule_suggestion.service import RuleSuggestionService
     from seerflow.sigma.engine import SigmaEngine
 
 router = APIRouter(tags=["sigma"], prefix="/sigma")
 
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 Engines = Annotated[DetectionEngines, Depends(get_engines)]
+RuleSuggestionDep = Annotated["RuleSuggestionService | None", Depends(get_rule_suggestion_service)]
+HealthStateDep = Annotated[dict[str, str], Depends(get_health_state)]
+
+# Path regex for ``pattern_key`` — only the characters
+# ``derive_pattern_key`` ever produces. Any caller-supplied value that
+# doesn't match returns 422 from FastAPI before reaching the service.
+_PATTERN_KEY_REGEX = r"^[a-z0-9_:.-]{1,128}$"
 
 # 24h alert-count window scan ceiling. Mirrors attack/coverage: a single
 # bounded scan beats N per-rule round-trips; AlertStore enforces 10000 cap.
@@ -427,3 +439,173 @@ async def upload_rule(
         status_code=201,
         content=_build_detail(rule, counts_24h.get(str(rule["title"]), 0)).model_dump(),
     )
+
+
+# --------------------------------------------------------------------------
+# S-100 — Sigma rule suggestion from TP feedback (FR-066)
+#
+# Three endpoints expose the LLM-drafted rule-suggestion flow:
+#
+#   GET    /sigma/rule-suggestions             — list eligible patterns
+#   POST   /sigma/rule-suggestions/{key}       — draft (or return cached)
+#   DELETE /sigma/rule-suggestions/{key}       — invalidate cache after promotion
+#
+# All three return 503 with ``{"detail": "llm_not_ready", "status":
+# health_state["llm"]}`` when the LLM backend is disabled or degraded.
+# --------------------------------------------------------------------------
+
+
+def _llm_not_ready(health_state: dict[str, str]) -> HTTPException:
+    """Return a 503 envelope reflecting the live LLM health surface."""
+    return HTTPException(
+        status_code=503,
+        detail={
+            "detail": "llm_not_ready",
+            "status": health_state.get("llm", "disabled"),
+        },
+    )
+
+
+@router.get(
+    "/rule-suggestions",
+    response_model=PaginatedResponse[RuleSuggestionPattern],
+    responses={
+        429: {"description": "Rate limit exceeded"},
+        503: {"description": "LLM not ready"},
+    },
+)
+@limiter.limit(list_limit)
+async def list_rule_suggestions(
+    request: Request,  # required for slowapi
+    service: RuleSuggestionDep,
+    health_state: HealthStateDep,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    limit: Annotated[int, Query(ge=1, le=200, description="Results per page")] = 50,
+) -> PaginatedResponse[RuleSuggestionPattern]:
+    """List patterns eligible for a Sigma rule suggestion (S-100, FR-066)."""
+    if service is None:
+        raise _llm_not_ready(health_state)
+
+    rows = await service.list_eligible_patterns()
+    total = len(rows)
+    start = (page - 1) * limit
+    end = start + limit
+    items = [
+        RuleSuggestionPattern(
+            pattern_key=row.pattern_key,
+            tp_count=row.tp_count,
+            most_recent_tp_ns=row.most_recent_tp_ns,
+            contributing_alert_ids=list(row.contributing_alert_ids),
+        )
+        for row in rows[start:end]
+    ]
+    return PaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+        has_next=end < total,
+    )
+
+
+@router.post(
+    "/rule-suggestions/{pattern_key}",
+    response_model=RuleSuggestionResponse,
+    responses={
+        404: {"description": "Pattern no longer eligible"},
+        422: {"description": "Invalid pattern_key"},
+        429: {"description": "Rate limit exceeded"},
+        502: {"description": "LLM backend failed"},
+        503: {"description": "LLM not ready"},
+    },
+)
+@limiter.limit(detail_limit)
+async def draft_rule_suggestion(
+    request: Request,  # required for slowapi
+    pattern_key: Annotated[
+        str,
+        FPath(
+            description="Pattern key (alert_type:rule_name:entity_type)",
+            pattern=_PATTERN_KEY_REGEX,
+            max_length=128,
+        ),
+    ],
+    service: RuleSuggestionDep,
+    health_state: HealthStateDep,
+) -> RuleSuggestionResponse:
+    """Generate (or return cached) Sigma rule suggestion for a TP-confirmed pattern."""
+    if service is None:
+        raise _llm_not_ready(health_state)
+
+    try:
+        result = await service.suggest(pattern_key)
+    except TimeoutError:
+        raise HTTPException(
+            status_code=502,
+            detail={"detail": "llm_timeout"},
+        ) from None
+    except Exception:
+        # Any other backend error — propagate as a generic 502 so the
+        # dashboard can grey out the suggestion. Detailed context is in
+        # the server log (logged inside the service).
+        raise HTTPException(
+            status_code=502,
+            detail={"detail": "llm_failed"},
+        ) from None
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"detail": "pattern_not_eligible"},
+        )
+
+    return RuleSuggestionResponse(
+        pattern_key=result.pattern_key,
+        tp_count=result.tp_count,
+        yaml=result.yaml,
+        title=result.title,
+        logsource_key=list(result.logsource_key),
+        validation_stage=result.validation_stage,
+        validation_message=result.validation_message,
+        contributing_alert_ids=list(result.contributing_alert_ids),
+        model=result.model,
+        generated_at_ns=result.generated_at_ns,
+        latency_ms=result.latency_ms,
+        cached=result.cached,
+    )
+
+
+@router.delete(
+    "/rule-suggestions/{pattern_key}",
+    status_code=204,
+    responses={
+        422: {"description": "Invalid pattern_key"},
+        429: {"description": "Rate limit exceeded"},
+        503: {"description": "LLM not ready"},
+    },
+)
+@limiter.limit(detail_limit)
+async def invalidate_rule_suggestion(
+    request: Request,  # required for slowapi
+    pattern_key: Annotated[
+        str,
+        FPath(
+            description="Pattern key (alert_type:rule_name:entity_type)",
+            pattern=_PATTERN_KEY_REGEX,
+            max_length=128,
+        ),
+    ],
+    service: RuleSuggestionDep,
+    health_state: HealthStateDep,
+) -> Response:
+    """Drop the cached suggestion for ``pattern_key``.
+
+    Idempotent — returns 204 whether or not a cached entry existed. Used
+    by the dashboard after the operator promotes the suggested rule via
+    the existing ``POST /api/v1/sigma/rules`` upload route so the
+    candidate list refreshes.
+    """
+    if service is None:
+        raise _llm_not_ready(health_state)
+    await service.invalidate(pattern_key)
+    return Response(status_code=204)

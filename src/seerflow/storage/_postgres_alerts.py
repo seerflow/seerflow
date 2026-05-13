@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 import msgspec
 
+from seerflow.llm.rule_suggestion.aggregator import PatternFeedbackRow
+from seerflow.llm.rule_suggestion.pattern_keys import derive_pattern_key
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.models.feedback import FeedbackEvent
@@ -30,6 +32,10 @@ if TYPE_CHECKING:
     from seerflow.models.query import AlertQuery, TimeRange
 
 _log = logging.getLogger(__name__)
+
+# Mirror of ``_sqlite_alerts._AGG_MAX_CONTRIB_IDS`` — declared locally so the
+# postgres backend never imports from a sibling backend module.
+_AGG_MAX_CONTRIB_IDS = 16
 
 
 def _build_pg_alert_query(filters: AlertQuery, start_param: int = 1) -> tuple[str, list[Any], int]:
@@ -383,6 +389,97 @@ class _PostgresAlertMixin:
             for row in rows
         )
         return Page(items=items, total=total, page=page, limit=limit)
+
+    async def aggregate_tp_feedback(
+        self,
+        *,
+        min_tp: int,
+        window_ns: int | None = None,
+        now_ns: int | None = None,
+        limit: int = 50_000,
+    ) -> tuple[PatternFeedbackRow, ...]:
+        """Aggregate TP feedback by ``(alert_type, rule_name, entity_type)``.
+
+        PostgreSQL mirror of :py:meth:`_SqliteAlertMixin.aggregate_tp_feedback`.
+        Uses ``DISTINCT ON`` to pick the newest feedback row per alert id
+        (PostgreSQL's idiomatic dedup pattern) and ``array_agg(... ORDER BY
+        most_recent_per_alert DESC)`` to assemble the per-pattern ID list.
+        """
+        if window_ns is not None and window_ns > 0:
+            reference_ns = now_ns if now_ns is not None else time.time_ns()
+            window_floor_ns: int | None = reference_ns - window_ns
+        else:
+            window_floor_ns = None
+
+        sql = """
+            WITH latest_per_alert AS (
+                SELECT DISTINCT ON (alert_id)
+                    alert_id,
+                    feedback,
+                    submitted_at_ns AS most_recent_per_alert
+                FROM alert_feedback_events
+                WHERE ($1::BIGINT IS NULL OR submitted_at_ns >= $1::BIGINT)
+                ORDER BY alert_id, submitted_at_ns DESC
+            ),
+            tp_alerts AS (
+                SELECT
+                    l.alert_id,
+                    l.most_recent_per_alert,
+                    a.alert_type,
+                    a.rule_name,
+                    a.entity_type
+                FROM latest_per_alert l
+                JOIN alerts a ON a.alert_id = l.alert_id
+                WHERE l.feedback = 'tp'
+            )
+            SELECT
+                alert_type,
+                rule_name,
+                entity_type,
+                COUNT(*) AS tp_count,
+                MAX(most_recent_per_alert) AS most_recent_tp_ns,
+                array_agg(alert_id ORDER BY most_recent_per_alert DESC)::text[]
+                    AS alert_ids
+            FROM tp_alerts
+            GROUP BY alert_type, rule_name, entity_type
+            HAVING COUNT(*) >= $2::BIGINT
+            ORDER BY tp_count DESC, most_recent_tp_ns DESC
+            LIMIT $3::BIGINT
+        """  # parameters bound, not interpolated
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                sql,
+                window_floor_ns,
+                int(min_tp),
+                int(limit),
+            )
+
+        out: list[PatternFeedbackRow] = []
+        for row in rows:
+            key_alert = Alert(
+                alert_id="",
+                alert_type=row["alert_type"],
+                timestamp_ns=0,
+                severity_id=SeverityLevel.INFORMATIONAL,
+                rule_name=row["rule_name"],
+                description="",
+                entity_uuid="",
+                entity_value="",
+                entity_type=row["entity_type"],
+                contributing_events=(),
+            )
+            pattern_key = derive_pattern_key(key_alert)
+            ids_raw = row["alert_ids"] or []
+            id_tuple = tuple(ids_raw)[:_AGG_MAX_CONTRIB_IDS]
+            out.append(
+                PatternFeedbackRow(
+                    pattern_key=pattern_key,
+                    tp_count=int(row["tp_count"]),
+                    most_recent_tp_ns=int(row["most_recent_tp_ns"]),
+                    contributing_alert_ids=id_tuple,
+                )
+            )
+        return tuple(out)
 
     async def count_by_severity(self) -> dict[str, int]:
         """Return alert counts grouped by severity name (lowercase)."""

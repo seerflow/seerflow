@@ -543,3 +543,49 @@ class SigmaRuleTimelineResponse(BaseModel):
     """Dense 24-bucket grid for a single Sigma rule's last-24h firing trend."""
 
     buckets: list[SigmaRuleTimelineBucket]
+
+
+class RuleSuggestionPattern(BaseModel):
+    """One eligible pattern in the ``GET /sigma/rule-suggestions`` list (S-100).
+
+    Mirrors :class:`seerflow.llm.rule_suggestion.aggregator.PatternFeedbackRow`.
+    ``most_recent_tp_ns`` is serialised as a JSON string for JS bigint safety,
+    matching the convention on :class:`SigmaRuleTimelineBucket`.
+    """
+
+    pattern_key: str
+    tp_count: int
+    most_recent_tp_ns: int
+    contributing_alert_ids: list[str]
+
+    @field_serializer("most_recent_tp_ns", when_used="json")
+    def _serialize_most_recent_tp_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199)."""
+        return str(v)
+
+
+class RuleSuggestionResponse(BaseModel):
+    """One drafted Sigma rule suggestion (S-100).
+
+    Carries the YAML body, the structured validator verdict, and the
+    metadata the dashboard needs (model, latency, cache hit). Maps from
+    :class:`seerflow.llm.rule_suggestion.result.RuleSuggestionResult`.
+    """
+
+    pattern_key: str
+    tp_count: int
+    yaml: str
+    title: str
+    logsource_key: list[str]
+    validation_stage: Literal["ok", "yaml", "schema", "compile"]
+    validation_message: str
+    contributing_alert_ids: list[str]
+    model: str
+    generated_at_ns: int
+    latency_ms: float
+    cached: bool
+
+    @field_serializer("generated_at_ns", when_used="json")
+    def _serialize_generated_at_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-199)."""
+        return str(v)
