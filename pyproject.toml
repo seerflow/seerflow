@@ -94,14 +94,15 @@ Documentation = "https://github.com/seerflow/seerflow/blob/main/SETTINGS.md"
 seerflow = "seerflow.__main__:main"
 
 [tool.hatch.build.targets.wheel]
+# ``packages = ["src/seerflow"]`` already ships every file under that path,
+# including the built React dashboard at ``src/seerflow/web/dist`` (produced
+# by ``./build_frontend.sh`` before ``uv build``). An earlier ``force-include``
+# layered a second copy on top, which produced duplicate ZIP local headers and
+# a hard PyPI rejection (400 "Duplicate filename in local headers"). Trust
+# ``packages`` and drop the ``.keep`` placeholder so the wheel layout is
+# single-source.
 packages = ["src/seerflow"]
-
-[tool.hatch.build.targets.wheel.force-include]
-# Ship the built React dashboard (S-057). Produced by
-# ``./build_frontend.sh`` before ``uv build --wheel``. The destination
-# path matches the package-relative directory used by
-# ``seerflow.web.static._DEFAULT_DIST``.
-"src/seerflow/web/dist" = "seerflow/web/dist"
+exclude = ["src/seerflow/web/dist/.keep"]
 
 [dependency-groups]
 dev = [
