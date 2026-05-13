@@ -102,13 +102,92 @@ class TestConnectGraphFalkorDB:
             await connect_graph(cfg)
 
 
-class TestConnectGraphDeferred:
+def _fake_asyncpg_module() -> Any:
+    """Build a fake ``asyncpg`` module whose ``create_pool`` returns a stubbed pool."""
+
+    class _FakePool:
+        def __init__(self) -> None:
+            self._conn = _FakeConn()
+
+        def acquire(self) -> Any:
+            return _FakeAcquire(self._conn)
+
+        async def close(self) -> None:
+            return None
+
+    class _FakeConn:
+        async def execute(self, _sql: str, *_args: Any) -> str:
+            return "OK"
+
+        async def fetchval(self, _sql: str, *_args: Any) -> Any:
+            return None  # graph not present -> bootstrap creates it
+
+        async def fetch(self, _sql: str, *_args: Any) -> list[tuple[Any, ...]]:
+            return []
+
+    class _FakeAcquire:
+        def __init__(self, conn: _FakeConn) -> None:
+            self._conn = conn
+
+        async def __aenter__(self) -> _FakeConn:
+            return self._conn
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+    class _FakeAsyncpg:
+        @staticmethod
+        async def create_pool(**_kwargs: Any) -> _FakePool:
+            return _FakePool()
+
+    return _FakeAsyncpg
+
+
+class TestConnectGraphPostgresAGE:
+    """S-155-F2 — ``graph_backend == 'postgres_age'`` returns a connected adapter."""
+
     @pytest.mark.asyncio
-    async def test_raises_not_implemented_for_postgres_age(self) -> None:
+    async def test_returns_postgres_age_backend(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import seerflow.graph.postgres_age_backend as age_mod
+
+        monkeypatch.setattr(age_mod, "_load_asyncpg", _fake_asyncpg_module)
+        cfg = StorageConfig(
+            backend="postgresql",
+            postgresql_url="postgresql://u:p@h/db",
+            graph_backend="postgres_age",
+        )
+        backend = await connect_graph(cfg)
+        assert isinstance(backend, age_mod.PostgresAGEGraphBackend)
+        assert isinstance(backend, GraphBackend)
+
+    @pytest.mark.asyncio
+    async def test_raises_config_error_when_url_empty(self) -> None:
         cfg = StorageConfig(backend="sqlite", graph_backend="postgres_age")
-        with pytest.raises(NotImplementedError) as exc_info:
+        with pytest.raises(ConfigError, match="postgresql_url"):
             await connect_graph(cfg)
-        assert "S-155-F2" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_propagates_config_error_when_extra_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Missing ``asyncpg`` package surfaces as ``ConfigError`` with the install hint."""
+        import seerflow.graph.postgres_age_backend as age_mod
+
+        def _raise_import() -> Any:
+            raise ImportError("No module named 'asyncpg'")
+
+        monkeypatch.setattr(age_mod, "_real_import_asyncpg", _raise_import)
+        cfg = StorageConfig(
+            backend="postgresql",
+            postgresql_url="postgresql://u:p@h/db",
+            graph_backend="postgres_age",
+        )
+        with pytest.raises(ConfigError, match="graph-postgres-age"):
+            await connect_graph(cfg)
 
 
 class TestConnectGraphDefenceInDepth:
