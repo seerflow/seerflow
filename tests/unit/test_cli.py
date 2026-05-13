@@ -931,3 +931,120 @@ class TestCLIExportArgs:
     def test_parse_export_requires_export_type(self) -> None:
         with pytest.raises(SystemExit):
             parse_args(["export"])
+
+
+class TestCLIGraphMigrateArgs:
+    """Parser surface for ``seerflow graph migrate`` (S-155-F3)."""
+
+    def test_parse_graph_migrate_required_flags(self) -> None:
+        args = parse_args(["graph", "migrate", "--from", "igraph", "--to", "falkordb"])
+        assert args.command == "graph"
+        assert args.graph_cmd == "migrate"
+        assert args.from_backend == "igraph"
+        assert args.to_backend == "falkordb"
+        assert args.batch_size == 5000
+        assert args.dry_run is False
+        assert args.wipe_destination is False
+
+    def test_parse_graph_migrate_all_flags(self) -> None:
+        args = parse_args(
+            [
+                "graph",
+                "migrate",
+                "--from",
+                "falkordb",
+                "--to",
+                "postgres_age",
+                "--batch-size",
+                "100",
+                "--dry-run",
+                "--wipe-destination",
+            ],
+        )
+        assert args.from_backend == "falkordb"
+        assert args.to_backend == "postgres_age"
+        assert args.batch_size == 100
+        assert args.dry_run is True
+        assert args.wipe_destination is True
+
+    def test_parse_graph_migrate_rejects_invalid_from_backend(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate", "--from", "neo4j", "--to", "igraph"])
+
+    def test_parse_graph_migrate_rejects_invalid_to_backend(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate", "--from", "igraph", "--to", "neo4j"])
+
+    def test_parse_graph_migrate_requires_from_and_to(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate"])
+        with pytest.raises(SystemExit):
+            parse_args(["graph", "migrate", "--from", "igraph"])
+
+    def test_parse_graph_migrate_rejects_zero_batch_size(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(
+                ["graph", "migrate", "--from", "igraph", "--to", "falkordb", "--batch-size", "0"],
+            )
+
+    def test_parse_graph_migrate_rejects_negative_batch_size(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(
+                [
+                    "graph",
+                    "migrate",
+                    "--from",
+                    "igraph",
+                    "--to",
+                    "falkordb",
+                    "--batch-size",
+                    "-1",
+                ],
+            )
+
+    def test_parse_graph_requires_subcommand(self) -> None:
+        with pytest.raises(SystemExit):
+            parse_args(["graph"])
+
+    def test_parse_graph_migrate_inherits_config_flag(self) -> None:
+        args = parse_args(
+            [
+                "--config",
+                "/tmp/c.yaml",
+                "graph",
+                "migrate",
+                "--from",
+                "igraph",
+                "--to",
+                "falkordb",
+            ],
+        )
+        assert args.config == "/tmp/c.yaml"
+        assert args.command == "graph"
+
+    def test_main_dispatches_graph_migrate(self) -> None:
+        """main() routes ``graph migrate`` to ``run_graph_migrate`` via _run_async_int."""
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(
+            config=None,
+            command="graph",
+            graph_cmd="migrate",
+            from_backend="igraph",
+            to_backend="falkordb",
+            batch_size=5000,
+            dry_run=False,
+            wipe_destination=False,
+        )
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.__main__._run_async_int") as mock_runner,
+        ):
+            mock_runner.return_value = 0
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+            mock_runner.assert_called_once()
