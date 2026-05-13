@@ -70,10 +70,7 @@ async def connect_graph(config: StorageConfig) -> GraphBackend:
         return await FalkorDBGraphBackend.connect(url=config.falkordb_url)
     if backend == "postgres_age":
         if not config.postgresql_url:
-            msg = (
-                "storage.postgresql_url is required when "
-                "storage.graph_backend == 'postgres_age'"
-            )
+            msg = "storage.postgresql_url is required when storage.graph_backend == 'postgres_age'"
             raise ConfigError(msg)
         from seerflow.graph.postgres_age_backend import PostgresAGEGraphBackend
 
