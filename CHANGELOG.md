@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/seerflow/seerflow/compare/v0.5.0...v0.5.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **release:** unblock PyPI publish for v0.5.x wheels ([3b4d6e4](https://github.com/seerflow/seerflow/commit/3b4d6e4679c6870430f7e18081b248e7272e9d14))
+* **release:** unblock PyPI publish for v0.5.x wheels ([7c158f8](https://github.com/seerflow/seerflow/commit/7c158f8b8e90194a0b83fb3b04c4e77a832d3fb6))
+
 ## [0.5.0](https://github.com/seerflow/seerflow/compare/v0.4.0...v0.5.0) (2026-05-13)
 
 
