@@ -34,7 +34,7 @@ repos:
 
       - id: pytest
         name: pytest (95% coverage)
-        entry: uv run pytest --cov=src/seerflow --cov-fail-under=95 -q --no-header -m "not slow"
+        entry: uv run pytest --cov=src/seerflow --cov-fail-under=95 -q --no-header -m "not slow and not docker and not e2e and not requires_falkordb and not requires_postgres_age"
         language: system
         pass_filenames: false
         stages: [pre-push]

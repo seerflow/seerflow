@@ -10,7 +10,7 @@ The default suite never executes this file — both ``asyncpg`` and
 ``testcontainers`` are optional dependencies, gated behind
 ``importorskip`` so collection still succeeds on a clean install.
 
-The container image is ``apache/age:PG16_latest`` which bundles
+The container image is ``apache/age:latest`` which bundles
 PostgreSQL 16 with the AGE extension pre-installed. The adapter still
 runs ``CREATE EXTENSION IF NOT EXISTS age`` on connect to confirm the
 production-bootstrap path works against this image.
@@ -41,7 +41,7 @@ pytestmark = pytest.mark.requires_postgres_age
 
 @pytest.fixture(scope="module")
 def postgres_age_container() -> Iterator[_PostgresContainer]:
-    container = PostgresContainer(image="apache/age:PG16_latest")
+    container = PostgresContainer(image="apache/age:latest")
     container.start()
     try:
         yield container
