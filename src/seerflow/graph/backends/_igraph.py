@@ -10,12 +10,8 @@ acceptable.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from seerflow.graph.entity_graph import EntityGraph
-
-if TYPE_CHECKING:
-    from seerflow.models.query import EntityRelation
+from seerflow.models.query import EntityRelation
 
 
 class InMemoryIgraphBackend:
@@ -71,8 +67,6 @@ class InMemoryIgraphBackend:
         # Inlined from ``storage.sqlite.get_related_from_graph`` so the
         # graph backend stays decoupled from any concrete storage module
         # (S-074 architectural guard).
-        from seerflow.models.query import EntityRelation
-
         neighbors = self._graph.get_neighbors_with_rel(entity_uuid)
         if not neighbors:
             return []
