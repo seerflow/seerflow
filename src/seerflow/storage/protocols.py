@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from seerflow.models.event import SeerflowEvent
     from seerflow.models.feedback import FeedbackEvent, FeedbackOrigin
     from seerflow.models.query import AlertQuery, EntityRelation, EventQuery, Page, TimeRange
+    from seerflow.storage.sqlite import TemplateInfo
 
 
 @runtime_checkable
@@ -259,3 +260,60 @@ class GraphStore(Protocol):  # pragma: no cover
         entity_id: str,
         depth: int = 2,
     ) -> tuple[list[str], list[dict[str, str]]]: ...
+
+
+@runtime_checkable
+class StorageBackend(
+    LogStore,
+    AlertStore,
+    ModelStore,
+    EntityStore,
+    Protocol,
+):  # pragma: no cover
+    """Composite storage backend Protocol.
+
+    Intersects the per-domain stores (:class:`LogStore`, :class:`AlertStore`,
+    :class:`ModelStore`, :class:`EntityStore`) and adds the
+    ``write_edge`` / ``load_edges`` subset of :class:`GraphStore` that both
+    concrete backends implement, plus the lifecycle and template-catalog
+    methods CLI entry points and the pipeline need.
+
+    :func:`seerflow.storage.connect_storage` returns this Protocol so
+    callers stay backend-agnostic. Concrete backends
+    (:class:`~seerflow.storage.sqlite.SqliteBackend` and
+    :class:`~seerflow.storage.postgres.PostgresBackend`) satisfy it
+    structurally — no explicit ``implements`` relationship is required.
+
+    Consumers that only need one responsibility (e.g. a correlation engine
+    that only reads timelines) should depend on the narrower per-domain
+    Protocol, not this composite. The per-domain ``GraphStore`` methods
+    ``get_neighbors`` / ``shortest_path`` / ``get_subgraph`` are delivered
+    by :class:`~seerflow.graph.backends.GraphBackend` and are deliberately
+    not part of this composite.
+    """
+
+    async def write_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        timestamp_ns: int,
+    ) -> None:
+        """Upsert a directed edge between two entities. See ``GraphStore``."""
+        ...
+
+    async def load_edges(self) -> list[tuple[str, str, str, int, int, int]]:
+        """Return every persisted edge as ``(src, dst, type, first, last, count)``."""
+        ...
+
+    async def close(self) -> None:
+        """Flush pending writes and release backend resources (idempotent)."""
+        ...
+
+    async def write_templates(self, templates: list[TemplateInfo]) -> None:
+        """Persist Drain3 template catalog entries."""
+        ...
+
+    async def get_templates(self, limit: int = 1000) -> list[TemplateInfo]:
+        """Return the top ``limit`` templates ordered by ``event_count`` DESC."""
+        ...
