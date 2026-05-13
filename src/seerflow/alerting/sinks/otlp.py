@@ -303,9 +303,7 @@ class OtlpSink:
         # ignored — operators staging certs for a later TLS flip will see this
         # as a heads-up, not a silent no-op. Paths are deliberately omitted to
         # avoid leaking filesystem layout into the log stream.
-        if not self._use_tls and any(
-            (self._tls_ca_pem, self._mtls_cert_pem, self._mtls_key_pem)
-        ):
+        if not self._use_tls and any((self._tls_ca_pem, self._mtls_cert_pem, self._mtls_key_pem)):
             _log.warning(
                 "OTLP sink: TLS disabled but CA/mTLS cert paths are configured "
                 "— PEM bytes held in memory but unused until TLS is enabled "

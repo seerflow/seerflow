@@ -960,9 +960,7 @@ class TestOtlpSinkGrpcCustomCreds:
         creds.assert_called_once_with()  # no kwargs → grpc bundled roots
 
     @pytest.mark.asyncio
-    async def test_grpc_uses_custom_ca_when_ca_file_set(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    async def test_grpc_uses_custom_ca_when_ca_file_set(self, tmp_path: pathlib.Path) -> None:
         import grpc.aio
 
         from seerflow.alerting.sinks.otlp import OtlpSink
@@ -995,9 +993,7 @@ class TestOtlpSinkGrpcCustomCreds:
         )
 
     @pytest.mark.asyncio
-    async def test_grpc_uses_full_mtls_when_triple_set(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    async def test_grpc_uses_full_mtls_when_triple_set(self, tmp_path: pathlib.Path) -> None:
         import grpc.aio
 
         from seerflow.alerting.sinks.otlp import OtlpSink
@@ -1036,9 +1032,7 @@ class TestOtlpSinkGrpcCustomCreds:
         )
 
     @pytest.mark.asyncio
-    async def test_grpc_uses_mtls_only_when_cert_and_key_set(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    async def test_grpc_uses_mtls_only_when_cert_and_key_set(self, tmp_path: pathlib.Path) -> None:
         """mTLS without custom CA — client cert against grpc's bundled roots."""
         import grpc.aio
 

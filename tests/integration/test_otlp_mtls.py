@@ -27,12 +27,11 @@ if TYPE_CHECKING:
 
 cryptography = pytest.importorskip("cryptography")
 
+import grpc  # noqa: E402
+import grpc.aio  # noqa: E402
 from cryptography import x509  # noqa: E402
 from cryptography.hazmat.primitives import hashes, serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
-
-import grpc  # noqa: E402
-import grpc.aio  # noqa: E402
 from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (  # noqa: E402
     ExportLogsServiceRequest,
     ExportLogsServiceResponse,
@@ -55,9 +54,7 @@ def _gen_key() -> rsa.RSAPrivateKey:
     return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
-def _build_ca(
-    key: rsa.RSAPrivateKey, common_name: str
-) -> x509.Certificate:
+def _build_ca(key: rsa.RSAPrivateKey, common_name: str) -> x509.Certificate:
     name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, common_name)])
     now = dt.datetime.now(tz=dt.UTC)
     return (
@@ -158,9 +155,7 @@ def _make_alert() -> Alert:
 
 class TestOtlpMtlsEndToEnd:
     @pytest.mark.asyncio
-    async def test_mtls_export_full_handshake(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    async def test_mtls_export_full_handshake(self, tmp_path: pathlib.Path) -> None:
         """End-to-end: OtlpSink → secure_channel → mTLS handshake → Export."""
         ca_key = _gen_key()
         ca_cert = _build_ca(ca_key, "seerflow-test-ca")

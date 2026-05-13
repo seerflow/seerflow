@@ -833,9 +833,7 @@ def _validate_otlp_str_path(field_name: str, value: Any) -> str:
     file-system I/O.
     """
     if not isinstance(value, str):
-        raise ConfigError(
-            f"alerting.{field_name} must be a string, got {type(value).__name__}"
-        )
+        raise ConfigError(f"alerting.{field_name} must be a string, got {type(value).__name__}")
     return value
 
 
