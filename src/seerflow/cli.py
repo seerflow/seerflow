@@ -206,6 +206,82 @@ def _add_templates_subparsers(subparsers: argparse._SubParsersAction) -> None:  
     )
 
 
+_GRAPH_BACKENDS = ("igraph", "falkordb", "postgres_age")
+"""Supported ``graph_backend`` values. Used by ``seerflow graph migrate`` to
+validate ``--from`` / ``--to`` at parse time (S-155-F3)."""
+
+_GRAPH_MIGRATE_DEFAULT_BATCH = 5000
+"""Default ``--batch-size`` for ``seerflow graph migrate``."""
+
+
+def _positive_int_arg(value: str) -> int:
+    """Parse a positive integer argument; reject zero and negatives.
+
+    Used by ``seerflow graph migrate --batch-size``. argparse-native
+    ``type=int`` would accept ``0`` and ``-1``; this wrapper raises a
+    clean argparse error instead.
+    """
+    parsed = int(value)
+    if parsed <= 0:
+        msg = f"must be a positive integer (got {parsed})"
+        raise argparse.ArgumentTypeError(msg)
+    return parsed
+
+
+def _add_graph_subparsers(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow graph migrate`` subcommands (S-155-F3).
+
+    The ``graph`` parent group leaves room for follow-up subcommands
+    (``status``, ``wipe``) without breaking the surface.
+    """
+    graph_parser = subparsers.add_parser("graph", help="Entity graph maintenance commands")
+    graph_sub = graph_parser.add_subparsers(dest="graph_cmd")
+    graph_sub.required = True
+
+    # --- graph migrate ---
+    mig = graph_sub.add_parser(
+        "migrate",
+        help="Move the entity graph between backends (igraph | falkordb | postgres_age)",
+    )
+    mig.add_argument(
+        "--from",
+        dest="from_backend",
+        type=str,
+        choices=_GRAPH_BACKENDS,
+        required=True,
+        help="Source graph backend",
+    )
+    mig.add_argument(
+        "--to",
+        dest="to_backend",
+        type=str,
+        choices=_GRAPH_BACKENDS,
+        required=True,
+        help="Destination graph backend",
+    )
+    mig.add_argument(
+        "--batch-size",
+        type=_positive_int_arg,
+        default=_GRAPH_MIGRATE_DEFAULT_BATCH,
+        help=(
+            f"Number of edges per write batch (default: {_GRAPH_MIGRATE_DEFAULT_BATCH}, "
+            "must be > 0)"
+        ),
+    )
+    mig.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Report projected edge/vertex counts from the source, do not write to destination",
+    )
+    mig.add_argument(
+        "--wipe-destination",
+        action="store_true",
+        default=False,
+        help="Empty the destination before streaming (strict count-equality verification)",
+    )
+
+
 _STATUS_TIMEOUT_MIN_S = 0.1
 _STATUS_TIMEOUT_MAX_S = 30.0
 
@@ -329,6 +405,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="table",
         help="Output format (default: table)",
     )
+
+    _add_graph_subparsers(subparsers)
 
     return parser
 
