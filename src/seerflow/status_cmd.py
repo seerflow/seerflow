@@ -21,7 +21,6 @@ from typing import Any
 
 import httpx
 
-from seerflow.cli_format import format_table
 from seerflow.config import load_config
 
 EXIT_HEALTHY = 0
@@ -85,34 +84,52 @@ def _format_severity(breakdown: dict[str, int]) -> str:
 
 
 def format_human(health: dict[str, Any], stats: dict[str, Any]) -> str:
-    """Render the human-readable status block."""
+    """Render the human-readable status block.
+
+    Output is two aligned columns: label + value, padded to a common label
+    width so each row reads as a key/value pair. Components follow on
+    indented lines so they visually belong to the ``components`` heading.
+    """
     status = str(health.get("status", "unknown"))
 
-    summary_rows: list[list[str]] = [
-        ["uptime", _format_uptime(float(stats.get("uptime_seconds", 0.0)))],
-        ["event_rate", f"{float(stats.get('event_rate_per_sec', 0.0)):.2f} events/sec"],
-        ["total_events", f"{int(stats.get('total_events', 0)):,}"],
-        ["total_alerts", f"{int(stats.get('total_alerts', 0)):,}"],
-        ["active_sources", str(int(stats.get("active_sources", 0)))],
-        ["model_count", str(int(stats.get("model_count", 0)))],
-        [
+    summary_rows: list[tuple[str, str]] = [
+        ("uptime", _format_uptime(float(stats.get("uptime_seconds", 0.0)))),
+        (
+            "event_rate",
+            f"{float(stats.get('event_rate_per_sec', 0.0)):.2f} events/sec",
+        ),
+        ("total_events", f"{int(stats.get('total_events', 0)):,}"),
+        ("total_alerts", f"{int(stats.get('total_alerts', 0)):,}"),
+        ("active_sources", str(int(stats.get("active_sources", 0)))),
+        ("model_count", str(int(stats.get("model_count", 0)))),
+        (
             "alerts_by_severity",
             _format_severity(dict(stats.get("alerts_by_severity") or {})),
-        ],
+        ),
     ]
 
     components: dict[str, str] = dict(health.get("components") or {})
-    comp_rows: list[list[str]] = [[name, components[name]] for name in sorted(components)]
+
+    # Compute a label width that fits both summary keys and component names
+    # so the value column lines up across both blocks.
+    label_width = max(
+        (len(label) for label, _ in summary_rows),
+        default=0,
+    )
+    label_width = max(label_width, *(len(name) for name in components), 16)
+
+    summary_lines = [f"{label:<{label_width}}  {value}" for label, value in summary_rows]
+    # Indent component rows by two spaces — same visual convention as the
+    # other Seerflow CLI subcommands (e.g. ``seerflow query``).
+    component_lines = [f"  {name:<{label_width}}{components[name]}" for name in sorted(components)]
 
     sections: list[str] = [
         f"Status: {status}",
         "",
-        format_table(["", ""], summary_rows).rstrip(),
+        *summary_lines,
         "",
         "components",
-        # Indent each component row by two spaces — same convention as
-        # ``seerflow query`` to keep visual parity across CLI subcommands.
-        *(f"  {name:<16}{state}" for name, state in comp_rows),
+        *component_lines,
     ]
     return "\n".join(sections) + "\n"
 
