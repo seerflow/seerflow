@@ -17,6 +17,11 @@ storage:
   # postgresql_pool_max_size: 10              # asyncpg pool ceiling; >= pool_min_size
   # postgresql_command_timeout_s: 30.0        # per-query timeout in seconds; > 0
 
+  # Entity-graph backend (S-155). ``igraph`` is the in-process default;
+  # ``falkordb`` (S-155-F1) and ``postgres_age`` (S-155-F2) are reserved
+  # for future scale-out backends and currently raise NotImplementedError.
+  # graph_backend: igraph                     # igraph | falkordb | postgres_age
+
 receivers:
   # Network binding
   bind_addr: "0.0.0.0"                   # address to bind all receivers; use 127.0.0.1 to restrict to localhost
