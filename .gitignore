@@ -164,8 +164,8 @@ frontend/coverage/
 !frontend/src/lib/
 !frontend/src/lib/**
 src/seerflow/web/dist/
-# …but keep the directory itself tracked via a placeholder so the
-# hatch force-include target resolves even in checkouts that never
-# ran `npm run build` (CI editable install, fresh clones).
+# …but keep the directory itself tracked via a placeholder so the package
+# layout is intact in fresh checkouts that never ran `npm run build`
+# (editable installs, CI runs that skip the frontend build).
 !src/seerflow/web/dist/
 !src/seerflow/web/dist/.keep
