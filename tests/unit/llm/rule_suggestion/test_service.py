@@ -392,7 +392,9 @@ class TestHelpersAndEdgeCases:
 
         class _CaptureStore:
             rows = ()
-            captured: dict[str, object] = {}
+
+            def __init__(self) -> None:
+                self.captured: dict[str, object] = {}
 
             async def aggregate_tp_feedback(
                 self,
@@ -523,7 +525,7 @@ class TestHelpersAndEdgeCases:
     async def test_load_sample_events_handles_empty_alert_list(self) -> None:
         """Empty alerts → empty events tuple."""
         service = _build_service()
-        events = await service._load_sample_events(())  # noqa: SLF001
+        events = await service._load_sample_events(())
         assert events == ()
 
     @pytest.mark.asyncio
@@ -546,7 +548,7 @@ class TestHelpersAndEdgeCases:
         alert_store = _FakeAlertStore(alerts={alert.alert_id: alert})
         log_store = _FakeLogStore(event_by_id={evt.event_id: evt})
         service = _build_service(alert_store=alert_store, log_store=log_store)
-        events = await service._load_sample_events((alert,))  # noqa: SLF001
+        events = await service._load_sample_events((alert,))
         assert len(events) == 1
         assert events[0].event_id == evt.event_id
 
@@ -585,7 +587,7 @@ class TestHelpersAndEdgeCases:
         )
         log_store = _FakeLogStore(event_by_id={evt.event_id: evt})
         service = _build_service(alert_store=alert_store, log_store=log_store)
-        events = await service._load_sample_events((alert_with, alert_without))  # noqa: SLF001
+        events = await service._load_sample_events((alert_with, alert_without))
         assert len(events) == 1
         assert events[0].event_id == evt.event_id
 
