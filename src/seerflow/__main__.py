@@ -38,9 +38,19 @@ def main() -> None:
     args = parse_args()
     try:
         if args.command == "start":
-            from seerflow.pipeline.run import _run
+            if getattr(args, "tui", False):
+                # S-079: --tui launches the Textual headless dashboard
+                # alongside the pipeline. Falls back to the plain pipeline
+                # path on graceful textual absence (handled inside the
+                # launcher, no branch here).
+                from seerflow.config import load_config
+                from seerflow.tui import launch_tui_with_pipeline
 
-            _run_async(_run(args.config))
+                _run_async(launch_tui_with_pipeline(load_config(args.config)))
+            else:
+                from seerflow.pipeline.run import _run
+
+                _run_async(_run(args.config))
         elif args.command == "status":
             from seerflow.status_cmd import run_status
 

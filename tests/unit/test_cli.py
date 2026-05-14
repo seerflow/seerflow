@@ -65,6 +65,29 @@ class TestCLIStatusArgs:
         assert args.config == "/tmp/c.yaml"
 
 
+class TestCLIStartTUIArgs:
+    """Parser surface for ``seerflow start --tui`` (S-079, FR-048)."""
+
+    def test_start_default_tui_false(self) -> None:
+        """Without --tui, the start command sets tui=False (backward compat)."""
+        args = parse_args(["start"])
+        assert args.command == "start"
+        assert args.tui is False
+
+    def test_start_tui_flag_enables(self) -> None:
+        """--tui sets tui=True so the dispatcher can branch to the TUI path."""
+        args = parse_args(["start", "--tui"])
+        assert args.command == "start"
+        assert args.tui is True
+
+    def test_start_tui_composes_with_global_config(self) -> None:
+        """--tui composes with the global --config flag (no parser conflict)."""
+        args = parse_args(["--config", "x.yaml", "start", "--tui"])
+        assert args.command == "start"
+        assert args.tui is True
+        assert args.config == "x.yaml"
+
+
 class TestMainImport:
     def test_main_callable(self) -> None:
         from seerflow.__main__ import main
@@ -701,6 +724,46 @@ class TestTailSubcommand:
         assert config.receivers.syslog_enabled is False
         assert config.log_level == "DEBUG"
         assert config.detection.hst_window_size == 500
+
+    def test_main_dispatches_start_tui(self) -> None:
+        """main() dispatches `start --tui` to launch_tui_with_pipeline (S-079)."""
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(config=None, command="start", tui=True)
+        sentinel_config = object()
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.config.load_config", return_value=sentinel_config) as mock_load,
+            patch("seerflow.tui.launch_tui_with_pipeline") as mock_launch,
+            patch("seerflow.__main__._run_async") as mock_run_async,
+        ):
+            mock_run_async.return_value = None
+            main()
+            mock_load.assert_called_once_with(None)
+            mock_launch.assert_called_once_with(sentinel_config)
+            mock_run_async.assert_called_once()
+
+    def test_main_dispatches_start_no_tui(self) -> None:
+        """main() dispatches plain `start` to _run, never to the TUI (S-079)."""
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(config=None, command="start", tui=False)
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.pipeline.run._run") as mock_run,
+            patch("seerflow.tui.launch_tui_with_pipeline") as mock_launch,
+            patch("seerflow.__main__._run_async") as mock_run_async,
+        ):
+            mock_run_async.return_value = None
+            main()
+            mock_run.assert_called_once_with(None)
+            mock_launch.assert_not_called()
 
     def test_main_dispatches_tail(self) -> None:
         """main() dispatches to _build_tail_config + _run_with_config for tail."""

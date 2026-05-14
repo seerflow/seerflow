@@ -83,6 +83,15 @@ graph-falkordb = ["falkordb>=1.6"]
 # ConfigError with an install hint when the import fails, mirroring the
 # ``postgres`` and ``graph-falkordb`` extra patterns.
 graph-postgres-age = ["asyncpg>=0.30"]
+# S-079: Textual TUI headless dashboard. Optional because the textual
+# dependency tree (~5 MB pure-Python, plus rich) is unnecessary for
+# operators using the React dashboard or for headless agents that never
+# attach a TTY. ``seerflow.tui.launch_tui_with_pipeline`` lazy-imports
+# textual and falls back to the plain pipeline path on ImportError,
+# mirroring the ``llm-cpu`` / ``llm-cloud`` graceful-absence pattern.
+tui = [
+    "textual>=0.80",
+]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
