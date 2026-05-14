@@ -21,6 +21,12 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+# Module-level singleton used as the default for ``related_*`` fields when
+# the corresponding entity type is disabled in the extractor. Interned by
+# CPython, but pinning it here keeps the hot path free of per-call literal
+# tuple construction and signals intent to readers.
+_EMPTY_TUPLE: tuple[str, ...] = ()
+
 
 class EventNormalizer:
     """Transforms RawEvent into SeerflowEvent.
@@ -86,13 +92,12 @@ class EventNormalizer:
         # produced by ``extract_tagged``; downstream code consumes only the
         # ``related_*`` value tuples below. ``extract_values`` skips the
         # per-entity ``TaggedEntity`` dataclass and the trailing
-        # ``tuple(e.value for e in ...)`` comprehension, which cuts entity-
-        # extraction allocations by ~10x on a 10K-event run (see
+        # ``tuple(e.value for e in ...)`` comprehension, removing work the
+        # caller immediately discarded (see
         # ``docs/performance/S-084-profiling-report.md``). Future callers
-        # that need the tag (e.g. S-034 correlation weighting) continue to
-        # call ``extract_tagged`` directly.
+        # that need the source tag (e.g. S-034 correlation weighting)
+        # continue to call ``extract_tagged`` directly.
         values = self._extractor.extract_values(message)
-        _empty: tuple[str, ...] = ()
 
         return SeerflowEvent(
             event_id=uuid.uuid4(),
@@ -105,10 +110,10 @@ class EventNormalizer:
             template_id=template_id,
             template_str=template_str,
             template_params=template_params,
-            related_ips=values.get("ip", _empty),
-            related_users=values.get("user", _empty),
-            related_hosts=values.get("host", _empty),
-            related_files=values.get("file", _empty),
-            related_domains=values.get("domain", _empty),
-            related_processes=values.get("process", _empty),
+            related_ips=values.get("ip", _EMPTY_TUPLE),
+            related_users=values.get("user", _EMPTY_TUPLE),
+            related_hosts=values.get("host", _EMPTY_TUPLE),
+            related_files=values.get("file", _EMPTY_TUPLE),
+            related_domains=values.get("domain", _EMPTY_TUPLE),
+            related_processes=values.get("process", _EMPTY_TUPLE),
         )

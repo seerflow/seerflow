@@ -235,12 +235,16 @@ class EntityExtractor:
              for name in self._extractors}
 
         but skips the per-entity :class:`TaggedEntity` dataclass allocation
-        and the inner generator. Used by :class:`~seerflow.parsing.normalizer.
-        EventNormalizer.normalize`, which reads only ``.value`` on the hot
-        path; profiling under py-spy (S-084) showed ``extract_tagged`` and
-        the trailing ``tuple(e.value for e in ...)`` comprehension together
-        accounted for ~10-15% of in-repo CPU samples and a comparable share
-        of allocations.
+        and the trailing generator expression. Used by
+        :class:`~seerflow.parsing.normalizer.EventNormalizer.normalize`,
+        which reads only ``.value`` on the hot path. Profiling under py-spy
+        (S-084) showed ``extract_tagged`` and the trailing
+        ``tuple(e.value for e in ...)`` comprehension together accounted
+        for ~6% of in-repo inclusive CPU samples; the absolute allocation
+        delta is small because the per-event allocation count is dominated
+        by aiosqlite worker buffers and asyncio wakeups, but the work
+        skipped is per-event and was building objects that the caller
+        immediately discarded.
 
         Callers wanting the ``"param"``/``"template"``/``"unknown"`` source
         tag must continue to use :meth:`extract_tagged` — the tag is dropped
