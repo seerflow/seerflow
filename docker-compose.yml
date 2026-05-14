@@ -1,6 +1,26 @@
 services:
   seerflow:
     build: .
+    # Pin to the dedicated non-root user baked into the image. Matching the
+    # uid/gid here lets bind-mounted config files (when used) inherit
+    # consistent ownership.
+    user: "10001:10001"
+    init: true
+    # Production hardening: deny privilege escalation, drop every Linux
+    # capability and run with a read-only root filesystem. The only paths
+    # that need to be writable are /app/data (named volume) and /tmp
+    # (tmpfs below).
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    tmpfs:
+      - "/tmp:size=64m"
+    # Bound resource usage so a runaway process cannot starve the host.
+    # Tune in production based on observed RSS + queue depth.
+    mem_limit: 1g
+    pids_limit: 256
     ports:
       - "8080:8080"    # HTTP API
       - "4317:4317"    # OTLP gRPC
