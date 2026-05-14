@@ -58,10 +58,14 @@ class TestDockerImage:
             f"exceeds {MAX_IMAGE_SIZE_MB}MB limit"
         )
 
-    def test_runs_as_non_root(self) -> None:
-        """Container must run as non-root user 'nobody'."""
-        result = _docker(["run", "--rm", IMAGE_NAME, "whoami"])
-        assert result.stdout.strip() == "nobody"
+    def test_runs_as_seerflow_user(self) -> None:
+        """Container must run as the dedicated non-root 'seerflow' user (uid 10001)."""
+        whoami = _docker(["run", "--rm", IMAGE_NAME, "whoami"])
+        assert whoami.stdout.strip() == "seerflow"
+        uid = _docker(["run", "--rm", IMAGE_NAME, "id", "-u"])
+        assert uid.stdout.strip() == "10001"
+        gid = _docker(["run", "--rm", IMAGE_NAME, "id", "-g"])
+        assert gid.stdout.strip() == "10001"
 
     def test_version_command(self) -> None:
         """'seerflow --version' must work inside the container."""
@@ -96,8 +100,8 @@ class TestDockerImage:
         assert "4318/tcp" in exposed
         assert "514/udp" in exposed
 
-    def test_healthcheck_configured(self) -> None:
-        """Healthcheck must reference 'seerflow' and '--version'."""
+    def test_healthcheck_uses_health_endpoint(self) -> None:
+        """Healthcheck must probe /api/v1/health via Python urllib (S-080 wiring)."""
         result = _docker(
             [
                 "inspect",
@@ -107,5 +111,25 @@ class TestDockerImage:
             ]
         )
         healthcheck = result.stdout.strip()
-        assert "seerflow" in healthcheck
-        assert "--version" in healthcheck
+        assert "/api/v1/health" in healthcheck, (
+            f"Healthcheck must call /api/v1/health, got: {healthcheck}"
+        )
+        assert "urllib.request" in healthcheck or "urlopen" in healthcheck, (
+            f"Healthcheck must use Python urllib (no apt curl/wget), got: {healthcheck}"
+        )
+
+    def test_healthcheck_has_start_period(self) -> None:
+        """Healthcheck must declare a non-zero StartPeriod to tolerate warmup."""
+        result = _docker(
+            [
+                "inspect",
+                IMAGE_NAME,
+                "--format",
+                "{{.Config.Healthcheck.StartPeriod}}",
+            ]
+        )
+        start_period = result.stdout.strip()
+        # Docker prints durations in nanoseconds; anything > 0 is acceptable.
+        assert start_period not in ("0", "0s", ""), (
+            f"Healthcheck StartPeriod must be set, got: {start_period!r}"
+        )

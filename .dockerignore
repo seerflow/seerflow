@@ -1,9 +1,9 @@
 .git
 .github
 .venv
-.mypy_cache
-.pytest_cache
-.ruff_cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 .pre-commit-config.yaml
 __pycache__
 *.db
@@ -23,3 +23,10 @@ seerflow.db
 .letta
 .coverage
 htmlcov/
+dist/
+.benchmarks/
+benchmark-results.json
+frontend/node_modules/
+.devcontainer/
+preflight_wheel.py
+build_frontend.sh
