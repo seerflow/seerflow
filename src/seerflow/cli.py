@@ -320,7 +320,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     subparsers.required = True
 
-    subparsers.add_parser("start", help="Start the Seerflow pipeline")
+    start_parser = subparsers.add_parser("start", help="Start the Seerflow pipeline")
+    start_parser.add_argument(
+        "--tui",
+        action="store_true",
+        default=False,
+        help="Launch the Textual headless terminal dashboard alongside the pipeline",
+    )
 
     status_parser = subparsers.add_parser(
         "status",
