@@ -275,6 +275,8 @@ class OtlpSink:
         self._stop_event: asyncio.Event = asyncio.Event()
         self._grpc_channel: grpc.aio.Channel | None = None
         self._http_session: aiohttp.ClientSession | None = None
+        # S-082: cumulative drops on backpressure since process start.
+        self._dropped_count = 0
         if tls is False and endpoint.lower().startswith("https://"):
             _log.warning(
                 "OTLP sink: otlp_tls=False but endpoint scheme is https (%s) "
@@ -315,10 +317,19 @@ class OtlpSink:
         try:
             self._pending.put_nowait(alert)
         except QueueFull:
+            self._dropped_count += 1
             _log.warning(
                 "OTLP sink pending queue full — dropping alert %s",
                 alert.alert_id,
             )
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": self._pending.qsize(),
+            "max": self._pending.maxsize,
+            "evictions": self._dropped_count,
+        }
 
     async def run(self) -> None:
         """Background loop: wait for interval or stop signal, then flush.

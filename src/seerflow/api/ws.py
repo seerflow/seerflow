@@ -242,6 +242,23 @@ class ConnectionManager:
     def connected_count(self) -> int:
         return len(self._clients)
 
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot.
+
+        ``current`` is the aggregate per-client deque pressure (events +
+        alerts) across all connected clients; ``max`` is the maximum
+        theoretical pressure (``max_connections * queue_maxlen * 2``).
+        ``evictions`` is reported as ``0`` because each per-client deque
+        is a ``maxlen``-bounded ring buffer — overwrites are by design
+        and not counted (they are operationally equivalent to lossless
+        backpressure as long as the consumer keeps draining).
+        """
+        current = 0
+        for client in self._clients.values():
+            current += len(client.event_deque) + len(client.alert_deque)
+        cap = self._max_connections * self._queue_maxlen * 2
+        return {"current": current, "max": cap, "evictions": 0}
+
     def is_origin_allowed(self, origin: str | None) -> bool:
         """Return True iff the given Origin header should be allowed.
 

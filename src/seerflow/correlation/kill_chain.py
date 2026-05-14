@@ -25,7 +25,13 @@ class KillChainTracker:
     alert fires only once per entity until tactics change.
     """
 
-    __slots__ = ("_config", "_entity_tactics", "_fired_entities", "_lru")
+    __slots__ = (
+        "_config",
+        "_entity_tactics",
+        "_eviction_count",
+        "_fired_entities",
+        "_lru",
+    )
 
     def __init__(self, config: KillChainConfig) -> None:
         self._config = config
@@ -33,6 +39,8 @@ class KillChainTracker:
         self._entity_tactics: dict[str, dict[str, tuple[int, str]]] = {}
         self._lru: OrderedDict[str, None] = OrderedDict()
         self._fired_entities: set[str] = set()
+        # S-082: cumulative LRU evictions since process start.
+        self._eviction_count = 0
 
     def record_alert(self, alert: Alert) -> list[Alert]:
         """Record tactics from an alert. Returns kill-chain alerts if threshold reached."""
@@ -79,6 +87,7 @@ class KillChainTracker:
             oldest, _ = self._lru.popitem(last=False)
             self._entity_tactics.pop(oldest, None)
             self._fired_entities.discard(oldest)
+            self._eviction_count += 1
 
     def _check_threshold(self, entity_id: str, timestamp_ns: int) -> list[Alert]:
         """Return a kill-chain alert if the entity has reached the tactic threshold."""
@@ -131,3 +140,11 @@ class KillChainTracker:
     def get_entity_state(self, entity_id: str) -> dict[str, tuple[int, str]]:
         """Return a copy of the current tactic state for an entity."""
         return dict(self._entity_tactics.get(entity_id, {}))
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": len(self._lru),
+            "max": self._config.max_entities,
+            "evictions": self._eviction_count,
+        }

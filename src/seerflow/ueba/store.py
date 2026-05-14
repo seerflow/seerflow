@@ -26,6 +26,13 @@ class BaselineStore:
         self._params = params
         self._max_entities = max_entities
         self._baselines: OrderedDict[str, EntityBaseline] = OrderedDict()
+        # S-082: cumulative LRU evictions since process start. The
+        # persisted blob carries baselines only — the counter is reset
+        # on every fresh process and reflects evictions observed since
+        # this process booted (matches the semantics in DetectionEnsemble
+        # and the other audited components; operator runbooks compute
+        # deltas rather than absolutes).
+        self._eviction_count = 0
 
     @property
     def params(self) -> UEBAParams:
@@ -73,9 +80,18 @@ class BaselineStore:
         self._baselines[entity_uuid] = new
         if len(self._baselines) > self._max_entities:
             self._baselines.popitem(last=False)
+            self._eviction_count += 1
 
     def __len__(self) -> int:
         return len(self._baselines)
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": len(self._baselines),
+            "max": self._max_entities,
+            "evictions": self._eviction_count,
+        }
 
     async def flush(self, model_store: ModelStore) -> None:
         """Persist the entire LRU as one msgpack blob.
