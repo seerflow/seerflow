@@ -132,6 +132,13 @@ dev = [
     # S-049b: needed by tests/integration/test_otlp_mtls.py to generate a
     # self-signed CA + server cert + client cert for the gRPC mTLS handshake.
     "cryptography>=44.0",
+    # S-084: performance profiling. py-spy is a sampling CPU profiler that
+    # attaches to a running Python process with near-zero overhead; memray
+    # tracks allocations frame-by-frame. Both are dev-only — they never ship
+    # in the runtime image. py-spy and memray both publish manylinux wheels
+    # for 3.11/3.12/3.13. Drive both via ``scripts/profile_pipeline.py``.
+    "py-spy>=0.4",
+    "memray>=1.13; sys_platform != 'win32'",
 ]
 
 [tool.ruff]

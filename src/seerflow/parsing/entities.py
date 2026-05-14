@@ -225,3 +225,30 @@ class EntityExtractor:
             ]
             for name, values in raw.items()
         }
+
+    def extract_values(self, message: str) -> dict[str, tuple[str, ...]]:
+        """S-084 fast path: extract entity *values* without tagging.
+
+        Behaviour-equivalent to::
+
+            {name: tuple(e.value for e in self.extract_tagged(msg)[name])
+             for name in self._extractors}
+
+        but skips the per-entity :class:`TaggedEntity` dataclass allocation
+        and the inner generator. Used by :class:`~seerflow.parsing.normalizer.
+        EventNormalizer.normalize`, which reads only ``.value`` on the hot
+        path; profiling under py-spy (S-084) showed ``extract_tagged`` and
+        the trailing ``tuple(e.value for e in ...)`` comprehension together
+        accounted for ~10-15% of in-repo CPU samples and a comparable share
+        of allocations.
+
+        Callers wanting the ``"param"``/``"template"``/``"unknown"`` source
+        tag must continue to use :meth:`extract_tagged` — the tag is dropped
+        here by design.
+        """
+        if len(message) > MAX_MESSAGE_LEN:
+            message = message[:MAX_MESSAGE_LEN]
+        return {
+            name: tuple(fn(message)[:MAX_ENTITIES_PER_TYPE])
+            for name, fn in self._extractors.items()
+        }

@@ -169,3 +169,7 @@ src/seerflow/web/dist/
 # (editable installs, CI runs that skip the frontend build).
 !src/seerflow/web/dist/
 !src/seerflow/web/dist/.keep
+
+# S-084: profiling artefacts (py-spy SVGs, memray .bin/.html) — generated
+# locally by tests/benchmarks/profile_pipeline.py + the outer profiler.
+profiling/
