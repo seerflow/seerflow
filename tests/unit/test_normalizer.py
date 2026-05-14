@@ -242,3 +242,23 @@ class TestConstants:
         from seerflow.parsing._constants import MAX_MESSAGE_LEN, MAX_RAW_BYTES
 
         assert MAX_RAW_BYTES == MAX_MESSAGE_LEN * 2
+
+
+class TestNormalizerParserAccess:
+    """S-081: shutdown code path needs the underlying Drain3 parser to persist
+    templates to storage. ``EventNormalizer.parser`` is the public, read-only
+    accessor for the embedded ``DrainParser`` so callers don't reach into
+    ``_parser``."""
+
+    def test_parser_returns_drain_parser(self) -> None:
+        normalizer = EventNormalizer()
+        assert isinstance(normalizer.parser, DrainParser)
+
+    def test_parser_returns_same_instance_each_call(self) -> None:
+        normalizer = EventNormalizer()
+        assert normalizer.parser is normalizer.parser
+
+    def test_parser_returns_injected_instance(self) -> None:
+        custom = DrainParser()
+        normalizer = EventNormalizer(drain_parser=custom)
+        assert normalizer.parser is custom

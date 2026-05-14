@@ -414,6 +414,10 @@ class SeerflowConfig:
     api_detail_rate_limit: str = "300/minute"
     api_coverage_rate_limit: str = "10/minute"
     api_trust_proxy_headers: bool = False
+    # S-081: bound for the cooperative drain phase of graceful shutdown.
+    # 30 s mirrors NFR-008 and matches the kubelet default ``terminationGracePeriodSeconds``
+    # so a pod sigterm exits cleanly without the kubelet escalating to SIGKILL.
+    shutdown_timeout_s: float = 30.0
 
 
 # Deferred imports from seerflow._config_builders. Placed AFTER dataclasses so
@@ -534,6 +538,15 @@ def load_config(
             f"health_bind_address is not a valid IP address: {health_bind_address!r}"
         ) from exc
 
+    shutdown_timeout_s = raw.get("shutdown_timeout_s", 30.0)
+    if not isinstance(shutdown_timeout_s, int | float) or isinstance(shutdown_timeout_s, bool):
+        raise ConfigError(
+            f"shutdown_timeout_s must be a number, got {type(shutdown_timeout_s).__name__}"
+        )
+    if shutdown_timeout_s <= 0:
+        raise ConfigError(f"shutdown_timeout_s must be > 0, got {shutdown_timeout_s}")
+    shutdown_timeout_s = float(shutdown_timeout_s)
+
     ws_fields = _parse_ws_fields(raw)
     api_fields = _parse_api_fields(raw)
 
@@ -568,6 +581,7 @@ def load_config(
         api_detail_rate_limit=api_fields.api_detail_rate_limit,
         api_coverage_rate_limit=api_fields.api_coverage_rate_limit,
         api_trust_proxy_headers=api_fields.api_trust_proxy_headers,
+        shutdown_timeout_s=shutdown_timeout_s,
     )
 
     validate_seerflow_config(cfg)

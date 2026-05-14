@@ -43,6 +43,16 @@ class EventNormalizer:
         self._parser = drain_parser or DrainParser()
         self._extractor = entity_extractor or EntityExtractor()
 
+    @property
+    def parser(self) -> DrainParser:
+        """Public, read-only handle on the embedded Drain3 parser (S-081).
+
+        The shutdown drain layer in ``pipeline.run`` persists template state to
+        the model store via ``save_drain_state(parser, store)``; exposing the
+        instance here avoids reaching into ``_parser`` from callers.
+        """
+        return self._parser
+
     def normalize(self, raw: RawEvent) -> SeerflowEvent:
         """Convert a RawEvent to a SeerflowEvent."""
         observed_ns = time.time_ns()
