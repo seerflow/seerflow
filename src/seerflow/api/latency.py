@@ -5,8 +5,8 @@ Designed to:
 
 - stay O(1) on record (single ``deque.append``);
 - bound memory (per-stage ring buffer, hard cap on distinct stage names);
-- stay thread-safe across the async event loop and the FastAPI worker that
-  reads the snapshot under ``run_in_threadpool``;
+- stay thread-safe across the async event loop and any background thread
+  that calls ``record`` while ``snapshot`` runs on the request thread;
 - keep snapshot work cheap enough for the 50 ms health budget (FR-047):
   ``statistics.quantiles`` on ≤ 2 048 floats is well under 5 ms.
 """
@@ -84,35 +84,33 @@ class StageLatencyTracker:
                 self._buffers[stage] = buf
             buf.append(float(elapsed_ms))
 
-    def snapshot(self) -> dict[str, dict[str, float]]:
+    def snapshot(self) -> dict[str, dict[str, float | int]]:
         """Return ``{stage: {p50, p95, p99, count}}`` for non-empty stages.
 
-        Computed under the lock to avoid concurrent mutation during the
-        ``list(deque)`` copy. ``statistics.quantiles`` requires ``n >= 2``
+        The deque is copied to a list under the lock; quantile math runs
+        outside the lock so concurrent ``record`` calls are not blocked by
+        the O(N log N) sort. ``statistics.quantiles`` requires at least two
         samples — single-sample stages collapse to the observed value.
+        ``count`` is emitted as ``int`` so dashboards do not render it as
+        ``2048.0``.
         """
-        snap: dict[str, dict[str, float]] = {}
         with self._lock:
-            for stage, buf in self._buffers.items():
-                if not buf:
-                    continue
-                samples = list(buf)
-                count = len(samples)
-                if count == 1:
-                    only = samples[0]
-                    snap[stage] = {
-                        "p50": only,
-                        "p95": only,
-                        "p99": only,
-                        "count": float(count),
-                    }
-                    continue
-                cuts = statistics.quantiles(samples, n=100, method="inclusive")
-                # ``cuts`` has 99 entries; index 49 -> 50th, 94 -> 95th, 98 -> 99th.
-                snap[stage] = {
-                    "p50": float(cuts[49]),
-                    "p95": float(cuts[94]),
-                    "p99": float(cuts[98]),
-                    "count": float(count),
-                }
+            copies: dict[str, list[float]] = {
+                stage: list(buf) for stage, buf in self._buffers.items() if buf
+            }
+        snap: dict[str, dict[str, float | int]] = {}
+        for stage, samples in copies.items():
+            count = len(samples)
+            if count == 1:
+                only = samples[0]
+                snap[stage] = {"p50": only, "p95": only, "p99": only, "count": count}
+                continue
+            cuts = statistics.quantiles(samples, n=100, method="inclusive")
+            # ``cuts`` has 99 entries; index 49 -> 50th, 94 -> 95th, 98 -> 99th.
+            snap[stage] = {
+                "p50": float(cuts[49]),
+                "p95": float(cuts[94]),
+                "p99": float(cuts[98]),
+                "count": count,
+            }
         return snap

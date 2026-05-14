@@ -21,9 +21,17 @@ __all__ = ["sanitize_exception"]
 _MAX_CAUSE_DEPTH: Final[int] = 2
 
 # ``postgres://user:pass@host`` or ``postgresql://user:pass@host`` -> mask userinfo.
-_DSN_USERINFO_RE = re.compile(r"(postgres(?:ql)?://)[^@\s]+@")
-# ``password=secret`` / ``password : secret`` / ``Password=secret`` -> mask value.
-_PASSWORD_KV_RE = re.compile(r"(password\s*[:=]\s*)\S+", re.IGNORECASE)
+# ``[^/\s]*@`` is greedy so it consumes embedded ``@`` characters inside the
+# password (e.g. ``user:p@ssword@host``) up to the final ``@`` that separates
+# userinfo from the host. ``re.IGNORECASE`` catches ``Postgres://`` and
+# ``POSTGRESQL://`` variants that libpq / asyncpg may emit.
+_DSN_USERINFO_RE = re.compile(r"(postgres(?:ql)?://)[^/\s]*@", re.IGNORECASE)
+# ``password=secret`` / ``passwd=secret`` / ``Password : secret`` -> mask value.
+# Matches ``password`` and the common ``passwd`` variant emitted by asyncpg /
+# psycopg2 connection-string errors. ``\S+`` requires at least one character
+# so we never consume the *following* token as the password value when the
+# field is empty (e.g. ``password= other=keep``).
+_PASSWORD_KV_RE = re.compile(r"(pass(?:word|wd)?\s*[:=]\s*)\S+", re.IGNORECASE)
 # ``dsn=postgresql://...`` -> mask the whole value token.
 _DSN_KV_RE = re.compile(r"(dsn\s*[:=]\s*)\S+", re.IGNORECASE)
 
@@ -53,16 +61,25 @@ def sanitize_exception(exc: BaseException) -> str:
     keep the record on one line.
     """
     parts: list[str] = []
+    seen: set[int] = set()
     cursor: BaseException | None = exc
     depth = 0
     while cursor is not None and depth <= _MAX_CAUSE_DEPTH:
+        if id(cursor) in seen:
+            break
+        seen.add(id(cursor))
         parts.append(_stringify(cursor))
         if cursor.args:
             for arg in cursor.args:
                 rendered = _stringify(arg)
                 if rendered not in parts[-1]:
                     parts.append(rendered)
-        cursor = cursor.__cause__
+        # ``__cause__`` is set by ``raise X from Y``; ``__context__`` is the
+        # implicit chain when a bare ``raise`` happens inside ``except``.
+        # Adapters that catch a DSN-bearing exception and re-raise without
+        # ``from`` (a common pattern) leave the original in ``__context__``,
+        # so the walker must follow it too.
+        cursor = cursor.__cause__ or cursor.__context__
         depth += 1
 
     joined = "; ".join(p for p in parts if p)

@@ -242,9 +242,10 @@ class HealthResponse(BaseModel):
     # otherwise the total number of alerts written in the last 24 hours.
     alert_count_24h: int = 0
     memory_bytes: dict[str, int] = Field(default_factory=dict)
-    # ``{stage: {p50, p95, p99, count}}`` — empty when no tracker is wired
-    # or no samples have been recorded yet.
-    latency_ms: dict[str, dict[str, float]] = Field(default_factory=dict)
+    # ``{stage: {p50, p95, p99, count}}`` — ``p50``/``p95``/``p99`` are
+    # ``float`` ms, ``count`` is ``int``. Empty when no tracker is wired or
+    # no samples have been recorded yet.
+    latency_ms: dict[str, dict[str, float | int]] = Field(default_factory=dict)
 
 
 class StatsResponse(BaseModel):

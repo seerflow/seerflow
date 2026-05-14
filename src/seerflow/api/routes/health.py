@@ -19,11 +19,11 @@ container orchestrators rely on this endpoint for liveness checks.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 import resource
 import sys
-import threading
 import time
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -38,6 +38,7 @@ from seerflow.api.deps import (
     get_stage_latency_tracker,
     get_storage,
 )
+from seerflow.api.metrics import compute_uptime_rate
 from seerflow.api.schemas import HealthResponse
 from seerflow.models.query import AlertQuery, TimeRange
 from seerflow.utils.log_sanitize import sanitize_exception
@@ -62,8 +63,10 @@ _HEALTHY_VALUES = frozenset(
     }
 )
 
-# Module-level so tests can monkeypatch the platform branch without
-# resorting to ``sys.platform`` (which is read-only in CPython).
+# Module-level alias for the platform string so tests can monkeypatch the
+# RSS-unit branch via ``monkeypatch.setattr(health, "_PLATFORM", ...)``
+# without poking ``sys.platform`` (which has surprising interactions with
+# other modules that cache it at import time).
 _PLATFORM: str = sys.platform
 
 # Alert-count cache TTL (seconds). Each request returns the cached value
@@ -86,13 +89,16 @@ LatencyTrackerDep = Annotated["StageLatencyTracker | None", Depends(get_stage_la
 class _AlertCountCache:
     """In-memory TTL cache for the rolling 24 h alert count.
 
-    Lives on ``app.state`` for the lifetime of the FastAPI app. Mutated
-    under a lock so concurrent probes do not double-query the alert store.
+    Lives on ``app.state`` for the lifetime of the FastAPI app. The
+    ``asyncio.Lock`` is held across the ``query_alerts`` await so a burst
+    of concurrent probes serializes onto a single store call rather than
+    each issuing its own (closes the TOCTOU window between the freshness
+    check and the write).
     """
 
     value: int = 0
     stored_at_monotonic: float = -1.0
-    lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+    lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
 
     def fresh(self, now_monotonic: float) -> bool:
         return (
@@ -106,7 +112,12 @@ class _AlertCountCache:
 
 
 def _get_alert_count_cache(request: Request) -> _AlertCountCache:
-    """Return (lazily creating) the per-app alert-count cache."""
+    """Return the per-app alert-count cache.
+
+    The cache is pre-initialized in ``create_api_app`` (S-080); the
+    ``getattr`` fallback only fires when a test instantiates the route on
+    a bare ``FastAPI()`` without going through the factory.
+    """
     cache: _AlertCountCache | None = getattr(request.app.state, "health_alert_count_cache", None)
     if cache is None:
         cache = _AlertCountCache()
@@ -124,7 +135,8 @@ def _get_rss_bytes() -> int:
     """
     try:
         usage = resource.getrusage(resource.RUSAGE_SELF)
-    except Exception:
+    except Exception as exc:
+        _log.debug("rss unavailable: %s", exc)
         return 0
     raw = int(usage.ru_maxrss)
     if _PLATFORM.startswith("linux"):
@@ -151,40 +163,28 @@ def _model_memory_bytes(engines: DetectionEngines) -> int:
 async def _alert_count_24h(storage: StorageDeps, cache: _AlertCountCache) -> int:
     """Return the rolling 24 h alert count, cached for ``_ALERT_COUNT_TTL_S``.
 
-    Sentinel ``-1`` is returned when the alert store query fails; the
-    health endpoint still answers 200 in that case so a transient storage
-    blip does not flap probes.
+    The lock is held across the freshness check and the underlying
+    ``query_alerts`` await, so concurrent probes serialize onto a single
+    store call rather than each issuing its own. Sentinel ``-1`` is
+    returned when the alert store query fails; the health endpoint still
+    answers 200 in that case so a transient storage blip does not flap
+    probes.
     """
-    now_mono = time.monotonic()
-    with cache.lock:
-        if cache.fresh(now_mono):
+    async with cache.lock:
+        if cache.fresh(time.monotonic()):
             return cache.value
-    now_ns = time.time_ns()
-    time_range = TimeRange(start_ns=max(0, now_ns - _ONE_DAY_NS), end_ns=now_ns)
-    try:
-        page = await storage.alert_store.query_alerts(AlertQuery(time_range=time_range, limit=1))
-    except Exception as exc:
-        _log.warning("alert_count_24h query failed: %s", sanitize_exception(exc))
-        return -1
-    total = int(page.total)
-    with cache.lock:
+        now_ns = time.time_ns()
+        time_range = TimeRange(start_ns=max(0, now_ns - _ONE_DAY_NS), end_ns=now_ns)
+        try:
+            page = await storage.alert_store.query_alerts(
+                AlertQuery(time_range=time_range, limit=1)
+            )
+        except Exception as exc:
+            _log.warning("alert_count_24h query failed: %s", sanitize_exception(exc))
+            return -1
+        total = int(page.total)
         cache.set(time.monotonic(), total)
-    return total
-
-
-def _compute_uptime_rate(
-    started_monotonic: float,
-    events: int,
-) -> tuple[float, float]:
-    """Mirror of ``stats._compute_rate`` — exposed via /health for FR-047.
-
-    Rate is clamped to ``0.0`` when uptime is ``< 1s`` to avoid
-    divide-by-zero and first-second spikes.
-    """
-    uptime = max(0.0, time.monotonic() - started_monotonic)
-    if uptime < 1.0:
-        return uptime, 0.0
-    return uptime, events / uptime
+        return total
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -217,7 +217,7 @@ async def get_health(
     if metrics_provider is not None:
         try:
             snapshot = metrics_provider()
-            uptime_seconds, event_rate_per_sec = _compute_uptime_rate(
+            uptime_seconds, event_rate_per_sec = compute_uptime_rate(
                 snapshot.started_monotonic,
                 snapshot.total_events_processed,
             )
@@ -229,7 +229,7 @@ async def get_health(
     cache = _get_alert_count_cache(request)
     alert_count_24h = await _alert_count_24h(storage, cache)
 
-    latency_ms: dict[str, dict[str, float]] = (
+    latency_ms: dict[str, dict[str, float | int]] = (
         latency_tracker.snapshot() if latency_tracker is not None else {}
     )
 
