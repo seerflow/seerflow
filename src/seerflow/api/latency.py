@@ -114,3 +114,21 @@ class StageLatencyTracker:
                 "count": count,
             }
         return snap
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot.
+
+        ``current`` is the aggregate sample count across all stages;
+        ``max`` is the worst-case envelope (``maxlen * max_stages``).
+        ``evictions`` is ``0`` — the ring-buffer overwrites are by design
+        (samples roll off as the buffer fills) and not counted. The hard
+        stage cap drops new *stages* and logs a one-shot warning (see
+        ``record``); the audit does not separately surface that count.
+        """
+        with self._lock:
+            current = sum(len(buf) for buf in self._buffers.values())
+        return {
+            "current": current,
+            "max": self._maxlen * self._max_stages,
+            "evictions": 0,
+        }

@@ -18,13 +18,16 @@ class EntityWindowBuffer:
     Events older than ``window_ns`` are lazily pruned on query.
     """
 
-    __slots__ = ("_buffers", "_max_entities", "_max_events", "_window_ns")
+    __slots__ = ("_buffers", "_eviction_count", "_max_entities", "_max_events", "_window_ns")
 
     def __init__(self, window_ns: int, max_events: int = 1000, max_entities: int = 10_000) -> None:
         self._window_ns = window_ns
         self._max_events = max_events
         self._max_entities = max_entities
         self._buffers: dict[str, deque[SeerflowEvent]] = {}
+        # S-082: cumulative LRU evictions since process start. Exposed via
+        # ``bounds()`` for the memory-bounds audit.
+        self._eviction_count = 0
 
     def add_event(self, entity_uuid: str, event: SeerflowEvent) -> None:
         """Add an event to the entity's window buffer.
@@ -40,6 +43,7 @@ class EntityWindowBuffer:
             while len(self._buffers) >= self._max_entities:
                 oldest_key = next(iter(self._buffers))
                 del self._buffers[oldest_key]
+                self._eviction_count += 1
             self._buffers[entity_uuid] = deque(maxlen=self._max_events)
         self._buffers[entity_uuid].append(event)
 
@@ -104,3 +108,17 @@ class EntityWindowBuffer:
     def entity_count(self) -> int:
         """Number of entities currently tracked."""
         return len(self._buffers)
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot.
+
+        ``current`` is the number of tracked entities (not the aggregate
+        event count — capacity is bounded by ``max_entities``, not by the
+        per-entity deque sum). ``max`` mirrors the configured cap.
+        ``evictions`` is cumulative since process start.
+        """
+        return {
+            "current": len(self._buffers),
+            "max": self._max_entities,
+            "evictions": self._eviction_count,
+        }

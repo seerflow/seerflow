@@ -155,6 +155,8 @@ class PagerDutySink:
         self._session = session
         self._queue: asyncio.Queue[_PagerDutyEvent] = asyncio.Queue(maxsize=queue_maxsize)
         self._running = True
+        # S-082: cumulative drops on backpressure since process start.
+        self._dropped_count = 0
 
     def enqueue_trigger(self, alert: Alert) -> None:
         """Enqueue a trigger event. Drops with warning if queue is full."""
@@ -162,6 +164,7 @@ class PagerDutySink:
         try:
             self._queue.put_nowait(_PagerDutyEvent(payload=payload))
         except asyncio.QueueFull:
+            self._dropped_count += 1
             _log.warning("PagerDuty queue full — dropping alert %s", alert.alert_id)
 
     def enqueue_resolve(self, dedup_key: str) -> None:
@@ -170,8 +173,17 @@ class PagerDutySink:
         try:
             self._queue.put_nowait(_PagerDutyEvent(payload=payload))
         except asyncio.QueueFull:
+            self._dropped_count += 1
             truncated = dedup_key[:8] + ("..." if len(dedup_key) > 8 else "")
             _log.warning("PagerDuty queue full — dropping resolve for %s", truncated)
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": self._queue.qsize(),
+            "max": self._queue.maxsize,
+            "evictions": self._dropped_count,
+        }
 
     async def run(self) -> None:
         """Background consumer loop. Runs until stopped and queue is empty."""

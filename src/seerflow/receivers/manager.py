@@ -25,13 +25,15 @@ class ReceiverManager:
         await mgr.stop()
     """
 
-    __slots__ = ("_queue", "_receivers", "_started", "_stopped")
+    __slots__ = ("_dropped_count", "_queue", "_receivers", "_started", "_stopped")
 
     def __init__(self, *, queue_maxsize: int = 10_000) -> None:
         self._receivers: dict[str, Receiver] = {}
         self._queue: asyncio.Queue[RawEvent] = asyncio.Queue(maxsize=queue_maxsize)
         self._started = False
         self._stopped = False
+        # S-082: cumulative backpressure rejections since process start.
+        self._dropped_count = 0
 
     def register(self, source_id: str, receiver: Receiver) -> None:
         """Register a receiver for lifecycle management."""
@@ -87,6 +89,7 @@ class ReceiverManager:
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
+            self._dropped_count += 1
             return False
         return True
 
@@ -122,3 +125,11 @@ class ReceiverManager:
         if self._queue.maxsize == 0:
             return 0.0
         return self._queue.qsize() / self._queue.maxsize
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": self._queue.qsize(),
+            "max": self._queue.maxsize,
+            "evictions": self._dropped_count,
+        }

@@ -246,6 +246,12 @@ class HealthResponse(BaseModel):
     # ``float`` ms, ``count`` is ``int``. Empty when no tracker is wired or
     # no samples have been recorded yet.
     latency_ms: dict[str, dict[str, float | int]] = Field(default_factory=dict)
+    # S-082: per-component memory-bound snapshot. Each entry is
+    # ``{component_key: {"current": int, "max": int, "evictions": int}}``.
+    # Empty when no audited component is wired on ``app.state``. Component
+    # keys are stable strings documented in
+    # :func:`seerflow.utils.memory_bounds.collect_memory_bounds`.
+    memory_bounds: dict[str, dict[str, int]] = Field(default_factory=dict)
 
 
 class StatsResponse(BaseModel):

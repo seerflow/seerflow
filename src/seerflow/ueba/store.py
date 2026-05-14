@@ -26,6 +26,11 @@ class BaselineStore:
         self._params = params
         self._max_entities = max_entities
         self._baselines: OrderedDict[str, EntityBaseline] = OrderedDict()
+        # S-082: cumulative LRU evictions since process start. Reset on
+        # ``restore`` so the counter only reflects live-runtime evictions
+        # (persisted blob has no counter — operator runbooks treat the
+        # counter as cumulative since boot).
+        self._eviction_count = 0
 
     @property
     def params(self) -> UEBAParams:
@@ -73,9 +78,18 @@ class BaselineStore:
         self._baselines[entity_uuid] = new
         if len(self._baselines) > self._max_entities:
             self._baselines.popitem(last=False)
+            self._eviction_count += 1
 
     def __len__(self) -> int:
         return len(self._baselines)
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": len(self._baselines),
+            "max": self._max_entities,
+            "evictions": self._eviction_count,
+        }
 
     async def flush(self, model_store: ModelStore) -> None:
         """Persist the entire LRU as one msgpack blob.

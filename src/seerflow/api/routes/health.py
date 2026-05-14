@@ -32,20 +32,45 @@ from fastapi import APIRouter, Depends, Request, Response
 from seerflow.api.deps import (
     DetectionEngines,
     StorageDeps,
+    get_alert_dispatcher,
+    get_baseline_store,
+    get_connection_manager,
     get_engines,
+    get_explanation_cache,
     get_health_state,
+    get_hunt_cache,
+    get_kill_chain_tracker,
+    get_otlp_sink,
+    get_pagerduty_sink,
     get_pipeline_metrics_provider,
+    get_receiver_manager,
+    get_risk_register,
+    get_rule_suggestion_cache,
     get_stage_latency_tracker,
     get_storage,
+    get_window_buffer,
 )
 from seerflow.api.metrics import compute_uptime_rate
 from seerflow.api.schemas import HealthResponse
 from seerflow.models.query import AlertQuery, TimeRange
 from seerflow.utils.log_sanitize import sanitize_exception
+from seerflow.utils.memory_bounds import collect_memory_bounds
 
 if TYPE_CHECKING:
+    from seerflow.alerting.dispatcher import AlertDispatcher
+    from seerflow.alerting.sinks.otlp import OtlpSink
+    from seerflow.alerting.sinks.pagerduty import PagerDutySink
     from seerflow.api.latency import StageLatencyTracker
     from seerflow.api.metrics import MetricsProvider
+    from seerflow.api.ws import ConnectionManager
+    from seerflow.correlation.kill_chain import KillChainTracker
+    from seerflow.correlation.risk import RiskRegister
+    from seerflow.correlation.window import EntityWindowBuffer
+    from seerflow.llm.explanation.cache import ExplanationCache
+    from seerflow.llm.hunt.cache import HuntCache
+    from seerflow.llm.rule_suggestion.cache import RuleSuggestionCache
+    from seerflow.receivers.manager import ReceiverManager
+    from seerflow.ueba.store import BaselineStore
 
 _log = logging.getLogger("seerflow.api.health")
 
@@ -83,6 +108,23 @@ Engines = Annotated[DetectionEngines, Depends(get_engines)]
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 MetricsProviderDep = Annotated["MetricsProvider | None", Depends(get_pipeline_metrics_provider)]
 LatencyTrackerDep = Annotated["StageLatencyTracker | None", Depends(get_stage_latency_tracker)]
+# S-082: memory-bounds audit dependencies. Each defaults to ``None``; the
+# route never instantiates these components — it only reads what is
+# already wired on ``app.state``.
+BaselineStoreDep = Annotated["BaselineStore | None", Depends(get_baseline_store)]
+WindowBufferDep = Annotated["EntityWindowBuffer | None", Depends(get_window_buffer)]
+RiskRegisterDep = Annotated["RiskRegister | None", Depends(get_risk_register)]
+KillChainDep = Annotated["KillChainTracker | None", Depends(get_kill_chain_tracker)]
+ReceiverManagerDep = Annotated["ReceiverManager | None", Depends(get_receiver_manager)]
+AlertDispatcherDep = Annotated["AlertDispatcher | None", Depends(get_alert_dispatcher)]
+OtlpSinkDep = Annotated["OtlpSink | None", Depends(get_otlp_sink)]
+PagerDutySinkDep = Annotated["PagerDutySink | None", Depends(get_pagerduty_sink)]
+ConnectionManagerDep = Annotated["ConnectionManager | None", Depends(get_connection_manager)]
+ExplanationCacheDep = Annotated["ExplanationCache | None", Depends(get_explanation_cache)]
+HuntCacheDep = Annotated["HuntCache | None", Depends(get_hunt_cache)]
+RuleSuggestionCacheDep = Annotated[
+    "RuleSuggestionCache | None", Depends(get_rule_suggestion_cache)
+]
 
 
 @dataclasses.dataclass
@@ -189,6 +231,8 @@ async def _alert_count_24h(storage: StorageDeps, cache: _AlertCountCache) -> int
 
 @router.get("/health", response_model=HealthResponse)
 async def get_health(
+    # surfaces every audited component; collapsing them under a single
+    # injected bag would hide the contract from the dependency tree.
     request: Request,
     response: Response,
     health_state: HealthState,
@@ -196,8 +240,20 @@ async def get_health(
     storage: Storage,
     metrics_provider: MetricsProviderDep,
     latency_tracker: LatencyTrackerDep,
+    baseline_store: BaselineStoreDep,
+    window_buffer: WindowBufferDep,
+    risk_register: RiskRegisterDep,
+    kill_chain: KillChainDep,
+    receiver_manager: ReceiverManagerDep,
+    alert_dispatcher: AlertDispatcherDep,
+    otlp_sink: OtlpSinkDep,
+    pagerduty_sink: PagerDutySinkDep,
+    ws_manager: ConnectionManagerDep,
+    explanation_cache: ExplanationCacheDep,
+    hunt_cache: HuntCacheDep,
+    rule_suggestion_cache: RuleSuggestionCacheDep,
 ) -> HealthResponse:
-    """Return comprehensive service health status (S-080)."""
+    """Return comprehensive service health status (S-080 + S-082)."""
     all_healthy = all(v in _HEALTHY_VALUES for v in health_state.values())
     status: Literal["healthy", "degraded"] = "healthy" if all_healthy else "degraded"
     if not all_healthy:
@@ -238,6 +294,25 @@ async def get_health(
         "models": _model_memory_bytes(engines),
     }
 
+    # S-082: per-component memory-bound snapshot. Pure read of in-process
+    # accessors; degrades to an empty dict when no component is wired.
+    memory_bounds = collect_memory_bounds(
+        ensemble=engines.ensemble,
+        baseline_store=baseline_store,
+        window_buffer=window_buffer,
+        risk_register=risk_register,
+        kill_chain=kill_chain,
+        receiver_manager=receiver_manager,
+        alert_dispatcher=alert_dispatcher,
+        otlp_sink=otlp_sink,
+        pagerduty_sink=pagerduty_sink,
+        websocket_manager=ws_manager,
+        latency_tracker=latency_tracker,
+        explanation_cache=explanation_cache,
+        hunt_cache=hunt_cache,
+        rule_suggestion_cache=rule_suggestion_cache,
+    )
+
     return HealthResponse(
         status=status,
         components=health_state,
@@ -250,4 +325,11 @@ async def get_health(
         alert_count_24h=alert_count_24h,
         memory_bytes=memory_bytes,
         latency_ms=latency_ms,
+        # MemoryBoundsReport is a TypedDict — at runtime it is a plain
+        # dict, so we widen the nested type explicitly. Pydantic accepts
+        # the structural match.
+        memory_bounds={
+            k: {"current": v["current"], "max": v["max"], "evictions": v["evictions"]}
+            for k, v in memory_bounds.items()
+        },
     )

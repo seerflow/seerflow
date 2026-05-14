@@ -108,6 +108,8 @@ class AlertDispatcher:
         self._running = True
         self._dashboard_url = dashboard_url
         self._router = router
+        # S-082: cumulative drops on backpressure since process start.
+        self._dropped_count = 0
 
     def masked_dashboard_url(self) -> str:
         """Return a host-only form of ``dashboard_url`` safe for log output.
@@ -137,7 +139,16 @@ class AlertDispatcher:
         try:
             self._queue.put_nowait(alert)
         except asyncio.QueueFull:
+            self._dropped_count += 1
             _log.warning("Alert dispatch queue full — dropping alert %s", alert.alert_id)
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": self._queue.qsize(),
+            "max": self._queue.maxsize,
+            "evictions": self._dropped_count,
+        }
 
     async def run(self) -> None:
         """Background consumer loop. Runs until stopped and queue is empty.
