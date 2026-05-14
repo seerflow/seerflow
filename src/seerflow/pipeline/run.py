@@ -18,6 +18,7 @@ import uvicorn
 
 from seerflow import __version__
 from seerflow.api.app import create_api_app
+from seerflow.api.latency import StageLatencyTracker
 from seerflow.config import SeerflowConfig, load_config
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
@@ -591,6 +592,12 @@ async def _run_with_config(
             log_store=storage,
         )
 
+    # S-080: shared per-stage latency tracker. Owned by the runner so the
+    # pipeline handler and the FastAPI ``/api/v1/health`` route observe the
+    # same rolling reservoir. Stays an in-memory ring buffer; no external
+    # dependency, no persistence, no extra CPU on the no-op path.
+    stage_latency_tracker = StageLatencyTracker()
+
     api_app = make_api_app(
         log_store=storage,
         alert_store=storage,
@@ -607,6 +614,7 @@ async def _run_with_config(
         explanation_service=explanation_service,
         hunt_service=hunt_service,
         rule_suggestion_service=rule_suggestion_service,
+        stage_latency_tracker=stage_latency_tracker,
     )
     ws_manager: ConnectionManager = api_app.state.ws_manager
     uvicorn_config = uvicorn.Config(
@@ -748,6 +756,7 @@ async def _run_with_config(
         ws_manager=ws_manager,
         ioc_matcher=ioc_matcher,
         ioc_enrichment_counters=ioc_enrichment_counters,
+        latency_tracker=stage_latency_tracker,
     )
     # Wire the live pipeline metrics provider for /api/v1/stats (S-067 ext).
     # ``taxii_registry`` is supplied so the route can surface per-feed counters

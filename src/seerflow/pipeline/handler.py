@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from seerflow.alerting.dispatcher import AlertDispatcher
     from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
+    from seerflow.api.latency import StageLatencyTracker
     from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
@@ -88,6 +89,7 @@ def make_handler(
     ueba_alert_cooldown_ns: int = 900_000_000_000,
     ioc_matcher: IoCMatcher | None = None,
     ioc_enrichment_counters: _IoCEnrichmentCounters | None = None,
+    latency_tracker: StageLatencyTracker | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -142,7 +144,16 @@ def make_handler(
 
     async def handler(event: RawEvent) -> None:
         nonlocal event_count, anomaly_count, last_save_ns
+        # S-080: per-stage latency tracking. ``perf_counter_ns`` is cheap
+        # (single VDSO call on Linux); the conditional ``latency_tracker``
+        # check keeps the no-tracker path zero-cost.
+        _parse_t0 = time.perf_counter_ns() if latency_tracker is not None else 0
         seerflow_event = normalizer.normalize(event)
+        if latency_tracker is not None:
+            latency_tracker.record(
+                "parse",
+                (time.perf_counter_ns() - _parse_t0) / 1_000_000.0,
+            )
 
         # Resolve entities to deterministic UUID5 strings.
         # Resolve each type separately to build both entity_refs (flat tuple
@@ -457,9 +468,21 @@ def make_handler(
                 )
 
         # Persist to storage (WriteBuffer handles batching + 100ms timer flush)
+        _storage_t0 = time.perf_counter_ns() if latency_tracker is not None else 0
         await storage.write_events([seerflow_event])
+        if latency_tracker is not None:
+            latency_tracker.record(
+                "storage",
+                (time.perf_counter_ns() - _storage_t0) / 1_000_000.0,
+            )
 
+        _detect_t0 = time.perf_counter_ns() if latency_tracker is not None else 0
         result = ensemble.process_event(seerflow_event)
+        if latency_tracker is not None:
+            latency_tracker.record(
+                "detect",
+                (time.perf_counter_ns() - _detect_t0) / 1_000_000.0,
+            )
         event_count += 1
 
         if ws_manager is not None:

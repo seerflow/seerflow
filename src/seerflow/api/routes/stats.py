@@ -24,6 +24,7 @@ from seerflow.api.limits import limiter, list_limit
 from seerflow.api.metrics import MetricsProvider
 from seerflow.api.schemas import StatsResponse
 from seerflow.models.query import AlertQuery, EventQuery
+from seerflow.utils.log_sanitize import sanitize_exception
 
 _log = logging.getLogger("seerflow.api.stats")
 
@@ -63,9 +64,15 @@ async def get_stats(
 
     try:
         alerts_by_severity = await storage.alert_store.count_by_severity()
-    except Exception:
+    except Exception as exc:
         # Any storage error should degrade to {} rather than 500 the endpoint.
-        _log.warning("count_by_severity failed; returning empty breakdown", exc_info=True)
+        # ``exc_info=True`` is avoided here: ``asyncpg`` exceptions can embed
+        # the DSN (including password) in the traceback chain, so the
+        # sanitized single-line summary is logged instead (S-080, S-056 review).
+        _log.warning(
+            "count_by_severity failed; returning empty breakdown: %s",
+            sanitize_exception(exc),
+        )
         alerts_by_severity = {}
 
     uptime_seconds = 0.0
@@ -96,9 +103,14 @@ async def get_stats(
                 ioc_matcher_payload = msgspec.to_builtins(snapshot.ioc_matcher)
             if snapshot.ioc_enrichment is not None:
                 ioc_enrichment_payload = msgspec.to_builtins(snapshot.ioc_enrichment)
-        except Exception:
+        except Exception as exc:
             # Provider failure must not 500 the endpoint; degrade to zero fields.
-            _log.warning("pipeline metrics provider failed", exc_info=True)
+            # ``exc_info=True`` skipped — DSN-bearing exceptions sanitized
+            # via ``sanitize_exception`` instead (S-080, S-056 review).
+            _log.warning(
+                "pipeline metrics provider failed: %s",
+                sanitize_exception(exc),
+            )
 
     return StatsResponse(
         total_events=event_page.total,

@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, Request
 
 if TYPE_CHECKING:
     from seerflow.api.anomaly_timeline import AnomalyTimelineRing
+    from seerflow.api.latency import StageLatencyTracker
     from seerflow.api.metrics import MetricsProvider
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.llm.explanation.service import AlertExplanationService
@@ -148,6 +149,19 @@ def get_hunt_service(request: Request) -> NaturalLanguageHuntService | None:
     """
     service: NaturalLanguageHuntService | None = getattr(request.app.state, "hunt_service", None)
     return service
+
+
+def get_stage_latency_tracker(request: Request) -> StageLatencyTracker | None:
+    """FastAPI Depends provider — returns the rolling latency tracker or None.
+
+    Returns the ``StageLatencyTracker`` stashed at
+    ``app.state.stage_latency_tracker`` (S-080), or ``None`` when the
+    attribute is missing (test mode / API running without a pipeline).
+    The health route degrades to an empty ``latency_ms`` field when this
+    is ``None``.
+    """
+    tracker: StageLatencyTracker | None = getattr(request.app.state, "stage_latency_tracker", None)
+    return tracker
 
 
 def get_rule_suggestion_service(request: Request) -> RuleSuggestionService | None:
