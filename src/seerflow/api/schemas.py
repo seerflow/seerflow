@@ -214,7 +214,7 @@ class PaginatedResponse(BaseModel, Generic[_T]):
 
 
 class HealthResponse(BaseModel):
-    """Health check response.
+    """Health check response (S-080 comprehensive envelope).
 
     ``detection`` and ``feedback`` mirror the legacy aiohttp health
     contract (S-217): when a ``DetectionEnsemble`` and ``AlertStore``
@@ -222,12 +222,30 @@ class HealthResponse(BaseModel):
     ``ensemble.get_health()`` and ``await alert_store.get_feedback_stats()``
     respectively. Both default to ``None`` for tests that exercise the
     legacy minimal envelope.
+
+    S-080 adds the comprehensive fields required by FR-047:
+    ``uptime_seconds``, ``event_rate_per_sec``, ``active_sources``,
+    ``model_count``, ``alert_count_24h``, ``memory_bytes`` and
+    ``latency_ms``. Every new field has a default so existing tests and
+    clients keyed on the legacy minimal envelope keep working.
     """
 
     status: Literal["healthy", "degraded"]
     components: dict[str, str]
     detection: dict[str, Any] | None = None
     feedback: dict[str, int] | None = None
+    uptime_seconds: float = 0.0
+    event_rate_per_sec: float = 0.0
+    active_sources: int = 0
+    model_count: int = 0
+    # ``-1`` is the "unknown" sentinel when the alert store query fails;
+    # otherwise the total number of alerts written in the last 24 hours.
+    alert_count_24h: int = 0
+    memory_bytes: dict[str, int] = Field(default_factory=dict)
+    # ``{stage: {p50, p95, p99, count}}`` — ``p50``/``p95``/``p99`` are
+    # ``float`` ms, ``count`` is ``int``. Empty when no tracker is wired or
+    # no samples have been recorded yet.
+    latency_ms: dict[str, dict[str, float | int]] = Field(default_factory=dict)
 
 
 class StatsResponse(BaseModel):

@@ -8,6 +8,7 @@ production after pipeline startup.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -43,6 +44,19 @@ class PipelineMetrics:
 
 
 MetricsProvider = Callable[[], PipelineMetrics]
+
+
+def compute_uptime_rate(started_monotonic: float, events: int) -> tuple[float, float]:
+    """Return ``(uptime_seconds, event_rate_per_sec)`` for a pipeline.
+
+    Shared by ``/api/v1/stats`` and ``/api/v1/health`` (S-080). Rate is
+    clamped to ``0.0`` when uptime is ``< 1s`` to avoid divide-by-zero and
+    first-second spikes.
+    """
+    uptime = max(0.0, time.monotonic() - started_monotonic)
+    if uptime < 1.0:
+        return uptime, 0.0
+    return uptime, events / uptime
 
 
 _DETECTORS_PER_SOURCE = 4  # HST + HW + CUSUM + Markov (v1 ensemble composition)

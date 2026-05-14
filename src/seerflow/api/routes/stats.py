@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import time
 from typing import Annotated, Any
 
 import msgspec
@@ -21,9 +20,10 @@ from seerflow.api.deps import (
     get_storage,
 )
 from seerflow.api.limits import limiter, list_limit
-from seerflow.api.metrics import MetricsProvider
+from seerflow.api.metrics import MetricsProvider, compute_uptime_rate
 from seerflow.api.schemas import StatsResponse
 from seerflow.models.query import AlertQuery, EventQuery
+from seerflow.utils.log_sanitize import sanitize_exception
 
 _log = logging.getLogger("seerflow.api.stats")
 
@@ -31,18 +31,6 @@ router = APIRouter(tags=["system"])
 
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 MetricsProviderDep = Annotated[MetricsProvider | None, Depends(get_pipeline_metrics_provider)]
-
-
-def _compute_rate(started_monotonic: float, events: int) -> tuple[float, float]:
-    """Return ``(uptime_seconds, event_rate_per_sec)``.
-
-    Rate is clamped to ``0.0`` when uptime is ``< 1s`` to avoid divide-by-zero
-    and first-second spikes.
-    """
-    uptime = max(0.0, time.monotonic() - started_monotonic)
-    if uptime < 1.0:
-        return uptime, 0.0
-    return uptime, events / uptime
 
 
 @router.get(
@@ -63,9 +51,15 @@ async def get_stats(
 
     try:
         alerts_by_severity = await storage.alert_store.count_by_severity()
-    except Exception:
+    except Exception as exc:
         # Any storage error should degrade to {} rather than 500 the endpoint.
-        _log.warning("count_by_severity failed; returning empty breakdown", exc_info=True)
+        # ``exc_info=True`` is avoided here: ``asyncpg`` exceptions can embed
+        # the DSN (including password) in the traceback chain, so the
+        # sanitized single-line summary is logged instead (S-080, S-056 review).
+        _log.warning(
+            "count_by_severity failed; returning empty breakdown: %s",
+            sanitize_exception(exc),
+        )
         alerts_by_severity = {}
 
     uptime_seconds = 0.0
@@ -80,7 +74,7 @@ async def get_stats(
     if metrics_provider is not None:
         try:
             snapshot = metrics_provider()
-            uptime_seconds, event_rate_per_sec = _compute_rate(
+            uptime_seconds, event_rate_per_sec = compute_uptime_rate(
                 snapshot.started_monotonic,
                 snapshot.total_events_processed,
             )
@@ -96,9 +90,14 @@ async def get_stats(
                 ioc_matcher_payload = msgspec.to_builtins(snapshot.ioc_matcher)
             if snapshot.ioc_enrichment is not None:
                 ioc_enrichment_payload = msgspec.to_builtins(snapshot.ioc_enrichment)
-        except Exception:
+        except Exception as exc:
             # Provider failure must not 500 the endpoint; degrade to zero fields.
-            _log.warning("pipeline metrics provider failed", exc_info=True)
+            # ``exc_info=True`` skipped — DSN-bearing exceptions sanitized
+            # via ``sanitize_exception`` instead (S-080, S-056 review).
+            _log.warning(
+                "pipeline metrics provider failed: %s",
+                sanitize_exception(exc),
+            )
 
     return StatsResponse(
         total_events=event_page.total,

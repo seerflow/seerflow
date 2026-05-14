@@ -38,11 +38,14 @@ from seerflow.api.routes import (
     stats,
 )
 from seerflow.api.ws import ConnectionManager
+from seerflow.utils.log_sanitize import sanitize_exception
 from seerflow.web import DEFAULT_DIST, CollapseSlashesMiddleware, mount_dashboard
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
+    from seerflow.api.latency import StageLatencyTracker
+    from seerflow.api.metrics import MetricsProvider
     from seerflow.config import SeerflowConfig
     from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.llm.explanation.service import AlertExplanationService
@@ -148,6 +151,29 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.ws_manager.shutdown()
 
 
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all handler for otherwise-unhandled exceptions (S-080).
+
+    FastAPI installs handlers for its own ``HTTPException`` and Starlette's
+    ``RequestValidationError`` automatically; this handler only fires for
+    truly unhandled paths (e.g. an ``asyncpg`` connection drop bubbling up
+    from a route). It logs a sanitized one-line summary (DSN-bearing
+    exception messages are scrubbed by ``sanitize_exception``) and returns
+    a generic 500 response so the wire body never carries implementation
+    details or credentials.
+    """
+    _logger.error(
+        "unhandled API error on %s %s: %s",
+        request.method,
+        request.url.path,
+        sanitize_exception(exc),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+
 async def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
     """Return a 429 response with ``Retry-After`` header.
 
@@ -245,6 +271,8 @@ def create_api_app(
     explanation_service: AlertExplanationService | None = None,
     hunt_service: NaturalLanguageHuntService | None = None,
     rule_suggestion_service: RuleSuggestionService | None = None,
+    stage_latency_tracker: StageLatencyTracker | None = None,
+    pipeline_metrics_provider: MetricsProvider | None = None,
 ) -> FastAPI:
     """Create and configure the Seerflow FastAPI application.
 
@@ -285,6 +313,15 @@ def create_api_app(
             the ``/api/v1/sigma/rule-suggestions`` endpoints (S-100, FR-066).
             ``None`` when the LLM backend is disabled or degraded — all
             three routes return 503.
+        stage_latency_tracker: Optional rolling per-stage latency tracker
+            (S-080). When supplied, the ``/api/v1/health`` route surfaces a
+            ``latency_ms`` envelope with ``p50``/``p95``/``p99`` per pipeline
+            stage. ``None`` (default) → ``latency_ms`` is an empty dict.
+        pipeline_metrics_provider: Optional zero-arg callable returning a
+            ``PipelineMetrics`` snapshot (S-080). When supplied, both
+            ``/api/v1/health`` and ``/api/v1/stats`` surface live throughput,
+            uptime, active source count, and model count. ``None`` (default)
+            collapses those fields to zero — the historical contract.
     """
     app = FastAPI(
         title="Seerflow API",
@@ -306,7 +343,8 @@ def create_api_app(
         ensemble=ensemble,
     )
     app.state.config = config
-    app.state.pipeline_metrics_provider = None
+    app.state.pipeline_metrics_provider = pipeline_metrics_provider
+    app.state.stage_latency_tracker = stage_latency_tracker
     app.state.baseline_store = baseline_store
     app.state.ueba_engine = ueba_engine
     app.state.sigma_state_store = sigma_state_store
@@ -322,6 +360,13 @@ def create_api_app(
     app.state.ws_manager = ws_manager or _build_ws_manager(
         alert_store, config, app.state.anomaly_timeline_ring
     )
+
+    # Install the catch-all handler BEFORE routes are registered so it
+    # applies uniformly to every route (rate-limit + CORS handlers are
+    # registered later by ``_install_security_middlewares`` — those are
+    # narrower than this fallback and run first by FastAPI's specificity
+    # rules).
+    app.add_exception_handler(Exception, _unhandled_exception_handler)
 
     _register_routes(app)
     _install_security_middlewares(app, config)
