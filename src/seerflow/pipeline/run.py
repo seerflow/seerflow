@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from seerflow.alerting.router import NotificationRouter
     from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
+    from seerflow.storage.factory import StorageBackend
 
     class _StoppablePipeline(Protocol):
         """Subset of the pipeline contract the shutdown closure needs."""
@@ -152,7 +153,7 @@ def _log_shutdown_task_exception(task: asyncio.Task[None]) -> None:
 
 async def _persist_session_state(
     handler: object | None,
-    storage: object,
+    storage: StorageBackend,
     ensemble: DetectionEnsemble,
     baseline_store: BaselineStore | None,
 ) -> None:
@@ -176,7 +177,7 @@ async def _persist_session_state(
                 events, anomalies, template_meta, t0 = get_stats()
                 pending_templates = [t for t in template_meta.values() if t.event_count > 0]
                 if pending_templates:
-                    await storage.write_templates(pending_templates)  # type: ignore[attr-defined]
+                    await storage.write_templates(pending_templates)
                     _log.info(
                         "Flushed %d template updates to storage",
                         len(pending_templates),
@@ -193,7 +194,7 @@ async def _persist_session_state(
             _log.warning("Session summary / template flush failed", exc_info=True)
 
     try:
-        saved = await ensemble.save_all_state(storage)  # type: ignore[arg-type]
+        saved = await ensemble.save_all_state(storage)
         if saved > 0:
             _log.info("Final save: %d model states persisted", saved)
     except Exception:
@@ -201,7 +202,7 @@ async def _persist_session_state(
 
     if baseline_store is not None:
         try:
-            await baseline_store.flush(storage)  # type: ignore[arg-type]
+            await baseline_store.flush(storage)
             _log.info("UEBA: flushed %d baselines", len(baseline_store))
         except Exception:
             _log.warning("UEBA baseline flush failed", exc_info=True)
@@ -210,6 +211,14 @@ async def _persist_session_state(
     # full vocabulary instead of rebuilding from scratch. Wired in via
     # ``EventNormalizer.parser`` (exposed on the handler closure as
     # ``handler.get_normalizer``). Best-effort — Drain3 rebuilds on next boot.
+    # WAL safety on cancellation: a wait_for-driven timeout cancels the
+    # current await inside ``save_state``; ``CancelledError`` is a
+    # ``BaseException`` so it bypasses the local ``except Exception`` rollback,
+    # but the outer ``_run_with_config`` ``finally`` block still calls
+    # ``storage.close()`` which invokes ``aiosqlite.Connection.close()`` →
+    # ``sqlite3.Connection.close()``, and CPython's stdlib sqlite3 module
+    # auto-rolls-back any open transaction on connection close. Net: the
+    # WAL never persists a half-written drain3 blob.
     if handler is not None:
         try:
             get_normalizer = getattr(handler, "get_normalizer", None)
@@ -217,7 +226,7 @@ async def _persist_session_state(
                 from seerflow.parsing.drain_persistence import save_drain_state
 
                 normalizer = get_normalizer()
-                await save_drain_state(normalizer.parser, storage)  # type: ignore[arg-type]
+                await save_drain_state(normalizer.parser, storage)
         except Exception:
             _log.warning("Drain3 state save failed", exc_info=True)
 
@@ -225,7 +234,7 @@ async def _persist_session_state(
 async def _run_shutdown_sequence(
     *,
     handler: object | None,
-    storage: object,
+    storage: StorageBackend,
     ensemble: DetectionEnsemble,
     baseline_store: BaselineStore | None,
     timeout: float,

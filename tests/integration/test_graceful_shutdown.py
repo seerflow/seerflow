@@ -96,17 +96,19 @@ class TestGracefulShutdownPersistence:
         assert restored.template_count == template_count_before
 
     @pytest.mark.asyncio
-    async def test_shutdown_timeout_still_attempts_drain3_save(
+    async def test_shutdown_timeout_fires_warning_and_returns_quickly(
         self,
         backend: SqliteBackend,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Drain3 save runs AFTER the ML save in ``_persist_session_state``.
+        """When the persist phase exceeds ``timeout`` the helper logs a
+        structured WARNING and returns within a small bound so the outer
+        ``finally`` block in ``_run_with_config`` can still close storage.
 
-        When the ML save is slow and the wait_for fires, the Drain3 save is
-        cancelled along with it — by design (the timeout is a hard wall).
-        The test pins that behaviour: the structured WARNING fires and the
-        helper returns quickly enough for the outer finally to close storage.
+        Cancellation propagates into the in-flight persist coroutine; any
+        steps queued after the slow one (Drain3 save in this case) are
+        skipped — by design (the timeout is a hard wall against wedged
+        sinks / DB writes / etc.).
         """
         handler, normalizer = _make_storage_facing_handler(backend)
         normalizer.normalize(_raw_event("Some unique pattern alpha"))
