@@ -26,10 +26,12 @@ class BaselineStore:
         self._params = params
         self._max_entities = max_entities
         self._baselines: OrderedDict[str, EntityBaseline] = OrderedDict()
-        # S-082: cumulative LRU evictions since process start. Reset on
-        # ``restore`` so the counter only reflects live-runtime evictions
-        # (persisted blob has no counter — operator runbooks treat the
-        # counter as cumulative since boot).
+        # S-082: cumulative LRU evictions since process start. The
+        # persisted blob carries baselines only — the counter is reset
+        # on every fresh process and reflects evictions observed since
+        # this process booted (matches the semantics in DetectionEnsemble
+        # and the other audited components; operator runbooks compute
+        # deltas rather than absolutes).
         self._eviction_count = 0
 
     @property
