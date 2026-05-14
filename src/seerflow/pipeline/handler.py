@@ -744,4 +744,8 @@ def make_handler(
                         )
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
+    # S-081: expose the EventNormalizer so the shutdown drain layer in
+    # ``pipeline.run`` can call ``save_drain_state(handler.get_normalizer().parser, ...)``
+    # without reaching into the closure.
+    handler.get_normalizer = lambda: normalizer  # type: ignore[attr-defined]
     return handler

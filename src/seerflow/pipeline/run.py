@@ -1,4 +1,29 @@
-"""Pipeline startup and run functions."""
+"""Pipeline startup and run functions.
+
+Shutdown contract (S-081, NFR-008)
+----------------------------------
+
+Seerflow exits in three ordered phases:
+
+1. **Signal phase** — ``_install_shutdown_handlers`` registers SIGINT/SIGTERM.
+   First signal flips ``uvicorn.Server.should_exit`` and schedules
+   ``pipeline.stop()``; a second signal escalates to ``force_exit``.
+2. **Cooperative drain phase** — ``_run_shutdown_sequence`` invokes
+   ``_persist_session_state`` under ``asyncio.wait_for`` with
+   ``SeerflowConfig.shutdown_timeout_s`` (default 30 s, matches kubelet
+   ``terminationGracePeriodSeconds``). The drain persists, in order:
+   pending template metadata, ML ensemble state, UEBA baselines, and
+   Drain3 template state. Each step is best-effort — failures are logged
+   at WARNING and the next step still runs.
+3. **Resource teardown phase** — the ``finally`` block in
+   ``_run_with_config`` stops dispatchers, sinks, IoC matcher, TAXII
+   manager, then closes uvicorn and storage. ``storage.close()`` runs
+   even on drain timeout so the SQLite WAL is always allowed to flush.
+
+Operators can grep ``Seerflow shutdown sequence (starting|completed)`` to
+confirm a clean exit, or ``Shutdown timeout exceeded`` to identify
+forced shutdowns.
+"""
 
 from __future__ import annotations
 
@@ -123,6 +148,113 @@ def _log_shutdown_task_exception(task: asyncio.Task[None]) -> None:
     exc = task.exception()
     if exc is not None:
         _log.warning("pipeline.stop() raised during signal handling", exc_info=exc)
+
+
+async def _persist_session_state(
+    handler: object | None,
+    storage: object,
+    ensemble: DetectionEnsemble,
+    baseline_store: BaselineStore | None,
+) -> None:
+    """Run the best-effort drain steps that must complete before storage.close().
+
+    S-081 — extracted from ``_run_with_config``. Each step is wrapped in a
+    try/except so a failure in one stage does not abort the others. Order:
+
+    1. Flush pending template metadata accumulated by the handler (S-015).
+    2. Persist ML model state (S-026).
+    3. Flush UEBA baselines (S-064 / S-097).
+    4. Persist Drain3 template state (S-015 / S-081 new wiring).
+
+    ``handler is None`` is tolerated so the helper can be called from the
+    startup-failure path before ``make_handler`` returns.
+    """
+    if handler is not None:
+        try:
+            get_stats = getattr(handler, "get_stats", None)
+            if get_stats is not None:
+                events, anomalies, template_meta, t0 = get_stats()
+                pending_templates = [t for t in template_meta.values() if t.event_count > 0]
+                if pending_templates:
+                    await storage.write_templates(pending_templates)  # type: ignore[attr-defined]
+                    _log.info(
+                        "Flushed %d template updates to storage",
+                        len(pending_templates),
+                    )
+                elapsed = time.time() - t0
+                _log.info("--- Session Summary ---")
+                _log.info("  Events processed: %d", events)
+                _log.info("  Anomalies detected: %d", anomalies)
+                _log.info("  Unique templates: %d", len(template_meta))
+                _log.info("  Duration: %.1fs", elapsed)
+                if elapsed > 0 and events > 0:
+                    _log.info("  Throughput: %.0f events/sec", events / elapsed)
+        except Exception:
+            _log.warning("Session summary / template flush failed", exc_info=True)
+
+    try:
+        saved = await ensemble.save_all_state(storage)  # type: ignore[arg-type]
+        if saved > 0:
+            _log.info("Final save: %d model states persisted", saved)
+    except Exception:
+        _log.warning("Final model save failed", exc_info=True)
+
+    if baseline_store is not None:
+        try:
+            await baseline_store.flush(storage)  # type: ignore[arg-type]
+            _log.info("UEBA: flushed %d baselines", len(baseline_store))
+        except Exception:
+            _log.warning("UEBA baseline flush failed", exc_info=True)
+
+    # S-081: persist Drain3 template state so the next boot warms up with the
+    # full vocabulary instead of rebuilding from scratch. Wired in via
+    # ``EventNormalizer.parser`` (exposed on the handler closure as
+    # ``handler.get_normalizer``). Best-effort — Drain3 rebuilds on next boot.
+    if handler is not None:
+        try:
+            get_normalizer = getattr(handler, "get_normalizer", None)
+            if get_normalizer is not None:
+                from seerflow.parsing.drain_persistence import save_drain_state
+
+                normalizer = get_normalizer()
+                await save_drain_state(normalizer.parser, storage)  # type: ignore[arg-type]
+        except Exception:
+            _log.warning("Drain3 state save failed", exc_info=True)
+
+
+async def _run_shutdown_sequence(
+    *,
+    handler: object | None,
+    storage: object,
+    ensemble: DetectionEnsemble,
+    baseline_store: BaselineStore | None,
+    timeout: float,
+) -> None:
+    """Bounded wrapper around ``_persist_session_state`` (S-081 / NFR-008).
+
+    Emits structured INFO log lines bracketing the drain phase and a WARNING on
+    timeout. Returns normally even on timeout so the caller's ``finally`` block
+    can still run resource teardown (uvicorn, sinks, storage). Storage close
+    must NOT live inside this wait — the SQLite WAL must always be allowed to
+    finish writing.
+    """
+    started = time.monotonic()
+    _log.info("Seerflow shutdown sequence starting (timeout=%.1fs)", timeout)
+    try:
+        await asyncio.wait_for(
+            _persist_session_state(handler, storage, ensemble, baseline_store),
+            timeout=timeout,
+        )
+    except TimeoutError:
+        elapsed = time.monotonic() - started
+        _log.warning(
+            "Shutdown timeout exceeded — forcing exit (took %.2fs, bound=%.1fs)",
+            elapsed,
+            timeout,
+        )
+        return
+    elapsed = time.monotonic() - started
+    _log.info("Seerflow shutdown sequence completed (took %.2fs)", elapsed)
 
 
 def _install_shutdown_handlers(
@@ -815,40 +947,18 @@ async def _run_with_config(
             )
 
     try:
-        # Flush remaining template metadata.
-        # Event flushing is handled by WriteBuffer.close() inside storage.close().
-        get_stats = getattr(handler, "get_stats", None)
-        if get_stats is not None:
-            events, anomalies, template_meta, t0 = get_stats()
-            pending_templates = [t for t in template_meta.values() if t.event_count > 0]
-            if pending_templates:
-                await storage.write_templates(pending_templates)
-                _log.info(
-                    "Flushed %d template updates to storage",
-                    len(pending_templates),
-                )
-            elapsed = time.time() - t0
-            _log.info("--- Session Summary ---")
-            _log.info("  Events processed: %d", events)
-            _log.info("  Anomalies detected: %d", anomalies)
-            _log.info("  Unique templates: %d", len(template_meta))
-            _log.info("  Duration: %.1fs", elapsed)
-            if elapsed > 0 and events > 0:
-                _log.info("  Throughput: %.0f events/sec", events / elapsed)
-
-        try:
-            saved = await ensemble.save_all_state(storage)
-            if saved > 0:
-                _log.info("Final save: %d model states persisted", saved)
-        except Exception:
-            _log.warning("Final model save failed", exc_info=True)
-
-        if baseline_store is not None:
-            try:
-                await baseline_store.flush(storage)
-                _log.info("UEBA: flushed %d baselines", len(baseline_store))
-            except Exception:
-                _log.warning("UEBA baseline flush failed", exc_info=True)
+        # S-081: bounded cooperative drain — Drain3 templates + ML state + UEBA
+        # baselines persist within ``config.shutdown_timeout_s`` (default 30 s,
+        # matches kubelet ``terminationGracePeriodSeconds``). On timeout the
+        # helper returns normally so the ``finally`` block still closes
+        # uvicorn + sinks + storage; the SQLite WAL is never cancelled mid-write.
+        await _run_shutdown_sequence(
+            handler=handler,
+            storage=storage,
+            ensemble=ensemble,
+            baseline_store=baseline_store,
+            timeout=config.shutdown_timeout_s,
+        )
     finally:
         if dispatcher is not None:
             await dispatcher.stop()
