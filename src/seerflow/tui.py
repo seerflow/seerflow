@@ -24,7 +24,6 @@ mirrors the ``llm-cpu`` / ``llm-cloud`` graceful-absence pattern.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
@@ -33,7 +32,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import httpx
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterable, Awaitable, Callable
+    from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
     from types import ModuleType
 
     from seerflow.config import SeerflowConfig
@@ -170,12 +169,16 @@ async def _consume_ws_messages(
 # ---------------------------------------------------------------------------
 
 
-def _build_app_class() -> type[Any]:
-    """Construct the Textual ``App`` subclass.
+def _build_app_class() -> tuple[type[Any], type[Any]]:
+    """Construct the Textual ``App`` and ``AlertDetailModal`` subclasses.
 
     Defined inside a function so the textual imports stay lazy. Callers
-    (``launch_tui_with_pipeline``) only invoke this after ``_load_textual``
-    confirms the extra is present.
+    (``launch_tui_with_pipeline`` and the PEP 562 ``__getattr__`` hook)
+    only invoke this after ``_load_textual`` confirms the extra is
+    present. Returns a ``(App, AlertDetailModal)`` tuple so a single
+    construction yields one canonical class for each name; the
+    ``__getattr__`` hook caches both on the module so subsequent access
+    skips the builder entirely.
     """
     # Imports here are protected by the `_load_textual()` gate at the call
     # site — they never run on the import-safe path.
@@ -292,6 +295,7 @@ def _build_app_class() -> type[Any]:
         async def _refresh_alerts(self) -> None:
             items = await _poll_alerts(self._client)
             table = self.query_one("#alert-feed", DataTable)
+            new_alerts: dict[str, dict[str, Any]] = {}
             for alert in items:
                 # The /api/v1/alerts response field is ``alert_id``; we accept
                 # either ``alert_id`` or ``id`` so the TUI also works against
@@ -299,7 +303,7 @@ def _build_app_class() -> type[Any]:
                 alert_id = str(alert.get("alert_id") or alert.get("id") or "")
                 if not alert_id or alert_id in self._alerts_by_id:
                     continue
-                self._alerts_by_id[alert_id] = alert
+                new_alerts[alert_id] = alert
                 ts_value = alert.get("timestamp_ns")
                 # The schema may serialise large ints as strings (msgspec int64
                 # safety). Coerce defensively before formatting.
@@ -313,6 +317,11 @@ def _build_app_class() -> type[Any]:
                     str(alert.get("entity_uuid", "")),
                     key=alert_id,
                 )
+            if new_alerts:
+                # Build a new dict rather than mutating in place — keeps the
+                # snapshot atomic per refresh cycle and respects the project
+                # immutability convention.
+                self._alerts_by_id = {**self._alerts_by_id, **new_alerts}
 
         async def _consume_websocket(self) -> None:
             try:
@@ -324,7 +333,7 @@ def _build_app_class() -> type[Any]:
             try:
                 async with _ws_connect(self._ws_url) as ws:
 
-                    async def _iter_messages() -> Any:
+                    async def _iter_messages() -> AsyncGenerator[str, None]:
                         async for raw in ws:
                             yield raw if isinstance(raw, str) else raw.decode("utf-8")
 
@@ -332,8 +341,24 @@ def _build_app_class() -> type[Any]:
                         log.write(_format_event_line(payload))
 
                     await _consume_ws_messages(_iter_messages(), _on_event)
-            except Exception as exc:
+            except asyncio.CancelledError:
+                # Worker cancellation on App.exit() must propagate so the
+                # asyncio runtime can complete the cancellation handshake.
+                raise
+            except OSError as exc:
+                # Network failure (DNS, TLS, refused, peer reset). Recoverable
+                # in principle; the worker simply exits and an operator can
+                # restart the App. Log at DEBUG to avoid noise on every retry.
                 _log.debug("tui: websocket loop ended: %s", type(exc).__name__)
+            except Exception as exc:
+                # Anything else (websockets-internal exceptions, malformed
+                # handshake) is logged at WARNING so persistent failures are
+                # visible to operators rather than silently dropped.
+                _log.warning(
+                    "tui: websocket loop ended unexpectedly: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
 
         async def action_open_or_search(self) -> None:
             focused = self.focused
@@ -366,7 +391,7 @@ def _build_app_class() -> type[Any]:
                 if alert is not None:
                     await self.push_screen(AlertDetailModal(alert))
 
-    return SeerflowTUIApp
+    return SeerflowTUIApp, AlertDetailModal
 
 
 def __getattr__(name: str) -> Any:
@@ -375,47 +400,31 @@ def __getattr__(name: str) -> Any:
     Importing ``SeerflowTUIApp`` / ``AlertDetailModal`` from this module
     triggers the textual import — but only when the caller actually wants
     them. This keeps ``import seerflow.tui`` safe on systems without the
-    optional extra.
+    optional extra. The first hit registers both names on the module
+    globals so subsequent accesses bypass the hook and return the same
+    class objects (so ``isinstance`` checks stay stable).
     """
     if name in {"SeerflowTUIApp", "AlertDetailModal"}:
         if _load_textual() is None:
             raise ImportError("textual is not installed; install with 'pip install seerflow[tui]'")
-        cls = _build_app_class()
-        if name == "SeerflowTUIApp":
-            return cls
-        # AlertDetailModal lives inside the closure; rebuild it the same way.
-        # The closure already produced both classes — _build_app_class returns
-        # the App, the modal is reachable as a sibling via the textual import
-        # graph. For symmetry, we re-import textual modules here and rebuild.
-        return _build_alert_modal_class()
+        app_cls, modal_cls = _build_app_class()
+        module_globals = globals()
+        module_globals["SeerflowTUIApp"] = app_cls
+        module_globals["AlertDetailModal"] = modal_cls
+        return module_globals[name]
     raise AttributeError(f"module 'seerflow.tui' has no attribute {name!r}")
 
 
 def _build_alert_modal_class() -> type[Any]:
-    """Standalone construction of ``AlertDetailModal`` for ``__getattr__`` access."""
-    from textual.binding import Binding
-    from textual.screen import ModalScreen
-    from textual.widgets import Static
+    """Backward-compatible standalone access to the modal class.
 
-    class AlertDetailModal(ModalScreen[None]):
-        BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
-            Binding("escape", "dismiss", "Close", show=True),
-        ]
-
-        def __init__(self, alert: dict[str, Any]) -> None:
-            super().__init__()
-            self._alert = alert
-
-        def compose(self) -> Any:
-            yield Static(
-                json.dumps(self._alert, indent=2, sort_keys=True, default=str),
-                id="alert-detail-body",
-            )
-
-        def action_dismiss(self) -> None:  # type: ignore[override]
-            self.app.pop_screen()
-
-    return AlertDetailModal
+    Tests imported this name before ``_build_app_class`` returned both
+    classes — keep the alias so the public unit-test surface stays
+    stable. The body delegates to the canonical builder so there is no
+    duplicate definition.
+    """
+    _app_cls, modal_cls = _build_app_class()
+    return modal_cls
 
 
 # ---------------------------------------------------------------------------
@@ -488,32 +497,36 @@ async def launch_tui_with_pipeline(
             timeout=_DEFAULT_HTTP_TIMEOUT_S,
         ) as client:
             await _warmup(client)
-            app_cls = _build_app_class()
+            app_cls, _ = _build_app_class()
             app = app_cls(client=client, ws_url=ws_url)
+            quit_task: asyncio.Task[None] | None = None
             if _max_uptime_s is not None:
                 # Test-only hard cap so the integration suite never hangs.
                 async def _auto_quit() -> None:
                     await asyncio.sleep(_max_uptime_s)
                     app.exit(0)
 
-                asyncio.create_task(_auto_quit())  # noqa: RUF006
-            await app.run_async()
+                # Keep a strong reference so the task is not collected mid-flight
+                # (ruff RUF006). Cancel it on UI exit to avoid a dangling task.
+                quit_task = asyncio.create_task(_auto_quit())
+            try:
+                await app.run_async()
+            finally:
+                if quit_task is not None and not quit_task.done():
+                    quit_task.cancel()
 
+    # The pipeline runs as a TaskGroup-managed background task; the UI
+    # is awaited directly so that when the operator presses ``q`` (or
+    # ``run_async`` returns) the pipeline is cancelled explicitly. If
+    # the pipeline raises, ``TaskGroup`` propagates the exception and
+    # cancels the UI await. No supervisor wrapper task is needed.
     async with asyncio.TaskGroup() as tg:
         pipeline_task = tg.create_task(_run_with_config(config))
-        ui_task = tg.create_task(_ui_after_warmup())
-
-        async def _on_ui_exit() -> None:
-            try:
-                await ui_task
-            finally:
-                # When the operator quits the TUI, tear the pipeline down.
-                if not pipeline_task.done():
-                    pipeline_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await pipeline_task
-
-        tg.create_task(_on_ui_exit())
+        try:
+            await _ui_after_warmup()
+        finally:
+            if not pipeline_task.done():
+                pipeline_task.cancel()
 
 
 __all__ = [

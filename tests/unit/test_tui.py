@@ -920,8 +920,8 @@ class TestLaunchTUIFullPath:
             def exit(self, _code: int = 0) -> None:
                 pass
 
-        def _fake_build() -> type[Any]:
-            return _FakeApp
+        def _fake_build() -> tuple[type[Any], type[Any]]:
+            return _FakeApp, _FakeApp
 
         monkeypatch.setattr(tui, "_warmup", _fake_warmup)
         monkeypatch.setattr(tui, "_build_app_class", _fake_build)
@@ -969,7 +969,7 @@ class TestLaunchTUIFullPath:
             await asyncio.Event().wait()
 
         monkeypatch.setattr(tui, "_warmup", _fake_warmup)
-        monkeypatch.setattr(tui, "_build_app_class", lambda: _FakeApp)
+        monkeypatch.setattr(tui, "_build_app_class", lambda: (_FakeApp, _FakeApp))
         import seerflow.pipeline.run as run_mod
 
         monkeypatch.setattr(run_mod, "_run_with_config", _fake_pipeline)
