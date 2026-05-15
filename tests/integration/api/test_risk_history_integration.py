@@ -14,6 +14,7 @@ from seerflow.api.app import create_api_app
 from seerflow.config import SeerflowConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+from tests.conftest import pin_time_ns
 
 if TYPE_CHECKING:
     from seerflow.storage.sqlite import SqliteBackend
@@ -148,23 +149,27 @@ class TestRiskHistoryIntegration:
         and cluster timestamps inside a safe sub-window so the
         truncation assertion does not depend on wall-clock progression.
 
-        The patch target ``seerflow.api.routes.entities.time.time_ns``
-        relies on ``entities.py`` using ``import time`` (not
-        ``from time import time_ns``); a future refactor that switches
-        to a direct ``time_ns`` import must update the patch path to
-        ``seerflow.api.routes.entities.time_ns``.
+        Clock pinning goes through the shared ``pin_time_ns`` helper in
+        ``tests/conftest.py`` (SEE-242) rather than an inline lambda. The
+        patch target ``seerflow.api.routes.entities.time.time_ns`` relies
+        on ``entities.py`` using ``import time`` (not ``from time import
+        time_ns``); a future refactor that switches to a direct
+        ``time_ns`` import must update the patch path to
+        ``seerflow.api.routes.entities.time_ns``. The target string lives
+        at this call site so that coupling stays visible.
 
-        See SEE-246.
+        See SEE-246 (root-cause fix) and SEE-242 (shared-helper refactor).
         """
         res_ns = RESOLUTION_NS["1m"]
         now_bucket = (time.time_ns() // res_ns) * res_ns
-        # Capture by value into a separate name so the lambda is immune to
-        # any future reassignment of ``now_bucket`` between this point and
-        # the request dispatch.
+        # Capture by value into a separate name so the pinned clock is
+        # immune to any future reassignment of ``now_bucket`` between this
+        # point and the request dispatch (pin_time_ns closes over the value).
         pinned_now_ns = now_bucket
-        monkeypatch.setattr(
+        pin_time_ns(
+            monkeypatch,
             "seerflow.api.routes.entities.time.time_ns",
-            lambda: pinned_now_ns,
+            pinned_now_ns,
         )
         entity = str(uuid.uuid5(uuid.NAMESPACE_DNS, "truncation-flood"))
         # 30 min back from ``now_bucket``; the 10_050 ns spread keeps every

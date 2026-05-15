@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,6 +14,7 @@ from seerflow.config import DetectionConfig, SeerflowConfig
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
 from seerflow.sigma.engine import SigmaEngine
+from tests.conftest import FrozenDatetime
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,25 +85,6 @@ def _alert(ts_ns: int, *, rule_name: str) -> Alert:
     )
 
 
-class _FrozenDatetime:
-    """Stand-in for ``datetime`` with a frozen ``now`` and passthrough UTC.
-
-    Patched onto ``seerflow.api.routes.sigma.datetime`` so the route's
-    ``datetime.now(UTC).timestamp()`` returns a deterministic value while
-    leaving every other ``datetime`` attribute the route might use intact.
-    """
-
-    def __init__(self, frozen_ns: int) -> None:
-        self._frozen = datetime.fromtimestamp(frozen_ns / 1_000_000_000, tz=UTC)
-
-    def now(self, tz: object = None) -> datetime:
-        # now(tz) ignores tz; route always passes UTC
-        return self._frozen
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(datetime, name)
-
-
 def test_timeline_returns_24_buckets_with_zero_fill(
     app_with_sigma: FastAPI,
     backend: SqliteBackend,
@@ -129,7 +110,7 @@ def test_timeline_returns_24_buckets_with_zero_fill(
 
     monkeypatch.setattr(
         "seerflow.api.routes.sigma.datetime",
-        _FrozenDatetime(now_ns),
+        FrozenDatetime(now_ns),
     )
 
     with TestClient(app_with_sigma) as client:
