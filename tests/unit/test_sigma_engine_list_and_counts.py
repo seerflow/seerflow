@@ -115,7 +115,6 @@ class _FakeStateStore:
             )
 
 
-@pytest.mark.asyncio
 async def test_attach_state_store_hydrates_disabled_set(engine: SigmaEngine) -> None:
     rid = engine.list_rules()[0]["rule_id"]
     store = _FakeStateStore()
@@ -133,7 +132,6 @@ async def test_attach_state_store_hydrates_disabled_set(engine: SigmaEngine) -> 
     assert summaries[0]["last_fired_ns"] == 999
 
 
-@pytest.mark.asyncio
 async def test_flush_counters_writes_deltas(engine: SigmaEngine) -> None:
     store = _FakeStateStore()
     await engine.attach_state_store(store)
@@ -152,7 +150,6 @@ async def test_flush_counters_writes_deltas(engine: SigmaEngine) -> None:
     assert engine._match_counts[rid] == 0
 
 
-@pytest.mark.asyncio
 async def test_flush_counters_noop_without_store(engine: SigmaEngine) -> None:
     # No store attached → no-op even with pending counts
     event = make_event(

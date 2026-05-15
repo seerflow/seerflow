@@ -81,7 +81,6 @@ def test_satisfies_graph_backend_protocol() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_add_edge_emits_cypher_in_sql_wrapper() -> None:
     rec = _Recorder()
     backend = _backend_with(rec)
@@ -99,7 +98,6 @@ async def test_add_edge_emits_cypher_in_sql_wrapper() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 @pytest.mark.parametrize("bad", ["bad`type", "has'quote", "has\\backslash"])
 async def test_add_edge_rejects_unsafe_chars_in_rel_type(bad: str) -> None:
     rec = _Recorder()
@@ -115,7 +113,6 @@ async def test_add_edge_rejects_unsafe_chars_in_rel_type(bad: str) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_neighbors_returns_entity_id_dicts() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([('"b"',), ('"c"',)])
@@ -127,7 +124,6 @@ async def test_get_neighbors_returns_entity_id_dicts() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_neighbors_returns_empty_when_no_rows() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([])
@@ -136,7 +132,6 @@ async def test_get_neighbors_returns_empty_when_no_rows() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_neighbors_filters_by_rel_types() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([])
@@ -148,7 +143,6 @@ async def test_get_neighbors_filters_by_rel_types() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 @pytest.mark.parametrize("bad", ["ba`d", "ba'd", "ba\\d"])
 async def test_get_neighbors_rejects_unsafe_chars_in_rel_types(bad: str) -> None:
     rec = _Recorder()
@@ -163,7 +157,6 @@ async def test_get_neighbors_rejects_unsafe_chars_in_rel_types(bad: str) -> None
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_shortest_path_returns_list_of_ids() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([('["a", "b", "c"]',)])
@@ -172,7 +165,6 @@ async def test_shortest_path_returns_list_of_ids() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_shortest_path_returns_empty_when_no_path() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([])
@@ -181,7 +173,6 @@ async def test_shortest_path_returns_empty_when_no_path() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_shortest_path_returns_empty_when_first_row_is_null() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([(None,)])
@@ -195,7 +186,6 @@ async def test_shortest_path_returns_empty_when_first_row_is_null() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_subgraph_returns_nodes_and_edges() -> None:
     rec = _Recorder()
     # First fetch: nodes; second: edges.
@@ -209,7 +199,6 @@ async def test_get_subgraph_returns_nodes_and_edges() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_subgraph_empty_when_seed_unknown() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([])
@@ -225,7 +214,6 @@ async def test_get_subgraph_empty_when_seed_unknown() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_related_returns_entity_relations() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([('"b"', '"uses"'), ('"c"', '"owns"')])
@@ -236,7 +224,6 @@ async def test_get_related_returns_entity_relations() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_related_skips_empty_relation_types() -> None:
     rec = _Recorder()
     rec.fetch_returns.append([('"b"', '""'), ('"c"', '"owns"')])
@@ -251,7 +238,6 @@ async def test_get_related_skips_empty_relation_types() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_load_clears_then_bulk_inserts() -> None:
     rec = _Recorder()
     backend = _backend_with(rec)
@@ -270,7 +256,6 @@ async def test_load_clears_then_bulk_inserts() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_load_no_rows_only_clears() -> None:
     rec = _Recorder()
     backend = _backend_with(rec)
@@ -280,7 +265,6 @@ async def test_load_no_rows_only_clears() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_load_rejects_unsafe_chars_in_rel_type() -> None:
     rec = _Recorder()
     backend = _backend_with(rec)
@@ -289,7 +273,6 @@ async def test_load_rejects_unsafe_chars_in_rel_type() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_export_edges_returns_storage_tuples() -> None:
     rec = _Recorder()
     rec.fetch_returns.append(
@@ -312,7 +295,6 @@ async def test_export_edges_returns_storage_tuples() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_refresh_counts_pulls_from_server() -> None:
     rec = _Recorder()
     rec.fetchval_returns.extend(["7", "12"])
@@ -325,7 +307,6 @@ async def test_refresh_counts_pulls_from_server() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_refresh_counts_handles_none_returns() -> None:
     rec = _Recorder()
     rec.fetchval_returns.extend([None, None])
@@ -341,7 +322,6 @@ async def test_refresh_counts_handles_none_returns() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_close_calls_pool_close() -> None:
     rec = _Recorder()
     pool = _fake_pool(rec)
@@ -351,7 +331,6 @@ async def test_close_calls_pool_close() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bootstrap_runs_create_extension_and_create_graph() -> None:
     rec = _Recorder()
     rec.fetchval_returns.append(None)  # ag_graph lookup -> not present
@@ -365,7 +344,6 @@ async def test_bootstrap_runs_create_extension_and_create_graph() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bootstrap_skips_create_graph_when_already_present() -> None:
     rec = _Recorder()
     rec.fetchval_returns.append("seerflow_graph")  # graph already exists
@@ -377,7 +355,6 @@ async def test_bootstrap_skips_create_graph_when_already_present() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_connect_class_method_builds_pool_and_bootstraps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -412,7 +389,6 @@ async def test_connect_class_method_builds_pool_and_bootstraps(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_setup_connection_loads_age_and_sets_search_path() -> None:
     """The pool setup callback runs LOAD 'age' + SET search_path on each connection."""
     rec = _Recorder()

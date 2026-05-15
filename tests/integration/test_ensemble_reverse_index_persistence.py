@@ -11,8 +11,6 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-import pytest
-
 from seerflow.config import DetectionConfig
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.models import SeerflowEvent, SeverityLevel
@@ -47,7 +45,6 @@ def _config() -> DetectionConfig:
 
 
 class TestEnsembleReverseIndexPersistence:
-    @pytest.mark.asyncio
     async def test_round_trip_preserves_reverse_index(self, backend: SqliteBackend) -> None:
         """save_all_state → load_all_state rebuilds _source_hw_keys consistently."""
         src = DetectionEnsemble(_config())
@@ -64,7 +61,6 @@ class TestEnsembleReverseIndexPersistence:
         assert dst._source_hw_keys["worker"][0] == {"worker:9"}
         assert dst._source_hw_keys["worker"][1] == {"worker:u2"}
 
-    @pytest.mark.asyncio
     async def test_round_trip_sanitizes_colon_sources(self, backend: SqliteBackend) -> None:
         """Sources with colons sanitize on write AND on load, key shape stable end-to-end."""
         src = DetectionEnsemble(_config())
@@ -79,7 +75,6 @@ class TestEnsembleReverseIndexPersistence:
         assert "syslog_prod" in dst._source_hw_keys
         assert dst._source_hw_keys["syslog_prod"][0] == {"syslog_prod:5"}
 
-    @pytest.mark.asyncio
     async def test_source_eviction_after_reload_uses_reverse_index(
         self, backend: SqliteBackend
     ) -> None:
@@ -102,7 +97,6 @@ class TestEnsembleReverseIndexPersistence:
         assert "srcA" not in dst._source_hw_keys
         assert all(not k.startswith("srcA:") for k in dst._template_hw)
 
-    @pytest.mark.asyncio
     async def test_legacy_colon_laden_entity_migrates_and_gcs_orphan(
         self, backend: SqliteBackend
     ) -> None:

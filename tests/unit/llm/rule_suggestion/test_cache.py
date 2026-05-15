@@ -32,13 +32,11 @@ def _result(pattern_key: str = "ml:hst-anomaly:ip") -> RuleSuggestionResult:
     )
 
 
-@pytest.mark.asyncio
 async def test_get_miss_returns_none() -> None:
     cache = RuleSuggestionCache(max_entries=4, ttl_seconds=10)
     assert await cache.get("nope") is None
 
 
-@pytest.mark.asyncio
 async def test_put_then_get_marks_cached() -> None:
     cache = RuleSuggestionCache(max_entries=4, ttl_seconds=10)
     fresh = _result()
@@ -52,7 +50,6 @@ async def test_put_then_get_marks_cached() -> None:
     assert hit.pattern_key == fresh.pattern_key
 
 
-@pytest.mark.asyncio
 async def test_lru_eviction() -> None:
     cache = RuleSuggestionCache(max_entries=2, ttl_seconds=60)
     await cache.put("a", _result("a"))
@@ -67,7 +64,6 @@ async def test_lru_eviction() -> None:
     assert len(cache) == 2
 
 
-@pytest.mark.asyncio
 async def test_ttl_prune_on_access() -> None:
     cache = RuleSuggestionCache(max_entries=4, ttl_seconds=1)
     await cache.put("a", _result("a"))
@@ -78,7 +74,6 @@ async def test_ttl_prune_on_access() -> None:
     assert len(cache) == 0
 
 
-@pytest.mark.asyncio
 async def test_max_entries_zero_disables_cache() -> None:
     cache = RuleSuggestionCache(max_entries=0, ttl_seconds=60)
     await cache.put("a", _result("a"))
@@ -86,7 +81,6 @@ async def test_max_entries_zero_disables_cache() -> None:
     assert await cache.get("a") is None
 
 
-@pytest.mark.asyncio
 async def test_clear_empties() -> None:
     cache = RuleSuggestionCache(max_entries=4, ttl_seconds=60)
     await cache.put("a", _result("a"))
@@ -96,7 +90,6 @@ async def test_clear_empties() -> None:
     assert len(cache) == 0
 
 
-@pytest.mark.asyncio
 async def test_delete_pattern_key_removes_entry() -> None:
     """``delete(pattern_key)`` removes a single entry without raising."""
     cache = RuleSuggestionCache(max_entries=4, ttl_seconds=60)
@@ -119,7 +112,6 @@ def test_validates_ttl_seconds() -> None:
         RuleSuggestionCache(max_entries=4, ttl_seconds=0)
 
 
-@pytest.mark.asyncio
 async def test_concurrent_put_does_not_corrupt_order() -> None:
     """Multiple concurrent ``put`` calls land deterministically."""
     cache = RuleSuggestionCache(max_entries=4, ttl_seconds=60)

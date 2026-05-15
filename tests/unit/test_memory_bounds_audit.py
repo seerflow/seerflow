@@ -225,7 +225,6 @@ def test_lru_eviction_invariants(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("name", "builder"),
     [
@@ -310,7 +309,6 @@ def test_queue_backed_components_raise_queue_full_on_overflow() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_alert_dispatcher_drop_counter() -> None:
     class _S:
         pass
@@ -329,7 +327,6 @@ async def test_alert_dispatcher_drop_counter() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_pagerduty_sink_drop_counter() -> None:
     class _S:
         pass

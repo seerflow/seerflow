@@ -5,14 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import aiosqlite
-import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 class TestGraphEdgesMigration:
-    @pytest.mark.asyncio()
     async def test_migration_creates_graph_edges_table(self, tmp_path: Path) -> None:
         """Migration v2 creates the graph_edges table."""
         db_path = tmp_path / "test.db"
@@ -26,7 +24,6 @@ class TestGraphEdgesMigration:
             row = await cursor.fetchone()
             assert row is not None
 
-    @pytest.mark.asyncio()
     async def test_graph_edges_upsert(self, tmp_path: Path) -> None:
         """UPSERT increments event_count and updates last_seen on conflict."""
         db_path = tmp_path / "test.db"
@@ -59,7 +56,6 @@ class TestGraphEdgesMigration:
             assert row[0] == 2
             assert row[1] == 200
 
-    @pytest.mark.asyncio()
     async def test_graph_edges_indexes_exist(self, tmp_path: Path) -> None:
         """Migration v2 creates source and target indexes."""
         db_path = tmp_path / "test.db"

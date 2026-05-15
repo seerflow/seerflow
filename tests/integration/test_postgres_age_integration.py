@@ -49,7 +49,6 @@ def postgres_age_container() -> Iterator[_PostgresContainer]:
         container.stop()
 
 
-@pytest.mark.asyncio
 async def test_end_to_end_round_trip(
     postgres_age_container: _PostgresContainer,
 ) -> None:
@@ -69,7 +68,6 @@ async def test_end_to_end_round_trip(
         await backend.close()
 
 
-@pytest.mark.asyncio
 async def test_load_export_round_trip(
     postgres_age_container: _PostgresContainer,
 ) -> None:
@@ -92,7 +90,6 @@ async def test_load_export_round_trip(
         await backend.close()
 
 
-@pytest.mark.asyncio
 async def test_bootstrap_is_idempotent(
     postgres_age_container: _PostgresContainer,
 ) -> None:

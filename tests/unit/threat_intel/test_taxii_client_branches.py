@@ -21,7 +21,6 @@ ROOT = "https://taxii.example/taxii2/"
 OBJECTS = "https://taxii.example/taxii2/api1/collections/abc/objects/"
 
 
-@pytest.mark.asyncio
 async def test_discover_returns_payload_on_200() -> None:
     payload = {"title": "Test", "api_roots": ["https://taxii.example/taxii2/api1/"]}
     async with aiohttp.ClientSession() as session:
@@ -32,7 +31,6 @@ async def test_discover_returns_payload_on_200() -> None:
             assert result == payload
 
 
-@pytest.mark.asyncio
 async def test_discover_raises_on_non_200() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)
@@ -42,7 +40,6 @@ async def test_discover_raises_on_non_200() -> None:
                 await client.discover(ROOT)
 
 
-@pytest.mark.asyncio
 async def test_get_objects_returns_silently_on_304() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)
@@ -52,7 +49,6 @@ async def test_get_objects_returns_silently_on_304() -> None:
             assert collected == []
 
 
-@pytest.mark.asyncio
 async def test_get_objects_raises_on_non_200_non_304() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)
@@ -63,7 +59,6 @@ async def test_get_objects_raises_on_non_200_non_304() -> None:
                     pass  # pragma: no cover
 
 
-@pytest.mark.asyncio
 async def test_get_objects_raises_on_non_dict_body() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)
@@ -75,7 +70,6 @@ async def test_get_objects_raises_on_non_dict_body() -> None:
                     pass  # pragma: no cover
 
 
-@pytest.mark.asyncio
 async def test_get_objects_returns_when_more_true_but_no_next_token() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)

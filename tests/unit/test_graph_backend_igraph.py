@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from seerflow.graph.backends import GraphBackend, InMemoryIgraphBackend
 from seerflow.graph.entity_graph import EntityGraph
 
@@ -26,14 +24,12 @@ class TestInMemoryIgraphBackendConformance:
 
 
 class TestInMemoryIgraphBackendMutation:
-    @pytest.mark.asyncio
     async def test_add_edge_creates_vertices_and_edge(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("a", "b", "spawned_by", 1_000)
         assert backend.vertex_count == 2
         assert backend.edge_count == 1
 
-    @pytest.mark.asyncio
     async def test_add_duplicate_edge_increments_count(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("a", "b", "uses", 1_000)
@@ -44,7 +40,6 @@ class TestInMemoryIgraphBackendMutation:
 
 
 class TestInMemoryIgraphBackendQueries:
-    @pytest.mark.asyncio
     async def test_get_neighbors_walks_depth(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("a", "b", "x", 1)
@@ -52,7 +47,6 @@ class TestInMemoryIgraphBackendQueries:
         neighbours = await backend.get_neighbors("a", depth=2)
         assert sorted(n["entity_id"] for n in neighbours) == ["b", "c"]
 
-    @pytest.mark.asyncio
     async def test_get_neighbors_filters_by_rel_types(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("a", "b", "x", 1)
@@ -60,7 +54,6 @@ class TestInMemoryIgraphBackendQueries:
         neighbours = await backend.get_neighbors("a", rel_types=("x",))
         assert [n["entity_id"] for n in neighbours] == ["b"]
 
-    @pytest.mark.asyncio
     async def test_shortest_path_returns_path_through_wrapper(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("a", "b", "x", 1)
@@ -68,7 +61,6 @@ class TestInMemoryIgraphBackendQueries:
         path = await backend.shortest_path("a", "c")
         assert path == ["a", "b", "c"]
 
-    @pytest.mark.asyncio
     async def test_get_subgraph_returns_nodes_and_edges(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("a", "b", "x", 1)
@@ -81,14 +73,12 @@ class TestInMemoryIgraphBackendQueries:
 
 
 class TestInMemoryIgraphBackendBulkRoundTrip:
-    @pytest.mark.asyncio
     async def test_export_edges_storage_ready_tuple_shape(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("a", "b", "uses", 1_000)
         rows = await backend.export_edges()
         assert rows == [("a", "b", "uses", 1_000, 1_000, 1)]
 
-    @pytest.mark.asyncio
     async def test_load_rebuilds_graph_from_rows(self) -> None:
         backend = InMemoryIgraphBackend()
         rows = [
@@ -101,13 +91,11 @@ class TestInMemoryIgraphBackendBulkRoundTrip:
 
 
 class TestInMemoryIgraphBackendRelations:
-    @pytest.mark.asyncio
     async def test_get_related_returns_empty_when_entity_unknown(self) -> None:
         backend = InMemoryIgraphBackend()
         result = await backend.get_related("missing-uuid")
         assert result == []
 
-    @pytest.mark.asyncio
     async def test_get_related_walks_graph_edges(self) -> None:
         backend = InMemoryIgraphBackend()
         await backend.add_edge("entity-a", "entity-b", "uses", 1_000)

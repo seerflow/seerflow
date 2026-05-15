@@ -16,7 +16,6 @@ from seerflow.graph.factory import connect_graph
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.asyncio
 async def test_factory_built_backend_round_trips_edges() -> None:
     cfg = StorageConfig(backend="sqlite", graph_backend="igraph")
     backend = await connect_graph(cfg)
@@ -29,7 +28,6 @@ async def test_factory_built_backend_round_trips_edges() -> None:
     assert len(rows) == 2
 
 
-@pytest.mark.asyncio
 async def test_factory_built_backend_load_rebuilds_graph() -> None:
     cfg = StorageConfig(backend="sqlite", graph_backend="igraph")
     backend = await connect_graph(cfg)
@@ -42,7 +40,6 @@ async def test_factory_built_backend_load_rebuilds_graph() -> None:
     assert (await backend.export_edges()) == rows
 
 
-@pytest.mark.asyncio
 async def test_factory_built_backend_supports_shortest_path() -> None:
     cfg = StorageConfig(backend="sqlite", graph_backend="igraph")
     backend = await connect_graph(cfg)
@@ -52,7 +49,6 @@ async def test_factory_built_backend_supports_shortest_path() -> None:
     assert path == ["a", "b", "c"]
 
 
-@pytest.mark.asyncio
 async def test_factory_built_backend_returns_subgraph() -> None:
     cfg = StorageConfig(backend="sqlite", graph_backend="igraph")
     backend = await connect_graph(cfg)

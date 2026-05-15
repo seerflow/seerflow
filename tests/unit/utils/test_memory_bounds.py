@@ -62,7 +62,6 @@ def test_latency_tracker_bounds() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_aggregator_collects_every_component() -> None:
     """End-to-end coverage of every branch in ``collect_memory_bounds``.
 
@@ -156,7 +155,6 @@ async def test_aggregator_collects_every_component() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_alert_dispatcher_bounds_smoke() -> None:
     """``AlertDispatcher.bounds()`` is exposed; we don't actually fire the
     consumer loop (the audit is read-only).

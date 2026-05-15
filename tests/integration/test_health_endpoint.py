@@ -104,7 +104,6 @@ class TestComprehensiveHealthEndpoint:
         assert body["memory_bytes"]["rss"] >= 0
         assert "models" in body["memory_bytes"]
 
-    @pytest.mark.asyncio
     async def test_alert_count_24h_reflects_recent_alerts(
         self, comprehensive_client: TestClient, backend: SqliteBackend
     ) -> None:

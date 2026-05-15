@@ -14,7 +14,6 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
@@ -31,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "unit" / "llm" / "e
 from _fakes import FakeLLMBackend, make_alert, make_event
 
 
-@pytest.mark.asyncio
 async def test_default_config_leaves_explanation_service_unwired(
     backend: SqliteBackend,
 ) -> None:
@@ -45,7 +43,6 @@ async def test_default_config_leaves_explanation_service_unwired(
     assert app.state.explanation_service is None
 
 
-@pytest.mark.asyncio
 async def test_service_wiring_respects_config_cache_size(
     backend: SqliteBackend,
 ) -> None:
@@ -77,7 +74,6 @@ async def test_service_wiring_respects_config_cache_size(
     assert app.state.explanation_service.cache._max_entries == 32  # type: ignore[attr-defined]
 
 
-@pytest.mark.asyncio
 async def test_explain_endpoint_uses_wired_service(
     backend: SqliteBackend,
 ) -> None:
@@ -110,7 +106,6 @@ async def test_explain_endpoint_uses_wired_service(
     assert fake.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_explain_endpoint_returns_503_when_unwired(backend: SqliteBackend) -> None:
     app = create_api_app(
         log_store=backend,

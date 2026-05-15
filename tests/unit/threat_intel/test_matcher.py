@@ -80,7 +80,6 @@ def _ipv4(value: str, *, source: str = "f1", confidence: int = 80) -> Indicator:
     )
 
 
-@pytest.mark.asyncio
 async def test_refresh_loads_from_single_feed_snapshot() -> None:
     store = _MemStore()
     feed = TAXIIFeedConfig(id="f1", url="https://x", collection_id="c")
@@ -106,7 +105,6 @@ async def test_refresh_loads_from_single_feed_snapshot() -> None:
     assert snap_metrics.last_rebuild_at_ns is not None
 
 
-@pytest.mark.asyncio
 async def test_refresh_unions_multiple_feeds() -> None:
     store = _MemStore()
     feeds = (
@@ -132,7 +130,6 @@ async def test_refresh_unions_multiple_feeds() -> None:
     assert matcher.metrics_snapshot().indicators_loaded == {"ipv4": 2}
 
 
-@pytest.mark.asyncio
 async def test_refresh_filters_by_confidence_floor() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -157,7 +154,6 @@ async def test_refresh_filters_by_confidence_floor() -> None:
     assert matcher.metrics_snapshot().indicators_loaded == {"ipv4": 1}
 
 
-@pytest.mark.asyncio
 async def test_refresh_skips_disabled_types() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -179,7 +175,6 @@ async def test_refresh_skips_disabled_types() -> None:
     assert matcher.metrics_snapshot().indicators_loaded == {}
 
 
-@pytest.mark.asyncio
 async def test_check_returns_indicator_for_known_value() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -207,7 +202,6 @@ async def test_check_returns_indicator_for_known_value() -> None:
     assert metrics.confirmed_matches_total == 1
 
 
-@pytest.mark.asyncio
 async def test_check_returns_none_for_disabled_type() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -221,7 +215,6 @@ async def test_check_returns_none_for_disabled_type() -> None:
     assert matcher.check("1.2.3.4", "ipv4") is None  # type disabled
 
 
-@pytest.mark.asyncio
 async def test_false_positive_metric_increments_on_bloom_collision() -> None:
     """Brute-force a Bloom collision in a tiny high-FPR filter."""
     store = _MemStore()
@@ -286,7 +279,6 @@ def _evt(
     )
 
 
-@pytest.mark.asyncio
 async def test_check_event_extracts_ip_domain_hash_url() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -353,7 +345,6 @@ async def test_check_event_extracts_ip_domain_hash_url() -> None:
     assert {m.type for m in captured} == {"ipv4", "domain", "sha256", "url"}
 
 
-@pytest.mark.asyncio
 async def test_check_event_classifies_ipv4_vs_ipv6() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -382,7 +373,6 @@ async def test_check_event_classifies_ipv4_vs_ipv6() -> None:
     assert {m.type for m in matches} == {"ipv6"}
 
 
-@pytest.mark.asyncio
 async def test_check_event_silently_skips_malformed() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -395,7 +385,6 @@ async def test_check_event_silently_skips_malformed() -> None:
     assert matcher.check_event(evt) == ()
 
 
-@pytest.mark.asyncio
 async def test_start_runs_initial_rebuild_and_registers_listener() -> None:
     from seerflow.threat_intel.manager import TAXIIFeedManager
 
@@ -426,7 +415,6 @@ async def test_start_runs_initial_rebuild_and_registers_listener() -> None:
         await matcher.stop()
 
 
-@pytest.mark.asyncio
 async def test_listener_triggers_debounced_rebuild() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -456,7 +444,6 @@ async def test_listener_triggers_debounced_rebuild() -> None:
         await matcher.stop()
 
 
-@pytest.mark.asyncio
 async def test_stop_cancels_loop_and_is_idempotent() -> None:
     cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
 
@@ -476,7 +463,6 @@ async def test_stop_cancels_loop_and_is_idempotent() -> None:
     await matcher.stop()  # second call must be a no-op
 
 
-@pytest.mark.asyncio
 async def test_concurrent_reads_during_rebuild_never_observe_partial_state() -> None:
     store = _MemStore()
     feeds = (TAXIIFeedConfig(id="f1", url="https://x", collection_id="c"),)
@@ -528,7 +514,6 @@ def test_check_returns_none_when_state_unbuilt(stub_store: object) -> None:
     assert matcher.metrics_snapshot().checks_total == 1
 
 
-@pytest.mark.asyncio
 async def test_check_event_skips_unknown_candidates() -> None:
     """Well-formed candidates that aren't in the indicator set must be skipped."""
     store = _MemStore()
@@ -564,7 +549,6 @@ async def test_check_event_skips_unknown_candidates() -> None:
     assert {m.value for m in matches} == {"1.2.3.4"}
 
 
-@pytest.mark.asyncio
 async def test_check_event_swallows_on_match_callback_exception() -> None:
     """A raising on_match must not stop further matches or propagate."""
     store = _MemStore()
@@ -596,7 +580,6 @@ async def test_check_event_swallows_on_match_callback_exception() -> None:
     assert len(matches) == 1
 
 
-@pytest.mark.asyncio
 async def test_start_is_idempotent_while_running() -> None:
     cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
 
@@ -620,7 +603,6 @@ async def test_start_is_idempotent_while_running() -> None:
         await matcher.stop()
 
 
-@pytest.mark.asyncio
 async def test_start_rejects_during_shutdown() -> None:
     cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
 
@@ -640,7 +622,6 @@ async def test_start_rejects_during_shutdown() -> None:
         await matcher.start()
 
 
-@pytest.mark.asyncio
 async def test_run_loop_no_debounce_when_zero_ms() -> None:
     """rebuild_debounce_ms=0 must skip the asyncio.sleep branch."""
     store = _MemStore()
@@ -669,7 +650,6 @@ async def test_run_loop_no_debounce_when_zero_ms() -> None:
         await matcher.stop()
 
 
-@pytest.mark.asyncio
 async def test_run_loop_reruns_when_dirty_set_during_rebuild() -> None:
     """If a notification arrives while refresh() runs, the loop iterates again."""
     store = _MemStore()
@@ -724,7 +704,6 @@ async def test_run_loop_reruns_when_dirty_set_during_rebuild() -> None:
         await matcher.stop()
 
 
-@pytest.mark.asyncio
 async def test_build_state_skips_disabled_feeds() -> None:
     store = _MemStore()
     feeds = (
@@ -752,7 +731,6 @@ async def test_build_state_skips_disabled_feeds() -> None:
     assert matcher.check("5.6.7.8", "ipv4") is not None
 
 
-@pytest.mark.asyncio
 async def test_build_state_warns_when_bit_array_exceeds_budget(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -774,7 +752,6 @@ async def test_build_state_warns_when_bit_array_exceeds_budget(
     assert matcher.metrics_snapshot().bit_array_bytes > 10 * 1024 * 1024
 
 
-@pytest.mark.asyncio
 async def test_restart_after_stop_rebuilds_fresh_bit_array() -> None:
     """AC12: stop() + start() cycles must rebuild the bit array from a fresh snapshot."""
     store = _MemStore()
@@ -819,7 +796,6 @@ async def test_restart_after_stop_rebuilds_fresh_bit_array() -> None:
         await matcher.stop()
 
 
-@pytest.mark.asyncio
 async def test_refresh_failure_keeps_previous_state_and_increments_metric(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -860,7 +836,6 @@ async def test_refresh_failure_keeps_previous_state_and_increments_metric(
     assert matcher.check("1.2.3.4", "ipv4") is not None
 
 
-@pytest.mark.asyncio
 async def test_stop_before_start_does_not_brick_matcher() -> None:
     """stop() before start() must reset _stopping so a later start() is not bricked."""
     cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
@@ -887,7 +862,6 @@ async def test_stop_before_start_does_not_brick_matcher() -> None:
         await matcher.stop()
 
 
-@pytest.mark.asyncio
 async def test_on_snapshot_updated_before_start_is_noop() -> None:
     """A listener firing before start() must drop the signal silently."""
     cfg = ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True))
@@ -910,7 +884,6 @@ async def test_on_snapshot_updated_before_start_is_noop() -> None:
     assert matcher._dirty_event is None
 
 
-@pytest.mark.asyncio
 async def test_run_loop_raises_when_dirty_event_unbound() -> None:
     """Defensive: ``_run_loop`` must surface a clear error if it is launched
     without ``start()`` having bound the dirty event."""
@@ -932,7 +905,6 @@ async def test_run_loop_raises_when_dirty_event_unbound() -> None:
         await matcher._run_loop()
 
 
-@pytest.mark.asyncio
 async def test_ipv6_canonical_form_match() -> None:
     """Indicator stored as ``::1`` matches event entity ``0:0:0:0:0:0:0:1``."""
     store = _MemStore()
@@ -966,7 +938,6 @@ async def test_ipv6_canonical_form_match() -> None:
     assert {m.type for m in matches} == {"ipv6"}
 
 
-@pytest.mark.asyncio
 async def test_ipv4_already_canonical_no_break() -> None:
     """IPv4 indicators in canonical dotted-decimal still match unchanged."""
     store = _MemStore()
@@ -990,7 +961,6 @@ async def test_ipv4_already_canonical_no_break() -> None:
     assert {m.value for m in matches} == {"1.2.3.4"}
 
 
-@pytest.mark.asyncio
 async def test_build_state_drops_malformed_ip_indicator(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1029,7 +999,6 @@ async def test_build_state_drops_malformed_ip_indicator(
     assert matcher.check("1.2.3.4", "ipv4") is not None
 
 
-@pytest.mark.asyncio
 async def test_domain_case_normalized_match() -> None:
     """Indicator ``evil.example`` matches event domain ``Evil.Example`` (case-fold)."""
     store = _MemStore()
@@ -1063,7 +1032,6 @@ async def test_domain_case_normalized_match() -> None:
     assert {m.type for m in matches} == {"domain"}
 
 
-@pytest.mark.asyncio
 async def test_hash_case_normalized_match() -> None:
     """Hash event with uppercase digest + uppercase algo prefix still matches."""
     store = _MemStore()
@@ -1099,7 +1067,6 @@ async def test_hash_case_normalized_match() -> None:
     assert {m.type for m in matches} == {"sha256"}
 
 
-@pytest.mark.asyncio
 async def test_build_state_refuses_bloom_above_hard_cap() -> None:
     """Bloom byte_size exceeding the 100 MB ceiling must raise + preserve prior state."""
     store = _MemStore()

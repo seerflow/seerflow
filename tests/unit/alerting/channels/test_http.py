@@ -12,7 +12,6 @@ from seerflow.alerting._http import RetryDecision, post_with_retry
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_post_with_retry_succeeds_on_200() -> None:
     with aioresponses() as mock:
         mock.post("https://x.example/endpoint", status=200)
@@ -27,7 +26,6 @@ async def test_post_with_retry_succeeds_on_200() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_post_with_retry_retries_5xx_then_succeeds() -> None:
     with aioresponses() as mock:
         mock.post("https://x.example/endpoint", status=503)
@@ -43,7 +41,6 @@ async def test_post_with_retry_retries_5xx_then_succeeds() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_post_with_retry_gives_up_after_max_attempts() -> None:
     with aioresponses() as mock:
         for _ in range(3):
@@ -60,7 +57,6 @@ async def test_post_with_retry_gives_up_after_max_attempts() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_post_with_retry_does_not_retry_4xx() -> None:
     with aioresponses() as mock:
         mock.post("https://x.example/endpoint", status=400)
@@ -75,7 +71,6 @@ async def test_post_with_retry_does_not_retry_4xx() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_post_with_retry_uses_data_when_provided() -> None:
     # Form-encoded payload (e.g. Twilio).
     captured: dict[str, Any] = {}
@@ -100,7 +95,6 @@ async def test_post_with_retry_uses_data_when_provided() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_post_with_retry_scrubs_telegram_bot_token_from_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -137,7 +131,6 @@ async def test_post_with_retry_scrubs_telegram_bot_token_from_logs(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_body_inspector_receives_status_and_body() -> None:
     """Inspector is called with (status, body_text) for non-2xx responses."""
     captured: list[tuple[int, str]] = []
@@ -162,7 +155,6 @@ async def test_body_inspector_receives_status_and_body() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_body_inspector_stop_short_circuits_5xx() -> None:
     call_count = 0
 
@@ -192,7 +184,6 @@ async def test_body_inspector_stop_short_circuits_5xx() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_body_inspector_default_preserves_4xx_drop() -> None:
     call_count = 0
 
@@ -222,7 +213,6 @@ async def test_body_inspector_default_preserves_4xx_drop() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_body_inspector_default_preserves_5xx_retry() -> None:
     call_count = 0
 
@@ -253,7 +243,6 @@ async def test_body_inspector_default_preserves_5xx_retry() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_body_inspector_not_called_on_2xx() -> None:
     calls: list[int] = []
 
@@ -278,7 +267,6 @@ async def test_body_inspector_not_called_on_2xx() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_body_inspector_retry_continues_to_next_attempt() -> None:
     """Inspector returning 'retry' on a 4xx must force a retry that would not
     happen under default semantics."""
@@ -311,7 +299,6 @@ async def test_body_inspector_retry_continues_to_next_attempt() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_body_inspector_retry_then_success() -> None:
     """Inspector forces a retry on attempt 1; attempt 2 succeeds with 200."""
     call_count = 0

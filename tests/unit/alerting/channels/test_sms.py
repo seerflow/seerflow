@@ -65,7 +65,6 @@ def test_sms_target_hides_auth_token_in_repr() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_sms_deliver_posts_to_twilio_messages_endpoint() -> None:
     target = SmsTarget(
         name="s",
@@ -86,7 +85,6 @@ async def test_sms_deliver_posts_to_twilio_messages_endpoint() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_sms_deliver_sends_to_each_to_number() -> None:
     target = SmsTarget(
         name="s",
@@ -120,7 +118,6 @@ async def test_sms_deliver_sends_to_each_to_number() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_sms_digest_sends_single_message_per_to_number() -> None:
     target = SmsTarget(
         name="s",
@@ -156,7 +153,6 @@ async def test_sms_digest_sends_single_message_per_to_number() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_sms_empty_digest_does_no_network_io() -> None:
     target = SmsTarget(
         name="s",

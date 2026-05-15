@@ -34,7 +34,6 @@ def test_duplicate_target_name_rejected() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_route_unknown_channel_logs_and_drops(caplog: pytest.LogCaptureFixture) -> None:
     slack = FakeDeliveryTarget(name="slack")
     router = NotificationRouter(
@@ -53,7 +52,6 @@ async def test_route_unknown_channel_logs_and_drops(caplog: pytest.LogCaptureFix
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_safe_deliver_swallows_target_exception(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -73,7 +71,6 @@ async def test_safe_deliver_swallows_target_exception(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_flush_key_deliver_digest_exception_logged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -102,7 +99,6 @@ async def test_flush_key_deliver_digest_exception_logged(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_stop_drain_handles_target_vanishing() -> None:
     """stop()'s final drain pops buffers even if the target is missing."""
     email = FakeDeliveryTarget(name="email")
@@ -134,7 +130,6 @@ async def test_stop_drain_handles_target_vanishing() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_stop_drain_target_exception_logged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -166,7 +161,6 @@ async def test_stop_drain_target_exception_logged(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_digest_buffer_warns_above_1000_entries(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -200,7 +194,6 @@ async def test_digest_buffer_warns_above_1000_entries(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_flush_after_cancelled_returns_early() -> None:
     email = FakeDeliveryTarget(name="email")
     router = NotificationRouter(
@@ -228,7 +221,6 @@ async def test_flush_after_cancelled_returns_early() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_flush_key_no_op_when_buffer_empty() -> None:
     """Direct _flush_key call with empty buffer must early-return."""
     email = FakeDeliveryTarget(name="email")
@@ -238,7 +230,6 @@ async def test_flush_key_no_op_when_buffer_empty() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_route_after_stop_is_rejected(caplog: pytest.LogCaptureFixture) -> None:
     slack = FakeDeliveryTarget(name="slack")
     router = NotificationRouter(

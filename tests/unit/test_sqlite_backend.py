@@ -966,7 +966,6 @@ class TestDedupWindow:
         finally:
             await backend.close()
 
-    @pytest.mark.asyncio
     async def test_late_arriving_event_within_window_deduplicates(self) -> None:
         """Late-arriving alert (earlier timestamp) within window still deduplicates."""
         backend = await self._make_backend()
@@ -1649,7 +1648,6 @@ class TestPruneResetTemplates:
 
 
 class TestFlush:
-    @pytest.mark.asyncio
     async def test_flush_empty_buffer_does_not_raise(self) -> None:
         """flush() on an empty buffer completes without error."""
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
@@ -1660,7 +1658,6 @@ class TestFlush:
         finally:
             await backend.close()
 
-    @pytest.mark.asyncio
     async def test_flush_writes_pending_events(self) -> None:
         """Public flush() drains the write buffer and persists events."""
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
@@ -1675,7 +1672,6 @@ class TestFlush:
         finally:
             await backend.close()
 
-    @pytest.mark.asyncio
     async def test_flush_idempotent(self) -> None:
         """Calling flush() twice does not duplicate events."""
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")
@@ -1691,7 +1687,6 @@ class TestFlush:
         finally:
             await backend.close()
 
-    @pytest.mark.asyncio
     async def test_flush_after_close_does_not_raise(self) -> None:
         """flush() on an already-closed backend must not raise."""
         config = StorageConfig(backend="sqlite", sqlite_path=":memory:")

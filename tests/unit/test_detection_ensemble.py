@@ -1330,7 +1330,6 @@ class TestFormatHealthTable:
 class TestRunQueryHealth:
     """S-140: run_query_health() table and JSON output paths."""
 
-    @pytest.mark.asyncio
     async def test_table_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         from argparse import Namespace
         from unittest.mock import AsyncMock, patch
@@ -1359,7 +1358,6 @@ class TestRunQueryHealth:
         assert "Detection Ensemble Health" in captured.out
         assert "0 / 256" in captured.out
 
-    @pytest.mark.asyncio
     async def test_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         from argparse import Namespace
         from unittest.mock import AsyncMock, patch
@@ -1392,7 +1390,6 @@ class TestRunQueryHealth:
         assert "estimated_memory_bytes" in data
         assert data["source_count"] == 0
 
-    @pytest.mark.asyncio
     async def test_run_query_dispatches_health(self, capsys: pytest.CaptureFixture[str]) -> None:
         from argparse import Namespace
         from unittest.mock import AsyncMock, patch
@@ -1420,7 +1417,6 @@ class TestRunQueryHealth:
         captured = capsys.readouterr()
         assert "Detection Ensemble Health" in captured.out
 
-    @pytest.mark.asyncio
     async def test_config_error_prints_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
         """S-158: load_config failure prints to stderr and exits with code 1."""
         from argparse import Namespace
@@ -1439,7 +1435,6 @@ class TestRunQueryHealth:
         captured = capsys.readouterr()
         assert "Error loading config: bad config" in captured.err
 
-    @pytest.mark.asyncio
     async def test_storage_connect_error_prints_stderr(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -1465,7 +1460,6 @@ class TestRunQueryHealth:
         captured = capsys.readouterr()
         assert "Error connecting to storage: no db" in captured.err
 
-    @pytest.mark.asyncio
     async def test_load_all_state_error_prints_stderr(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -1930,7 +1924,6 @@ class TestReverseHWIndex:
 class TestLoadStateReverseIndex:
     """S-201: load_all_state re-sanitizes manifest keys and rebuilds reverse index."""
 
-    @pytest.mark.asyncio
     async def test_load_populates_reverse_index_from_manifest(self, tmp_path: Path) -> None:
         storage_cfg = StorageConfig(
             backend="sqlite",
@@ -1952,7 +1945,6 @@ class TestLoadStateReverseIndex:
 
         await storage.close()
 
-    @pytest.mark.asyncio
     async def test_load_resanitizes_legacy_colon_keys(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -2000,7 +1992,6 @@ class TestLoadStateReverseIndex:
 
         await storage.close()
 
-    @pytest.mark.asyncio
     async def test_load_migrates_legacy_colon_laden_entity(self, tmp_path: Path) -> None:
         """Legacy ent_hw manifest with colon in entity (IPv6) sanitizes
         to the runtime shape (ent:fe80::1 → ent:fe80__1) not the rsplit shape."""
@@ -2036,7 +2027,6 @@ class TestLoadStateReverseIndex:
 
         await storage.close()
 
-    @pytest.mark.asyncio
     async def test_load_rejects_no_colon_manifest_entry(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -2082,7 +2072,6 @@ class TestLoadStateReverseIndex:
 
         await storage.close()
 
-    @pytest.mark.asyncio
     async def test_load_collision_gcs_losing_raw_key(self, tmp_path: Path) -> None:
         """When two raw manifest keys collapse onto one sanitized key,
         the losing raw_key's on-disk row is deleted so reload does not
@@ -2144,7 +2133,6 @@ class TestLoadStateReverseIndex:
 
         await storage.close()
 
-    @pytest.mark.asyncio
     async def test_load_collision_gc_failure_logs_and_continues(
         self,
         tmp_path: Path,
@@ -2212,7 +2200,6 @@ class TestLoadStateReverseIndex:
 
         await storage.close()
 
-    @pytest.mark.asyncio
     async def test_load_preserves_248_char_boundary_key(self, tmp_path: Path) -> None:
         """S-201 regression guard: when source_type == _MAX_SOURCE_KEY_LEN, the
         runtime produces a no-colon key (truncation drops the separator). That
@@ -2243,7 +2230,6 @@ class TestLoadStateReverseIndex:
 
         await storage.close()
 
-    @pytest.mark.asyncio
     async def test_load_state_failure_logs_and_continues(
         self,
         tmp_path: Path,

@@ -17,7 +17,6 @@ from tests.unit.alert_factory import make_alert
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_adapter_deliver_invokes_dispatcher_retry_path() -> None:
     t = WebhookTarget(name="slack", url="https://example.com/hook", format="json")
     session = AsyncMock(spec=aiohttp.ClientSession)
@@ -40,7 +39,6 @@ async def test_adapter_deliver_invokes_dispatcher_retry_path() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_adapter_deliver_digest_loops_deliver() -> None:
     t = WebhookTarget(name="slack", url="https://example.com/hook", format="json")
     session = AsyncMock(spec=aiohttp.ClientSession)

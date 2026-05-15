@@ -53,7 +53,6 @@ def client(backend: SqliteBackend) -> TestClient:
     return TestClient(app)
 
 
-@pytest.mark.asyncio
 class TestRiskHistoryIntegration:
     async def test_buckets_sum_and_top_rule(
         self, client: TestClient, backend: SqliteBackend

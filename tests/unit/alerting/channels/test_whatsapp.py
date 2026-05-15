@@ -68,7 +68,6 @@ def test_whatsapp_target_hides_access_token_in_repr() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_deliver_posts_template_message() -> None:
     target = WhatsAppTarget(
         name="w",
@@ -104,7 +103,6 @@ async def test_whatsapp_deliver_posts_template_message() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_131026_opens_circuit_for_5_minutes() -> None:
     now = [0.0]
 
@@ -154,7 +152,6 @@ async def test_whatsapp_131026_opens_circuit_for_5_minutes() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_non_131026_400_does_not_open_circuit(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -198,7 +195,6 @@ async def test_whatsapp_non_131026_400_does_not_open_circuit(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_empty_digest_no_network_io() -> None:
     target = WhatsAppTarget(
         name="w",
@@ -215,7 +211,6 @@ async def test_whatsapp_empty_digest_no_network_io() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_digest_sends_one_template_with_top_alert() -> None:
     target = WhatsAppTarget(
         name="w",
@@ -255,7 +250,6 @@ async def test_whatsapp_digest_sends_one_template_with_top_alert() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_retries_503_then_succeeds() -> None:
     """Transient 5xx must be retried; the eventual 200 must produce a single delivery."""
     target = WhatsAppTarget(
@@ -291,7 +285,6 @@ async def test_whatsapp_retries_503_then_succeeds() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_5xx_with_meta_code_does_not_double_log_error(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -332,7 +325,6 @@ async def test_whatsapp_5xx_with_meta_code_does_not_double_log_error(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_three_5xx_exhausts_retries(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -376,7 +368,6 @@ async def test_whatsapp_three_5xx_exhausts_retries(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_503_then_131026_opens_circuit_mid_retry() -> None:
     """A 503 followed by a 131026 must open the circuit and stop retrying."""
     now = [0.0]
@@ -422,7 +413,6 @@ async def test_whatsapp_503_then_131026_opens_circuit_mid_retry() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_non_dict_error_field_is_treated_as_no_code() -> None:
     """A compromised upstream returning ``error: [list]`` (not a dict) must not
     raise AttributeError inside the inspector, which would convert a terminal
@@ -459,7 +449,6 @@ async def test_whatsapp_non_dict_error_field_is_treated_as_no_code() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_whatsapp_transport_error_does_not_leak_bearer_token(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

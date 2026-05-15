@@ -50,7 +50,6 @@ def _make_alert() -> Alert:
     )
 
 
-@pytest.mark.asyncio
 async def test_dashboard_root_and_health() -> None:
     """AC1 + AC6 — root responds and health surfaces shared state + feedback."""
     ws_manager = ConnectionManager()

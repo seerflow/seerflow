@@ -103,7 +103,6 @@ def test_constructor_does_not_load_model(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_complete_invokes_create_completion_once(tmp_path: Path, fake_llama: Any) -> None:
     backend = LlamaCppBackend(tmp_path / "m.gguf", n_threads=2)
     out = await backend.complete("hi", max_tokens=10, temperature=0.5, stop=("\n",))
@@ -118,7 +117,6 @@ async def test_complete_invokes_create_completion_once(tmp_path: Path, fake_llam
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_complete_hard_caps_max_tokens(tmp_path: Path, fake_llama: Any) -> None:
     backend = LlamaCppBackend(tmp_path / "m.gguf", n_threads=2)
     await backend.complete("hi", max_tokens=99999)
@@ -126,7 +124,6 @@ async def test_complete_hard_caps_max_tokens(tmp_path: Path, fake_llama: Any) ->
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_complete_strips_prompt_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -149,7 +146,6 @@ async def test_complete_strips_prompt_prefix(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_complete_handles_missing_choices(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -172,7 +168,6 @@ async def test_complete_handles_missing_choices(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_complete_handles_non_dict_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,7 +188,6 @@ async def test_complete_handles_non_dict_payload(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_complete_runs_in_thread(tmp_path: Path, fake_llama: Any) -> None:
     """A blocking sync call must not stall the event loop."""
     backend = LlamaCppBackend(tmp_path / "m.gguf", n_threads=2)
@@ -216,7 +210,6 @@ async def test_complete_runs_in_thread(tmp_path: Path, fake_llama: Any) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_complete_serialises_concurrent_calls(tmp_path: Path, fake_llama: Any) -> None:
     """Concurrent ``complete(...)`` calls share one instance; never overlap."""
     backend = LlamaCppBackend(tmp_path / "m.gguf", n_threads=2)
@@ -230,7 +223,6 @@ async def test_complete_serialises_concurrent_calls(tmp_path: Path, fake_llama: 
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_constructor_passes_kwargs_to_llama(tmp_path: Path, fake_llama: Any) -> None:
     backend = LlamaCppBackend(
         tmp_path / "m.gguf",
@@ -253,7 +245,6 @@ async def test_constructor_passes_kwargs_to_llama(tmp_path: Path, fake_llama: An
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_lazy_load_logs_once(
     tmp_path: Path,
     fake_llama: Any,

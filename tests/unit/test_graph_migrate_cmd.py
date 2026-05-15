@@ -99,7 +99,6 @@ def patched_factory(
     yield registry
 
 
-@pytest.mark.asyncio
 class TestRunGraphMigrate:
     async def test_happy_path_in_memory_round_trip(
         self,

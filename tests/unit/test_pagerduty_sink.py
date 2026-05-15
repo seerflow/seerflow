@@ -206,7 +206,6 @@ class TestResolvePayload:
 
 
 class TestPagerDutySinkAsync:
-    @pytest.mark.asyncio
     async def test_enqueue_trigger_and_dispatch(self) -> None:
         session = _mock_session(202)
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -220,7 +219,6 @@ class TestPagerDutySinkAsync:
         call_kwargs = session.post.call_args
         assert call_kwargs[1]["json"]["event_action"] == "trigger"
 
-    @pytest.mark.asyncio
     async def test_enqueue_resolve_and_dispatch(self) -> None:
         session = _mock_session(202)
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -233,7 +231,6 @@ class TestPagerDutySinkAsync:
         assert call_kwargs[1]["json"]["event_action"] == "resolve"
         assert call_kwargs[1]["json"]["dedup_key"] == "ml:hst-anomaly:ent-123"
 
-    @pytest.mark.asyncio
     async def test_queue_full_drops_trigger(self) -> None:
         session = _mock_session()
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -243,7 +240,6 @@ class TestPagerDutySinkAsync:
         sink.enqueue_trigger(_make_alert())  # should drop silently
         assert sink._queue.qsize() == 1
 
-    @pytest.mark.asyncio
     async def test_queue_full_logs_warning_on_trigger(self) -> None:
         session = _mock_session()
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -254,7 +250,6 @@ class TestPagerDutySinkAsync:
             sink.enqueue_trigger(_make_alert())
             mock_log.warning.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_queue_full_logs_warning_on_resolve(self) -> None:
         session = _mock_session()
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -265,7 +260,6 @@ class TestPagerDutySinkAsync:
             sink.enqueue_resolve("ml:hst-anomaly:ent-123")
             mock_log.warning.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_retry_on_server_error(self) -> None:
         resp_fail_inner = MagicMock(status=500)
         resp_fail_inner.text = AsyncMock(return_value="")
@@ -296,7 +290,6 @@ class TestPagerDutySinkAsync:
 
         assert session.post.call_count == 2
 
-    @pytest.mark.asyncio
     async def test_no_retry_on_client_error(self) -> None:
         session = _mock_session(400)
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -307,7 +300,6 @@ class TestPagerDutySinkAsync:
         await asyncio.wait_for(sink.run(), timeout=5.0)
         assert session.post.call_count == 1
 
-    @pytest.mark.asyncio
     async def test_exhausts_retries_on_persistent_500(self) -> None:
         session = _mock_session(500)
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -325,7 +317,6 @@ class TestPagerDutySinkAsync:
 
         assert session.post.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_routing_key_not_logged(self) -> None:
         """Ensure routing_key does not appear in log output."""
         session = _mock_session(500)
@@ -349,7 +340,6 @@ class TestPagerDutySinkAsync:
             msg = str(call)
             assert "super-secret-key-12345" not in msg
 
-    @pytest.mark.asyncio
     async def test_stop_drains_queue(self) -> None:
         session = _mock_session(202)
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
@@ -361,7 +351,6 @@ class TestPagerDutySinkAsync:
         await asyncio.wait_for(sink.run(), timeout=5.0)
         assert session.post.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_exception_during_post_retried(self) -> None:
         """Network exception during POST is retried up to MAX_RETRIES."""
         call_count = 0
@@ -394,7 +383,6 @@ class TestPagerDutySinkAsync:
 
         assert session.post.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_post_uses_allow_redirects_false(self) -> None:
         """POST is made with allow_redirects=False."""
         session = _mock_session(202)
@@ -407,7 +395,6 @@ class TestPagerDutySinkAsync:
         call_kwargs = session.post.call_args[1]
         assert call_kwargs.get("allow_redirects") is False
 
-    @pytest.mark.asyncio
     async def test_post_targets_pd_endpoint(self) -> None:
         """POST is made to the PagerDuty Events API v2 endpoint."""
         session = _mock_session(202)
@@ -421,7 +408,6 @@ class TestPagerDutySinkAsync:
         assert call_args == _PD_ENDPOINT
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_run_survives_programmer_error_in_send(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -478,7 +464,6 @@ class TestSendProgrammerErrorPropagation:
     AttributeError). These indicate real bugs and must propagate instead of
     being silently retried and then logged as 'retries exhausted'."""
 
-    @pytest.mark.asyncio
     async def test_send_propagates_typeerror(self) -> None:
         from seerflow.alerting.sinks.pagerduty import PagerDutySink
 
@@ -495,7 +480,6 @@ class TestSendProgrammerErrorPropagation:
 
 
 class TestPDResponseBodyLogging:
-    @pytest.mark.asyncio
     async def test_4xx_reads_response_body(self) -> None:
         """On 4xx, PD sink reads response body via text() for logging."""
         resp_mock = MagicMock(status=400)
@@ -517,7 +501,6 @@ class TestPDResponseBodyLogging:
 
         resp_mock.text.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_5xx_reads_response_body(self) -> None:
         """On 5xx, PD sink reads response body via text() for logging."""
         resp_mock = MagicMock(status=500)

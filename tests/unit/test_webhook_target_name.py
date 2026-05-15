@@ -21,7 +21,6 @@ def test_webhook_target_satisfies_delivery_target_protocol() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_webhook_target_deliver_stubs_raise_not_implemented() -> None:
     from tests.unit.alert_factory import make_alert
 

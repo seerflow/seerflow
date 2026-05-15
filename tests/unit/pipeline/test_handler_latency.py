@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from seerflow.api.latency import StageLatencyTracker
 from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
@@ -50,7 +48,6 @@ def _raw_event() -> RawEvent:
     )
 
 
-@pytest.mark.asyncio
 async def test_handler_records_per_stage_latency_when_tracker_wired() -> None:
     tracker = StageLatencyTracker()
     handler = make_handler(
@@ -70,7 +67,6 @@ async def test_handler_records_per_stage_latency_when_tracker_wired() -> None:
         assert snap[stage]["count"] >= 1.0
 
 
-@pytest.mark.asyncio
 async def test_handler_runs_without_tracker() -> None:
     """Existing call shape (no tracker kwarg) must keep working."""
     handler = make_handler(

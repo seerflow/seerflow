@@ -79,7 +79,6 @@ async def _build_client(backend: SqliteBackend) -> httpx.AsyncClient:
 class TestTUIAppRendersAgainstInProcessAPI:
     """End-to-end TUI smoke test driven by Textual's Pilot harness."""
 
-    @pytest.mark.asyncio
     async def test_compose_alerts_and_search(
         self,
         backend: SqliteBackend,

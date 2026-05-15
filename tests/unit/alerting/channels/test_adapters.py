@@ -18,7 +18,6 @@ from tests.unit.alert_factory import make_alert
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bind_http_channel_passes_session_to_sms() -> None:
     sms = SmsTarget(
         name="s",
@@ -42,7 +41,6 @@ async def test_bind_http_channel_passes_session_to_sms() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bind_http_channel_forwards_deliver_digest() -> None:
     tg = TelegramTarget(
         name="tg",
@@ -70,7 +68,6 @@ async def test_bind_http_channel_forwards_deliver_digest() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bind_http_channel_preserves_min_severity() -> None:
     wa = WhatsAppTarget(
         name="wa",

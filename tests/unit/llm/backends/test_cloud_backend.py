@@ -198,7 +198,6 @@ def _openai_response(text: str | None) -> Any:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_cls = _set_fake_anthropic(monkeypatch, response=_anthropic_response("  Yes."))
 
@@ -212,7 +211,6 @@ async def test_anthropic_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_default_kwargs_match_protocol(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -237,7 +235,6 @@ async def test_anthropic_default_kwargs_match_protocol(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_cls = _set_fake_openai(monkeypatch, response=_openai_response("  Yes."))
 
@@ -251,7 +248,6 @@ async def test_openai_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_default_kwargs_match_protocol(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -275,7 +271,6 @@ async def test_openai_default_kwargs_match_protocol(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_hard_cap_clamps_max_tokens(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -287,7 +282,6 @@ async def test_anthropic_hard_cap_clamps_max_tokens(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_hard_cap_clamps_max_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch, response=_openai_response("x"))
     backend = OpenAIBackend(api_key="k", model="m")
@@ -297,7 +291,6 @@ async def test_openai_hard_cap_clamps_max_tokens(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_stop_tokens_passed_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -309,7 +302,6 @@ async def test_anthropic_stop_tokens_passed_through(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_stop_tokens_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch, response=_openai_response("x"))
     backend = OpenAIBackend(api_key="k", model="m")
@@ -319,7 +311,6 @@ async def test_openai_stop_tokens_passed_through(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_temperature_pass_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -331,7 +322,6 @@ async def test_anthropic_temperature_pass_through(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_temperature_pass_through(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch, response=_openai_response("x"))
     backend = OpenAIBackend(api_key="k", model="m")
@@ -341,7 +331,6 @@ async def test_openai_temperature_pass_through(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_timeout_pass_through(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_anthropic(monkeypatch, response=_anthropic_response("x"))
     backend = AnthropicBackend(api_key="k", model="m", timeout_s=2.0)
@@ -351,7 +340,6 @@ async def test_anthropic_timeout_pass_through(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_timeout_pass_through(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch, response=_openai_response("x"))
     backend = OpenAIBackend(api_key="k", model="m", timeout_s=2.0)
@@ -386,7 +374,6 @@ def test_openai_base_url_pass_through(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_api_status_error_wrapped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -413,7 +400,6 @@ async def test_anthropic_api_status_error_wrapped(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_api_status_error_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch, response=_openai_response("ok"))
     import openai  # type: ignore[import-not-found]
@@ -436,7 +422,6 @@ async def test_openai_api_status_error_wrapped(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_connection_error_wrapped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -456,7 +441,6 @@ async def test_anthropic_connection_error_wrapped(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_connection_error_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch)
     import openai  # type: ignore[import-not-found]
@@ -470,7 +454,6 @@ async def test_openai_connection_error_wrapped(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_timeout_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_anthropic(monkeypatch)
     _FakeAsyncAnthropic._next_raises = TimeoutError("deadline exceeded")
@@ -481,7 +464,6 @@ async def test_anthropic_timeout_wrapped(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_timeout_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch)
     _FakeAsyncOpenAI._next_raises = TimeoutError("deadline exceeded")
@@ -492,7 +474,6 @@ async def test_openai_timeout_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_malformed_empty_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -503,7 +484,6 @@ async def test_anthropic_malformed_empty_content(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_malformed_non_text_block(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -517,7 +497,6 @@ async def test_anthropic_malformed_non_text_block(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_malformed_text_not_string(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -531,7 +510,6 @@ async def test_anthropic_malformed_text_not_string(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_malformed_none_content(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch, response=_openai_response(None))
     backend = OpenAIBackend(api_key="k", model="m")
@@ -540,7 +518,6 @@ async def test_openai_malformed_none_content(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_malformed_empty_choices(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_fake_openai(monkeypatch, response=SimpleNamespace(choices=[]))
     backend = OpenAIBackend(api_key="k", model="m")
@@ -554,7 +531,6 @@ async def test_openai_malformed_empty_choices(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_error_message_scrubs_bearer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -574,7 +550,6 @@ async def test_anthropic_error_message_scrubs_bearer(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_error_message_scrubs_bearer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -678,7 +653,6 @@ def test_provider_endpoint_url_defaults_per_provider() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_malformed_missing_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -693,7 +667,6 @@ async def test_openai_malformed_missing_message(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_anthropic_debug_log_emitted(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -709,7 +682,6 @@ async def test_anthropic_debug_log_emitted(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_openai_debug_log_emitted(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

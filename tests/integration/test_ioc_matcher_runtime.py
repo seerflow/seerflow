@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import msgspec
-import pytest
 
 from seerflow.config import (
     IoCMatcherConfig,
@@ -21,7 +20,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.mark.asyncio
 async def test_matcher_construction_order_attaches_listener_before_manager_start(
     tmp_path: Path,
 ) -> None:

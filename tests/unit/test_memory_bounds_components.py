@@ -151,7 +151,6 @@ def test_baseline_store_eviction_counter_increments(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_explanation_cache_eviction_counter() -> None:
     from seerflow.llm.explanation.result import ExplanationResult
 
@@ -177,7 +176,6 @@ async def test_explanation_cache_eviction_counter() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_hunt_cache_eviction_counter() -> None:
     cache = HuntCache(max_entries=3, ttl_seconds=3600)
     for i in range(7):
@@ -189,7 +187,6 @@ async def test_hunt_cache_eviction_counter() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_rule_suggestion_cache_eviction_counter() -> None:
     from seerflow.llm.rule_suggestion.result import RuleSuggestionResult
 

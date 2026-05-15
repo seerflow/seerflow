@@ -44,7 +44,6 @@ def make_alert(*, alert_id: str = "a-1", feedback: str = "") -> Alert:
     )
 
 
-@pytest.mark.asyncio
 async def test_append_feedback_event_persists_row(sqlite_storage: SqliteBackend) -> None:
     await sqlite_storage.append_feedback_event(
         alert_id="a-1",
@@ -62,7 +61,6 @@ async def test_append_feedback_event_persists_row(sqlite_storage: SqliteBackend)
     assert ev.submitted_at_ns == 1_700_000_000_000_000_000
 
 
-@pytest.mark.asyncio
 async def test_list_feedback_events_newest_first(sqlite_storage: SqliteBackend) -> None:
     for ts in (10, 20, 30):
         await sqlite_storage.append_feedback_event(
@@ -77,7 +75,6 @@ async def test_list_feedback_events_newest_first(sqlite_storage: SqliteBackend) 
     assert page.total == 3
 
 
-@pytest.mark.asyncio
 async def test_list_feedback_events_pagination(sqlite_storage: SqliteBackend) -> None:
     for ts in range(1, 6):
         await sqlite_storage.append_feedback_event("a-1", "tp", "", "cli", ts)
@@ -88,7 +85,6 @@ async def test_list_feedback_events_pagination(sqlite_storage: SqliteBackend) ->
     assert page2.limit == 2
 
 
-@pytest.mark.asyncio
 async def test_list_feedback_events_unknown_alert_empty(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -97,7 +93,6 @@ async def test_list_feedback_events_unknown_alert_empty(
     assert page.items == ()
 
 
-@pytest.mark.asyncio
 async def test_update_feedback_also_appends_log_row(sqlite_storage: SqliteBackend) -> None:
     alert = make_alert(alert_id="a-1", feedback="")
     await sqlite_storage.write_alert(alert)
@@ -110,7 +105,6 @@ async def test_update_feedback_also_appends_log_row(sqlite_storage: SqliteBacken
     assert ev.note == "too noisy"
 
 
-@pytest.mark.asyncio
 async def test_list_feedback_events_includes_monotonic_id(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -125,7 +119,6 @@ async def test_list_feedback_events_includes_monotonic_id(
     assert len(set(ids)) == len(ids)
 
 
-@pytest.mark.asyncio
 async def test_update_feedback_rolls_back_on_insert_failure(
     sqlite_storage: SqliteBackend,
     monkeypatch: pytest.MonkeyPatch,
@@ -154,7 +147,6 @@ async def test_update_feedback_rolls_back_on_insert_failure(
     assert page.total == 0
 
 
-@pytest.mark.asyncio
 async def test_update_feedback_missing_alert_does_not_write_log(
     sqlite_storage: SqliteBackend,
 ) -> None:

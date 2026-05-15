@@ -37,7 +37,6 @@ def _make_alert(
 
 @pytest.mark.integration
 class TestKillChainIntegration:
-    @pytest.mark.asyncio
     async def test_three_tactics_produces_kill_chain_alert(self, tmp_path: Path) -> None:
         """Three alerts with different tactics for same entity -> kill-chain alert."""
         from seerflow.config import KillChainConfig, StorageConfig
@@ -90,7 +89,6 @@ class TestKillChainIntegration:
         finally:
             await storage.close()
 
-    @pytest.mark.asyncio
     async def test_two_tactics_no_kill_chain_alert(self, tmp_path: Path) -> None:
         """Two tactics for same entity -> no kill-chain alert."""
         from seerflow.config import KillChainConfig

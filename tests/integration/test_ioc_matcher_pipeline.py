@@ -7,7 +7,6 @@ import time
 from typing import TYPE_CHECKING
 
 import msgspec
-import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,7 +41,6 @@ _UNDER_COVERAGE = sys.gettrace() is not None
 _REBUILD_BUDGET_S = 3.0 if _UNDER_COVERAGE else 1.0
 
 
-@pytest.mark.asyncio
 async def test_matcher_rebuilds_within_one_second_for_100k_indicators(
     tmp_path: Path,
 ) -> None:
