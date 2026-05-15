@@ -4,13 +4,20 @@
 // patch the page can merge into its filter state. Selecting a category /
 // product / severity or toggling enabled-only fires immediately.
 //
-// S-154 (T8): the single severity `<select>` is replaced by a checkbox
-// group emitting `severity_in: number[]`. An empty selection means "no
-// filter" — `buildQuery` in sigmaRulesApi already strips empty arrays so
-// no `?severity_in=` token reaches the backend.
+// S-154 (T8): the single severity `<select>` is replaced by a multi-select
+// emitting `severity_in: number[]`. An empty selection means "no filter" —
+// `buildQuery` in sigmaRulesApi already strips empty arrays so no
+// `?severity_in=` token reaches the backend.
+//
+// S-230 / SEE-241: the severity multi-select renders as a Button +
+// aria-pressed chip group (matching AlertFeed/FilterBar) instead of raw
+// checkboxes, and the container padding aligns to the canonical
+// `border-b p-2`.
 import { useEffect, useRef, useState } from "react";
 
 import type { SigmaRuleFilter } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface Props {
   initialSearch?: string;
@@ -79,7 +86,7 @@ export function FilterBar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 border-b px-3 py-2">
+    <div className="flex flex-wrap items-center gap-3 border-b p-2">
       <input
         type="search"
         placeholder="Search rules…"
@@ -112,27 +119,34 @@ export function FilterBar({
           </option>
         ))}
       </select>
-      <fieldset
-        className="flex flex-wrap items-center gap-2 text-sm"
-        aria-label="Filter by severity"
+      <span className="sr-only" id="sigma-severity-label">
+        Filter by severity
+      </span>
+      <div
+        className="flex flex-wrap items-center gap-2"
+        role="group"
+        aria-labelledby="sigma-severity-label"
       >
-        <legend className="sr-only">Severity</legend>
-        {SEVERITIES.map((s) => (
-          <label
-            key={s.value}
-            className="flex items-center gap-1 capitalize"
-          >
-            <input
-              type="checkbox"
-              aria-label={s.label}
-              checked={severityIn.includes(s.value)}
-              onChange={(e) => toggleSeverity(s.value, e.target.checked)}
-              className="h-4 w-4 cursor-pointer accent-primary"
-            />
-            {s.label}
-          </label>
-        ))}
-      </fieldset>
+        {SEVERITIES.map((s) => {
+          const active = severityIn.includes(s.value);
+          return (
+            <Button
+              key={s.value}
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-pressed={active}
+              className={cn(
+                "capitalize",
+                active && "bg-primary text-primary-foreground",
+              )}
+              onClick={() => toggleSeverity(s.value, !active)}
+            >
+              {s.label}
+            </Button>
+          );
+        })}
+      </div>
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
