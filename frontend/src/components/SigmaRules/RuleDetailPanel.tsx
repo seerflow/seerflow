@@ -37,38 +37,35 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<SigmaRuleTimelineResponse | null>(null);
 
+  // S-230 / SEE-241: one AbortController shared by both fetches (rule
+  // detail + 24h timeline). A fast ruleId switch runs this effect's
+  // cleanup, aborting the prior controller so stale detail/timeline
+  // responses cannot land. An aborted fetch never resolves its `.then`,
+  // so the stale-setState-after-switch path is closed by the abort
+  // itself — no separate `alive` flag needed. AbortError is swallowed
+  // (a deliberate cancel is not an error). The timeline stays an
+  // independent request so a slow/erroring timeline cannot block the
+  // YAML view; its failures (AbortError included) fall back to "no
+  // sparkline rendered".
   useEffect(() => {
-    let alive = true;
+    const controller = new AbortController();
     setRule(null);
     setError(null);
-    void getSigmaRule(ruleId)
-      .then((r) => {
-        if (alive) setRule(r);
-      })
-      .catch((e: unknown) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [ruleId]);
-
-  // Independent fetch from the rule detail so a slow/erroring timeline
-  // endpoint cannot block the YAML view. Failures fall back to "no
-  // sparkline rendered" — see comment in `getSigmaRuleTimeline`.
-  useEffect(() => {
-    let alive = true;
     setTimeline(null);
-    void getSigmaRuleTimeline(ruleId)
-      .then((t) => {
-        if (alive) setTimeline(t);
-      })
-      .catch(() => {
-        // Silent: the metric row still shows the count without the chart.
+    void getSigmaRule(ruleId, controller.signal)
+      .then(setRule)
+      .catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        if (e instanceof Error && e.name === "AbortError") return;
+        setError(e instanceof Error ? e.message : String(e));
       });
-    return () => {
-      alive = false;
-    };
+    void getSigmaRuleTimeline(ruleId, controller.signal)
+      .then(setTimeline)
+      .catch(() => {
+        // Silent: the metric row still shows the count without the
+        // chart; an aborted timeline is silenced here too.
+      });
+    return () => controller.abort();
   }, [ruleId]);
 
   if (error) {

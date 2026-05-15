@@ -59,6 +59,37 @@ describe("useSigmaRulesStore", () => {
     expect(useSigmaRulesStore.getState().status).toBe("error");
   });
 
+  it("load forwards the AbortSignal to getSigmaRules (S-230)", async () => {
+    mockedGet.mockResolvedValueOnce({
+      items: [sampleRule],
+      total: 1,
+      page: 1,
+      limit: 100,
+    });
+    const controller = new AbortController();
+    await useSigmaRulesStore.getState().load(controller.signal);
+    expect(mockedGet).toHaveBeenCalledTimes(1);
+    expect(mockedGet.mock.calls[0][1]).toBe(controller.signal);
+  });
+
+  it("load does not set status=error when rejected with AbortError (S-230)", async () => {
+    mockedGet.mockRejectedValueOnce(
+      new DOMException("aborted", "AbortError"),
+    );
+    const controller = new AbortController();
+    await useSigmaRulesStore.getState().load(controller.signal);
+    expect(useSigmaRulesStore.getState().status).not.toBe("error");
+    expect(useSigmaRulesStore.getState().status).toBe("loading");
+  });
+
+  it("load swallows a plain Error named AbortError (S-230)", async () => {
+    mockedGet.mockRejectedValueOnce(
+      Object.assign(new Error("aborted"), { name: "AbortError" }),
+    );
+    await useSigmaRulesStore.getState().load(new AbortController().signal);
+    expect(useSigmaRulesStore.getState().status).not.toBe("error");
+  });
+
   it("setFilter merges patches", () => {
     useSigmaRulesStore.getState().setFilter({ search: "ssh" });
     expect(useSigmaRulesStore.getState().filter.search).toBe("ssh");

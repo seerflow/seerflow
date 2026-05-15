@@ -39,20 +39,31 @@ describe("FilterBar", () => {
     expect(onChange).toHaveBeenCalledWith({ enabledOnly: true });
   });
 
-  it("emits severity_in as the union of checked boxes", () => {
+  it("emits severity_in as the union of pressed chips (S-230)", () => {
     const onChange = vi.fn();
     render(<FilterBar onChange={onChange} />);
-    fireEvent.click(screen.getByLabelText("critical"));
-    fireEvent.click(screen.getByLabelText("high"));
+    fireEvent.click(screen.getByRole("button", { name: "critical" }));
+    fireEvent.click(screen.getByRole("button", { name: "high" }));
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ severity_in: [5, 4] }),
     );
   });
 
-  it("unchecking removes the value from severity_in (empty array on full clear)", () => {
+  it("severity chip exposes aria-pressed reflecting selection (S-230)", () => {
+    const onChange = vi.fn();
+    render(<FilterBar onChange={onChange} />);
+    const crit = screen.getByRole("button", { name: "critical" });
+    expect(crit).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(crit);
+    expect(
+      screen.getByRole("button", { name: "critical" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("un-pressing removes the value from severity_in (empty array on full clear) (S-230)", () => {
     const onChange = vi.fn();
     render(<FilterBar initialSeverityIn={[5]} onChange={onChange} />);
-    fireEvent.click(screen.getByLabelText("critical"));
+    fireEvent.click(screen.getByRole("button", { name: "critical" }));
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ severity_in: [] }),
     );

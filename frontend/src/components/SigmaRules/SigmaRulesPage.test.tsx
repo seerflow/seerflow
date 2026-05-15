@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SigmaRulesPage } from "./SigmaRulesPage";
 import { useSigmaRulesStore } from "@/stores/sigmaRules";
@@ -81,6 +81,30 @@ describe("SigmaRulesPage", () => {
     render(<SigmaRulesPage />);
     await waitFor(() =>
       expect(screen.getByText(/No rules match the current filters/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("aborts the in-flight list load when the filter changes again (S-230)", async () => {
+    const signals: AbortSignal[] = [];
+    mockedGet.mockImplementation(
+      (_params: unknown, signal?: AbortSignal) => {
+        if (signal) signals.push(signal);
+        return Promise.resolve({ items: [], total: 0, page: 1, limit: 100 });
+      },
+    );
+    render(<SigmaRulesPage />);
+    await waitFor(() =>
+      expect(useSigmaRulesStore.getState().status).toBe("ready"),
+    );
+    expect(signals.length).toBeGreaterThanOrEqual(1);
+    const firstSignal = signals[0];
+    act(() => {
+      useSigmaRulesStore.getState().setFilter({ search: "x" });
+    });
+    await waitFor(() => expect(signals.length).toBeGreaterThanOrEqual(2));
+    expect(firstSignal.aborted).toBe(true);
+    await waitFor(() =>
+      expect(useSigmaRulesStore.getState().status).not.toBe("error"),
     );
   });
 

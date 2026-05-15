@@ -111,6 +111,56 @@ describe("RuleDetailPanel", () => {
     expect(screen.queryByTestId("rule-sparkline")).toBeNull();
   });
 
+  it("aborts in-flight fetches when ruleId changes (S-230)", async () => {
+    const detailSignals: AbortSignal[] = [];
+    const timelineSignals: AbortSignal[] = [];
+    mockedGet.mockReset();
+    mockedGet.mockImplementation((id: string, signal?: AbortSignal) => {
+      if (signal) detailSignals.push(signal);
+      return new Promise((resolve) => {
+        setTimeout(
+          () =>
+            resolve({
+              rule_id: id,
+              title: id,
+              description: "",
+              severity: 3,
+              logsource_key: ["", "linux", ""],
+              attack_tactics: [],
+              attack_techniques: [],
+              enabled: true,
+              source: "bundled",
+              yaml_source: "",
+              match_count_lifetime: 0,
+              last_fired_ns: null,
+              alert_count_24h: 0,
+            }),
+          50,
+        );
+      });
+    });
+    mockedTimeline.mockReset();
+    mockedTimeline.mockImplementation(
+      (_id: string, signal?: AbortSignal) => {
+        if (signal) timelineSignals.push(signal);
+        return Promise.reject(new Error("no timeline"));
+      },
+    );
+
+    const { rerender } = render(
+      <RuleDetailPanel ruleId="r1" onClose={() => {}} />,
+    );
+    await waitFor(() => expect(detailSignals.length).toBe(1));
+    rerender(<RuleDetailPanel ruleId="r2" onClose={() => {}} />);
+    await waitFor(() => expect(detailSignals.length).toBe(2));
+
+    expect(detailSignals[0].aborted).toBe(true);
+    expect(timelineSignals[0]).toBe(detailSignals[0]);
+    expect(detailSignals[1].aborted).toBe(false);
+    // The abort of r1 must not surface an error banner.
+    expect(screen.queryByText(/failed to load rule/i)).toBeNull();
+  });
+
   it("close button fires onClose", async () => {
     mockedGet.mockResolvedValueOnce({
       rule_id: "r1",
