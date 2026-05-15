@@ -143,6 +143,8 @@ CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts (timestamp_ns);
 CREATE INDEX IF NOT EXISTS idx_alerts_entity ON alerts (entity_uuid);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_dedup ON alerts (dedup_key);
 CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts (alert_type);
+CREATE INDEX IF NOT EXISTS idx_alerts_type_rule_time
+    ON alerts (alert_type, rule_name, timestamp_ns);
 
 CREATE TABLE IF NOT EXISTS model_state (
     key        TEXT PRIMARY KEY,

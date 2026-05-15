@@ -42,7 +42,7 @@ from seerflow.api.schemas import (
     SigmaRuleUploadRequest,
     SigmaRuleValidationResult,
 )
-from seerflow.models.query import AlertQuery, TimeRange
+from seerflow.models.query import TimeRange
 from seerflow.sigma.engine import SigmaRuleCollisionError
 from seerflow.sigma.ids import compute_rule_id
 from seerflow.sigma.validator import SigmaRuleValidationError, validate_yaml
@@ -62,10 +62,6 @@ HealthStateDep = Annotated[dict[str, str], Depends(get_health_state)]
 # ``derive_pattern_key`` ever produces. Any caller-supplied value that
 # doesn't match returns 422 from FastAPI before reaching the service.
 _PATTERN_KEY_REGEX = r"^[a-z0-9_:.-]{1,128}$"
-
-# 24h alert-count window scan ceiling. Mirrors attack/coverage: a single
-# bounded scan beats N per-rule round-trips; AlertStore enforces 10000 cap.
-_ALERT_SCAN_LIMIT = 10_000
 
 # Timeline bucket size + count. The endpoint returns exactly 24 hourly
 # buckets across the trailing 24h window; both are pinned today (only
@@ -92,21 +88,20 @@ def _require_engine(engines: DetectionEngines) -> SigmaEngine:
 
 
 async def _alert_counts_24h(storage: StorageDeps) -> dict[str, int]:
-    """Group sigma alerts by ``rule_name`` over the trailing 24h window."""
+    """Group sigma alerts by ``rule_name`` over the trailing 24h window.
+
+    Pushes the aggregation to SQL via ``count_alerts_grouped`` — no
+    result-set cap, so high-volume deployments are no longer silently
+    undercounted, and the full alert payload is no longer decoded just
+    to tally counts (S-229 / SEE-240).
+    """
     end_ns = int(datetime.now(UTC).timestamp() * 1_000_000_000)
     start_ns = end_ns - 24 * 3600 * 1_000_000_000
-    page = await storage.alert_store.query_alerts(
-        AlertQuery(
-            time_range=TimeRange(start_ns=start_ns, end_ns=end_ns),
-            alert_type="sigma",
-            page=1,
-            limit=_ALERT_SCAN_LIMIT,
-        )
+    return await storage.alert_store.count_alerts_grouped(
+        alert_type="sigma",
+        time_range=TimeRange(start_ns=start_ns, end_ns=end_ns),
+        group_by="rule_name",
     )
-    counts: dict[str, int] = {}
-    for alert in page.items:
-        counts[alert.rule_name] = counts.get(alert.rule_name, 0) + 1
-    return counts
 
 
 def _parse_severity_in(values: list[str] | None) -> list[int] | None:

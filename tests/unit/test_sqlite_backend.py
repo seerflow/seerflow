@@ -153,6 +153,7 @@ class TestSchema:
                 "idx_alerts_entity",
                 "idx_alerts_dedup",
                 "idx_alerts_type",
+                "idx_alerts_type_rule_time",
             }
         finally:
             await conn.close()

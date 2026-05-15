@@ -222,6 +222,35 @@ async def _migrate_v6_junction_timestamp_ns(conn: aiosqlite.Connection) -> None:
     )
 
 
+async def _migrate_v7_alerts_type_rule_time(conn: aiosqlite.Connection) -> None:
+    """Migration 7: covering composite index for the per-rule 24h alert
+    aggregation (S-229 / SEE-240).
+
+    Accelerates ``count_alerts_grouped`` (``WHERE alert_type=? AND
+    timestamp_ns IN [..) GROUP BY rule_name``) and the existing
+    ``count_alerts_bucketed`` (``WHERE alert_type=? AND rule_name=? AND
+    timestamp_ns IN [..)``). Idempotent — fresh DBs already have it from
+    the schema DDL.
+
+    Defensive like ``_backfill_mitre_junctions``: a DB that predates the
+    ``alerts`` table (or its ``alert_type`` / ``rule_name`` columns) is
+    left untouched — the columns land with the table in a fresh schema,
+    so there is nothing to index on such DBs.
+    """
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='alerts'"
+    ) as cur:
+        if await cur.fetchone() is None:
+            return
+    for column in ("alert_type", "rule_name", "timestamp_ns"):
+        if not await _column_exists(conn, "alerts", column):
+            return
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alerts_type_rule_time "
+        "ON alerts (alert_type, rule_name, timestamp_ns)"
+    )
+
+
 MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     1: _migrate_v1_bootstrap,
     2: _migrate_v2_graph_edges,
@@ -229,6 +258,7 @@ MIGRATIONS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     4: _migrate_v4_feedback_events,
     5: _migrate_v5_sigma_rule_state,
     6: _migrate_v6_junction_timestamp_ns,
+    7: _migrate_v7_alerts_type_rule_time,
 }
 
 

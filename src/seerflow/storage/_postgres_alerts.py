@@ -37,6 +37,12 @@ _log = logging.getLogger(__name__)
 # postgres backend never imports from a sibling backend module.
 _AGG_MAX_CONTRIB_IDS = 16
 
+# Mirror of ``_sqlite_alerts._GROUP_BY_COLUMNS`` — declared locally for the
+# same no-sibling-import reason. The SQL column is resolved through this
+# map's *values* (literal strings defined in-repo), never from caller
+# input — keep in sync with the SQLite copy.
+_GROUP_BY_COLUMNS: dict[str, str] = {"rule_name": "rule_name"}
+
 
 def _build_pg_alert_query(filters: AlertQuery, start_param: int = 1) -> tuple[str, list[Any], int]:
     """Build WHERE + params for a PostgreSQL alert query.
@@ -316,6 +322,29 @@ class _PostgresAlertMixin:
                 time_range.end_ns,
             )
         return [(int(r["bucket"]), int(r["count"])) for r in rows]
+
+    async def count_alerts_grouped(
+        self,
+        *,
+        alert_type: str,
+        time_range: TimeRange,
+        group_by: str,
+    ) -> dict[str, int]:
+        """See :class:`AlertStore.count_alerts_grouped` Protocol for the contract."""
+        column = _GROUP_BY_COLUMNS.get(group_by)
+        if column is None:
+            raise ValueError(f"unsupported group_by: {group_by!r}")
+        sql = (
+            f"SELECT {column} AS grp, COUNT(*) "  # noqa: S608  # nosec B608
+            "FROM alerts "
+            "WHERE alert_type = $1 "
+            "  AND timestamp_ns >= $2 "
+            "  AND timestamp_ns <  $3 "
+            f"GROUP BY {column}"  # nosec B608
+        )
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, alert_type, time_range.start_ns, time_range.end_ns)
+        return {str(r["grp"]): int(r["count"]) for r in rows}
 
     async def get_feedback_stats(self) -> dict[str, int]:
         """Return feedback counts: tp, fp, total."""
