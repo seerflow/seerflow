@@ -16,8 +16,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { SigmaRuleFilter } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { SeverityChip } from "@/components/ui/SeverityChip";
 
 interface Props {
   initialSearch?: string;
@@ -130,20 +129,12 @@ export function FilterBar({
         {SEVERITIES.map((s) => {
           const active = severityIn.includes(s.value);
           return (
-            <Button
+            <SeverityChip
               key={s.value}
-              type="button"
-              size="sm"
-              variant="outline"
-              aria-pressed={active}
-              className={cn(
-                "capitalize",
-                active && "bg-primary text-primary-foreground",
-              )}
-              onClick={() => toggleSeverity(s.value, !active)}
-            >
-              {s.label}
-            </Button>
+              label={s.label}
+              active={active}
+              onToggle={() => toggleSeverity(s.value, !active)}
+            />
           );
         })}
       </div>
