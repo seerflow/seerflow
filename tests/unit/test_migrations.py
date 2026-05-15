@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 
 class TestSchemaVersion:
-    @pytest.mark.asyncio()
     async def test_fresh_db_returns_version_0(self, tmp_path: Path) -> None:
         """A fresh database with no schema_version table reports version 0."""
         db_path = tmp_path / "test.db"
@@ -25,7 +24,6 @@ class TestSchemaVersion:
             version = await get_schema_version(conn)
         assert version == 0
 
-    @pytest.mark.asyncio()
     async def test_versioned_db_returns_correct_version(self, tmp_path: Path) -> None:
         """A database with schema_version table reports the stored version."""
         db_path = tmp_path / "test.db"
@@ -40,7 +38,6 @@ class TestSchemaVersion:
 
 
 class TestRunMigrations:
-    @pytest.mark.asyncio()
     async def test_fresh_db_applies_all_migrations(self, tmp_path: Path) -> None:
         """All registered migrations are applied on a fresh database."""
         db_path = tmp_path / "test.db"
@@ -50,7 +47,6 @@ class TestRunMigrations:
             version = await get_schema_version(conn)
             assert version == max(MIGRATIONS)
 
-    @pytest.mark.asyncio()
     async def test_already_at_latest_applies_nothing(self, tmp_path: Path) -> None:
         """A database at the latest version has no migrations to apply."""
         db_path = tmp_path / "test.db"
@@ -59,7 +55,6 @@ class TestRunMigrations:
             applied = await run_migrations(conn)
             assert applied == 0
 
-    @pytest.mark.asyncio()
     async def test_migration_failure_rolls_back(self, tmp_path: Path) -> None:
         """If a migration fails, the transaction is rolled back."""
         db_path = tmp_path / "test.db"
@@ -83,7 +78,6 @@ class TestRunMigrations:
             version = await get_schema_version(conn)
             assert version == latest
 
-    @pytest.mark.asyncio()
     async def test_migrations_applied_in_order(self, tmp_path: Path) -> None:
         """Migrations are applied in ascending version order."""
         db_path = tmp_path / "test.db"
@@ -113,7 +107,6 @@ class TestRunMigrations:
 
 
 class TestSqliteBackendMigration:
-    @pytest.mark.asyncio()
     async def test_backend_connect_runs_migrations(self, tmp_path: Path) -> None:
         """SqliteBackend.connect() applies pending migrations on startup."""
         from seerflow.config import StorageConfig
@@ -130,7 +123,6 @@ class TestSqliteBackendMigration:
         finally:
             await storage.close()
 
-    @pytest.mark.asyncio()
     async def test_backend_reconnect_no_duplicate_migrations(self, tmp_path: Path) -> None:
         """Reconnecting to an existing database does not re-run migrations."""
         from seerflow.config import StorageConfig
@@ -151,7 +143,6 @@ class TestSqliteBackendMigration:
             await storage2.close()
 
 
-@pytest.mark.asyncio
 async def test_migration_v3_registered_and_applied(tmp_path: Path) -> None:
     assert 3 in MIGRATIONS
     db = tmp_path / "t.db"
@@ -208,7 +199,6 @@ async def _seed_v2_alert(
     )
 
 
-@pytest.mark.asyncio
 async def test_migration_v3_backfills_existing_rows(tmp_path: Path) -> None:
     from seerflow.storage.sqlite import _init_schema
 
@@ -245,7 +235,6 @@ async def test_migration_v3_backfills_existing_rows(tmp_path: Path) -> None:
     assert techs == ["T1059", "T1059.001"]
 
 
-@pytest.mark.asyncio
 async def test_migration_v3_tolerates_none_mitre_fields(tmp_path: Path) -> None:
     """Alerts whose decoded form has None tactic/technique fields don't abort."""
     from seerflow.storage import _mitre_backfill as _mitre_module
@@ -288,7 +277,6 @@ async def test_migration_v3_tolerates_none_mitre_fields(tmp_path: Path) -> None:
         assert row[0] == 0
 
 
-@pytest.mark.asyncio
 async def test_migration_v3_skips_corrupt_blob(tmp_path: Path) -> None:
     from seerflow.storage.sqlite import _init_schema
 
@@ -314,7 +302,6 @@ async def test_migration_v3_skips_corrupt_blob(tmp_path: Path) -> None:
         assert await get_schema_version(conn) >= 3
 
 
-@pytest.mark.asyncio
 async def test_migration_v4_creates_feedback_events_table(tmp_path: Path) -> None:
     db_path = tmp_path / "t.db"
     async with aiosqlite.connect(db_path) as conn:
@@ -336,7 +323,6 @@ async def test_migration_v4_creates_feedback_events_table(tmp_path: Path) -> Non
             assert await cur.fetchone() is not None
 
 
-@pytest.mark.asyncio
 async def test_migration_v4_is_idempotent(tmp_path: Path) -> None:
     db_path = tmp_path / "t.db"
     async with aiosqlite.connect(db_path) as conn:
@@ -349,7 +335,6 @@ async def test_migration_v4_is_idempotent(tmp_path: Path) -> None:
         assert applied2 == 0
 
 
-@pytest.mark.asyncio
 async def test_migration_v6_adds_timestamp_ns_to_pre_existing_junctions(
     tmp_path: Path,
 ) -> None:
@@ -406,7 +391,6 @@ async def test_migration_v6_adds_timestamp_ns_to_pre_existing_junctions(
             assert await cur.fetchone() is not None
 
 
-@pytest.mark.asyncio
 async def test_migration_v6_idempotent_on_fresh_db(tmp_path: Path) -> None:
     """Fresh DBs already have ``timestamp_ns`` from v3; v6 must be a no-op."""
     db_path = tmp_path / "t.db"
@@ -420,7 +404,6 @@ async def test_migration_v6_idempotent_on_fresh_db(tmp_path: Path) -> None:
         assert applied2 == 0
 
 
-@pytest.mark.asyncio
 async def test_migration_v7_adds_alerts_type_rule_time_index(tmp_path: Path) -> None:
     """v7 creates the ``(alert_type, rule_name, timestamp_ns)`` covering index
     used by ``count_alerts_grouped`` / ``count_alerts_bucketed`` (S-229)."""
@@ -444,7 +427,6 @@ async def test_migration_v7_adds_alerts_type_rule_time_index(tmp_path: Path) -> 
             assert await cur.fetchone() is not None
 
 
-@pytest.mark.asyncio
 async def test_migration_v7_idempotent_on_fresh_db(tmp_path: Path) -> None:
     """Re-running migrations after v7 is a no-op (CREATE INDEX IF NOT EXISTS)."""
     db_path = tmp_path / "t.db"

@@ -10,14 +10,12 @@ from tests.unit.alert_factory import make_alert  # existing helper (see existing
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_fake_target_is_delivery_target() -> None:
     target: DeliveryTarget = FakeDeliveryTarget(name="t1", min_severity=0)
     assert target.name == "t1"
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_loop_deliver_digest_calls_deliver_in_order() -> None:
     target = FakeDeliveryTarget(name="t1", min_severity=0)
     a1 = make_alert(rule_name="r1")

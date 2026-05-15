@@ -89,7 +89,6 @@ async def _build_manager_and_consumer(
     return mgr, consumer, storage
 
 
-@pytest.mark.asyncio
 async def test_three_consecutive_401s_open_breaker_then_close_on_probe_success(
     tmp_path: Path,
 ) -> None:
@@ -132,7 +131,6 @@ async def test_three_consecutive_401s_open_breaker_then_close_on_probe_success(
         await storage.close()
 
 
-@pytest.mark.asyncio
 async def test_breaker_reopens_when_half_open_probe_returns_401(
     tmp_path: Path,
 ) -> None:

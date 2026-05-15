@@ -97,7 +97,6 @@ def caplog_handler(logger_name: str) -> Iterator[list[logging.LogRecord]]:
 
 
 class TestAlertDispatcher:
-    @pytest.mark.asyncio
     async def test_formatter_error_logs_and_continues(self) -> None:
         """If the formatter raises, the dispatcher logs and skips that target."""
         session = _mock_session(status=200)
@@ -118,7 +117,6 @@ class TestAlertDispatcher:
 
         session.post.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_enqueue_and_dispatch(self) -> None:
         """Alert enqueued is dispatched to the configured target URL."""
         session = _mock_session(status=200)
@@ -134,7 +132,6 @@ class TestAlertDispatcher:
         session.post.assert_called_once()
         assert session.post.call_args[0][0] == "https://hooks.example.com/json"
 
-    @pytest.mark.asyncio
     async def test_dispatch_sends_correct_payload(self) -> None:
         """Payload POSTed matches format_json output for the alert."""
         from seerflow.alerting.formatters import format_json
@@ -154,7 +151,6 @@ class TestAlertDispatcher:
 
         assert session.post.call_args[1]["json"] == expected_payload
 
-    @pytest.mark.asyncio
     async def test_severity_filter(self) -> None:
         """Alert below min_severity is not dispatched."""
         session = _mock_session(status=200)
@@ -173,7 +169,6 @@ class TestAlertDispatcher:
 
         session.post.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_severity_filter_allows_equal_severity(self) -> None:
         """Alert with severity == min_severity is dispatched."""
         session = _mock_session(status=200)
@@ -191,7 +186,6 @@ class TestAlertDispatcher:
 
         session.post.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_queue_full_logs_warning(self) -> None:
         """When queue is full, enqueue logs a warning and drops the alert."""
         session = _mock_session(status=200)
@@ -212,7 +206,6 @@ class TestAlertDispatcher:
             warning_msg = mock_log.warning.call_args[0][0]
             assert "queue full" in warning_msg.lower() or "dropping" in warning_msg.lower()
 
-    @pytest.mark.asyncio
     async def test_retry_on_failure(self) -> None:
         """Failed POST (HTTP 500) is retried up to 3 times; succeeds on 3rd."""
         call_count = 0
@@ -251,7 +244,6 @@ class TestAlertDispatcher:
         # 2 x 500 failures + 1 x 200 success
         assert session.post.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_retry_on_exception(self) -> None:
         """POST raising an exception is retried; succeeds on 3rd attempt."""
         call_count = 0
@@ -288,7 +280,6 @@ class TestAlertDispatcher:
 
         assert session.post.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_dispatch_exhausts_retries_on_persistent_failure(self) -> None:
         """After 3 failed attempts (all 500), dispatcher stops retrying without crash."""
         resp_cm = MagicMock()
@@ -316,7 +307,6 @@ class TestAlertDispatcher:
 
         assert session.post.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_multiple_targets(self) -> None:
         """Alert is dispatched to all configured targets."""
         call_urls: list[str] = []
@@ -347,7 +337,6 @@ class TestAlertDispatcher:
         assert "https://hooks1.example.com/json" in call_urls
         assert "https://hooks2.example.com/slack" in call_urls
 
-    @pytest.mark.asyncio
     async def test_stop_drains_queue_before_exit(self) -> None:
         """After stop(), run() drains remaining queue items before returning."""
         dispatched: list[str] = []
@@ -379,7 +368,6 @@ class TestAlertDispatcher:
 
         assert len(dispatched) == 3
 
-    @pytest.mark.asyncio
     async def test_slack_format_dispatched(self) -> None:
         """Slack format target receives Slack Block Kit payload."""
         from seerflow.alerting.formatters import format_slack
@@ -411,7 +399,6 @@ class TestAlertDispatcher:
 
         assert captured_payload == [expected]
 
-    @pytest.mark.asyncio
     async def test_teams_format_dispatched(self) -> None:
         """Teams format target receives Teams Adaptive Card payload."""
         from seerflow.alerting.formatters import format_teams
@@ -445,7 +432,6 @@ class TestAlertDispatcher:
 
 
 class TestDispatcherDashboardUrl:
-    @pytest.mark.asyncio
     async def test_dashboard_url_passed_to_formatter(self) -> None:
         """Dashboard URL is forwarded from dispatcher to the formatter."""
         session = _mock_session(status=200)
@@ -466,7 +452,6 @@ class TestDispatcherDashboardUrl:
         assert len(actions) == 1
         assert actions[0]["elements"][0]["url"] == "https://seerflow.example.com"
 
-    @pytest.mark.asyncio
     async def test_no_dashboard_url_no_actions_block(self) -> None:
         """Without dashboard_url, Slack payload has no actions block."""
         session = _mock_session(status=200)
@@ -484,7 +469,6 @@ class TestDispatcherDashboardUrl:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_dispatcher_preserves_legacy_fanout_when_router_absent() -> None:
     """No router ⇒ today's per-target min_severity fan-out runs unchanged."""
     from tests.unit.alert_factory import make_alert
@@ -504,7 +488,6 @@ async def test_dispatcher_preserves_legacy_fanout_when_router_absent() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_dispatcher_delegates_when_router_present() -> None:
     """Router wired ⇒ dispatcher calls router.route instead of per-target fan-out."""
     from tests.unit.alert_factory import make_alert
@@ -524,7 +507,6 @@ async def test_dispatcher_delegates_when_router_present() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_dispatcher_run_stops_router_after_queue_drains() -> None:
     """run() must await router.stop() after draining so digest buffers flush."""
     session = _mock_session(status=200)
@@ -539,7 +521,6 @@ async def test_dispatcher_run_stops_router_after_queue_drains() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_run_survives_programmer_error_in_router_route() -> None:
     """AC-3(b): a programmer error inside router.route must not kill the consumer.
 
@@ -590,7 +571,6 @@ async def test_run_survives_programmer_error_in_router_route() -> None:
 
 
 class TestResponseBodyLogging:
-    @pytest.mark.asyncio
     async def test_4xx_reads_response_body(self) -> None:
         """On 4xx, dispatcher reads response body via text() for logging."""
         resp_mock = MagicMock(status=400)
@@ -617,7 +597,6 @@ class TestResponseBodyLogging:
 
         resp_mock.text.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_5xx_reads_response_body(self) -> None:
         """On 5xx, dispatcher reads response body via text() for logging."""
         resp_mock = MagicMock(status=500)

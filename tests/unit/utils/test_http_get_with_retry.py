@@ -9,7 +9,6 @@ from aioresponses import aioresponses
 from seerflow.utils.http import GetWithRetryError, get_with_retry
 
 
-@pytest.mark.asyncio
 async def test_get_with_retry_returns_body_on_200() -> None:
     url = "https://example.test/r"
     with aioresponses() as m:
@@ -22,7 +21,6 @@ async def test_get_with_retry_returns_body_on_200() -> None:
         assert body["ok"] is True
 
 
-@pytest.mark.asyncio
 async def test_get_with_retry_retries_on_5xx() -> None:
     url = "https://example.test/r"
     with aioresponses() as m:
@@ -34,7 +32,6 @@ async def test_get_with_retry_retries_on_5xx() -> None:
         assert status == 200
 
 
-@pytest.mark.asyncio
 async def test_get_with_retry_honors_retry_after() -> None:
     url = "https://example.test/r"
     with aioresponses() as m:
@@ -45,7 +42,6 @@ async def test_get_with_retry_honors_retry_after() -> None:
         assert status == 200
 
 
-@pytest.mark.asyncio
 async def test_get_with_retry_raises_after_exhaustion() -> None:
     url = "https://example.test/r"
     with aioresponses() as m:
@@ -56,7 +52,6 @@ async def test_get_with_retry_raises_after_exhaustion() -> None:
                 await get_with_retry(s, url, max_attempts=2, base_delay_s=0.001)
 
 
-@pytest.mark.asyncio
 async def test_get_with_retry_does_not_retry_on_4xx_other_than_429() -> None:
     url = "https://example.test/r"
     with aioresponses() as m:

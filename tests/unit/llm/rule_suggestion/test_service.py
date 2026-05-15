@@ -171,13 +171,11 @@ def _seed_alerts(store: _FakeAlertStore, *, n: int = 3) -> tuple[Alert, ...]:
 
 
 class TestListEligiblePatterns:
-    @pytest.mark.asyncio
     async def test_empty_returns_empty_tuple(self) -> None:
         service = _build_service()
         result = await service.list_eligible_patterns()
         assert result == ()
 
-    @pytest.mark.asyncio
     async def test_returns_rows_from_store(self) -> None:
         store = _FakeAlertStore(
             rows=(
@@ -199,7 +197,6 @@ class TestListEligiblePatterns:
 
 
 class TestSuggest:
-    @pytest.mark.asyncio
     async def test_cache_hit_skips_backend(self) -> None:
         backend = _FakeBackend()
         cache = RuleSuggestionCache(max_entries=4, ttl_seconds=60)
@@ -226,14 +223,12 @@ class TestSuggest:
         assert second.cached is True
         assert backend.call_count == 1  # no second call
 
-    @pytest.mark.asyncio
     async def test_returns_none_when_pattern_below_threshold(self) -> None:
         """AC4: pattern that falls below ``min_tp`` returns ``None``."""
         store = _FakeAlertStore(rows=())  # no eligible rows
         service = _build_service(alert_store=store)
         assert await service.suggest("ml:hst-anomaly:ip") is None
 
-    @pytest.mark.asyncio
     async def test_validation_ok_branch(self) -> None:
         """AC4: a YAML that passes the validator gets ``validation_stage='ok'``."""
         store = _FakeAlertStore(
@@ -257,7 +252,6 @@ class TestSuggest:
         # The validator extracted the logsource key.
         assert "authentication" in result.logsource_key
 
-    @pytest.mark.asyncio
     async def test_validation_failure_does_not_raise(self) -> None:
         """AC4: invalid YAML → result populated, no exception."""
         backend = _FakeBackend(response=_BAD_YAML)
@@ -279,7 +273,6 @@ class TestSuggest:
         assert result.validation_message != ""
         assert result.title == ""
 
-    @pytest.mark.asyncio
     async def test_backend_exception_propagates(self) -> None:
         """AC4: a non-timeout backend exception propagates."""
         backend = _FakeBackend(raise_exc=RuntimeError)
@@ -298,7 +291,6 @@ class TestSuggest:
         with pytest.raises(RuntimeError, match="synthetic"):
             await service.suggest("ml:hst-anomaly:ip")
 
-    @pytest.mark.asyncio
     async def test_backend_timeout_propagates(self, caplog: pytest.LogCaptureFixture) -> None:
         """AC4: backend exceeding the timeout raises ``TimeoutError``."""
         backend = _FakeBackend(delay_s=2.0)
@@ -334,7 +326,6 @@ class TestSuggest:
         with pytest.raises((asyncio.TimeoutError, TimeoutError)):
             await service.suggest("ml:hst-anomaly:ip")
 
-    @pytest.mark.asyncio
     async def test_contributing_alert_ids_in_result(self) -> None:
         """AC4: ``contributing_alert_ids`` from the aggregator propagate."""
         store = _FakeAlertStore(
@@ -354,7 +345,6 @@ class TestSuggest:
         assert result.contributing_alert_ids == ("a-0", "a-1", "a-2", "a-3")
         assert result.tp_count == 4
 
-    @pytest.mark.asyncio
     async def test_pattern_key_filter_when_not_in_eligible_rows(self) -> None:
         """AC4: a key absent from the aggregator returns ``None``."""
         store = _FakeAlertStore(
@@ -377,7 +367,6 @@ class TestSuggest:
 class TestHelpersAndEdgeCases:
     """Cover the small helpers + edge-case branches in the orchestrator."""
 
-    @pytest.mark.asyncio
     async def test_window_days_zero_translates_to_no_window(self) -> None:
         """``rule_suggestion_window_days=0`` means no window filter."""
         store = _FakeAlertStore()
@@ -386,7 +375,6 @@ class TestHelpersAndEdgeCases:
         await service.list_eligible_patterns()
         # No assertion failure means no exception; storage receives None.
 
-    @pytest.mark.asyncio
     async def test_window_days_positive_translates_to_ns(self) -> None:
         """A positive ``rule_suggestion_window_days`` becomes ns."""
 
@@ -422,7 +410,6 @@ class TestHelpersAndEdgeCases:
         await service.list_eligible_patterns()
         assert store.captured["window_ns"] == 7 * 24 * 3_600 * 1_000_000_000
 
-    @pytest.mark.asyncio
     async def test_empty_yaml_yields_yaml_stage(self) -> None:
         """A completion that produces empty YAML → ``validation_stage='yaml'``."""
 
@@ -467,7 +454,6 @@ class TestHelpersAndEdgeCases:
         assert result.validation_stage == "yaml"
         assert "empty" in result.validation_message.lower()
 
-    @pytest.mark.asyncio
     async def test_alerts_without_contributing_events_are_skipped(self) -> None:
         """Sample alerts whose ``contributing_events`` is empty cause no crash."""
         store = _FakeAlertStore(
@@ -501,7 +487,6 @@ class TestHelpersAndEdgeCases:
         # No crash; result still generated (the LLM gets context-only).
         assert result is not None
 
-    @pytest.mark.asyncio
     async def test_missing_alert_skipped_in_sample_load(self) -> None:
         """``alert_store.get_alert_by_id`` returning ``None`` is tolerated."""
         store = _FakeAlertStore(
@@ -521,14 +506,12 @@ class TestHelpersAndEdgeCases:
         result = await service.suggest("ml:hst-anomaly:ip")
         assert result is not None
 
-    @pytest.mark.asyncio
     async def test_load_sample_events_handles_empty_alert_list(self) -> None:
         """Empty alerts → empty events tuple."""
         service = _build_service()
         events = await service._load_sample_events(())
         assert events == ()
 
-    @pytest.mark.asyncio
     async def test_load_sample_events_matches_event_id(self) -> None:
         """Sample events tuple aligns with each alert's first contributing event."""
         evt = _event()
@@ -552,7 +535,6 @@ class TestHelpersAndEdgeCases:
         assert len(events) == 1
         assert events[0].event_id == evt.event_id
 
-    @pytest.mark.asyncio
     async def test_load_sample_events_skips_mixed_empty_contributing(self) -> None:
         """Mixed: one alert has events, one does not — only the populated one returned."""
         evt = _event()
@@ -593,7 +575,6 @@ class TestHelpersAndEdgeCases:
 
 
 class TestInvalidate:
-    @pytest.mark.asyncio
     async def test_removes_cached_entry(self) -> None:
         """AC5: invalidate drops the cached entry."""
         backend = _FakeBackend()
@@ -617,7 +598,6 @@ class TestInvalidate:
         await service.suggest("ml:hst-anomaly:ip")
         assert backend.call_count == 2
 
-    @pytest.mark.asyncio
     async def test_invalidate_missing_key_no_op(self) -> None:
         """AC5: invalidate a never-cached key does not raise."""
         service = _build_service()

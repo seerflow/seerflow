@@ -230,7 +230,6 @@ class TestBuildExportRequest:
 
 
 class TestOtlpSinkEnqueue:
-    @pytest.mark.asyncio
     async def test_enqueue_adds_to_pending(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -239,7 +238,6 @@ class TestOtlpSinkEnqueue:
         sink.enqueue(alert)
         assert sink._pending.qsize() == 1
 
-    @pytest.mark.asyncio
     async def test_enqueue_drops_when_at_max(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -248,7 +246,6 @@ class TestOtlpSinkEnqueue:
         sink.enqueue(_make_alert())  # should drop
         assert sink._pending.qsize() == 1
 
-    @pytest.mark.asyncio
     async def test_enqueue_logs_warning_when_full(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -260,7 +257,6 @@ class TestOtlpSinkEnqueue:
 
 
 class TestOtlpSinkBatching:
-    @pytest.mark.asyncio
     async def test_flush_sends_batch(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -274,7 +270,6 @@ class TestOtlpSinkBatching:
         assert len(req.resource_logs[0].scope_logs[0].log_records) == 3
         assert sink._pending.empty()
 
-    @pytest.mark.asyncio
     async def test_flush_noop_when_empty(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -283,7 +278,6 @@ class TestOtlpSinkBatching:
         await sink._flush()
         sink._send_grpc.assert_not_called()  # type: ignore[union-attr]
 
-    @pytest.mark.asyncio
     async def test_flush_uses_http_when_configured(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -295,7 +289,6 @@ class TestOtlpSinkBatching:
 
 
 class TestOtlpSinkShutdown:
-    @pytest.mark.asyncio
     async def test_stop_flushes_remaining(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -312,7 +305,6 @@ class TestOtlpSinkShutdown:
 
 
 class TestOtlpSinkGrpcRetry:
-    @pytest.mark.asyncio
     async def test_grpc_retry_on_rpc_error(self) -> None:
         import grpc
 
@@ -349,7 +341,6 @@ class TestOtlpSinkGrpcRetry:
 
         assert call_count == 3
 
-    @pytest.mark.asyncio
     async def test_grpc_exhausts_retries_logs_error(self) -> None:
         import grpc
 
@@ -383,7 +374,6 @@ class TestOtlpSinkGrpcRetry:
 
 
 class TestOtlpSinkHttpTransport:
-    @pytest.mark.asyncio
     async def test_http_posts_protobuf_with_correct_headers(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -404,7 +394,6 @@ class TestOtlpSinkHttpTransport:
         assert call_kwargs["headers"]["Content-Type"] == "application/x-protobuf"
         assert isinstance(call_kwargs["data"], bytes)
 
-    @pytest.mark.asyncio
     async def test_http_appends_v1_logs_to_endpoint(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -423,7 +412,6 @@ class TestOtlpSinkHttpTransport:
         url = session.post.call_args[0][0]
         assert url == "http://localhost:4318/v1/logs"
 
-    @pytest.mark.asyncio
     async def test_http_no_retry_on_4xx(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -441,7 +429,6 @@ class TestOtlpSinkHttpTransport:
 
         assert session.post.call_count == 1
 
-    @pytest.mark.asyncio
     async def test_http_retry_on_5xx(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -467,7 +454,6 @@ class TestOtlpSinkHttpTransport:
 
         assert session.post.call_count == 2
 
-    @pytest.mark.asyncio
     async def test_http_uses_allow_redirects_false(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -565,7 +551,6 @@ class TestGetVersion:
 
 
 class TestOtlpSinkClose:
-    @pytest.mark.asyncio
     async def test_close_grpc_channel_when_open(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -576,7 +561,6 @@ class TestOtlpSinkClose:
         mock_channel.close.assert_awaited_once()
         assert sink._grpc_channel is None
 
-    @pytest.mark.asyncio
     async def test_close_http_session_when_open(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -589,7 +573,6 @@ class TestOtlpSinkClose:
 
 
 class TestOtlpSinkGrpcChannelCreation:
-    @pytest.mark.asyncio
     async def test_grpc_creates_channel_when_none(self) -> None:
         import grpc.aio
 
@@ -614,7 +597,6 @@ class TestOtlpSinkGrpcChannelCreation:
 
 
 class TestOtlpSinkGrpcGenericException:
-    @pytest.mark.asyncio
     async def test_grpc_generic_exception_propagates_to_flush(self) -> None:
         """Non-RpcError exceptions in _send_grpc propagate to _flush's try/except."""
         from seerflow.alerting.sinks.otlp import OtlpSink
@@ -638,7 +620,6 @@ class TestOtlpSinkGrpcGenericException:
 
 
 class TestOtlpSinkConcurrentEnqueue:
-    @pytest.mark.asyncio
     async def test_high_volume_sync_enqueue(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -647,7 +628,6 @@ class TestOtlpSinkConcurrentEnqueue:
             sink.enqueue(_make_alert())
         assert sink._pending.qsize() == 1000
 
-    @pytest.mark.asyncio
     async def test_queue_full_drops_and_warns(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -658,7 +638,6 @@ class TestOtlpSinkConcurrentEnqueue:
             mock_log.warning.assert_called_once()
         assert sink._pending.qsize() == 1
 
-    @pytest.mark.asyncio
     async def test_threadsafe_enqueue_via_call_soon_threadsafe(self) -> None:
         import threading
 
@@ -685,7 +664,6 @@ class TestOtlpSinkConcurrentEnqueue:
         t.join(timeout=2.0)
         assert sink._pending.qsize() == 100
 
-    @pytest.mark.asyncio
     async def test_flush_drains_queue(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -701,7 +679,6 @@ class TestOtlpSinkConcurrentEnqueue:
 
 
 class TestOtlpSinkFastShutdown:
-    @pytest.mark.asyncio
     async def test_stop_exits_within_one_second_even_with_long_interval(self) -> None:
         import time
 
@@ -720,7 +697,6 @@ class TestOtlpSinkFastShutdown:
 
         assert elapsed < 1.0, f"stop() took {elapsed:.3f}s; should be < 1s"
 
-    @pytest.mark.asyncio
     async def test_stop_is_idempotent(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -731,7 +707,6 @@ class TestOtlpSinkFastShutdown:
         await sink.stop()
         assert sink._stop_event.is_set()
 
-    @pytest.mark.asyncio
     async def test_final_flush_runs_even_if_stop_set_before_run(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -746,7 +721,6 @@ class TestOtlpSinkFastShutdown:
 
 
 class TestOtlpSinkGrpcTls:
-    @pytest.mark.asyncio
     async def test_grpc_uses_secure_channel_when_tls_true(self) -> None:
         import grpc as _grpc
         import grpc.aio
@@ -773,7 +747,6 @@ class TestOtlpSinkGrpcTls:
         assert args[0] == "host:4317"
         assert isinstance(args[1], _grpc.ChannelCredentials)
 
-    @pytest.mark.asyncio
     async def test_grpc_uses_insecure_channel_when_tls_false(self) -> None:
         import grpc.aio
 
@@ -796,7 +769,6 @@ class TestOtlpSinkGrpcTls:
         insecure.assert_called_once_with("host:4317")
         secure.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_grpc_auto_tls_from_https_scheme(self) -> None:
         import grpc.aio
 
@@ -935,7 +907,6 @@ class TestOtlpSinkGrpcCustomCreds:
     """S-049b: ``_send_grpc`` chooses zero-arg vs triple-arg credentials based
     on whether any of the three PEM byte-buffers are set."""
 
-    @pytest.mark.asyncio
     async def test_grpc_uses_system_roots_when_no_paths(self) -> None:
         """Existing S-049a behaviour: zero-arg ssl_channel_credentials when
         no custom CA / no client cert is configured."""
@@ -959,7 +930,6 @@ class TestOtlpSinkGrpcCustomCreds:
 
         creds.assert_called_once_with()  # no kwargs → grpc bundled roots
 
-    @pytest.mark.asyncio
     async def test_grpc_uses_custom_ca_when_ca_file_set(self, tmp_path: pathlib.Path) -> None:
         import grpc.aio
 
@@ -992,7 +962,6 @@ class TestOtlpSinkGrpcCustomCreds:
             certificate_chain=None,
         )
 
-    @pytest.mark.asyncio
     async def test_grpc_uses_full_mtls_when_triple_set(self, tmp_path: pathlib.Path) -> None:
         import grpc.aio
 
@@ -1031,7 +1000,6 @@ class TestOtlpSinkGrpcCustomCreds:
             certificate_chain=b"cert",
         )
 
-    @pytest.mark.asyncio
     async def test_grpc_uses_mtls_only_when_cert_and_key_set(self, tmp_path: pathlib.Path) -> None:
         """mTLS without custom CA — client cert against grpc's bundled roots."""
         import grpc.aio
@@ -1187,7 +1155,6 @@ class TestOtlpSinkCustomCaAndMtlsInit:
 
 
 class TestOtlpSinkHttpExhaustsRetries:
-    @pytest.mark.asyncio
     async def test_http_logs_error_after_all_retries_exhausted(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
@@ -1212,7 +1179,6 @@ class TestOtlpSinkHttpExhaustsRetries:
         mock_log.error.assert_called_once()
         assert session.post.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_http_generic_exception_triggers_retry(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
 

@@ -27,7 +27,6 @@ def _clock_at(hh: int, mm: int) -> Callable[[], datetime]:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_same_day_window_suppresses_below_min_severity() -> None:
     slack = FakeDeliveryTarget(name="slack")
     router = NotificationRouter(
@@ -52,7 +51,6 @@ async def test_same_day_window_suppresses_below_min_severity() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_overnight_wrap() -> None:
     slack = FakeDeliveryTarget(name="slack")
 
@@ -86,7 +84,6 @@ async def test_overnight_wrap() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_quiet_hours_per_target_not_global() -> None:
     """A rule dispatches to two channels; only the one with quiet hours drops."""
     slack = FakeDeliveryTarget(name="slack")

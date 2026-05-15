@@ -18,7 +18,6 @@ from tests.unit.alert_factory import make_alert
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_digest_buffers_and_flushes_once_on_window() -> None:
     email = FakeDeliveryTarget(name="email")
     rules = (
@@ -48,7 +47,6 @@ async def test_digest_buffers_and_flushes_once_on_window() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_stop_flushes_pending_buffers() -> None:
     email = FakeDeliveryTarget(name="email")
     rules = (
@@ -73,7 +71,6 @@ async def test_stop_flushes_pending_buffers() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_immediate_and_digest_are_isolated() -> None:
     slack = FakeDeliveryTarget(name="slack")
     email = FakeDeliveryTarget(name="email")

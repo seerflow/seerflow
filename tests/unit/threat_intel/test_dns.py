@@ -11,7 +11,6 @@ from seerflow.config import TAXIIFeedConfig, ThreatIntelConfig
 from seerflow.threat_intel.dns import StaticResolver, build_static_resolver_map
 
 
-@pytest.mark.asyncio
 async def test_static_resolver_returns_pinned_ip_for_known_host() -> None:
     resolver = StaticResolver({"taxii.example": "1.1.1.1"})
     results = await resolver.resolve("taxii.example", port=443)
@@ -22,7 +21,6 @@ async def test_static_resolver_returns_pinned_ip_for_known_host() -> None:
     await resolver.close()
 
 
-@pytest.mark.asyncio
 async def test_static_resolver_delegates_unknown_host_to_fallback() -> None:
     """Mixed-config: ``allow_private_addresses`` feeds are absent from the
     pinned map; they must fall through to the fallback resolver, not

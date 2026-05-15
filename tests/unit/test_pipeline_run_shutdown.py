@@ -39,7 +39,6 @@ def _remove_handlers(loop: asyncio.AbstractEventLoop) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_install_returns_context_with_pipeline_and_no_server() -> None:
     pipeline = _FakePipeline()
     loop = asyncio.get_running_loop()
@@ -57,7 +56,6 @@ async def test_install_returns_context_with_pipeline_and_no_server() -> None:
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
-@pytest.mark.asyncio
 async def test_sigterm_flips_should_exit_within_50ms() -> None:
     pipeline = _FakePipeline()
     loop = asyncio.get_running_loop()
@@ -85,7 +83,6 @@ async def test_sigterm_flips_should_exit_within_50ms() -> None:
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
-@pytest.mark.asyncio
 async def test_repeated_sigterm_is_idempotent() -> None:
     pipeline = _FakePipeline()
     loop = asyncio.get_running_loop()
@@ -109,7 +106,6 @@ async def test_repeated_sigterm_is_idempotent() -> None:
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
-@pytest.mark.asyncio
 async def test_second_signal_logs_force_exit_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -141,7 +137,6 @@ async def test_second_signal_logs_force_exit_warning(
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
-@pytest.mark.asyncio
 async def test_signal_before_server_wired_does_not_crash() -> None:
     """SIGTERM in the gap between handler registration and ``server`` construction
     must still stop the pipeline; ``ctx.server is None`` is tolerated."""
@@ -164,7 +159,6 @@ async def test_signal_before_server_wired_does_not_crash() -> None:
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
-@pytest.mark.asyncio
 async def test_sigterm_emits_info_log_once(caplog: pytest.LogCaptureFixture) -> None:
     pipeline = _FakePipeline()
     loop = asyncio.get_running_loop()
@@ -208,7 +202,6 @@ def test_noop_capture_signals_accepts_self_argument() -> None:
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals only")
-@pytest.mark.asyncio
 async def test_pipeline_stop_exception_is_logged_via_done_callback(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

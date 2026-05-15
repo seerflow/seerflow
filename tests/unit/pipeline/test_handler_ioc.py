@@ -82,7 +82,6 @@ def _ensemble_mock() -> MagicMock:
     return ensemble
 
 
-@pytest.mark.asyncio
 async def test_handler_writes_ioc_alert_and_enriches_event() -> None:
     storage = MagicMock()
     storage.write_alert = AsyncMock(return_value=True)
@@ -112,7 +111,6 @@ async def test_handler_writes_ioc_alert_and_enriches_event() -> None:
     assert counters.alerts_emitted_total == 1
 
 
-@pytest.mark.asyncio
 async def test_handler_skips_when_matcher_none() -> None:
     storage = MagicMock()
     storage.write_alert = AsyncMock(return_value=True)
@@ -133,7 +131,6 @@ async def test_handler_skips_when_matcher_none() -> None:
     assert "ioc_matches" not in persisted.attributes
 
 
-@pytest.mark.asyncio
 async def test_handler_feeds_risk_register_on_new_ioc_alert() -> None:
     storage = MagicMock()
     storage.write_alert = AsyncMock(return_value=True)
@@ -163,7 +160,6 @@ async def test_handler_feeds_risk_register_on_new_ioc_alert() -> None:
     assert counters.risk_register_updates_total == 1
 
 
-@pytest.mark.asyncio
 async def test_handler_skips_when_dedup_returns_false() -> None:
     storage = MagicMock()
     storage.write_alert = AsyncMock(return_value=False)  # dedup hit

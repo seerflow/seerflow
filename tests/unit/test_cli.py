@@ -801,7 +801,6 @@ class TestQueryHealthParsing:
 class TestGracefulStartupError:
     """S-141: Clean error when all receivers fail to start."""
 
-    @pytest.mark.asyncio
     async def test_all_receivers_fail_exits_with_code_1(self) -> None:
         from unittest.mock import AsyncMock, patch
 
@@ -823,7 +822,6 @@ class TestGracefulStartupError:
 
         assert exc_info.value.code == 1
 
-    @pytest.mark.asyncio
     async def test_all_receivers_fail_logs_suggestions(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -850,7 +848,6 @@ class TestGracefulStartupError:
         assert any("Startup failed" in r.message for r in caplog.records)
         assert any("seerflow.yaml" in r.message for r in caplog.records)
 
-    @pytest.mark.asyncio
     async def test_partial_failure_logs_warning_and_continues(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:

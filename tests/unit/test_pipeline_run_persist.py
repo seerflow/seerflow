@@ -63,7 +63,6 @@ def _make_ensemble(saved: int = 2) -> MagicMock:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_persist_session_state_writes_pending_templates() -> None:
     """Template metadata accumulated by the handler is flushed to storage."""
     handler = _make_handler(template_meta_with_pending=True)
@@ -76,7 +75,6 @@ async def test_persist_session_state_writes_pending_templates() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_persist_session_state_saves_model_state() -> None:
     """``ensemble.save_all_state`` is invoked with the storage handle."""
     handler = _make_handler()
@@ -89,7 +87,6 @@ async def test_persist_session_state_saves_model_state() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_persist_session_state_saves_drain3_templates() -> None:
     """S-081 NEW: Drain3 template state is persisted via ``save_drain_state``."""
     drain_parser = MagicMock()
@@ -109,7 +106,6 @@ async def test_persist_session_state_saves_drain3_templates() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_persist_session_state_continues_after_drain3_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -129,7 +125,6 @@ async def test_persist_session_state_continues_after_drain3_failure(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_persist_session_state_flushes_ueba_baselines() -> None:
     """When a baseline store is provided, its flush is invoked with storage."""
     handler = _make_handler()
@@ -145,7 +140,6 @@ async def test_persist_session_state_flushes_ueba_baselines() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_persist_session_state_continues_after_model_save_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -165,7 +159,6 @@ async def test_persist_session_state_continues_after_model_save_failure(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_run_shutdown_sequence_emits_start_and_complete_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -190,7 +183,6 @@ async def test_run_shutdown_sequence_emits_start_and_complete_logs(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_run_shutdown_sequence_returns_on_timeout(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -224,7 +216,6 @@ async def test_run_shutdown_sequence_returns_on_timeout(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_persist_session_state_skips_drain3_when_accessor_missing() -> None:
     """A legacy handler (no ``get_normalizer`` attribute) must not crash the
     drain — Drain3 save is silently skipped."""
@@ -240,7 +231,6 @@ async def test_persist_session_state_skips_drain3_when_accessor_missing() -> Non
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_run_shutdown_sequence_with_no_handler_is_a_noop() -> None:
     """When ``handler is None`` (startup failed before make_handler), the
     sequence still completes; only the resource close phase runs after."""

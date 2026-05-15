@@ -14,7 +14,6 @@ pytestmark = pytest.mark.integration
 
 
 class TestRunImport:
-    @pytest.mark.asyncio
     async def test_imports_plain_text_file(self, tmp_path: Path) -> None:
         from seerflow.import_cmd import run_import
 
@@ -28,7 +27,6 @@ class TestRunImport:
         assert stats["files_processed"] == 1
         assert stats["lines_read"] == 2
 
-    @pytest.mark.asyncio
     async def test_skips_binary_file(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -45,7 +43,6 @@ class TestRunImport:
         assert stats["files_processed"] == 0
         assert "binary" in caplog.text.lower()
 
-    @pytest.mark.asyncio
     async def test_imports_gzip_file(self, tmp_path: Path) -> None:
         import gzip as _gzip
 
@@ -62,7 +59,6 @@ class TestRunImport:
         assert stats["files_processed"] == 1
         assert stats["lines_read"] == 2
 
-    @pytest.mark.asyncio
     async def test_empty_paths_returns_zero_stats(self, tmp_path: Path) -> None:
         from seerflow.import_cmd import run_import
 

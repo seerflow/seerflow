@@ -112,7 +112,6 @@ def smtp_controller() -> Iterator[tuple[Controller, _CapturingHandler]]:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_email_deliver_strips_crlf_from_subject(
     smtp_controller: tuple[Controller, _CapturingHandler],
 ) -> None:
@@ -143,7 +142,6 @@ async def test_email_deliver_strips_crlf_from_subject(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_email_deliver_sends_html_multipart(
     smtp_controller: tuple[Controller, _CapturingHandler],
 ) -> None:
@@ -174,7 +172,6 @@ async def test_email_deliver_sends_html_multipart(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_email_digest_sends_single_email_with_count_in_subject(
     smtp_controller: tuple[Controller, _CapturingHandler],
 ) -> None:
@@ -200,7 +197,6 @@ async def test_email_digest_sends_single_email_with_count_in_subject(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_email_digest_with_empty_list_does_not_send() -> None:
     target = EmailTarget(
         name="t",

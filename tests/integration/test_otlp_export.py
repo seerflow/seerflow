@@ -6,7 +6,6 @@ import asyncio
 import uuid
 from typing import TYPE_CHECKING
 
-import pytest
 from aiohttp import web
 
 if TYPE_CHECKING:
@@ -35,7 +34,6 @@ def _make_alert(*, rule_name: str = "hst-anomaly") -> Alert:
 
 
 class TestOtlpHttpIntegration:
-    @pytest.mark.asyncio
     async def test_export_to_mock_collector(self) -> None:
         """Start a mock OTLP HTTP collector, export alerts, verify receipt."""
         from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (

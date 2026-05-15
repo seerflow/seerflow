@@ -99,11 +99,9 @@ class TestWaitUntil:
     """Cover the _wait_until test helper itself so it is not dead code
     before Task 24 replaces fixed sleeps with calls into it."""
 
-    @pytest.mark.asyncio
     async def test_returns_immediately_when_predicate_already_true(self) -> None:
         await _wait_until(lambda: True, timeout=0.1)
 
-    @pytest.mark.asyncio
     async def test_returns_when_predicate_becomes_true(self) -> None:
         calls = {"n": 0}
 
@@ -114,7 +112,6 @@ class TestWaitUntil:
         await _wait_until(predicate, timeout=0.5, interval=0.001)
         assert calls["n"] >= 3
 
-    @pytest.mark.asyncio
     async def test_raises_timeout_error_when_predicate_never_true(self) -> None:
         with pytest.raises(TimeoutError, match="did not become true"):
             await _wait_until(lambda: False, timeout=0.02, interval=0.001)
@@ -205,7 +202,6 @@ class TestConnectionManagerConstruction:
 
 
 class TestConnectionManagerLifecycle:
-    @pytest.mark.asyncio
     async def test_connect_assigns_unique_id(self) -> None:
         mgr = ConnectionManager()
         ws_a = MagicMock()
@@ -221,7 +217,6 @@ class TestConnectionManagerLifecycle:
         ws_a.accept.assert_awaited_once()
         ws_b.accept.assert_awaited_once()
 
-    @pytest.mark.asyncio
     async def test_disconnect_removes_client(self) -> None:
         mgr = ConnectionManager()
         ws = MagicMock()
@@ -232,7 +227,6 @@ class TestConnectionManagerLifecycle:
 
         assert mgr.connected_count == 0
 
-    @pytest.mark.asyncio
     async def test_disconnect_is_idempotent(self) -> None:
         mgr = ConnectionManager()
         ws = MagicMock()
@@ -244,7 +238,6 @@ class TestConnectionManagerLifecycle:
 
         assert mgr.connected_count == 0
 
-    @pytest.mark.asyncio
     async def test_max_connections_enforced(self) -> None:
         mgr = ConnectionManager(max_connections=2)
         for _ in range(2):
@@ -261,13 +254,11 @@ class TestConnectionManagerLifecycle:
 
 
 class TestSetFilter:
-    @pytest.mark.asyncio
     async def _connect(self, mgr: ConnectionManager) -> str:
         ws = MagicMock()
         ws.accept = AsyncMock()
         return await mgr.connect(ws)
 
-    @pytest.mark.asyncio
     async def test_valid_filter_updates_state(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -290,7 +281,6 @@ class TestSetFilter:
         assert client.filter.alert_types == frozenset({"sigma"})
         assert client.filter.template_ids == frozenset({42})
 
-    @pytest.mark.asyncio
     async def test_min_severity_clamped_to_lower_bound(self) -> None:
         """Negative severities are clamped to 0 (TRACE)."""
         mgr = ConnectionManager()
@@ -298,7 +288,6 @@ class TestSetFilter:
         mgr.set_filter(client_id, {"type": "filter", "min_severity": -5})
         assert mgr._clients[client_id].filter.min_severity == 0
 
-    @pytest.mark.asyncio
     async def test_min_severity_clamped_to_upper_bound(self) -> None:
         """Severities above FATAL (6) are clamped down to 6."""
         mgr = ConnectionManager()
@@ -306,13 +295,11 @@ class TestSetFilter:
         mgr.set_filter(client_id, {"type": "filter", "min_severity": 99})
         assert mgr._clients[client_id].filter.min_severity == 6
 
-    @pytest.mark.asyncio
     async def test_default_filter_includes_trace_events(self) -> None:
         """Empty ClientFilter must match TRACE (severity=0) events — regression guard."""
         f = ClientFilter()
         assert f.matches_event(_make_event(severity_id=0)) is True
 
-    @pytest.mark.asyncio
     async def test_unknown_alert_type_rejected(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -324,7 +311,6 @@ class TestSetFilter:
         # Filter must NOT be partially applied on failure
         assert mgr._clients[client_id].filter.alert_types == frozenset()
 
-    @pytest.mark.asyncio
     async def test_sources_list_capped_at_50(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -332,7 +318,6 @@ class TestSetFilter:
         mgr.set_filter(client_id, {"type": "filter", "sources": huge})
         assert len(mgr._clients[client_id].filter.sources) == 50
 
-    @pytest.mark.asyncio
     async def test_template_ids_list_capped_at_100(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -340,13 +325,11 @@ class TestSetFilter:
         mgr.set_filter(client_id, {"type": "filter", "template_ids": huge})
         assert len(mgr._clients[client_id].filter.template_ids) == 100
 
-    @pytest.mark.asyncio
     async def test_set_filter_on_unknown_client_is_noop(self) -> None:
         mgr = ConnectionManager()
         errors = mgr.set_filter("not-a-real-id", {"type": "filter"})
         assert errors == []
 
-    @pytest.mark.asyncio
     async def test_filter_rate_limit_rejects_fast_updates(self) -> None:
         """Second filter message within the throttle window is rejected."""
         mgr = ConnectionManager(filter_min_interval_ns=50_000_000)  # 50 ms
@@ -359,7 +342,6 @@ class TestSetFilter:
         # Original filter preserved
         assert mgr._clients[client_id].filter.sources == frozenset({"a"})
 
-    @pytest.mark.asyncio
     async def test_filter_rate_limit_allows_after_interval(self) -> None:
         mgr = ConnectionManager(filter_min_interval_ns=10_000_000)  # 10 ms
         client_id = await self._connect(mgr)
@@ -373,7 +355,6 @@ class TestSetFilter:
         assert errors == []
         assert mgr._clients[client_id].filter.sources == frozenset({"b"})
 
-    @pytest.mark.asyncio
     async def test_filter_rate_limit_disabled_when_interval_zero(self) -> None:
         """filter_min_interval_ns=0 means no throttle; rapid updates allowed."""
         mgr = ConnectionManager(filter_min_interval_ns=0)
@@ -387,18 +368,15 @@ class TestSetFilter:
 
 
 class TestBroadcastEvent:
-    @pytest.mark.asyncio
     async def _connect(self, mgr: ConnectionManager) -> str:
         ws = MagicMock()
         ws.accept = AsyncMock()
         return await mgr.connect(ws)
 
-    @pytest.mark.asyncio
     async def test_broadcast_to_empty_manager_is_noop(self) -> None:
         mgr = ConnectionManager()
         mgr.broadcast_event(_make_event())  # Must not raise
 
-    @pytest.mark.asyncio
     async def test_broadcast_appends_to_all_matching_clients(self) -> None:
         mgr = ConnectionManager()
         id_a = await self._connect(mgr)
@@ -410,7 +388,6 @@ class TestBroadcastEvent:
         assert len(mgr._clients[id_a].event_deque) == 1
         assert len(mgr._clients[id_b].event_deque) == 1
 
-    @pytest.mark.asyncio
     async def test_broadcast_skips_non_matching_clients(self) -> None:
         mgr = ConnectionManager()
         id_syslog = await self._connect(mgr)
@@ -423,7 +400,6 @@ class TestBroadcastEvent:
         assert len(mgr._clients[id_syslog].event_deque) == 1
         assert len(mgr._clients[id_otlp].event_deque) == 0
 
-    @pytest.mark.asyncio
     async def test_broadcast_sets_wakeup(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -433,7 +409,6 @@ class TestBroadcastEvent:
 
         assert mgr._clients[client_id].wakeup.is_set() is True
 
-    @pytest.mark.asyncio
     async def test_deque_overflow_drops_oldest_and_increments_counter(self) -> None:
         mgr = ConnectionManager(queue_maxlen=3)
         client_id = await self._connect(mgr)
@@ -447,7 +422,6 @@ class TestBroadcastEvent:
         template_ids = [be.event.template_id for be in client.event_deque]
         assert template_ids == [2, 3, 4]
 
-    @pytest.mark.asyncio
     async def test_broadcast_does_not_raise_on_filter_error(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -458,13 +432,11 @@ class TestBroadcastEvent:
 
 
 class TestBroadcastAlert:
-    @pytest.mark.asyncio
     async def _connect(self, mgr: ConnectionManager) -> str:
         ws = MagicMock()
         ws.accept = AsyncMock()
         return await mgr.connect(ws)
 
-    @pytest.mark.asyncio
     async def test_broadcast_alert_appends_to_alert_deque(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -475,7 +447,6 @@ class TestBroadcastAlert:
         assert len(client.alert_deque) == 1
         assert len(client.event_deque) == 0  # separate deque
 
-    @pytest.mark.asyncio
     async def test_broadcast_alert_respects_alert_type_filter(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
@@ -487,7 +458,6 @@ class TestBroadcastAlert:
         mgr.broadcast_alert(_make_alert(alert_type="ml"))
         assert len(mgr._clients[client_id].alert_deque) == 1
 
-    @pytest.mark.asyncio
     async def test_event_flood_does_not_evict_alerts(self) -> None:
         mgr = ConnectionManager(queue_maxlen=3)
         client_id = await self._connect(mgr)
@@ -501,7 +471,6 @@ class TestBroadcastAlert:
         assert len(client.event_deque) == 3
         assert client.dropped_alerts == 0
 
-    @pytest.mark.asyncio
     async def test_alert_deque_overflow_drops_oldest(self) -> None:
         mgr = ConnectionManager(queue_maxlen=2)
         client_id = await self._connect(mgr)
@@ -640,7 +609,6 @@ class TestSerialization:
 
 
 class TestClientSender:
-    @pytest.mark.asyncio
     async def test_sends_single_event_as_event_message(self) -> None:
         mgr = ConnectionManager(tick_interval_s=0.001, batch_max_events=10)
         ws = MagicMock()
@@ -657,7 +625,6 @@ class TestClientSender:
         assert sent[0]["type"] == "event"
         await mgr.disconnect(client_id)
 
-    @pytest.mark.asyncio
     async def test_sends_multi_event_as_batch_message(self) -> None:
         mgr = ConnectionManager(tick_interval_s=0.05, batch_max_events=10)
         ws = MagicMock()
@@ -683,7 +650,6 @@ class TestClientSender:
         assert len(batch_msg["events"]) == 5
         await mgr.disconnect(client_id)
 
-    @pytest.mark.asyncio
     async def test_sends_alerts_separately_from_events(self) -> None:
         mgr = ConnectionManager(tick_interval_s=0.05, batch_max_events=10)
         ws = MagicMock()
@@ -715,7 +681,6 @@ class TestClientSender:
         assert "alert" in types or "alert_batch" in types
         await mgr.disconnect(client_id)
 
-    @pytest.mark.asyncio
     async def test_sender_drains_on_tick_timeout_without_wakeup(self) -> None:
         mgr = ConnectionManager(tick_interval_s=0.02, batch_max_events=10)
         ws = MagicMock()
@@ -733,7 +698,6 @@ class TestClientSender:
         assert ws.send_bytes.await_count >= 1
         await mgr.disconnect(client_id)
 
-    @pytest.mark.asyncio
     async def test_sender_exits_on_websocket_disconnect(self) -> None:
         from fastapi import WebSocketDisconnect
 
@@ -763,7 +727,6 @@ class TestClientSender:
 
 
 class TestStatusBroadcaster:
-    @pytest.mark.asyncio
     async def test_periodic_status_emitted(self) -> None:
         alert_store = AsyncMock()
         alert_store.query_alerts = AsyncMock(
@@ -801,7 +764,6 @@ class TestStatusBroadcaster:
 
         await mgr.shutdown()
 
-    @pytest.mark.asyncio
     async def test_events_ingested_per_sec_window_resets(self) -> None:
         mgr = ConnectionManager(
             status_interval_s=0.02,
@@ -842,7 +804,6 @@ class TestStatusBroadcaster:
         assert last_rate < first_rate
         await mgr.shutdown()
 
-    @pytest.mark.asyncio
     async def test_status_payload_includes_dropped_total(self) -> None:
         alert_store = AsyncMock()
         alert_store.query_alerts = AsyncMock(
@@ -890,41 +851,35 @@ class TestWebSocketRoute:
 class TestSetFilterEdgeCases:
     """Cover the non-list / non-int validation error branches in set_filter."""
 
-    @pytest.mark.asyncio
     async def _connect(self, mgr: ConnectionManager) -> str:
         ws = MagicMock()
         ws.accept = AsyncMock()
         return await mgr.connect(ws)
 
-    @pytest.mark.asyncio
     async def test_non_list_sources_returns_error(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
         errors = mgr.set_filter(client_id, {"type": "filter", "sources": "syslog"})
         assert any("sources must be a list" in e for e in errors)
 
-    @pytest.mark.asyncio
     async def test_non_list_template_ids_returns_error(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
         errors = mgr.set_filter(client_id, {"type": "filter", "template_ids": 42})
         assert any("template_ids must be a list" in e for e in errors)
 
-    @pytest.mark.asyncio
     async def test_non_list_alert_types_returns_error(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
         errors = mgr.set_filter(client_id, {"type": "filter", "alert_types": "sigma"})
         assert any("alert_types must be a list" in e for e in errors)
 
-    @pytest.mark.asyncio
     async def test_non_int_min_severity_returns_error(self) -> None:
         mgr = ConnectionManager()
         client_id = await self._connect(mgr)
         errors = mgr.set_filter(client_id, {"type": "filter", "min_severity": "high"})
         assert any("min_severity must be an integer" in e for e in errors)
 
-    @pytest.mark.asyncio
     async def test_template_ids_non_int_entry_rejected(self) -> None:
         """Mixed-type template_ids list must be rejected, filter unchanged."""
         mgr = ConnectionManager()
@@ -938,7 +893,6 @@ class TestSetFilterEdgeCases:
         assert any("template_ids items must be integers" in e for e in errors)
         assert mgr._clients[client_id].filter is original_filter
 
-    @pytest.mark.asyncio
     async def test_template_ids_bool_entry_rejected(self) -> None:
         """``True`` is int in Python; ensure bools are rejected too."""
         mgr = ConnectionManager()
@@ -953,12 +907,10 @@ class TestSetFilterEdgeCases:
 class TestConnectionManagerEdgeCases:
     """Cover the short-return branches in start_client_sender and start_status_task."""
 
-    @pytest.mark.asyncio
     async def test_start_client_sender_unknown_client_is_noop(self) -> None:
         mgr = ConnectionManager()
         mgr.start_client_sender("not-a-real-id")  # Must not raise
 
-    @pytest.mark.asyncio
     async def test_start_client_sender_twice_is_idempotent(self) -> None:
         mgr = ConnectionManager(tick_interval_s=0.01)
         ws = MagicMock()
@@ -971,7 +923,6 @@ class TestConnectionManagerEdgeCases:
         assert mgr._clients[client_id].sender_task is first_task
         await mgr.disconnect(client_id)
 
-    @pytest.mark.asyncio
     async def test_start_status_task_twice_is_idempotent(self) -> None:
         mgr = ConnectionManager(status_interval_s=3600.0)
         mgr.start_status_task()
@@ -984,7 +935,6 @@ class TestConnectionManagerEdgeCases:
 class TestQueryAlerts24h:
     """Cover the _query_alerts_24h exception-handling path."""
 
-    @pytest.mark.asyncio
     async def test_query_failure_returns_zero(self) -> None:
         alert_store = AsyncMock()
         alert_store.query_alerts = AsyncMock(side_effect=RuntimeError("db down"))
@@ -996,7 +946,6 @@ class TestQueryAlerts24h:
 class TestSenderBatchedAlerts:
     """Cover the alert_batch (multi-alert) send path."""
 
-    @pytest.mark.asyncio
     async def test_sends_multi_alert_as_alert_batch_message(self) -> None:
         mgr = ConnectionManager(tick_interval_s=0.05, batch_max_events=10)
         ws = MagicMock()
@@ -1025,7 +974,6 @@ class TestSenderBatchedAlerts:
 class TestStatusBroadcasterErrorPaths:
     """Cover the status broadcaster send_bytes exception branch."""
 
-    @pytest.mark.asyncio
     async def test_status_send_failure_does_not_crash_task(self) -> None:
         mgr = ConnectionManager(
             status_interval_s=0.02,
@@ -1048,7 +996,6 @@ class TestStatusBroadcasterErrorPaths:
 class TestBroadcastAlertSafety:
     """Cover the broadcast_alert exception branch (I4 from code review)."""
 
-    @pytest.mark.asyncio
     async def test_broadcast_alert_does_not_raise_on_filter_error(self) -> None:
         mgr = ConnectionManager()
         ws = MagicMock()
@@ -1122,7 +1069,6 @@ class TestOriginAllowlist:
 
 
 class TestDeadClientMarker:
-    @pytest.mark.asyncio
     async def test_sender_exception_marks_client_dead(self) -> None:
         """Non-disconnect exceptions in the sender task mark the client dead."""
         mgr = ConnectionManager(tick_interval_s=0.005, batch_max_events=10)
@@ -1140,7 +1086,6 @@ class TestDeadClientMarker:
         assert mgr._clients[client_id].dead is True
         await mgr.disconnect(client_id)
 
-    @pytest.mark.asyncio
     async def test_dead_client_skipped_by_broadcast_event(self) -> None:
         mgr = ConnectionManager()
         ws = MagicMock()
@@ -1151,7 +1096,6 @@ class TestDeadClientMarker:
         mgr.broadcast_event(_make_event())
         assert len(mgr._clients[client_id].event_deque) == 0
 
-    @pytest.mark.asyncio
     async def test_dead_client_skipped_by_broadcast_alert(self) -> None:
         mgr = ConnectionManager()
         ws = MagicMock()
@@ -1171,7 +1115,6 @@ class TestRouteSizeGuard:
 
         assert _WS_MAX_FRAME_BYTES == 64 * 1024
 
-    @pytest.mark.asyncio
     async def test_oversized_frame_via_testclient_returns_error(self) -> None:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
@@ -1189,7 +1132,6 @@ class TestRouteSizeGuard:
             assert msg["type"] == "error"
             assert "too large" in msg["message"]
 
-    @pytest.mark.asyncio
     async def test_invalid_json_via_testclient_returns_error(self) -> None:
         """Small frame with invalid JSON body also returns an error reply."""
         from fastapi import FastAPI

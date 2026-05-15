@@ -14,8 +14,6 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from seerflow.config import TAXIIFeedConfig, ThreatIntelConfig
 from seerflow.models.indicator import Indicator, IndicatorSnapshot
 from seerflow.threat_intel.circuit import AuthCircuitBreaker
@@ -57,7 +55,6 @@ def _defaults(**kw: Any) -> ThreatIntelConfig:
     return ThreatIntelConfig(**base)
 
 
-@pytest.mark.asyncio
 async def test_poll_once_returns_empty_when_circuit_is_open() -> None:
     model_store = MagicMock()
     model_store.save_state = AsyncMock()
@@ -94,7 +91,6 @@ async def test_poll_once_returns_empty_when_circuit_is_open() -> None:
     model_store.load_state.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_filter_confidence_drops_below_floor() -> None:
     model_store = MagicMock()
     model_store.save_state = AsyncMock()
@@ -163,7 +159,6 @@ def _make_consumer_with_failing_client(
     return consumer, metrics, breaker
 
 
-@pytest.mark.asyncio
 async def test_classify_failure_records_auth_on_401() -> None:
     consumer, metrics, breaker = _make_consumer_with_failing_client(
         error_msg="GET https://x failed: status 401",
@@ -179,7 +174,6 @@ async def test_classify_failure_records_auth_on_401() -> None:
     assert breaker.is_open() is False
 
 
-@pytest.mark.asyncio
 async def test_classify_failure_records_auth_on_403() -> None:
     consumer, metrics, _ = _make_consumer_with_failing_client(
         error_msg="GET https://x failed: status 403",
@@ -190,7 +184,6 @@ async def test_classify_failure_records_auth_on_403() -> None:
     assert snap_metrics.polls_auth_failed_total == 1
 
 
-@pytest.mark.asyncio
 async def test_classify_failure_records_non_auth_on_other_status() -> None:
     consumer, metrics, breaker = _make_consumer_with_failing_client(
         error_msg="GET https://x failed: status 502",
@@ -204,7 +197,6 @@ async def test_classify_failure_records_non_auth_on_other_status() -> None:
     assert breaker.is_open() is False
 
 
-@pytest.mark.asyncio
 async def test_run_forever_returns_during_jitter_when_stop_already_set() -> None:
     """Cover line 113 — stop fires during the jitter wait_for window."""
     model_store = MagicMock()
@@ -240,7 +232,6 @@ async def test_run_forever_returns_during_jitter_when_stop_already_set() -> None
     parser.parse.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_run_forever_returns_during_post_poll_wait_when_stop_set() -> None:
     """Cover line 120 — wait_for(stop, poll_interval) resolves via stop, returns.
 

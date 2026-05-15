@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from seerflow.sigma.state import SigmaRuleState
 
 if TYPE_CHECKING:
     from seerflow.storage.sqlite import SqliteBackend
 
 
-@pytest.mark.asyncio
 async def test_set_enabled_and_get_all(backend: SqliteBackend) -> None:
     await backend.set_enabled("rule-a", False)
     states = await backend.get_all()
@@ -21,7 +18,6 @@ async def test_set_enabled_and_get_all(backend: SqliteBackend) -> None:
     assert states["rule-a"].match_count_lifetime == 0
 
 
-@pytest.mark.asyncio
 async def test_set_enabled_idempotent(backend: SqliteBackend) -> None:
     await backend.set_enabled("rule-b", False)
     await backend.set_enabled("rule-b", False)
@@ -30,7 +26,6 @@ async def test_set_enabled_idempotent(backend: SqliteBackend) -> None:
     assert states["rule-b"].enabled is True
 
 
-@pytest.mark.asyncio
 async def test_increment_counts_upserts_and_max_last_fired(backend: SqliteBackend) -> None:
     await backend.increment_counts({"r": (5, 100)})
     await backend.increment_counts({"r": (3, 50)})  # older last_fired_ns
@@ -40,13 +35,11 @@ async def test_increment_counts_upserts_and_max_last_fired(backend: SqliteBacken
     assert states["r"].last_fired_ns == 200
 
 
-@pytest.mark.asyncio
 async def test_increment_counts_empty_is_noop(backend: SqliteBackend) -> None:
     await backend.increment_counts({})
     assert await backend.get_all() == {}
 
 
-@pytest.mark.asyncio
 async def test_state_dataclass_returned(backend: SqliteBackend) -> None:
     await backend.set_enabled("rule-c", True)
     states = await backend.get_all()

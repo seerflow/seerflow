@@ -88,7 +88,6 @@ class TestSyncAlertBenchmarks:
         benchmark(lambda: asyncio.run(_run()))
 
 
-@pytest.mark.asyncio
 @pytest.mark.slow
 async def test_mitre_filter_sql_vs_decode_baseline(tmp_path: Path) -> None:
     """SQL junction filter must be >= 10x faster than a full-decode baseline.

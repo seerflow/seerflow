@@ -10,7 +10,6 @@ from seerflow.alerting.channels._ratelimit import TokenBucket
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bucket_allows_burst_without_waiting() -> None:
     bucket = TokenBucket(rate_per_second=1.0, burst=3)
     start = asyncio.get_running_loop().time()
@@ -22,7 +21,6 @@ async def test_bucket_allows_burst_without_waiting() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bucket_blocks_when_empty() -> None:
     bucket = TokenBucket(rate_per_second=20.0, burst=1)
     await bucket.acquire()  # drains bucket
@@ -33,7 +31,6 @@ async def test_bucket_blocks_when_empty() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_bucket_refills_up_to_burst() -> None:
     bucket = TokenBucket(rate_per_second=100.0, burst=5)
     for _ in range(5):

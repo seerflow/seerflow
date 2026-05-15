@@ -59,14 +59,12 @@ def _row(
 
 
 class TestCountPatternTps:
-    @pytest.mark.asyncio
     async def test_empty_store_returns_empty_tuple(self) -> None:
         """AC2: empty store yields no rows."""
         store = _FakeAlertStore()
         result = await count_pattern_tps(store, min_tp=3)
         assert result == ()
 
-    @pytest.mark.asyncio
     async def test_below_threshold_filtered(self) -> None:
         """AC2: patterns with ``tp_count < min_tp`` are filtered out."""
         store = _FakeAlertStore(
@@ -75,7 +73,6 @@ class TestCountPatternTps:
         result = await count_pattern_tps(store, min_tp=3)
         assert result == ()
 
-    @pytest.mark.asyncio
     async def test_meets_threshold_returned(self) -> None:
         """AC2: ``tp_count >= min_tp`` patterns are returned."""
         store = _FakeAlertStore(
@@ -94,7 +91,6 @@ class TestCountPatternTps:
         assert result[0].tp_count == 3
         assert result[0].contributing_alert_ids == ("a3", "a2", "a1")
 
-    @pytest.mark.asyncio
     async def test_multiple_patterns_returned(self) -> None:
         """AC3: multiple eligible patterns surface."""
         store = _FakeAlertStore(
@@ -108,7 +104,6 @@ class TestCountPatternTps:
         keys = {r.pattern_key for r in result}
         assert keys == {"ml:hst-anomaly:ip", "ml:hst-anomaly:host"}
 
-    @pytest.mark.asyncio
     async def test_window_ns_passed_through(self) -> None:
         """AC2: ``window_ns`` is forwarded to the storage layer."""
         store = _FakeAlertStore()
@@ -121,7 +116,6 @@ class TestCountPatternTps:
         assert store.last_call["window_ns"] == 86_400_000_000_000
         assert store.last_call["now_ns"] == 1_700_000_000_000_000_000
 
-    @pytest.mark.asyncio
     async def test_contributing_alert_ids_capped_at_16(self) -> None:
         """AC2: aggregator caps ``contributing_alert_ids`` at 16 newest-first.
 
@@ -144,7 +138,6 @@ class TestCountPatternTps:
         assert len(result[0].contributing_alert_ids) == 16
         assert result[0].contributing_alert_ids == ids[:16]
 
-    @pytest.mark.asyncio
     async def test_default_min_tp_from_config(self) -> None:
         """AC2: the default ``min_tp`` argument matches FR-066 (3)."""
         # Two TPs should not pass the default threshold.
@@ -154,7 +147,6 @@ class TestCountPatternTps:
         result = await count_pattern_tps(store)
         assert result == ()
 
-    @pytest.mark.asyncio
     async def test_limit_forwarded(self) -> None:
         """AC2: ``limit`` is forwarded to the storage layer."""
         store = _FakeAlertStore()

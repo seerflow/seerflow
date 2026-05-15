@@ -19,8 +19,6 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-import pytest
-
 from seerflow.parsing.drain import DrainParser
 from seerflow.parsing.drain_persistence import load_drain_state
 from seerflow.pipeline.handler import make_handler
@@ -28,6 +26,8 @@ from seerflow.pipeline.run import _run_shutdown_sequence
 from seerflow.receivers.base import RawEvent
 
 if TYPE_CHECKING:
+    import pytest
+
     from seerflow.parsing.normalizer import EventNormalizer
     from seerflow.storage.sqlite import SqliteBackend
 
@@ -70,7 +70,6 @@ def _make_storage_facing_handler(
 
 
 class TestGracefulShutdownPersistence:
-    @pytest.mark.asyncio
     async def test_shutdown_persists_drain3_state_round_trip(self, backend: SqliteBackend) -> None:
         """End-to-end: normalize → shutdown → reload Drain3 state from SQLite."""
         handler, normalizer = _make_storage_facing_handler(backend)
@@ -95,7 +94,6 @@ class TestGracefulShutdownPersistence:
         assert loaded is True
         assert restored.template_count == template_count_before
 
-    @pytest.mark.asyncio
     async def test_shutdown_timeout_fires_warning_and_returns_quickly(
         self,
         backend: SqliteBackend,
@@ -130,7 +128,6 @@ class TestGracefulShutdownPersistence:
         matches = [r for r in caplog.records if "Shutdown timeout exceeded" in r.message]
         assert len(matches) == 1
 
-    @pytest.mark.asyncio
     async def test_shutdown_writes_pending_templates_to_storage(
         self, backend: SqliteBackend
     ) -> None:

@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_ioc_match_produces_alert_and_enriches_event(tmp_path: Path) -> None:
     feed_id = "test-feed"
     storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "ioc.db"))

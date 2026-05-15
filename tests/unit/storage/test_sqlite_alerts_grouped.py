@@ -51,7 +51,6 @@ def _alert(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_grouped_empty_returns_empty_dict(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -64,7 +63,6 @@ async def test_count_alerts_grouped_empty_returns_empty_dict(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_grouped_single_rule(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -80,7 +78,6 @@ async def test_count_alerts_grouped_single_rule(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_grouped_multi_rule_mixed_type(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -98,7 +95,6 @@ async def test_count_alerts_grouped_multi_rule_mixed_type(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_grouped_half_open_window(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -115,7 +111,6 @@ async def test_count_alerts_grouped_half_open_window(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_grouped_rejects_unknown_group_by(
     sqlite_storage: SqliteBackend,
 ) -> None:

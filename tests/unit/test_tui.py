@@ -83,7 +83,6 @@ class TestLoadTextual:
 
 
 class TestLaunchTUIFallback:
-    @pytest.mark.asyncio
     async def test_falls_back_to_pipeline_when_textual_missing(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -127,7 +126,6 @@ def _mock_client(
 
 
 class TestPollAlerts:
-    @pytest.mark.asyncio
     async def test_returns_items_on_200(self) -> None:
         body = {
             "items": [{"id": "alert-1", "rule_name": "demo"}],
@@ -145,7 +143,6 @@ class TestPollAlerts:
             items = await tui._poll_alerts(client)
         assert items == body["items"]
 
-    @pytest.mark.asyncio
     async def test_returns_empty_list_on_connection_error(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("nope")
@@ -154,7 +151,6 @@ class TestPollAlerts:
             items = await tui._poll_alerts(client)
         assert items == []
 
-    @pytest.mark.asyncio
     async def test_returns_empty_list_on_503(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(503, json={"detail": "degraded"})
@@ -167,7 +163,6 @@ class TestPollAlerts:
 
 
 class TestSearchEntities:
-    @pytest.mark.asyncio
     async def test_issues_get_with_query_param(self) -> None:
         captured: dict[str, str] = {}
 
@@ -188,7 +183,6 @@ class TestSearchEntities:
             {"entity_type": "user", "entity_value": "alice", "entity_uuid": "u-1"},
         ]
 
-    @pytest.mark.asyncio
     async def test_returns_empty_on_failure(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("nope")
@@ -199,7 +193,6 @@ class TestSearchEntities:
 
 
 class TestWarmup:
-    @pytest.mark.asyncio
     async def test_returns_true_on_first_200(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"status": "healthy", "components": {}})
@@ -208,7 +201,6 @@ class TestWarmup:
             ok = await tui._warmup(client, max_s=0.5, interval_s=0.01)
         assert ok is True
 
-    @pytest.mark.asyncio
     async def test_returns_true_on_503(self) -> None:
         """503 means 'degraded but the app is up' — accept it."""
 
@@ -219,7 +211,6 @@ class TestWarmup:
             ok = await tui._warmup(client, max_s=0.5, interval_s=0.01)
         assert ok is True
 
-    @pytest.mark.asyncio
     async def test_returns_false_on_persistent_failure(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("nope")
@@ -245,7 +236,6 @@ class TestSeerflowTUIApp:
         keys = {b.key for b in SeerflowTUIApp.BINDINGS}
         assert {"q", "ctrl+c", "tab", "shift+tab", "enter"}.issubset(keys)
 
-    @pytest.mark.asyncio
     async def test_compose_yields_documented_panel_ids(self) -> None:
         from seerflow.tui import SeerflowTUIApp
 
@@ -270,7 +260,6 @@ class TestSeerflowTUIApp:
 
 
 class TestWebSocketConsumer:
-    @pytest.mark.asyncio
     async def test_consume_appends_event_payloads(self) -> None:
         """``_consume_ws_messages`` invokes the callback once per ``event`` frame."""
 
@@ -292,7 +281,6 @@ class TestWebSocketConsumer:
         assert captured[0]["template"].startswith("ssh login")
         assert captured[1]["template"].startswith("kernel")
 
-    @pytest.mark.asyncio
     async def test_consume_skips_non_dict_top_level(self) -> None:
         """Top-level JSON arrays / scalars are silently dropped (not raised)."""
 
@@ -311,7 +299,6 @@ class TestWebSocketConsumer:
         assert len(captured) == 1
         assert captured[0]["template"] == "ok"
 
-    @pytest.mark.asyncio
     async def test_consume_skips_event_with_non_dict_data(self) -> None:
         """``data`` that is not a dict (e.g. None, list) is dropped."""
 
@@ -335,7 +322,6 @@ class TestWebSocketConsumer:
 
 
 class TestPollAlertsBranches:
-    @pytest.mark.asyncio
     async def test_returns_empty_on_non_dict_body(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=[1, 2, 3])
@@ -344,7 +330,6 @@ class TestPollAlertsBranches:
             items = await tui._poll_alerts(client)
         assert items == []
 
-    @pytest.mark.asyncio
     async def test_returns_empty_when_items_not_list(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"items": "oops"})
@@ -355,7 +340,6 @@ class TestPollAlertsBranches:
 
 
 class TestSearchEntitiesBranches:
-    @pytest.mark.asyncio
     async def test_returns_empty_on_non_200(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(503, json={"detail": "degraded"})
@@ -364,7 +348,6 @@ class TestSearchEntitiesBranches:
             results = await tui._search_entities(client, "alice")
         assert results == []
 
-    @pytest.mark.asyncio
     async def test_returns_empty_on_non_list_body(self) -> None:
         def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"oops": "not a list"})
@@ -375,7 +358,6 @@ class TestSearchEntitiesBranches:
 
 
 class TestWarmupBranches:
-    @pytest.mark.asyncio
     async def test_unrecognised_status_is_ignored_then_succeeds(self) -> None:
         """A 404 (or other non-200/503) does not count as warmup-ok."""
         calls = {"n": 0}
@@ -508,7 +490,6 @@ class TestAlertDetailModal:
         assert "a-2" in rendered
         assert "test" in rendered
 
-    @pytest.mark.asyncio
     async def test_modal_action_dismiss_pops_screen(self) -> None:
         """``action_dismiss`` pops the modal off the screen stack."""
         from seerflow.tui import SeerflowTUIApp
@@ -553,7 +534,6 @@ class TestAlertDetailModal:
 
 @pytest.mark.skipif(not textual_available, reason="textual extra not installed")
 class TestActionOpenOrSearch:
-    @pytest.mark.asyncio
     async def test_input_focus_runs_entity_search(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -592,7 +572,6 @@ class TestActionOpenOrSearch:
         finally:
             await client.aclose()
 
-    @pytest.mark.asyncio
     async def test_input_focus_with_blank_query_is_noop(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -624,7 +603,6 @@ class TestActionOpenOrSearch:
         finally:
             await client.aclose()
 
-    @pytest.mark.asyncio
     async def test_no_focus_is_noop(self) -> None:
         from seerflow.tui import SeerflowTUIApp
 
@@ -640,7 +618,6 @@ class TestActionOpenOrSearch:
         finally:
             await client.aclose()
 
-    @pytest.mark.asyncio
     async def test_alert_row_focus_opens_modal(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -684,7 +661,6 @@ class TestActionOpenOrSearch:
         finally:
             await client.aclose()
 
-    @pytest.mark.asyncio
     async def test_alert_row_focus_with_unknown_key_is_noop(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -728,7 +704,6 @@ class TestActionOpenOrSearch:
 
 @pytest.mark.skipif(not textual_available, reason="textual extra not installed")
 class TestRefreshAlertsCoercion:
-    @pytest.mark.asyncio
     async def test_string_timestamp_is_coerced_to_int(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -769,7 +744,6 @@ class TestRefreshAlertsCoercion:
 
 @pytest.mark.skipif(not textual_available, reason="textual extra not installed")
 class TestConsumeWebSocketErrors:
-    @pytest.mark.asyncio
     async def test_websockets_missing_logs_and_returns(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -791,7 +765,6 @@ class TestConsumeWebSocketErrors:
         finally:
             await client.aclose()
 
-    @pytest.mark.asyncio
     async def test_websocket_connection_failure_is_swallowed(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -821,7 +794,6 @@ class TestConsumeWebSocketErrors:
         finally:
             await client.aclose()
 
-    @pytest.mark.asyncio
     async def test_websocket_happy_path_writes_event_to_log(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -879,7 +851,6 @@ class TestConsumeWebSocketErrors:
 
 @pytest.mark.skipif(not textual_available, reason="textual extra not installed")
 class TestLaunchTUIFullPath:
-    @pytest.mark.asyncio
     async def test_taskgroup_runs_pipeline_and_ui(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -936,7 +907,6 @@ class TestLaunchTUIFullPath:
         assert ui_started["ok"] is True
         assert pipeline_cancelled["ok"] is True
 
-    @pytest.mark.asyncio
     async def test_max_uptime_auto_quit_invokes_exit(
         self,
         monkeypatch: pytest.MonkeyPatch,

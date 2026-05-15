@@ -141,7 +141,6 @@ class TestConfirm:
 
 class TestList:
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_table_output_sorted_desc(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 5), _tinfo(2, 50), _tinfo(3, 1)])
         with patch.object(templates_cmd, "_connect_storage_from_args") as conn:
@@ -159,7 +158,6 @@ class TestList:
         assert storage.closed is True
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_empty(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage()
         with patch.object(templates_cmd, "_connect_storage_from_args") as conn:
@@ -170,7 +168,6 @@ class TestList:
         assert "No templates found" in out
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 5)])
         with patch.object(templates_cmd, "_connect_storage_from_args") as conn:
@@ -187,7 +184,6 @@ class TestList:
         assert "template" in data[0]
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_respects_limit(self) -> None:
         storage = _FakeStorage(templates=[_tinfo(i, i) for i in range(1, 5)])
         with patch.object(templates_cmd, "_connect_storage_from_args") as conn:
@@ -196,7 +192,6 @@ class TestList:
         assert storage.get_templates_calls == [2]
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_invalid_limit_validation_error(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -215,7 +210,6 @@ class TestList:
 
 class TestPrune:
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_negative_min_count_validation_error(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -228,7 +222,6 @@ class TestPrune:
         conn.assert_not_called()
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_yes_flag_skips_confirmation(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 1), _tinfo(2, 5)])
         with patch.object(templates_cmd, "_connect_storage_from_args") as conn:
@@ -243,7 +236,6 @@ class TestPrune:
         assert "remaining" in out.lower()
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_confirmation_yes_proceeds(self) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 1)])
         with (
@@ -259,7 +251,6 @@ class TestPrune:
         assert storage.prune_calls == [2]
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_confirmation_no_cancels(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 1)])
         with (
@@ -276,7 +267,6 @@ class TestPrune:
         assert "Cancelled" in capsys.readouterr().out
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_non_tty_without_yes_exits_2(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 1)])
         with (
@@ -293,7 +283,6 @@ class TestPrune:
         assert "--yes" in err
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 1), _tinfo(2, 10)])
         with patch.object(templates_cmd, "_connect_storage_from_args") as conn:
@@ -314,7 +303,6 @@ class TestPrune:
 
 class TestReset:
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_yes_flag_skips_confirmation(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(
             templates=[_tinfo(1, 1), _tinfo(2, 5)],
@@ -330,7 +318,6 @@ class TestReset:
         assert "2" in out  # deleted_templates = 2
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_confirmation_no_cancels(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(templates=[_tinfo(1, 1)])
         with (
@@ -346,7 +333,6 @@ class TestReset:
         assert "Cancelled" in capsys.readouterr().out
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_json_output_with_drain_state(self, capsys: pytest.CaptureFixture[str]) -> None:
         storage = _FakeStorage(
             templates=[_tinfo(1, 1)],
@@ -363,7 +349,6 @@ class TestReset:
         assert payload == {"deleted_templates": 1, "drain_state_cleared": True}
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_json_output_without_drain_state(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -426,7 +411,6 @@ class TestParser:
 
 class TestStorageErrors:
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_runtime_error_propagates_as_exit_1(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -452,7 +436,6 @@ class TestStorageErrors:
 
 class TestDispatcher:
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_unknown_subcommand(self, capsys: pytest.CaptureFixture[str]) -> None:
         with patch.object(templates_cmd, "_connect_storage_from_args") as conn:
             rc = await templates_cmd.run_templates(_args(templates_cmd="WAT"))
@@ -462,7 +445,6 @@ class TestDispatcher:
         conn.assert_not_called()
 
     @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_reset_non_tty_without_yes_exits_2(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:

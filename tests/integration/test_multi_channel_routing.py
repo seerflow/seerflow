@@ -60,7 +60,6 @@ def smtp_controller() -> Iterator[tuple[Controller, _CapturingHandler]]:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_router_fans_out_to_all_four_channels(
     smtp_controller: tuple[Controller, _CapturingHandler],
 ) -> None:

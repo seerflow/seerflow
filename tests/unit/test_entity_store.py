@@ -22,11 +22,9 @@ class TestEntityStoreProtocol:
         yield b
         await b.close()
 
-    @pytest.mark.asyncio
     async def test_isinstance_entity_store(self, backend) -> None:
         assert isinstance(backend, EntityStore)
 
-    @pytest.mark.asyncio
     async def test_get_related_returns_list(self, backend) -> None:
         from seerflow.graph.entity_graph import EntityGraph
 
@@ -36,7 +34,6 @@ class TestEntityStoreProtocol:
         assert isinstance(result, list)
         assert result == []
 
-    @pytest.mark.asyncio
     async def test_get_related_with_graph_edges(self, backend) -> None:
         from seerflow.graph.entity_graph import EntityGraph
         from seerflow.models.entity import generate_ip_id, generate_user_id
@@ -51,7 +48,6 @@ class TestEntityStoreProtocol:
         assert len(related) >= 1
         assert any(r.entity_uuid == ip_uuid for r in related)
 
-    @pytest.mark.asyncio
     async def test_get_related_without_graph_returns_empty(self, backend) -> None:
         result = await backend.get_related("some-uuid")
         assert result == []
