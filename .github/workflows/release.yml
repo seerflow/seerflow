@@ -56,5 +56,24 @@ jobs:
       - name: Build package
         run: uv build
 
+      - name: Install dependencies
+        run: uv sync --extra tui
+
+      # tag -> build -> TEST -> publish. A broken build can never reach PyPI:
+      # the same quality gate enforced on every PR runs here against the
+      # built tree before the upload step.
+      - name: Quality gates
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy src/
+          uv run bandit -r src/ -c pyproject.toml
+          uv run pytest --cov=src/seerflow --cov-fail-under=95 -q
+
+      # PyPI rejects malformed long descriptions at upload time; running the
+      # exact check here fails the release loudly instead.
+      - name: Verify distribution metadata
+        run: uv run twine check dist/*
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

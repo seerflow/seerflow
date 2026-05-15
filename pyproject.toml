@@ -139,6 +139,11 @@ dev = [
     # for 3.11/3.12/3.13. Drive both via ``scripts/profile_pipeline.py``.
     "py-spy>=0.4",
     "memray>=1.13; sys_platform != 'win32'",
+    # S-085: powers the `twine check dist/*` gate in the release workflow,
+    # which applies PyPI's exact long-description validation before upload so
+    # a malformed README fails the release instead of being rejected at the
+    # registry. Dev-only — never ships in the runtime image.
+    "twine>=5.0",
 ]
 
 [tool.ruff]
