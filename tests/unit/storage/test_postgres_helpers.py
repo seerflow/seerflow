@@ -108,7 +108,7 @@ class TestBuildPgAlertQuery:
 class TestPostgresMigrations:
     def test_version_keys_are_sequential(self) -> None:
         keys = sorted(MIGRATIONS)
-        assert keys == [1, 2, 3, 4, 5, 6]
+        assert keys == list(range(1, len(MIGRATIONS) + 1))
 
     def test_all_entries_are_callable(self) -> None:
         for fn in MIGRATIONS.values():

@@ -386,8 +386,9 @@ async def test_migration_v6_adds_timestamp_ns_to_pre_existing_junctions(
         await conn.commit()
 
         applied = await run_migrations(conn)
-        assert applied == 1
-        assert await get_schema_version(conn) == 6
+        # v5 baseline → v6 (junction backfill) + v7 (alerts index) apply.
+        assert applied == max(MIGRATIONS) - 5
+        assert await get_schema_version(conn) == max(MIGRATIONS)
 
         async with conn.execute(
             "SELECT timestamp_ns FROM alert_tactics WHERE dedup_key='k1'"
@@ -412,6 +413,47 @@ async def test_migration_v6_idempotent_on_fresh_db(tmp_path: Path) -> None:
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute(
             "CREATE TABLE alerts (alert_id TEXT, dedup_key TEXT, timestamp_ns INTEGER, data BLOB)"
+        )
+        await conn.commit()
+        await run_migrations(conn)
+        applied2 = await run_migrations(conn)
+        assert applied2 == 0
+
+
+@pytest.mark.asyncio
+async def test_migration_v7_adds_alerts_type_rule_time_index(tmp_path: Path) -> None:
+    """v7 creates the ``(alert_type, rule_name, timestamp_ns)`` covering index
+    used by ``count_alerts_grouped`` / ``count_alerts_bucketed`` (S-229)."""
+    db_path = tmp_path / "t.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE alerts ("
+            "  alert_id TEXT PRIMARY KEY, alert_type TEXT NOT NULL, "
+            "  timestamp_ns INTEGER NOT NULL, rule_name TEXT NOT NULL, "
+            "  dedup_key TEXT, data BLOB)"
+        )
+        await conn.commit()
+        version = await run_migrations(conn)
+        assert version >= 7
+        assert await get_schema_version(conn) == max(MIGRATIONS)
+
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='idx_alerts_type_rule_time'"
+        ) as cur:
+            assert await cur.fetchone() is not None
+
+
+@pytest.mark.asyncio
+async def test_migration_v7_idempotent_on_fresh_db(tmp_path: Path) -> None:
+    """Re-running migrations after v7 is a no-op (CREATE INDEX IF NOT EXISTS)."""
+    db_path = tmp_path / "t.db"
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "CREATE TABLE alerts ("
+            "  alert_id TEXT PRIMARY KEY, alert_type TEXT NOT NULL, "
+            "  timestamp_ns INTEGER NOT NULL, rule_name TEXT NOT NULL, "
+            "  dedup_key TEXT, data BLOB)"
         )
         await conn.commit()
         await run_migrations(conn)

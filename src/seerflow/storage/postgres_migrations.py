@@ -196,6 +196,21 @@ async def _migrate_v6_junction_timestamp_ns(conn: asyncpg.Connection) -> None:
     return None
 
 
+async def _migrate_v7_alerts_type_rule_time(conn: asyncpg.Connection) -> None:
+    """Migration 7: covering composite index for the per-rule 24h alert
+    aggregation (S-229 / SEE-240). Mirrors the SQLite v7.
+
+    Accelerates ``count_alerts_grouped`` (``WHERE alert_type=? AND
+    timestamp_ns IN [..) GROUP BY rule_name``) and the existing
+    ``count_alerts_bucketed``. Idempotent — fresh DBs already have it
+    from the schema DDL.
+    """
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alerts_type_rule_time "
+        "ON alerts (alert_type, rule_name, timestamp_ns)"
+    )
+
+
 MIGRATIONS: dict[int, Callable[[asyncpg.Connection], Awaitable[None]]] = {
     1: _migrate_v1_bootstrap,
     2: _migrate_v2_graph_edges,
@@ -203,6 +218,7 @@ MIGRATIONS: dict[int, Callable[[asyncpg.Connection], Awaitable[None]]] = {
     4: _migrate_v4_feedback_events,
     5: _migrate_v5_sigma_rule_state,
     6: _migrate_v6_junction_timestamp_ns,
+    7: _migrate_v7_alerts_type_rule_time,
 }
 
 
