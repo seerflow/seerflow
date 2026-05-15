@@ -25,7 +25,11 @@ export function SigmaRulesPage(): JSX.Element {
   const [uploadOpen, setUploadOpen] = useState(false);
 
   useEffect(() => {
-    void useSigmaRulesStore.getState().load();
+    // S-230 / SEE-241: abort the prior in-flight list load when the filter
+    // changes again so a stale response cannot overwrite a fresh one.
+    const controller = new AbortController();
+    void useSigmaRulesStore.getState().load(controller.signal);
+    return () => controller.abort();
     // Re-load whenever any filter field changes.
   }, [filter]);
 
