@@ -136,9 +136,7 @@ async def _run(events: Sequence[RawEvent], data_dir: Path) -> BenchmarkResult:
     )
 
 
-def run_benchmark(
-    count: int, *, seed: int = 42, data_dir: Path | None = None
-) -> BenchmarkResult:
+def run_benchmark(count: int, *, seed: int = 42, data_dir: Path | None = None) -> BenchmarkResult:
     """Drive ``count`` synthetic events through a real pipeline and measure it."""
     if count <= 0:
         raise ValueError(f"count must be positive, got {count}")

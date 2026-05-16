@@ -61,16 +61,13 @@ async def _demo(count: int, seed: int, data_dir: Path) -> int:
         _say(f"[2/4] ingest: feeding {count} synthetic syslog events")
         start = time.perf_counter()
         for event in events:
-            await handler(event)  # type: ignore[operator]
+            await handler(event)
         elapsed = time.perf_counter() - start
         await storage.flush()
         stored = (await storage.query_events(EventQuery(limit=1))).total
         alerts = (await storage.query_alerts(AlertQuery(limit=1))).total
         rate = stored / elapsed if elapsed > 0 else 0.0
-        _say(
-            f"[3/4] detect: {stored} events parsed + scored in "
-            f"{elapsed:.2f}s ({rate:,.0f} ev/s)"
-        )
+        _say(f"[3/4] detect: {stored} events parsed + scored in {elapsed:.2f}s ({rate:,.0f} ev/s)")
         _say(f"[4/4] alerts: {alerts} alert(s) raised and persisted to SQLite")
         _say("Reproduce: python -m seerflow.launch.demo")
     finally:

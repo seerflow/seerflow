@@ -8,7 +8,7 @@ the canonical command so the recording procedure is copy-pasteable offline.
 from __future__ import annotations
 
 import argparse
-import subprocess  # noqa: S404 -- explicit, user-gated --exec only
+import subprocess  # nosec B404 -- argv is a fixed list, no shell, --exec gated
 import sys
 from typing import TYPE_CHECKING
 
@@ -18,9 +18,7 @@ if TYPE_CHECKING:
 _DEFAULT_DEMO_CMD = "python -m seerflow.launch.demo"
 
 
-def build_asciinema_command(
-    cast_path: str, *, demo_cmd: str = _DEFAULT_DEMO_CMD
-) -> list[str]:
+def build_asciinema_command(cast_path: str, *, demo_cmd: str = _DEFAULT_DEMO_CMD) -> list[str]:
     """Return the canonical ``asciinema rec`` argv for the demo."""
     return [
         "asciinema",
@@ -53,7 +51,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ns = p.parse_args(sys.argv[1:] if argv is None else argv)
     cmd = build_asciinema_command(ns.cast_path, demo_cmd=ns.demo_cmd)
     if ns.exec:
-        return subprocess.run(cmd, check=False).returncode  # noqa: S603
+        return subprocess.run(cmd, check=False).returncode  # noqa: S603  # nosec B603
     print(" ".join(cmd))  # noqa: T201 -- CLI stdout is the contract
     print(  # noqa: T201
         "\n# asciinema not run (no --exec). Install asciinema, then either\n"

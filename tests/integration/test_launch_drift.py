@@ -13,9 +13,7 @@ from seerflow.launch.report import render_benchmark_report
 
 _ROOT = Path(__file__).resolve().parents[2]
 _README = (_ROOT / "README.md").read_text(encoding="utf-8")
-_SHOWHN = (_ROOT / "src" / "seerflow" / "launch" / "SHOWHN.md").read_text(
-    encoding="utf-8"
-)
+_SHOWHN = (_ROOT / "src" / "seerflow" / "launch" / "SHOWHN.md").read_text(encoding="utf-8")
 
 
 def test_report_contains_throughput_and_command(tmp_path) -> None:
@@ -33,11 +31,7 @@ def test_readme_comparison_has_wazuh_and_opensearch() -> None:
     compare = _README.split("## How Seerflow Compares", 1)[1]
     # The comparison table header is the first Markdown table row
     # ("| Dimension | ... |") after the section heading.
-    header = next(
-        line
-        for line in compare.splitlines()
-        if line.startswith("| Dimension")
-    )
+    header = next(line for line in compare.splitlines() if line.startswith("| Dimension"))
     assert "Wazuh" in header
     assert "OpenSearch" in header
 
