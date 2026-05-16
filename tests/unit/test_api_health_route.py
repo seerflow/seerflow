@@ -278,3 +278,39 @@ class TestHealthEndpointComprehensive:
         client = TestClient(app)
         body = client.get("/api/v1/health").json()
         assert body["memory_bytes"]["rss"] == 4_194_304
+
+
+class TestHealthServerSideProcessTime:
+    """S-233: the route reports its own processing duration so callers can
+    budget the *endpoint's* work (FR-047) rather than the client round-trip.
+    """
+
+    def test_health_emits_server_side_process_time_header(self) -> None:
+        """The ``X-Process-Time-Ms`` header carries the route's own
+        wall-clock processing duration (float ms), present on the 200 path.
+        """
+        app = _make_app({"pipeline": "running", "storage": "connected"})
+        client = TestClient(app)
+
+        resp = client.get("/api/v1/health")
+
+        assert resp.status_code == 200
+        assert "x-process-time-ms" in resp.headers
+        value = float(resp.headers["x-process-time-ms"])
+        assert value >= 0.0
+        # Server-side work for the bare envelope is trivially under the
+        # FR-047 50 ms budget even with coverage instrumentation.
+        assert value < 50.0
+
+    def test_process_time_header_present_on_degraded_503(self) -> None:
+        """The header is set unconditionally before the single ``return``,
+        so it is also present on the 503 degraded path.
+        """
+        app = _make_app({"pipeline": "running", "storage": "error"})
+        client = TestClient(app)
+
+        resp = client.get("/api/v1/health")
+
+        assert resp.status_code == 503
+        assert "x-process-time-ms" in resp.headers
+        assert float(resp.headers["x-process-time-ms"]) >= 0.0

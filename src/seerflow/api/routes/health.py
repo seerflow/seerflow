@@ -25,7 +25,7 @@ import logging
 import resource
 import sys
 import time
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, Depends, Request, Response
 
@@ -102,6 +102,12 @@ _ALERT_COUNT_TTL_S: float = 5.0
 # 24 hours in nanoseconds (the unit used by ``TimeRange`` throughout the
 # storage layer).
 _ONE_DAY_NS: int = 24 * 3600 * 1_000_000_000
+# S-233: server-side processing-duration header. The health route measures
+# the wall-clock cost of its own handler body and emits it (float ms) on
+# this header so callers/tests can budget the *endpoint's* work (FR-047)
+# rather than the client round-trip, which is dominated by host scheduler
+# noise under full-suite parallel + coverage load.
+_PROCESS_TIME_HEADER: Final[str] = "X-Process-Time-Ms"
 
 HealthState = Annotated[dict[str, str], Depends(get_health_state)]
 Engines = Annotated[DetectionEngines, Depends(get_engines)]
@@ -254,6 +260,10 @@ async def get_health(
     rule_suggestion_cache: RuleSuggestionCacheDep,
 ) -> HealthResponse:
     """Return comprehensive service health status (S-080 + S-082)."""
+    # S-233: measure the route's own processing duration. ``perf_counter``
+    # is monotonic; the delta captured at ``return`` is the endpoint's
+    # work only, immune to client-side scheduler / coverage-tracing noise.
+    _t0 = time.perf_counter()
     all_healthy = all(v in _HEALTHY_VALUES for v in health_state.values())
     status: Literal["healthy", "degraded"] = "healthy" if all_healthy else "degraded"
     if not all_healthy:
@@ -313,7 +323,7 @@ async def get_health(
         rule_suggestion_cache=rule_suggestion_cache,
     )
 
-    return HealthResponse(
+    result = HealthResponse(
         status=status,
         components=health_state,
         detection=detection,
@@ -333,3 +343,8 @@ async def get_health(
             for k, v in memory_bounds.items()
         },
     )
+    # S-233: emit server-side processing duration (ms) before returning, on
+    # both the 200 and 503 paths. The value is the route's own work only —
+    # immune to client-side scheduler noise under full-suite parallel load.
+    response.headers[_PROCESS_TIME_HEADER] = f"{(time.perf_counter() - _t0) * 1000.0:.3f}"
+    return result
