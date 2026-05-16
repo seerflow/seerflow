@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -113,4 +114,37 @@ def test_health_under_50ms_with_bounds(bounded_client: TestClient) -> None:
     assert server_ms_max < 50.0, (
         f"max server-side health processing {server_ms_max:.1f}ms exceeds "
         f"the FR-047 50 ms budget"
+    )
+
+
+def test_health_latency_guard_fails_on_genuine_regression(
+    bounded_client: TestClient,
+) -> None:
+    """S-233 sanity check (AC): if the health endpoint genuinely regresses
+    past its FR-047 budget, the server-side measurement (and therefore
+    ``test_health_under_50ms_with_bounds``) must catch it.
+
+    A ~60 ms delay is injected into ``collect_memory_bounds`` — a function
+    invoked *inside* the route's timed body. We assert the server-side
+    header crosses 50 ms (a lower-bound assertion: deterministic even under
+    host load, since real work only ever *adds* to the injected delay).
+    """
+    import time as _time
+
+    from seerflow.api.routes import health as _health_mod
+
+    real_collect = _health_mod.collect_memory_bounds
+
+    def _slow_collect(*args: object, **kwargs: object) -> object:
+        _time.sleep(0.06)
+        return real_collect(*args, **kwargs)
+
+    with patch.object(_health_mod, "collect_memory_bounds", _slow_collect):
+        resp = bounded_client.get("/api/v1/health")
+
+    assert resp.status_code == 200
+    server_ms = float(resp.headers["x-process-time-ms"])
+    assert server_ms >= 50.0, (
+        f"injected 60ms regression should push server-side processing "
+        f"({server_ms:.1f}ms) past the 50 ms budget — guard is broken"
     )
