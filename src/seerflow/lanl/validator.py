@@ -157,9 +157,7 @@ def compute_metrics(
 
     precision = n_tp / (n_tp + n_fp) if (n_tp + n_fp) > 0 else 0.0
     recall = n_tp / (n_tp + n_fn) if (n_tp + n_fn) > 0 else 0.0
-    f1_score = (
-        2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    )
+    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     false_positive_rate = n_fp / (n_fp + n_tp) if (n_fp + n_tp) > 0 else 0.0
 
     patterns_detected = frozenset(a.rule_name for a in tp_alerts)

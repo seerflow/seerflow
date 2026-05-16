@@ -53,9 +53,7 @@ def test_readme_validation_labels_synthetic_subset():
 def test_renderer_output_matches_harness(result):
     from seerflow.lanl.report import render_validation_report
 
-    md = render_validation_report(
-        result, dataset_label="synthetic LANL subset", date="2026-05-16"
-    )
+    md = render_validation_report(result, dataset_label="synthetic LANL subset", date="2026-05-16")
     assert f"| Precision | {_pct(result.precision)} |" in md
     assert f"| F1 score | {_pct(result.f1_score)} |" in md
     assert f"| False-positive rate | {_pct(result.false_positive_rate)} |" in md
