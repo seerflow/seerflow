@@ -217,6 +217,38 @@ Key config sections:
 | File tailing | -- | Glob + watchfiles | Done |
 | Webhooks | 8081 | JSON/form + auth | Done |
 
+## Validation
+
+Seerflow's correlation engine is validated against a **synthetic LANL
+subset** (~200 events modelled on the LANL Unified Host and Network
+Dataset, committed at `tests/fixtures/lanl/`). The engine detects three
+documented cross-source attack scenarios: brute-force + lateral movement,
+credential stuffing, and C2 beaconing.
+
+| Metric | Value |
+|--------|-------|
+| Patterns detected | 3 |
+| Precision | 92.31% |
+| Recall | 100.00% |
+| F1 score | 96.00% |
+| False-positive rate | 7.69% |
+| Events processed | 203 |
+
+> Numbers are derived from the harness, not hand-maintained -- a drift
+> test (`tests/integration/test_lanl_report_drift.py`) fails if this table
+> diverges from `run_validation()`.
+
+Reproduce locally:
+
+```bash
+uv run pytest tests/integration/test_lanl_validation.py -v
+uv run python -m seerflow.lanl.report
+```
+
+To run against the full downloaded LANL dataset, see the
+**Run on the full LANL dataset** section emitted by
+`python -m seerflow.lanl.report`.
+
 ## Architecture
 
 ```mermaid
