@@ -22,7 +22,7 @@ from seerflow.launch.synthetic import build_events
 from seerflow.models.query import AlertQuery, EventQuery
 from seerflow.pipeline.handler import make_handler
 from seerflow.sigma.engine import SigmaEngine
-from seerflow.storage.sqlite import SqliteBackend
+from seerflow.storage import connect_storage
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -46,7 +46,7 @@ async def _demo(count: int, seed: int, data_dir: Path) -> int:
         "  webhook_enabled: false\n"
     )
     config = load_config(str(cfg))
-    storage = await SqliteBackend.connect(config.storage)
+    storage = await connect_storage(config.storage)
     ensemble = DetectionEnsemble(config.detection)
     sigma = SigmaEngine()
     sigma.load_bundled()

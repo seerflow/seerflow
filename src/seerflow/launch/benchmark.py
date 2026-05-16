@@ -26,12 +26,13 @@ from seerflow.launch.synthetic import build_events
 from seerflow.models.query import AlertQuery, EventQuery
 from seerflow.pipeline.handler import make_handler
 from seerflow.sigma.engine import SigmaEngine
-from seerflow.storage.sqlite import SqliteBackend
+from seerflow.storage import connect_storage
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from seerflow.receivers.base import RawEvent
+    from seerflow.storage.factory import StorageBackend
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +83,7 @@ def _peak_rss_mb() -> float | None:
     return _rss_kib_to_mb(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
 
-async def _build_pipeline(data_dir: Path) -> tuple[SqliteBackend, object]:
+async def _build_pipeline(data_dir: Path) -> tuple[StorageBackend, object]:
     cfg_yaml = data_dir / "seerflow.yaml"
     cfg_yaml.write_text(
         "storage:\n"
@@ -94,7 +95,7 @@ async def _build_pipeline(data_dir: Path) -> tuple[SqliteBackend, object]:
         "  webhook_enabled: false\n"
     )
     config = load_config(str(cfg_yaml))
-    storage = await SqliteBackend.connect(config.storage)
+    storage = await connect_storage(config.storage)
     ensemble = DetectionEnsemble(config.detection)
     sigma = SigmaEngine()
     sigma.load_bundled()
