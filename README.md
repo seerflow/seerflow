@@ -11,7 +11,50 @@ A streaming, entity-centric log intelligence agent that detects operational fail
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-green)](LICENSE)
 
+## Installation
+
+### From PyPI (recommended — fastest path)
+
+```bash
+pip install seerflow
+# or, with uv:
+uv pip install seerflow
+```
+
+The wheel bundles the pre-built React dashboard, the 63 curated Sigma rules,
+and every runtime dependency. No build step, no Node toolchain required.
+
+### From source
+
+```bash
+git clone https://github.com/seerflow/seerflow.git
+cd seerflow
+uv sync
+```
+
+Use the source install for development or to run the latest unreleased
+changes. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev setup.
+
 ## Quick Start
+
+### Zero to first alert in under 5 minutes
+
+These steps take **well under 5 minutes** on a fresh machine — no Docker, no
+database, no config file, no tuning required (Seerflow runs zero-config with
+sensible defaults — NFR-006):
+
+1. **Install** (~30s): `pip install seerflow`
+2. **Start the pipeline** (~10s): `seerflow start` — boots receivers,
+   detection engines, and the dashboard with built-in defaults (SQLite,
+   syslog + OTLP + webhooks). No config file needed for the first run.
+3. **Send a log line that trips an anomaly or Sigma rule** (~1m, see the
+   syslog example below) and watch the `WARNING ANOMALY ...` /
+   `WARNING SIGMA ...` line print to the console and the alert appear in the
+   dashboard at `http://127.0.0.1:8080/`.
+
+Total: well inside 5 minutes — install dominates, detection is instant once
+events flow. Drop in a `seerflow.yaml` (copy `seerflow.example.yaml`) only
+when you want to change ports, backends, or detector tuning.
 
 ```bash
 # Install from source
@@ -174,17 +217,24 @@ Key config sections:
 | File tailing | -- | Glob + watchfiles | Done |
 | Webhooks | 8081 | JSON/form + auth | Done |
 
-## Detection Pipeline
+## Architecture
 
-```
-Log Sources → Receivers → Drain3 → UUID5 Entities → ML Ensemble → Sigma Rules
-                                        ↓                ↓              ↓
-                                  Entity Graph      blended score   ATT&CK tags
-                                  Window Buffer     [0.0 - 1.0]    tactic/technique
-                                  Risk Register         ↓              ↓
-                                        ↓          Risk Accumulation → Alert
-                                  PageRank, Louvain
-                                  Fan-out, Betweenness
+```mermaid
+flowchart LR
+    SRC["Log Sources<br/>(syslog · OTLP · files · webhooks)"] --> RCV[Receivers]
+    RCV --> DRAIN["Drain3<br/>template extraction"]
+    DRAIN --> ENT["UUID5 Entity<br/>Resolution"]
+    ENT --> ML["ML Ensemble<br/>HST · Holt-Winters · CUSUM · Markov"]
+    ENT --> SIGMA["Sigma Engine<br/>63 rules"]
+    ENT --> GRAPH["Entity Graph<br/>igraph · PageRank · Louvain"]
+
+    ML -->|blended score 0.0–1.0| RISK["Risk Accumulation<br/>per-entity decay register"]
+    SIGMA -->|MITRE tactic/technique| RISK
+    GRAPH -->|centrality / fan-out| RISK
+    ML --> ALERT([Alert])
+    SIGMA --> ALERT
+    RISK -->|threshold exceeded| ALERT
+    ALERT --> STORE[("SQLite / PostgreSQL")]
 ```
 
 - **Drain3**: Streaming log template extraction (120K msgs/sec)
@@ -283,6 +333,31 @@ uv run pytest tests/benchmarks/ --benchmark-compare
 | Entity extraction | ~41K msgs/sec |
 | Full normalizer | ~39.5K msgs/sec |
 | **Full pipeline** (parse + ML + Sigma + storage) | **~1,800 events/sec** |
+
+## How Seerflow Compares
+
+Seerflow is not a SIEM replacement — it is a lightweight, streaming anomaly +
+detection layer you can run in minutes. Comparison is category-level
+(deployment posture and approach), not a feature-for-feature scorecard:
+
+| Dimension | Seerflow | Wazuh | Splunk |
+|-----------|----------|-------|--------|
+| Primary model | Streaming entity-centric anomaly + rule detection | Host-agent XDR / SIEM | Log analytics + SIEM platform |
+| Deployment | Single `pip install`, zero-config, SQLite default | Manager + agents + indexer (Elastic stack) | Indexers + search heads (self-host or cloud) |
+| Detection approach | Online ML ensemble (HST/Holt-Winters/CUSUM/Markov) + 3,000+ Sigma rules | Signature/rule + FIM + rootcheck | SPL queries + correlation searches + premium ES app |
+| Streaming / online learning | Yes — constant-memory online detectors, no batch retrain | Limited (rule-based) | Batch search; ML via paid add-on |
+| Sigma rule support | Native (pySigma, logsource-indexed dispatch) | Partial / via integrations | Via third-party conversion |
+| Footprint | Megabytes; one process | Multi-component cluster | Heavy; indexer cluster |
+| Cost posture | Open source (AGPL-3.0), no per-GB pricing | Open source | Commercial, ingest-volume priced |
+
+Numbers and tiers for Wazuh and Splunk reflect their general product
+categories at the time of writing and are deliberately not version-pinned;
+consult their docs for specifics.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, quality gates, branching model, and pull-request process.
 
 ## License
 
