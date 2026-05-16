@@ -90,18 +90,27 @@ def test_health_envelope_carries_memory_bounds(bounded_client: TestClient) -> No
 
 
 def test_health_under_50ms_with_bounds(bounded_client: TestClient) -> None:
-    """The audit collection must not blow the FR-047 50 ms budget."""
-    import time
+    """FR-047: the audit collection must not blow the 50 ms budget.
 
-    # Warm-up call.
+    S-233: assert on the route's *own* processing duration
+    (``X-Process-Time-Ms``) rather than the client round-trip wall clock.
+    The round-trip measurement transiently exceeds 50 ms under full-suite
+    parallel + coverage load purely from OS scheduler latency in the test
+    process, not endpoint work; the server-side value is immune to that
+    while still genuinely guarding the endpoint (coverage still instruments
+    the route code, so the measurement is, if anything, conservative).
+    """
+    # Warm-up call (first request pays one-time import / cache priming).
     bounded_client.get("/api/v1/health")
 
-    elapsed_max = 0.0
+    server_ms_max = 0.0
     for _ in range(10):
-        t0 = time.perf_counter()
         resp = bounded_client.get("/api/v1/health")
-        elapsed = time.perf_counter() - t0
         assert resp.status_code == 200
-        elapsed_max = max(elapsed_max, elapsed)
+        server_ms = float(resp.headers["x-process-time-ms"])
+        server_ms_max = max(server_ms_max, server_ms)
 
-    assert elapsed_max < 0.05, f"max health latency {elapsed_max * 1000:.1f}ms exceeds 50 ms"
+    assert server_ms_max < 50.0, (
+        f"max server-side health processing {server_ms_max:.1f}ms exceeds "
+        f"the FR-047 50 ms budget"
+    )
