@@ -112,8 +112,7 @@ def test_health_under_50ms_with_bounds(bounded_client: TestClient) -> None:
         server_ms_max = max(server_ms_max, server_ms)
 
     assert server_ms_max < 50.0, (
-        f"max server-side health processing {server_ms_max:.1f}ms exceeds "
-        f"the FR-047 50 ms budget"
+        f"max server-side health processing {server_ms_max:.1f}ms exceeds the FR-047 50 ms budget"
     )
 
 
