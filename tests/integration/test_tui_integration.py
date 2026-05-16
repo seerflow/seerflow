@@ -17,7 +17,6 @@ installed, mirroring the production fallback path.
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import TYPE_CHECKING
 
@@ -96,14 +95,29 @@ class TestTUIAppRendersAgainstInProcessAPI:
             # ws_url is only consumed by the WebSocket worker, which times out
             # quickly when the destination is unreachable. The test does not
             # exercise the WS frame path — that is covered by unit tests.
+            # ``poll_interval_s`` is set deliberately large so the recurring
+            # ``set_interval`` poll timer started in ``on_mount`` fires *zero*
+            # times during this sub-second test. The one-shot
+            # ``run_worker(_refresh_alerts())`` (also started in ``on_mount``)
+            # still performs the initial seeded-alert render, so the test's
+            # intent is fully preserved. Suppressing the recurring timer
+            # removes the documented teardown race deterministically: under
+            # full-suite coverage load a 50 ms tick could otherwise fire while
+            # ``run_test()`` is in ``__aexit__`` (widgets detached), so
+            # ``_refresh_alerts``'s ``query_one("#alert-feed")`` raised
+            # ``NoMatches`` (S-235 / SEE-259). This is a test-harness
+            # synchronization choice, not a product behaviour change.
             app = SeerflowTUIApp(
                 client=client,
                 ws_url="ws://testserver/api/ws",
-                poll_interval_s=0.05,
+                poll_interval_s=3600.0,
             )
             async with app.run_test() as pilot:
-                # Allow the on_mount worker to fire its first poll.
-                await pilot.pause(0.3)
+                # Drain the Textual message pump to idle so the on_mount
+                # worker's first poll has run. ``pilot.pause()`` with no
+                # argument is deterministic pump synchronization, not a
+                # wall-clock sleep.
+                await pilot.pause()
 
                 # AC #1 + #2: documented panel IDs are mounted.
                 ids = {w.id for w in app.query("*") if w.id}
@@ -114,11 +128,15 @@ class TestTUIAppRendersAgainstInProcessAPI:
 
                 # AC #2 alert feed: poll picked up the seeded alert.
                 table = app.query_one("#alert-feed", DataTable)
-                # Pilot may take an additional tick to drain the worker's
-                # awaitable; allow a short retry window.
-                deadline = time.monotonic() + 1.5
-                while time.monotonic() < deadline and table.row_count == 0:
-                    await pilot.pause(0.1)
+                # The on_mount worker may need a few additional pump cycles to
+                # finish its awaitable and add the row. Bound the wait to a
+                # finite number of deterministic pump drains (no wall clock):
+                # each ``pilot.pause()`` returns once the message queue is
+                # idle, so this resolves as soon as the row is rendered.
+                for _ in range(50):
+                    if table.row_count >= 1:
+                        break
+                    await pilot.pause()
                 assert table.row_count >= 1
                 # Header column names match the documented schema.
                 column_labels = [str(col.label).strip() for col in table.columns.values()]
@@ -130,7 +148,9 @@ class TestTUIAppRendersAgainstInProcessAPI:
                 search.focus()
                 await pilot.press("a", "l", "i", "c", "e")
                 await pilot.press("enter")
-                await pilot.pause(0.2)
+                # Drain the pump so the search action's awaitable completes
+                # (deterministic; no wall-clock sleep).
+                await pilot.pause()
                 # Action completed without exception. Result count depends on
                 # whether the search_text fallback finds anything in an empty
                 # event store; we only assert that the table is queryable.
