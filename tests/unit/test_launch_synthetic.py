@@ -33,3 +33,18 @@ def test_build_events_seed_changes_payload() -> None:
 
 def test_build_events_zero() -> None:
     assert build_events(0) == []
+
+
+def test_package_exports() -> None:
+    import seerflow.launch as launch
+
+    for name in (
+        "BenchmarkResult",
+        "build_asciinema_command",
+        "build_events",
+        "render_benchmark_report",
+        "run_benchmark",
+        "run_demo",
+    ):
+        assert hasattr(launch, name), name
+        assert name in launch.__all__
