@@ -100,3 +100,63 @@ def test_main_markdown_emits_report(capsys, tmp_path) -> None:
     assert rc == 0
     assert "## Seerflow Benchmark Results" in out
     assert "python -m seerflow.launch.benchmark" in out
+
+
+_FAKE = BenchmarkResult(
+    event_count=42,
+    elapsed_s=1.0,
+    throughput_eps=42.0,
+    latency_p50_ms=0.1,
+    latency_p95_ms=0.2,
+    latency_mean_ms=0.15,
+    peak_rss_mb=12.5,
+    stored_events=42,
+    alerts=3,
+)
+_FAKE_NO_RSS = BenchmarkResult(
+    event_count=7,
+    elapsed_s=1.0,
+    throughput_eps=7.0,
+    latency_p50_ms=0.1,
+    latency_p95_ms=0.2,
+    latency_mean_ms=0.15,
+    peak_rss_mb=None,
+    stored_events=7,
+    alerts=0,
+)
+
+
+def test_main_summary_deterministic(monkeypatch, capsys) -> None:
+    # Stub run_benchmark so main()'s print/markdown lines are covered
+    # deterministically without the heavy async pipeline (no asyncio
+    # boundary -> coverage records the lines in any --cov scope).
+    import seerflow.launch.benchmark as bench
+
+    monkeypatch.setattr(bench, "run_benchmark", lambda *a, **k: _FAKE)
+    rc = bench.main(["--count", "42"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "events=42" in out
+    assert "peak_rss=12.5 MB" in out
+    assert "alerts=3" in out
+
+
+def test_main_summary_rss_na(monkeypatch, capsys) -> None:
+    import seerflow.launch.benchmark as bench
+
+    monkeypatch.setattr(bench, "run_benchmark", lambda *a, **k: _FAKE_NO_RSS)
+    rc = bench.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "peak_rss=n/a" in out
+
+
+def test_main_markdown_deterministic(monkeypatch, capsys) -> None:
+    import seerflow.launch.benchmark as bench
+
+    monkeypatch.setattr(bench, "run_benchmark", lambda *a, **k: _FAKE)
+    rc = bench.main(["--markdown"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "## Seerflow Benchmark Results" in out
+    assert "python -m seerflow.launch.benchmark" in out
