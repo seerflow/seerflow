@@ -19,6 +19,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASE_YML = REPO_ROOT / ".github" / "workflows" / "release.yml"
+PUBLISH_YML = REPO_ROOT / ".github" / "workflows" / "publish.yml"
 
 
 @pytest.fixture(scope="module")
@@ -41,6 +42,25 @@ def test_release_yml_is_valid_yaml() -> None:
     workflow = yaml.safe_load(RELEASE_YML.read_text(encoding="utf-8"))
     assert "jobs" in workflow
     assert "publish" in workflow["jobs"]
+
+
+def test_single_canonical_publish_workflow() -> None:
+    """S-086 (deferred S-085 #2): exactly one PyPI-publish entrypoint.
+
+    ``release.yml`` is the canonical, gated path (release-please tag ->
+    frontend build -> ``uv build`` -> quality gates -> ``twine check`` ->
+    upload). The old ``publish.yml`` (``release: published`` trigger) was an
+    ungated duplicate that fired on the *same* GitHub Release release-please
+    creates, risking a double upload. It must not come back.
+    """
+    assert RELEASE_YML.is_file(), (
+        "release.yml is the canonical PyPI publish workflow and must exist"
+    )
+    assert not PUBLISH_YML.is_file(), (
+        "publish.yml is a redundant, ungated PyPI publish workflow that "
+        "double-fires with release.yml on the same GitHub Release — it must "
+        "stay deleted; release.yml is the single canonical publish path"
+    )
 
 
 def test_publish_runs_tests_before_pypi_upload(

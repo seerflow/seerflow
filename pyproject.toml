@@ -218,6 +218,7 @@ markers = [
     "benchmark: performance benchmarks",
     "docker: integration tests requiring Docker daemon",
     "e2e: end-to-end pipeline integration tests",
+    "integration: pipeline-stage / cross-component integration tests",
     "requires_falkordb: integration tests requiring a live FalkorDB instance",
     "requires_postgres_age: integration tests requiring an AGE-enabled PostgreSQL instance",
     "slow: heavyweight benchmarks, run with pytest -m slow",
