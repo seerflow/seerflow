@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from typing import Any
 
 from seerflow.cli import parse_args
+from seerflow.config import ConfigError
 
 
 def _run_async(coro: Coroutine[Any, Any, None]) -> None:
@@ -110,6 +111,13 @@ def main() -> None:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:
         sys.exit(0)
+    except ConfigError as exc:
+        # S-089: a hand-edited seerflow.yaml is the most likely first-run
+        # failure. Translate the (already-actionable) ConfigError message
+        # into a clean stderr line + exit 1 instead of a raw traceback so a
+        # new evaluator can fix their config within the NFR-005 window.
+        print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
+        sys.exit(1)
 
 
 if __name__ == "__main__":
