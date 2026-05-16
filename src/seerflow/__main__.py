@@ -36,6 +36,12 @@ def _run_async_int(coro: Coroutine[Any, Any, int]) -> int:
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
+    # S-089: imported here (not at module top) so ``--help`` / arg parsing
+    # never pull in the heavy ``seerflow.config`` import chain (and its
+    # third-party deps). This preserves the existing lazy-import invariant
+    # of this dispatcher — config is only loaded once a command runs.
+    from seerflow.config import ConfigError
+
     try:
         if args.command == "start":
             if getattr(args, "tui", False):
@@ -110,6 +116,13 @@ def main() -> None:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:
         sys.exit(0)
+    except ConfigError as exc:
+        # S-089: a hand-edited seerflow.yaml is the most likely first-run
+        # failure. Translate the (already-actionable) ConfigError message
+        # into a clean stderr line + exit 1 instead of a raw traceback so a
+        # new evaluator can fix their config within the NFR-005 window.
+        print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
+        sys.exit(1)
 
 
 if __name__ == "__main__":
