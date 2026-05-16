@@ -10,7 +10,33 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from seerflow.cli import parse_args
+from seerflow.cli import build_parser, parse_args
+
+
+class TestCLIHelpClarity:
+    """S-089: ``--help`` must guide a first-time evaluator (NFR-005/006).
+
+    The ``--config`` flag is optional and zero-config works without it
+    (NFR-006); the root help should say so and point at a next step.
+    """
+
+    def test_config_help_mentions_optional_and_zero_config(self) -> None:
+        """``--config`` help states the flag is optional + zero-config works."""
+        parser = build_parser()
+        action = parser._option_string_actions["--config"]
+        help_text = (action.help or "").lower()
+        assert "optional" in help_text
+        assert "default" in help_text or "zero-config" in help_text
+
+    def test_parser_description_and_epilog_point_to_docs(self) -> None:
+        """Root description is descriptive; epilog points at a command + docs."""
+        parser = build_parser()
+        description = parser.description or ""
+        # Must be more than the old bare one-liner.
+        assert len(description) > len("Streaming log intelligence agent")
+        epilog = parser.epilog or ""
+        assert "seerflow start" in epilog
+        assert "operator-guide" in epilog or "README" in epilog
 
 
 class TestCLIArgs:

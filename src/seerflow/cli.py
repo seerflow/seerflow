@@ -307,14 +307,26 @@ def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
         prog="seerflow",
-        description="Streaming log intelligence agent",
+        description=(
+            "Seerflow - streaming, entity-centric log intelligence. Detects "
+            "operational failures and security threats across log sources "
+            "using online ML and Sigma rules."
+        ),
+        epilog=(
+            "Quickstart: seerflow start (zero-config: SQLite + bundled Sigma "
+            "rules)  |  Docs: README.md and docs/operator-guide.md"
+        ),
     )
     parser.add_argument("--version", action="version", version=f"seerflow {__version__}")
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help="Path to seerflow.yaml config file",
+        help=(
+            "Optional path to a seerflow.yaml config file. Omit to run with "
+            "built-in defaults (zero-config: SQLite storage, bundled Sigma "
+            "rules)."
+        ),
     )
 
     subparsers = parser.add_subparsers(dest="command")
