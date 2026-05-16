@@ -210,18 +210,22 @@ class TestRunLoop:
 
         # Patch build_pipeline to get a handle on the pipeline
         built_pipeline = None
+        built_event = asyncio.Event()
 
         async def _capture_build(config):
             nonlocal built_pipeline
             from seerflow.pipeline import build_pipeline
 
             built_pipeline = await build_pipeline(config)
+            built_event.set()
             return built_pipeline
 
         with patch("seerflow.pipeline.run.build_pipeline", side_effect=_capture_build):
             task = asyncio.create_task(_run(str(yaml_file)))
-            # Wait for pipeline to be built
-            await asyncio.sleep(0.3)
+            # Deterministically wait until the pipeline has been built
+            # (replaces a fixed asyncio.sleep(0.3) that flaked under
+            # full-suite parallel load — see S-234 / SEE-258).
+            await asyncio.wait_for(built_event.wait(), timeout=5.0)
             assert built_pipeline is not None
             # Inject event then stop
             event = RawEvent(
