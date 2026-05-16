@@ -38,6 +38,8 @@ class ValidationResult:
     false_negatives: int
     precision: float  # TP / (TP + FP), 0.0 if no alerts
     recall: float  # TP / (TP + FN), 0.0 if no red-team events
+    f1_score: float  # 2PR / (P + R), 0.0 if P + R == 0
+    false_positive_rate: float  # FP / (FP + TP), 0.0 if no alerts
     detection_latency_s: dict[str, float]  # rule_name → avg latency in seconds
     patterns_detected: frozenset[str]  # distinct rule names that fired on red-team activity
     total_events_processed: int
@@ -155,6 +157,8 @@ def compute_metrics(
 
     precision = n_tp / (n_tp + n_fp) if (n_tp + n_fp) > 0 else 0.0
     recall = n_tp / (n_tp + n_fn) if (n_tp + n_fn) > 0 else 0.0
+    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    false_positive_rate = n_fp / (n_fp + n_tp) if (n_fp + n_tp) > 0 else 0.0
 
     patterns_detected = frozenset(a.rule_name for a in tp_alerts)
 
@@ -164,6 +168,8 @@ def compute_metrics(
         false_negatives=n_fn,
         precision=precision,
         recall=recall,
+        f1_score=f1_score,
+        false_positive_rate=false_positive_rate,
         detection_latency_s=detection_latencies,
         patterns_detected=patterns_detected,
         total_events_processed=events_processed,

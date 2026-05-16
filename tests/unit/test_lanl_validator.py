@@ -228,6 +228,82 @@ def test_recall_one_when_all_detected(compute_metrics):
 
 
 # ---------------------------------------------------------------------------
+# F1 score + false-positive-rate tests (S-088)
+# ---------------------------------------------------------------------------
+
+
+def test_f1_score_harmonic_mean(compute_metrics):
+    """TP=3, FP=1, FN=1 → P=0.75, R=0.75, F1=0.75."""
+    tp_alerts = [_make_alert(alert_id=str(i)) for i in range(3)]
+    fp_alerts = [_make_alert(alert_id="fp-1")]
+    missed = [_make_redteam()]
+    result = compute_metrics(
+        tp_alerts=tp_alerts,
+        fp_alerts=fp_alerts,
+        missed_redteam=missed,
+        alerts=tp_alerts + fp_alerts,
+        events_processed=10,
+        detection_latencies={},
+    )
+    assert result.f1_score == pytest.approx(0.75)
+
+
+def test_f1_score_zero_when_precision_and_recall_zero(compute_metrics):
+    """No alerts, no redteam → P=0, R=0 → F1=0.0 (no ZeroDivision)."""
+    result = compute_metrics(
+        tp_alerts=[],
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=[],
+        events_processed=0,
+        detection_latencies={},
+    )
+    assert result.f1_score == 0.0
+
+
+def test_f1_score_one_when_perfect(compute_metrics):
+    """All TP, no FP, no FN → P=1, R=1 → F1=1.0."""
+    tp_alerts = [_make_alert(alert_id=str(i)) for i in range(4)]
+    result = compute_metrics(
+        tp_alerts=tp_alerts,
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=tp_alerts,
+        events_processed=20,
+        detection_latencies={},
+    )
+    assert result.f1_score == pytest.approx(1.0)
+
+
+def test_false_positive_rate_calculation(compute_metrics):
+    """TP=3, FP=1 → FP-rate = 1 / (1+3) = 0.25 (matches integration test def)."""
+    tp_alerts = [_make_alert(alert_id=str(i)) for i in range(3)]
+    fp_alerts = [_make_alert(alert_id="fp-1")]
+    result = compute_metrics(
+        tp_alerts=tp_alerts,
+        fp_alerts=fp_alerts,
+        missed_redteam=[],
+        alerts=tp_alerts + fp_alerts,
+        events_processed=10,
+        detection_latencies={},
+    )
+    assert result.false_positive_rate == pytest.approx(0.25)
+
+
+def test_false_positive_rate_zero_when_no_alerts(compute_metrics):
+    """TP=0, FP=0 → FP-rate = 0.0 (no ZeroDivision)."""
+    result = compute_metrics(
+        tp_alerts=[],
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=[],
+        events_processed=0,
+        detection_latencies={},
+    )
+    assert result.false_positive_rate == 0.0
+
+
+# ---------------------------------------------------------------------------
 # match_against_ground_truth tests
 # ---------------------------------------------------------------------------
 

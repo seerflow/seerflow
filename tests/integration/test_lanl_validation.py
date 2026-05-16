@@ -63,6 +63,18 @@ class TestLANLCorrelationValidation:
         """Sanity check: the engine generated alerts."""
         assert validation_result.total_alerts > 0
 
+    def test_f1_score_is_positive(self, validation_result) -> None:
+        """F1 must be > 0 -- proves the harness produces a usable launch metric."""
+        assert validation_result.f1_score > 0, "F1 score is zero"
+        assert 0.0 <= validation_result.f1_score <= 1.0
+
+    def test_false_positive_rate_is_bounded(self, validation_result) -> None:
+        """FP-rate must be a valid probability and reasonably low."""
+        assert 0.0 <= validation_result.false_positive_rate <= 1.0
+        assert validation_result.false_positive_rate < 0.5, (
+            f"FP-rate too high: {validation_result.false_positive_rate:.2%}"
+        )
+
 
 class TestValidationReport:
     """Tests that the validation produces data suitable for reporting."""
