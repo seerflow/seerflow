@@ -23,6 +23,7 @@ from seerflow.lanl.parser import (
     parse_proc_line,
     parse_redteam_line,
 )
+from seerflow.lanl.report import render_validation_report
 from seerflow.lanl.validator import ValidationResult, run_validation
 
 __all__ = [
@@ -39,5 +40,6 @@ __all__ = [
     "parse_flow_line",
     "parse_proc_line",
     "parse_redteam_line",
+    "render_validation_report",
     "run_validation",
 ]

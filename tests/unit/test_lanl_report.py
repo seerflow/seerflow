@@ -121,3 +121,10 @@ def test_report_contains_detection_latency_table(render):
     )
     assert "Detection Latency" in out
     assert "brute-force-lateral-movement" in out
+
+
+def test_render_validation_report_exported_from_package():
+    import seerflow.lanl as lanl_pkg
+
+    assert hasattr(lanl_pkg, "render_validation_report")
+    assert "render_validation_report" in lanl_pkg.__all__
