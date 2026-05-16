@@ -353,10 +353,22 @@ tests/
 
 ### Benchmarks
 
+Benchmarks are produced by a committed, runnable harness — not hand-typed.
+Reproduce the full-pipeline benchmark on your own hardware:
+
+```bash
+python -m seerflow.launch.benchmark --count 20000 --markdown
+```
+
+Component micro-benchmarks (pytest-benchmark, CI history tracking):
+
 ```bash
 uv run pytest tests/benchmarks/ --benchmark-autosave
 uv run pytest tests/benchmarks/ --benchmark-compare
 ```
+
+Representative measured figures (commodity hardware, synthetic syslog
+workload — your numbers will differ; reproduce with the command above):
 
 | Component | Throughput |
 |-----------|-----------|
@@ -364,7 +376,10 @@ uv run pytest tests/benchmarks/ --benchmark-compare
 | Drain3 templates | ~120K msgs/sec |
 | Entity extraction | ~41K msgs/sec |
 | Full normalizer | ~39.5K msgs/sec |
-| **Full pipeline** (parse + ML + Sigma + storage) | **~1,800 events/sec** |
+| **Full pipeline** (parse + ML + Sigma + storage) | measured by `python -m seerflow.launch.benchmark` |
+
+Detection quality (precision / recall / F1 / FP-rate) is validated
+separately — see [Validation](#validation).
 
 ## How Seerflow Compares
 
@@ -372,19 +387,19 @@ Seerflow is not a SIEM replacement — it is a lightweight, streaming anomaly +
 detection layer you can run in minutes. Comparison is category-level
 (deployment posture and approach), not a feature-for-feature scorecard:
 
-| Dimension | Seerflow | Wazuh | Splunk |
-|-----------|----------|-------|--------|
-| Primary model | Streaming entity-centric anomaly + rule detection | Host-agent XDR / SIEM | Log analytics + SIEM platform |
-| Deployment | Single `pip install`, zero-config, SQLite default | Manager + agents + indexer (Elastic stack) | Indexers + search heads (self-host or cloud) |
-| Detection approach | Online ML ensemble (HST/Holt-Winters/CUSUM/Markov) + 3,000+ Sigma rules | Signature/rule + FIM + rootcheck | SPL queries + correlation searches + premium ES app |
-| Streaming / online learning | Yes — constant-memory online detectors, no batch retrain | Limited (rule-based) | Batch search; ML via paid add-on |
-| Sigma rule support | Native (pySigma, logsource-indexed dispatch) | Partial / via integrations | Via third-party conversion |
-| Footprint | Megabytes; one process | Multi-component cluster | Heavy; indexer cluster |
-| Cost posture | Open source (AGPL-3.0), no per-GB pricing | Open source | Commercial, ingest-volume priced |
+| Dimension | Seerflow | Wazuh | OpenSearch | Splunk |
+|-----------|----------|-------|------------|--------|
+| Primary model | Streaming entity-centric anomaly + rule detection | Host-agent XDR / SIEM | Search + analytics engine (security analytics plugin) | Log analytics + SIEM platform |
+| Deployment | Single `pip install`, zero-config, SQLite default | Manager + agents + indexer (Elastic stack) | Cluster (data/manager nodes) + Dashboards | Indexers + search heads (self-host or cloud) |
+| Detection approach | Online ML ensemble (HST/Holt-Winters/CUSUM/Markov) + 3,000+ Sigma rules | Signature/rule + FIM + rootcheck | Query + correlation / anomaly-detection plugin (batch ML) | SPL queries + correlation searches + premium ES app |
+| Streaming / online learning | Yes — constant-memory online detectors, no batch retrain | Limited (rule-based) | Batch / scheduled detectors | Batch search; ML via paid add-on |
+| Sigma rule support | Native (pySigma, logsource-indexed dispatch) | Partial / via integrations | Via third-party conversion | Via third-party conversion |
+| Footprint | Megabytes; one process | Multi-component cluster | JVM cluster | Heavy; indexer cluster |
+| Cost posture | Open source (AGPL-3.0), no per-GB pricing | Open source | Open source (Apache-2.0) | Commercial, ingest-volume priced |
 
-Numbers and tiers for Wazuh and Splunk reflect their general product
-categories at the time of writing and are deliberately not version-pinned;
-consult their docs for specifics.
+Numbers and tiers for Wazuh, OpenSearch and Splunk reflect their general
+product categories at the time of writing and are deliberately not
+version-pinned; consult their docs for specifics.
 
 ## Contributing
 
