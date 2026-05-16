@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from typing import Any
 
 from seerflow.cli import parse_args
-from seerflow.config import ConfigError
 
 
 def _run_async(coro: Coroutine[Any, Any, None]) -> None:
@@ -37,6 +36,12 @@ def _run_async_int(coro: Coroutine[Any, Any, int]) -> int:
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
+    # S-089: imported here (not at module top) so ``--help`` / arg parsing
+    # never pull in the heavy ``seerflow.config`` import chain (and its
+    # third-party deps). This preserves the existing lazy-import invariant
+    # of this dispatcher — config is only loaded once a command runs.
+    from seerflow.config import ConfigError
+
     try:
         if args.command == "start":
             if getattr(args, "tui", False):
