@@ -68,6 +68,9 @@ async def test_ueba_alert_write_exception_swallowed(
     handler = harness.build(ueba_engine=ueba_engine, baseline_store=baseline_store)
     await handler(make_raw_event())  # must not raise
 
+    ueba_engine.score_and_maybe_alert.assert_called_once()  # UEBA path reached
+    harness.storage.write_alert.assert_awaited()  # alert write attempted + raised
+
 
 async def test_ueba_no_alert_when_engine_returns_none(
     harness: HandlerTestHarness,
@@ -143,6 +146,8 @@ async def test_ioc_alert_write_exception_swallowed(
     )
     await handler(_IOC_EVENT)  # must not raise
 
+    harness.storage.write_alert.assert_awaited()  # IoC alert write attempted + raised
+
 
 # ── Correlation ─────────────────────────────────────────────────────────
 
@@ -184,6 +189,9 @@ async def test_correlation_per_alert_write_exception_swallowed(
 
     handler = harness.build(correlation_holder=_holder(engine))
     await handler(make_raw_event())  # must not raise
+
+    engine.evaluate.assert_called_once()  # correlation path reached
+    harness.storage.write_alert.assert_awaited()  # per-alert except hit
 
 
 async def test_correlation_evaluate_exception_swallowed(

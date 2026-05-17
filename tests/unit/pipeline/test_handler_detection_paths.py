@@ -53,6 +53,9 @@ async def test_anomaly_alert_write_exception_swallowed(
     handler = harness.build()
     await handler(make_raw_event())  # must not raise
 
+    # The except branch was actually entered (write_alert was reached + raised).
+    harness.storage.write_alert.assert_awaited()
+
 
 # ── Sigma ───────────────────────────────────────────────────────────────
 
@@ -87,6 +90,8 @@ async def test_sigma_evaluate_exception_swallowed(
     handler = harness.build(sigma_holder=EngineHolder(engine=sigma_engine))
     await handler(make_raw_event())  # must not raise
 
+    sigma_engine.evaluate.assert_called_once()  # outer except actually hit
+
 
 async def test_sigma_per_alert_write_exception_swallowed(
     harness: HandlerTestHarness,
@@ -98,6 +103,8 @@ async def test_sigma_per_alert_write_exception_swallowed(
 
     handler = harness.build(sigma_holder=EngineHolder(engine=sigma_engine))
     await handler(make_raw_event())  # must not raise
+
+    harness.storage.write_alert.assert_awaited()  # per-alert except hit
 
 
 # ── Risk-accumulation alert ─────────────────────────────────────────────
@@ -155,6 +162,9 @@ async def test_risk_alert_write_exception_swallowed(
     handler = harness.build(risk_register=risk_register)
     await handler(make_raw_event())  # must not raise
 
+    risk_register.check_threshold.assert_called()  # risk block reached
+    harness.storage.write_alert.assert_awaited()  # risk alert write attempted
+
 
 # ── Periodic model save ─────────────────────────────────────────────────
 
@@ -203,6 +213,8 @@ async def test_periodic_model_save_exception_swallowed(
     handler = harness.build()
     for _ in range(100):
         await handler(make_raw_event())  # must not raise
+
+    harness.ensemble.save_all_state.assert_called()  # save attempted + raised
 
 
 # ── Graph-algorithm interval + post-algo structural alerts ──────────────
@@ -271,6 +283,9 @@ async def test_graph_structural_post_alert_write_exception_swallowed(
     )
     await handler(make_raw_event())
     await handler(make_raw_event())  # must not raise
+
+    structural.check_post_algorithms.assert_called()  # post-algo path reached
+    harness.storage.write_alert.assert_awaited()  # alert write attempted + raised
 
 
 async def test_community_crossing_alerts_fan_out(

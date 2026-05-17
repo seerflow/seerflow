@@ -64,14 +64,16 @@ async def test_late_event_skipped_for_correlation(
         window_buffer=window,
         correlation_holder=EngineHolder(engine=corr_engine),
     )
-    # First event advances the watermark far ahead.
+    # First event advances the watermark far ahead (timestamp_ns is derived
+    # from received_ns by the normalizer, verified: ts == received_ns).
     await handler(make_raw_event(received_ns=2_000_000_000_000_000_000))
-    # Second event is far in the past → is_late() True → correlation skipped.
+    assert corr_engine.evaluate.call_count == 1  # in-order event evaluated
+    # Second event is ~1e18 ns in the past → is_late() True → the correlation
+    # block short-circuits and evaluate() is NOT called again for it.
     await handler(make_raw_event(received_ns=1_000_000_000_000_000_000))
 
-    # Correlation engine was never evaluated for the late event (only the
-    # first, in-order event could have reached it; the late path short-circuits).
-    assert corr_engine.evaluate.call_count <= 1
+    assert corr_engine.evaluate.call_count == 1  # late event skipped, not 2
+    assert watermark.is_late(1_000_000_000_000_000_000) is True
 
 
 # ── 409-410: graph edge write exception ─────────────────────────────────
