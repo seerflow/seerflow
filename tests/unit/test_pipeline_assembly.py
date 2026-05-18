@@ -185,3 +185,60 @@ async def test_inverted_flags_wiring_is_pinned(
     assert kw["ioc_matcher"] is ioc_sentinel
 
     await result.teardown()
+
+
+@pytest.mark.unit
+async def test_teardown_is_idempotent_and_does_not_close_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """teardown() twice is safe; it stops TAXII and cancels the rule
+    reloader but never closes caller-owned storage."""
+    config = SeerflowConfig(
+        storage=StorageConfig(),
+        alerting=AlertingConfig(),
+        shutdown_timeout_s=1.0,
+    )
+    spy, _ensemble, storage, result = await _assemble_and_capture(monkeypatch, config)
+
+    # rule reloader task is always present in lifecycle
+    assert len(result.lifecycle) == 1
+    reload_task = result.lifecycle[0]
+
+    await result.teardown()
+    await result.teardown()  # second call is a no-op (idempotent)
+
+    assert reload_task.cancelled() or reload_task.done()
+    storage.close.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_capture_sink_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """capture_sink is surfaced on the result for the S-303 wiring seam."""
+    sentinel = object()
+    config = SeerflowConfig(
+        storage=StorageConfig(),
+        alerting=AlertingConfig(),
+        shutdown_timeout_s=1.0,
+    )
+    import seerflow.pipeline.assembly as asm_mod
+
+    storage = _stub_storage()
+    taxii = MagicMock()
+    taxii.start = AsyncMock(return_value=[])
+    taxii.stop = AsyncMock()
+    taxii.feed_ids = MagicMock(return_value=())
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
+    ensemble = MagicMock()
+    ensemble.load_all_state = AsyncMock(return_value=0)
+    monkeypatch.setattr(asm_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
+
+    async def _h(_e: Any) -> None:  # pragma: no cover
+        return None
+
+    monkeypatch.setattr(asm_mod, "make_handler", MagicMock(return_value=_h))
+
+    result = await assemble_handler(config, storage, capture_sink=sentinel)
+    assert result.capture_sink is sentinel
+    await result.teardown()
