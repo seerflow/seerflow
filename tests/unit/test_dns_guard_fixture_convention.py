@@ -16,14 +16,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_TESTS_ROOT = Path(__file__).resolve().parent.parent
+_SELF = Path(__file__).resolve()
+_TESTS_ROOT = _SELF.parent.parent
 
 # The exact monkeypatch target the bypass overrides. Any inline re-duplication
 # of the old per-file fixture necessarily re-introduces this string.
 _BYPASS_TARGET = '"seerflow.threat_intel.dns._resolve_feed_with_private_ip_guard"'
-
-
-_SELF = Path(__file__).resolve()
 
 
 def test_single_dns_guard_bypass_definition() -> None:
