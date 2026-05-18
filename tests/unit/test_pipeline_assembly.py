@@ -448,3 +448,52 @@ async def test_router_path_sigma_failure_and_zero_attack_mappings(
     result = await assemble_handler(config, storage)
     assert callable(result.handler)
     await result.teardown()
+
+
+@pytest.mark.unit
+async def test_ws_manager_kwarg_forwarded_to_make_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-304: assemble_handler forwards an explicit ws_manager into
+    make_handler; default stays None (byte-identical for S-303/S-305)."""
+    import seerflow.pipeline.assembly as asm_mod
+
+    config = SeerflowConfig(
+        storage=StorageConfig(),
+        alerting=AlertingConfig(),
+        shutdown_timeout_s=1.0,
+    )
+
+    # Default (no kwarg): ws_manager must stay None — analyze/benchmark
+    # consumers (S-303 analyze_cmd, S-305 LANL) call assemble_handler with
+    # no ws_manager, so this is the byte-identical-behaviour guard.
+    spy, _ensemble, _storage, result = await _assemble_and_capture(monkeypatch, config)
+    assert spy.call_args.kwargs["ws_manager"] is None
+    await result.teardown()
+
+    # Explicit ws_manager: the live caller (S-304 _run_with_config) passes
+    # the real ConnectionManager — it must reach make_handler unchanged.
+    storage2 = _stub_storage()
+    taxii2 = MagicMock()
+    taxii2.start = AsyncMock(return_value=[])
+    taxii2.stop = AsyncMock()
+    taxii2.feed_ids = MagicMock(return_value=())
+    taxii2.metrics = MagicMock()
+    taxii2.register_snapshot_listener = MagicMock()
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii2))
+
+    ensemble2 = MagicMock()
+    ensemble2.load_all_state = AsyncMock(return_value=0)
+    ensemble2.save_all_state = AsyncMock(return_value=0)
+    monkeypatch.setattr(asm_mod, "DetectionEnsemble", MagicMock(return_value=ensemble2))
+
+    async def _h(_event: Any) -> None:  # pragma: no cover - never invoked
+        return None
+
+    spy2 = MagicMock(return_value=_h)
+    monkeypatch.setattr(asm_mod, "make_handler", spy2)
+
+    sentinel = object()
+    result2 = await assemble_handler(config, storage2, ws_manager=sentinel)
+    assert spy2.call_args.kwargs["ws_manager"] is sentinel
+    await result2.teardown()

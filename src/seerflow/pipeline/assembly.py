@@ -61,6 +61,7 @@ async def assemble_handler(
     storage: StorageBackend,
     *,
     capture_sink: object | None = None,
+    ws_manager: object | None = None,
 ) -> AssembledHandler:
     """Build the full-stack ``make_handler(...)`` wiring (no receivers/API).
 
@@ -68,7 +69,13 @@ async def assemble_handler(
     connect, receivers, signal handlers, FastAPI/uvicorn, LLM/services and
     the metrics provider. Same construction, same order - the S-301
     characterization test pins the live side; ``test_pipeline_assembly``
-    pins this side (``ws_manager`` is ``None`` here by design).
+    pins this side.
+
+    ``ws_manager`` defaults to ``None`` (analyze/benchmark consumers build
+    no FastAPI app). The live caller (S-304 ``_run_with_config``) passes the
+    real ``ConnectionManager`` read off ``api_app.state.ws_manager`` so the
+    pipeline handler and the ``/api/v1/ws`` route share one fan-out. The
+    default preserves byte-identical behaviour for S-303/S-305.
     """
     # --- TAXII feed manager + IoC matcher (run.py:440-471) ---
     taxii_manager = TAXIIFeedManager(config=config.threat_intel, model_store=storage)
@@ -337,7 +344,7 @@ async def assemble_handler(
         baseline_store=baseline_store,
         ueba_engine=ueba_engine,
         ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
-        ws_manager=None,
+        ws_manager=ws_manager,
         ioc_matcher=ioc_matcher,
         ioc_enrichment_counters=ioc_enrichment_counters,
         latency_tracker=stage_latency_tracker,
