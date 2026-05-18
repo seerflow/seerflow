@@ -6,27 +6,11 @@ import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from seerflow.config import TAXIIFeedConfig, ThreatIntelConfig
 from seerflow.threat_intel.manager import TAXIIFeedManager
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@pytest.fixture(autouse=True)
-def _bypass_dns_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S-227: ``TAXIIFeedManager.start()`` resolves each feed hostname at
-    socket level to populate the static aiohttp resolver. Tests use stub
-    hostnames (``a`` / ``x``) that don't resolve; substitute a sentinel
-    public IP so the resolver-map builder succeeds without hitting real
-    DNS.
-    """
-    monkeypatch.setattr(
-        "seerflow.threat_intel.dns._resolve_feed_with_private_ip_guard",
-        lambda _feed_id, _hostname: "1.1.1.1",
-    )
 
 
 async def test_manager_starts_one_task_per_enabled_feed() -> None:
