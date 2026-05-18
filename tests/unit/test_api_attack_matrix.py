@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from seerflow.api.attack import (
     CellData,
@@ -17,12 +18,15 @@ from seerflow.models.alert import Alert, CorrelationRule, SourceCondition
 from seerflow.models.event import SeverityLevel
 from seerflow.sigma.attack import TACTICS
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 class _StubSigmaEngine:
-    def __init__(self, rules: list[object]) -> None:
+    def __init__(self, rules: list[_StubCompiled]) -> None:
         self._rules = rules
 
-    def iter_compiled_rules(self) -> object:
+    def iter_compiled_rules(self) -> Iterator[_StubCompiled]:
         yield from self._rules
 
 
@@ -89,7 +93,7 @@ class TestCollectSigmaCells:
                 _StubCompiled(("discovery",), ("t1033",)),
             ]
         )
-        counts = collect_sigma_cells(engine)  # type: ignore[arg-type]
+        counts = collect_sigma_cells(engine)
         assert counts[("discovery", "T1033")].count == 2
         assert counts[("discovery", "T1087")].count == 1
 
@@ -100,7 +104,7 @@ class TestCollectSigmaCells:
                 _StubCompiled(("discovery",), ()),
             ]
         )
-        assert collect_sigma_cells(engine) == {}  # type: ignore[arg-type]
+        assert collect_sigma_cells(engine) == {}
 
     def test_skips_empty_string_tactic_and_technique_entries(self) -> None:
         engine = _StubSigmaEngine(
@@ -110,7 +114,7 @@ class TestCollectSigmaCells:
                 _StubCompiled(("discovery",), ("t1033",)),
             ]
         )
-        counts = collect_sigma_cells(engine)  # type: ignore[arg-type]
+        counts = collect_sigma_cells(engine)
         assert list(counts.keys()) == [("discovery", "T1033")]
         assert counts[("discovery", "T1033")].count == 1
 
@@ -121,7 +125,7 @@ def test_collect_sigma_cells_returns_cell_data_with_rule_names() -> None:
         _StubCompiled(("persistence",), ("T1053",), rule_name="crontab_mod"),
     ]
     engine = _StubSigmaEngine(rules)
-    result = collect_sigma_cells(engine)  # type: ignore[arg-type]
+    result = collect_sigma_cells(engine)
     cell = result[("persistence", "T1053")]
     assert cell.count == 2
     assert cell.rule_names == ("sched_task_cron", "crontab_mod")

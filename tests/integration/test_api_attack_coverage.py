@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+import pytest
 from fastapi.testclient import TestClient
 
 from seerflow.api.app import create_api_app
@@ -69,6 +70,7 @@ class TestAttackCoverageIntegration:
         )
         assert covered_any
 
+    @pytest.mark.slow
     async def test_perf_under_500ms_with_10k_alerts(self, backend: SqliteBackend) -> None:
         for i in range(10_000):
             await backend.write_alert(_make_alert(i), dedup_window_ns=0)

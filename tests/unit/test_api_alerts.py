@@ -137,6 +137,48 @@ class TestListAlerts:
         assert call_args.tactic == "discovery"
         assert call_args.technique == "T1059.001"
 
+    def test_titlecase_tactic_normalized(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts.return_value = Page(
+            items=(),
+            total=0,
+            page=1,
+            limit=50,
+        )
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?tactic=Persistence")
+        assert resp.status_code == 200
+        call_args = alert_store.query_alerts.call_args[0][0]
+        assert call_args.tactic == "persistence"
+
+    def test_tactic_id_normalized(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts.return_value = Page(
+            items=(),
+            total=0,
+            page=1,
+            limit=50,
+        )
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?tactic=TA0003")
+        assert resp.status_code == 200
+        call_args = alert_store.query_alerts.call_args[0][0]
+        assert call_args.tactic == "persistence"
+
+    def test_lowercase_tactic_still_works(self) -> None:
+        alert_store = AsyncMock()
+        alert_store.query_alerts.return_value = Page(
+            items=(),
+            total=0,
+            page=1,
+            limit=50,
+        )
+        client = TestClient(_make_app(alert_store))
+        resp = client.get("/api/v1/alerts?tactic=persistence")
+        assert resp.status_code == 200
+        call_args = alert_store.query_alerts.call_args[0][0]
+        assert call_args.tactic == "persistence"
+
     def test_limit_capped_at_1000(self) -> None:
         alert_store = AsyncMock()
         alert_store.query_alerts.return_value = Page(
