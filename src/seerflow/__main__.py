@@ -88,6 +88,10 @@ def main() -> None:
                 await run_import(paths=args.paths, db_path=db_path)
 
             _run_async(_do_import())
+        elif args.command == "analyze":
+            from seerflow.analyze_cmd import run_analyze
+
+            sys.exit(_run_async_int(run_analyze(args)))
         elif args.command == "feedback":
             from seerflow.feedback_cmd import run_feedback
 
