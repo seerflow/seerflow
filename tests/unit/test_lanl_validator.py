@@ -565,3 +565,90 @@ def test_compute_metrics_per_family_empty_when_no_alerts(compute_metrics):
         detection_latencies={},
     )
     assert result.per_family == {}
+
+
+# ---------------------------------------------------------------------------
+# S-305: _build_raw_events — LANL records → text RawEvents (§A.5/§A.9)
+# ---------------------------------------------------------------------------
+
+
+def test_build_raw_events_emits_text_rawevents(validator):
+    from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord
+    from seerflow.receivers.base import RawEvent
+
+    auth = AuthRecord(
+        time=100,
+        src_user="U1@DOM1",
+        dst_user="U5624@DOM1",
+        src_computer="C17693",
+        dst_computer="C528",
+        auth_type="Negotiate",
+        logon_type="Network",
+        auth_orientation="LogOn",
+        success=False,
+    )
+    proc = ProcRecord(
+        time=110, user="U2@DOM1", computer="C9", process_name="P1", start_end="Start"
+    )
+    flow = FlowRecord(
+        time=120,
+        duration=1,
+        src_computer="C9999",
+        src_port=1234,
+        dst_computer="C8888",
+        dst_port=443,
+        protocol=6,
+        packet_count=5,
+        byte_count=4096,
+    )
+    raws = validator._build_raw_events([auth], [proc], [flow])
+    assert all(isinstance(r, RawEvent) for r in raws)
+    assert len(raws) == 3  # one per record
+    msgs = [r.data.decode() for r in raws]
+    assert any("authentication failure" in m and "u5624" in m for m in msgs)
+    assert any("process" in m for m in msgs)
+    assert any("flow established" in m for m in msgs)
+    assert all(r.source_type == "syslog" for r in raws)
+    assert all(r.received_ns > 0 for r in raws)
+
+
+def test_build_raw_events_success_auth_message(validator):
+    from seerflow.lanl.parser import AuthRecord
+
+    auth = AuthRecord(
+        time=200,
+        src_user="U1@DOM1",
+        dst_user="U7@DOM1",
+        src_computer="C42",
+        dst_computer="C99",
+        auth_type="Kerberos",
+        logon_type="Network",
+        auth_orientation="LogOn",
+        success=True,
+    )
+    raws = validator._build_raw_events([auth], [], [])
+    assert len(raws) == 1
+    msg = raws[0].data.decode()
+    assert "Accepted password" in msg
+    assert "u7" in msg
+    assert raws[0].received_ns == 200 * 1_000_000_000
+
+
+def test_build_raw_events_empty_inputs(validator):
+    assert validator._build_raw_events([], [], []) == []
+
+
+def test_rebased_shifts_received_ns(validator):
+    from seerflow.receivers.base import RawEvent
+
+    raw = RawEvent(
+        data=b"x",
+        source_type="syslog",
+        source_id="t",
+        received_ns=1_000,
+        metadata={},
+    )
+    shifted = validator._rebased(raw, 500)
+    assert shifted.received_ns == 1_500
+    assert shifted.data == b"x"
+    assert raw.received_ns == 1_000  # original unchanged (immutable)

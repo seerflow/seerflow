@@ -1,10 +1,16 @@
 """LANL validation harness: computes detection metrics against red-team ground truth.
 
-Matches correlation alerts produced by the Seerflow engine against the LANL
-red-team label file to compute precision, recall, and detection latency.
+Routes time-rebased :class:`~seerflow.receivers.base.RawEvent`\\ s through the
+**full detection stack** (Drain3 → ML ensemble → Sigma → UEBA → IoC →
+correlation) via :func:`seerflow.pipeline.assembly.assemble_handler` — the
+identical wiring as live ``seerflow start`` — then scores the persisted alerts
+against the LANL red-team label file (precision/recall/F1 per detector family
+and combined). The scope is the committed synthetic LANL subset unless
+``run_validation`` is pointed at a downloaded full-dataset directory; it does
+**not** by itself constitute "end-to-end on the full LANL dataset".
 
-The main entry point is :func:`run_validation`, which orchestrates the full
-pipeline end-to-end from raw LANL CSV files to a :class:`ValidationResult`.
+The synchronous entry point is :func:`run_validation`; it wraps the async
+driver :func:`run_validation_async` in ``asyncio.run``.
 """
 
 from __future__ import annotations
@@ -18,8 +24,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from seerflow.lanl.parser import RedTeamRecord
+    from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord, RedTeamRecord
     from seerflow.models.alert import Alert
+    from seerflow.receivers.base import RawEvent
 
 _log = logging.getLogger("seerflow")
 
@@ -232,6 +239,98 @@ def compute_metrics(
         total_alerts=len(alerts),
         per_family=per_family,
     )
+
+
+# ---------------------------------------------------------------------------
+# RawEvent construction (functional review §A.5 / §A.9)
+# ---------------------------------------------------------------------------
+
+
+def _build_raw_events(
+    auth_records: list[AuthRecord],
+    proc_records: list[ProcRecord],
+    flow_records: list[FlowRecord],
+) -> list[RawEvent]:
+    """Build one textual ``RawEvent`` per LANL record.
+
+    Emits raw text bytes (the message strings the legacy converter crafted to
+    match the brute-force / credential-stuffing / C2 regexes) so the
+    in-handler ``EventNormalizer`` runs Drain3 + entity extraction exactly as
+    a live receiver would (functional review §A.5/§A.9). One record → one
+    ``RawEvent``; ``related_*`` are re-derived from the text by the real
+    ``EntityExtractor`` (no pre-split user/ip views).
+
+    Timestamps are raw record seconds → ns; chronological rebasing against
+    wall-clock is the async driver's job (keeps this function pure).
+    """
+    from seerflow.lanl.hostmap import host_to_ip
+    from seerflow.models.entity import normalize_username
+    from seerflow.receivers.base import RawEvent
+
+    events: list[RawEvent] = []
+
+    for rec in auth_records:
+        dst_user, _domain = normalize_username(rec.dst_user)
+        if rec.success:
+            msg = f"Accepted password for {dst_user} session opened from {rec.src_computer}"
+        else:
+            msg = (
+                f"authentication failure for {dst_user} from {rec.src_computer} "
+                f"via {rec.auth_type}"
+            )
+        events.append(
+            RawEvent(
+                data=msg.encode("utf-8"),
+                source_type="syslog",
+                source_id="lanl-auth",
+                received_ns=rec.time * 1_000_000_000,
+                metadata={},
+            )
+        )
+
+    for prec in proc_records:
+        username, _domain = normalize_username(prec.user)
+        action = "start" if prec.start_end.lower() == "start" else "end"
+        msg = f"process {action}: {prec.process_name} by {username} on {prec.computer}"
+        events.append(
+            RawEvent(
+                data=msg.encode("utf-8"),
+                source_type="syslog",
+                source_id="lanl-proc",
+                received_ns=prec.time * 1_000_000_000,
+                metadata={},
+            )
+        )
+
+    for frec in flow_records:
+        src_ip = host_to_ip(frec.src_computer)
+        dst_ip = host_to_ip(frec.dst_computer)
+        msg = (
+            f"flow established {dst_ip}:{frec.dst_port} from "
+            f"{src_ip}:{frec.src_port} {frec.byte_count}B"
+        )
+        events.append(
+            RawEvent(
+                data=msg.encode("utf-8"),
+                source_type="syslog",
+                source_id="lanl-flow",
+                received_ns=frec.time * 1_000_000_000,
+                metadata={},
+            )
+        )
+
+    return events
+
+
+def _rebased(raw: RawEvent, offset_ns: int) -> RawEvent:
+    """Return a copy of ``raw`` with ``received_ns`` shifted by ``offset_ns``.
+
+    ``RawEvent`` is a frozen ``dataclass`` (not a msgspec Struct), so this
+    uses :func:`dataclasses.replace`.
+    """
+    import dataclasses
+
+    return dataclasses.replace(raw, received_ns=raw.received_ns + offset_ns)
 
 
 # ---------------------------------------------------------------------------
