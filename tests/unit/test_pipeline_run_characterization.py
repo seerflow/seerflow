@@ -88,7 +88,10 @@ async def _drive_and_capture(
     storage = _stub_storage()
     monkeypatch.setattr(run_mod, "connect_storage", AsyncMock(return_value=storage))
     monkeypatch.setattr(run_mod, "build_pipeline", AsyncMock(return_value=_FakePipeline()))
-    monkeypatch.setattr(run_mod.uvicorn, "Server", _FakeServer)
+    # String-target form: ``run.py`` does ``import uvicorn`` so this patches
+    # the same module object, and avoids the mypy --strict implicit-reexport
+    # ``attr-defined`` smell that ``run_mod.uvicorn`` triggers.
+    monkeypatch.setattr("uvicorn.Server", _FakeServer)
 
     taxii = MagicMock()
     taxii.start = AsyncMock(return_value=[])
@@ -116,8 +119,12 @@ async def _drive_and_capture(
 
     sess = MagicMock()
     sess.close = AsyncMock()
-    monkeypatch.setattr(run_mod.aiohttp, "ClientSession", MagicMock(return_value=sess))
-    monkeypatch.setattr(run_mod.aiohttp, "TCPConnector", MagicMock(return_value=MagicMock()))
+    # ``run.py`` does ``import aiohttp`` so the string-target form patches the
+    # same module object ``run_mod.aiohttp`` references; monkeypatch reverts
+    # it automatically. Preferred over ``run_mod.aiohttp`` attribute access,
+    # which mypy --strict flags as an implicit re-export (``attr-defined``).
+    monkeypatch.setattr("aiohttp.ClientSession", MagicMock(return_value=sess))
+    monkeypatch.setattr("aiohttp.TCPConnector", MagicMock(return_value=MagicMock()))
 
     with contextlib.suppress(SystemExit):
         await _run_with_config(config, make_api_app=lambda **_kw: _fake_app())
