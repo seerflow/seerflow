@@ -748,4 +748,10 @@ def make_handler(
     # ``pipeline.run`` can call ``save_drain_state(handler.get_normalizer().parser, ...)``
     # without reaching into the closure.
     handler.get_normalizer = lambda: normalizer  # type: ignore[attr-defined]
+    # S-304: expose the ensemble + baseline store the same way so the
+    # ``pipeline.run`` shutdown drain can persist final ML/UEBA state after
+    # the engine assembly moved into ``pipeline.assembly.assemble_handler``
+    # (the factory owns these; the live caller no longer builds them itself).
+    handler.get_ensemble = lambda: ensemble  # type: ignore[attr-defined]
+    handler.get_baseline_store = lambda: baseline_store  # type: ignore[attr-defined]
     return handler

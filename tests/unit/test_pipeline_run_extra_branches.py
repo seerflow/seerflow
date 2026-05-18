@@ -139,6 +139,7 @@ def _fake_app() -> MagicMock:
 
 
 def _base_patches(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     storage = MagicMock()
@@ -148,11 +149,13 @@ def _base_patches(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(run_mod, "connect_storage", AsyncMock(return_value=storage))
     monkeypatch.setattr(run_mod.uvicorn, "Server", _FakeServer)
     monkeypatch.setattr(run_mod, "build_pipeline", AsyncMock(return_value=_FakePipeline()))
+    # S-304: DetectionEnsemble / make_handler moved into the factory
+    # (pipeline.assembly). ``_run_with_config`` consumes it now.
     ensemble = MagicMock()
     ensemble.load_all_state = AsyncMock(return_value=0)
     ensemble.save_all_state = AsyncMock(return_value=0)
-    monkeypatch.setattr(run_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
-    monkeypatch.setattr(run_mod, "make_handler", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(asm_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
+    monkeypatch.setattr(asm_mod, "make_handler", MagicMock(return_value=MagicMock()))
     return storage
 
 
@@ -160,7 +163,7 @@ def _base_patches(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 async def test_taxii_feed_start_failure_logs_warning(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    import seerflow.pipeline.run as run_mod
+    import seerflow.pipeline.assembly as asm_mod
 
     _base_patches(monkeypatch)
     taxii = MagicMock()
@@ -168,7 +171,8 @@ async def test_taxii_feed_start_failure_logs_warning(
     taxii.stop = AsyncMock()
     taxii.feed_ids = MagicMock(return_value=())
     taxii.metrics = MagicMock()
-    monkeypatch.setattr(run_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
+    taxii.register_snapshot_listener = MagicMock()
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
 
     config = SeerflowConfig(storage=StorageConfig(), alerting=AlertingConfig())
     with caplog.at_level(logging.WARNING), contextlib.suppress(SystemExit):
@@ -181,7 +185,7 @@ async def test_taxii_feed_start_failure_logs_warning(
 async def test_sigma_load_custom_invoked_for_configured_dirs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    import seerflow.pipeline.run as run_mod
+    import seerflow.pipeline.assembly as asm_mod
 
     _base_patches(monkeypatch)
     taxii = MagicMock()
@@ -189,7 +193,8 @@ async def test_sigma_load_custom_invoked_for_configured_dirs(
     taxii.stop = AsyncMock()
     taxii.feed_ids = MagicMock(return_value=())
     taxii.metrics = MagicMock()
-    monkeypatch.setattr(run_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
+    taxii.register_snapshot_listener = MagicMock()
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
 
     sigma_inst = MagicMock()
     sigma_inst.load_bundled = MagicMock()
@@ -215,6 +220,7 @@ async def test_pipeline_task_cancelled_in_finally_when_server_finishes_first(
     """Pipeline.run() that never returns → after the sibling wait completes
     (server task done first) the finally block cancels the pipeline task
     (run.py 936-939)."""
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     _base_patches(monkeypatch)
@@ -223,7 +229,8 @@ async def test_pipeline_task_cancelled_in_finally_when_server_finishes_first(
     taxii.stop = AsyncMock()
     taxii.feed_ids = MagicMock(return_value=())
     taxii.metrics = MagicMock()
-    monkeypatch.setattr(run_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
+    taxii.register_snapshot_listener = MagicMock()
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
 
     class _HangingPipeline(_FakePipeline):
         async def run(self, _h: Any) -> None:

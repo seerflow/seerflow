@@ -38,6 +38,28 @@ _log = logging.getLogger("seerflow")
 
 
 @dataclass(frozen=True, slots=True)
+class AssembledEngines:
+    """Introspection handles the live caller (S-304) needs for the FastAPI
+    app + metrics provider + shutdown drain.
+
+    S-303 ``analyze_cmd`` and S-305 (LANL) ignore this entirely — they only
+    drive ``handler`` and call ``teardown``. Bundling these here (additive,
+    behaviour-preserving for existing consumers) lets ``_run_with_config``
+    consume the shared factory without rebuilding any engine, which is the
+    S-302/S-304 reconciliation the Carried-Over Note designates S-304 to do.
+    """
+
+    ensemble: Any
+    baseline_store: Any | None
+    ueba_engine: Any | None
+    sigma_engine: Any | None
+    correlation_rules: tuple[Any, ...]
+    taxii_manager: Any
+    ioc_matcher: Any | None
+    ioc_enrichment_counters: Any | None
+
+
+@dataclass(frozen=True, slots=True)
 class AssembledHandler:
     """Result of :func:`assemble_handler`.
 
@@ -49,12 +71,16 @@ class AssembledHandler:
                          uvicorn (none built).
     - ``capture_sink`` — passthrough seam for S-303 (analyze/benchmark);
                          accepted but not yet wired into ``make_handler``.
+    - ``engines``     — S-304 introspection bundle for the live caller's
+                         FastAPI app / metrics / drain. Offline consumers
+                         (S-303/S-305) ignore it.
     """
 
     handler: Callable[[RawEvent], Awaitable[None]]
     lifecycle: tuple[asyncio.Task[Any], ...]
     teardown: Callable[[], Awaitable[None]]
     capture_sink: object | None
+    engines: AssembledEngines
 
 
 async def _build_threat_intel(
@@ -94,14 +120,14 @@ def _build_correlation_stack(
     config: SeerflowConfig,
     window_buffer: Any,
     sigma_engine: Any,
-) -> tuple[Any, Any, asyncio.Task[Any]]:
+) -> tuple[Any, Any, asyncio.Task[Any], tuple[Any, ...]]:
     """Correlation rules/engine + sigma & correlation holders + reloader task.
 
-    Reproduces run.py:616-653 (==assembly.py:233-260). Returns
-    ``(sigma_holder, correlation_holder, reload_task)`` — the only objects
-    ``make_handler`` and the lifecycle list consume. The intermediate
-    ``correlation_rules``/``correlation_engine`` are local to this build
-    (they were never read again in the original inline block).
+    Reproduces run.py:616-653. Returns ``(sigma_holder, correlation_holder,
+    reload_task, correlation_rules)``. ``correlation_rules`` is surfaced for
+    the S-304 live caller's FastAPI app (run.py passed
+    ``correlation_rules=tuple(correlation_rules)`` to ``make_api_app``);
+    ``correlation_engine`` stays local (never read again in the original).
     """
     from seerflow.correlation.bundled import get_bundled_rule_dir
     from seerflow.correlation.engine import CorrelationEngine
@@ -130,7 +156,7 @@ def _build_correlation_stack(
         window_buffer=window_buffer,
     )
     reload_task = asyncio.create_task(reloader.watch())
-    return sigma_holder, correlation_holder, reload_task
+    return sigma_holder, correlation_holder, reload_task, tuple(correlation_rules)
 
 
 async def _build_alert_sinks(
@@ -371,9 +397,12 @@ async def assemble_handler(
     )
 
     # --- Correlation rules + engine + holder + reloader (run.py:616-653) ---
-    sigma_holder, correlation_holder, reload_task = _build_correlation_stack(
-        config, window_buffer, sigma_engine
-    )
+    (
+        sigma_holder,
+        correlation_holder,
+        reload_task,
+        correlation_rules,
+    ) = _build_correlation_stack(config, window_buffer, sigma_engine)
 
     # --- Per-stage latency tracker (run.py:740) ---
     from seerflow.api.latency import StageLatencyTracker
@@ -471,4 +500,14 @@ async def assemble_handler(
         lifecycle=tuple(lifecycle),
         teardown=_teardown,
         capture_sink=capture_sink,
+        engines=AssembledEngines(
+            ensemble=ensemble,
+            baseline_store=baseline_store,
+            ueba_engine=ueba_engine,
+            sigma_engine=sigma_engine,
+            correlation_rules=correlation_rules,
+            taxii_manager=taxii_manager,
+            ioc_matcher=ioc_matcher,
+            ioc_enrichment_counters=ioc_enrichment_counters,
+        ),
     )

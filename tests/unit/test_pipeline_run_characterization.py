@@ -83,6 +83,7 @@ async def _drive_and_capture(
     Returns ``(make_handler_spy, ensemble_stub, storage_stub)`` so callers
     can pin positional args by identity and assert on the captured call.
     """
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     storage = _stub_storage()
@@ -93,36 +94,46 @@ async def _drive_and_capture(
     # ``attr-defined`` smell that ``run_mod.uvicorn`` triggers.
     monkeypatch.setattr("uvicorn.Server", _FakeServer)
 
+    # S-304: the engine-assembly block (TAXII / DetectionEnsemble /
+    # ``make_handler``) moved verbatim from ``run.py`` into
+    # ``pipeline.assembly.assemble_handler`` — the S-302 extraction this
+    # very test was written to guard. ``_run_with_config`` now CONSUMES the
+    # factory, so these symbols live on ``asm_mod`` (not ``run_mod``). The
+    # assertions below are unchanged: they still pin every positional /
+    # keyword arg fed to ``make_handler`` byte-for-byte, so wiring drift
+    # still fails here. Only the patch *target module* moved, tracking the
+    # documented S-302/S-304 call-site relocation (story S-304 / SEE-267).
     taxii = MagicMock()
     taxii.start = AsyncMock(return_value=[])
     taxii.stop = AsyncMock()
     taxii.feed_ids = MagicMock(return_value=())
     taxii.metrics = MagicMock()
-    monkeypatch.setattr(run_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
+    taxii.register_snapshot_listener = MagicMock()
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
 
     ensemble = MagicMock()
     ensemble.load_all_state = AsyncMock(return_value=0)
     ensemble.save_all_state = AsyncMock(return_value=0)
-    monkeypatch.setattr(run_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
+    monkeypatch.setattr(asm_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
 
     # The real handler is a bare ``async def handler(event)`` closure with no
     # ``get_stats`` attribute, so the teardown ``_persist_session_state``
-    # path (run.py:175) skips its flush branch. Return a faithful async
-    # callable rather than an AsyncMock so that ``getattr(handler,
-    # "get_stats", None)`` resolves to None (an AsyncMock would auto-create
-    # a child that returns an un-awaited coroutine and emit a RuntimeWarning).
+    # path skips its flush branch. Return a faithful async callable rather
+    # than an AsyncMock so that ``getattr(handler, "get_stats", None)``
+    # resolves to None (an AsyncMock would auto-create a child that returns
+    # an un-awaited coroutine and emit a RuntimeWarning).
     async def _handler_stub(_event: Any) -> None:  # pragma: no cover - never invoked
         return None
 
     spy = MagicMock(return_value=_handler_stub)
-    monkeypatch.setattr(run_mod, "make_handler", spy)
+    monkeypatch.setattr(asm_mod, "make_handler", spy)
 
     sess = MagicMock()
     sess.close = AsyncMock()
-    # ``run.py`` does ``import aiohttp`` so the string-target form patches the
-    # same module object ``run_mod.aiohttp`` references; monkeypatch reverts
-    # it automatically. Preferred over ``run_mod.aiohttp`` attribute access,
-    # which mypy --strict flags as an implicit re-export (``attr-defined``).
+    # ``aiohttp`` is imported inside ``assembly._build_alert_sinks`` and
+    # ``run._build_channel_session_and_router``; the string-target form
+    # patches the shared module object both reference. monkeypatch reverts
+    # it automatically.
     monkeypatch.setattr("aiohttp.ClientSession", MagicMock(return_value=sess))
     monkeypatch.setattr("aiohttp.TCPConnector", MagicMock(return_value=MagicMock()))
 
@@ -213,7 +224,7 @@ async def test_inverted_flags_wiring_is_pinned(
     them — so the two scenarios pin the real engines on one branch and the
     None gate on the other.
     """
-    import seerflow.pipeline.run as run_mod
+    import seerflow.pipeline.assembly as asm_mod
     from seerflow.config import (
         DetectionConfig,
         IoCMatcherConfig,
@@ -226,7 +237,9 @@ async def test_inverted_flags_wiring_is_pinned(
     ioc_sentinel.start = AsyncMock()
     ioc_sentinel.stop = AsyncMock()
     ioc_sentinel.on_snapshot_updated = MagicMock()
-    monkeypatch.setattr(run_mod, "IoCMatcher", MagicMock(return_value=ioc_sentinel))
+    # S-304: ``IoCMatcher`` is constructed inside the factory now (see the
+    # patch-target migration note in ``_drive_and_capture``).
+    monkeypatch.setattr(asm_mod, "IoCMatcher", MagicMock(return_value=ioc_sentinel))
 
     # Immutable construction (no in-place mutation): flip the three flag
     # gates away from their defaults via explicit nested configs.

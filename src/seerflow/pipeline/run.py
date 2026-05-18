@@ -42,17 +42,13 @@ import aiohttp
 import uvicorn
 
 from seerflow import __version__
-from seerflow.api.app import create_api_app
+from seerflow.api.anomaly_timeline import AnomalyTimelineRing
+from seerflow.api.app import build_ws_manager, create_api_app
 from seerflow.api.latency import StageLatencyTracker
 from seerflow.config import SeerflowConfig, load_config
-from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline import build_pipeline
-from seerflow.pipeline.handler import make_handler
+from seerflow.pipeline.assembly import assemble_handler
 from seerflow.storage import connect_storage
-from seerflow.threat_intel import IoCMatcher, TAXIIFeedManager
-from seerflow.threat_intel.enricher import _IoCEnrichmentCounters
-from seerflow.ueba.engine import UEBAEngine
-from seerflow.ueba.store import BaselineStore
 from seerflow.web import DEFAULT_DIST
 
 if TYPE_CHECKING:
@@ -64,7 +60,9 @@ if TYPE_CHECKING:
     from seerflow.alerting.router import NotificationRouter
     from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
+    from seerflow.detection.ensemble import DetectionEnsemble
     from seerflow.storage.factory import StorageBackend
+    from seerflow.ueba.store import BaselineStore
 
     class _StoppablePipeline(Protocol):
         """Subset of the pipeline contract the shutdown closure needs."""
@@ -433,26 +431,31 @@ async def _run_with_config(
     storage = await connect_storage(config.storage)
     _log.info("Storage: %s", config.storage.sqlite_path)
 
-    # Threat-intel TAXII feed manager (S-067). Constructed unconditionally
-    # so the shutdown path can call ``stop()`` without a None-check; the
-    # ``start()`` call returns ``[]`` immediately when ``threat_intel.enabled``
-    # is False (no aiohttp session opened, no tasks scheduled).
-    taxii_manager = TAXIIFeedManager(
-        config=config.threat_intel,
-        model_store=storage,
-    )
-    # IoC matcher (S-068). Constructed before manager.start() so the snapshot
-    # listener is registered atomically with the consumer fan-out — any
-    # snapshot persisted during initial poll will trigger a matcher rebuild.
-    ioc_matcher: IoCMatcher | None = None
-    if config.threat_intel.matcher.enabled:
-        ioc_matcher = IoCMatcher(
-            config=config.threat_intel,
-            model_store=storage,
-        )
-        taxii_manager.register_snapshot_listener(ioc_matcher.on_snapshot_updated)
-        await ioc_matcher.start()
-    ioc_enrichment_counters = _IoCEnrichmentCounters() if ioc_matcher is not None else None
+    # S-304: build the detection handler via the shared factory
+    # (``pipeline.assembly.assemble_handler``). This is the SAME wiring
+    # ``seerflow analyze`` (S-303) and the LANL benchmark (S-305) consume,
+    # so live ≡ analyze ≡ benchmark detection is identical by construction
+    # (FR-069 / NFR-013/017). The factory owns every engine + the alert
+    # sinks + the rule reloader; the live caller keeps only the live-only
+    # concerns (receivers, signal handlers, FastAPI/uvicorn, LLM services,
+    # metrics provider, the S-081 shutdown drain).
+    #
+    # ``ws_manager`` is the one intentional divergence from the factory
+    # default of ``None``: the live pipeline must broadcast WebSocket
+    # frames, so the ``ConnectionManager`` is built ONCE here (identical
+    # CSWSH / queue / tick wiring as the in-app default via
+    # ``build_ws_manager``) and injected into BOTH the factory (so the
+    # handler closure broadcasts) and ``create_api_app`` (so the
+    # ``/api/v1/ws`` route shares the same fan-out). The
+    # ``AnomalyTimelineRing`` is built here too and reused so the
+    # ``/api/v1/anomaly`` route reads the ring the manager records into.
+    timeline_ring = AnomalyTimelineRing()
+    ws_manager: ConnectionManager = build_ws_manager(storage, config, timeline_ring)
+
+    assembled = await assemble_handler(config, storage, ws_manager=ws_manager)
+    engines = assembled.engines
+    handler = assembled.handler
+
     # LLM backend (S-070). Built once at boot; ``None`` on graceful absence
     # (no backend configured, optional dep missing, model file missing) so
     # downstream consumers (S-071 alert explanation, S-072 NL hunt) can
@@ -460,62 +463,6 @@ async def _run_with_config(
     from seerflow.llm import LLMBackend, build_llm_backend
 
     llm_backend: LLMBackend | None = build_llm_backend(config.llm)
-    taxii_failed = await taxii_manager.start()
-    if taxii_failed:
-        _log.warning(
-            "Threat intel: %d feed(s) failed to start: %s",
-            len(taxii_failed),
-            ", ".join(taxii_failed),
-        )
-    elif config.threat_intel.enabled:
-        _log.info("Threat intel: %d feed(s) running", len(taxii_manager.feed_ids()))
-
-    ensemble = DetectionEnsemble(config.detection)
-    try:
-        loaded = await ensemble.load_all_state(storage)
-        if loaded > 0:
-            _log.info("Restored %d model states from storage", loaded)
-    except Exception:
-        _log.warning("Failed to restore model state — starting fresh", exc_info=True)
-
-    # UEBA baseline store — feature-flag gated by config.ueba.enabled.
-    baseline_store: BaselineStore | None = None
-    ueba_engine: UEBAEngine | None = None
-    if config.ueba.enabled:
-        from seerflow.ueba.baseline import UEBAParams
-
-        ueba_params = UEBAParams(
-            alpha=config.ueba.ema_alpha,
-            source_ip_cap=config.ueba.source_ip_cap,
-            template_top_k=config.ueba.template_top_k,
-            warmup_days=config.ueba.warmup_days,
-            warmup_min_events=config.ueba.warmup_min_events,
-        )
-        baseline_store = BaselineStore(
-            params=ueba_params,
-            max_entities=config.ueba.max_entities,
-        )
-        try:
-            restored = await baseline_store.restore(storage)
-            _log.info("UEBA: restored %d baselines", restored)
-        except Exception:
-            _log.warning("UEBA baseline restore failed", exc_info=True)
-        ueba_engine = UEBAEngine(config=config.ueba)
-
-    from seerflow.detection.attack_mapping import AttackMapper
-
-    try:
-        if config.detection.attack_mappings:
-            attack_mapper = AttackMapper.from_config(list(config.detection.attack_mappings))
-            _log.info("ATT&CK mapper: %d user-defined mappings", len(attack_mapper))
-        else:
-            attack_mapper = AttackMapper.load_defaults()
-            _log.info("ATT&CK mapper: %d default mappings", len(attack_mapper))
-    except (ValueError, OSError) as exc:
-        _log.error("ATT&CK mapper init failed — falling back to defaults: %s", exc)
-        attack_mapper = AttackMapper.load_defaults()
-    if len(attack_mapper) == 0:
-        _log.warning("ATT&CK mapper has 0 mappings — ML alerts will have empty MITRE fields")
 
     try:
         pipeline = await build_pipeline(config)
@@ -527,12 +474,10 @@ async def _run_with_config(
             "  - Ensure ports are not already in use\n"
             "  - Verify receiver settings in seerflow.yaml"
         )
-        # Mirror the documented shutdown order (see end of run_pipeline):
-        # stop the IoC matcher before TAXII so its debounce loop is cancelled
-        # before consumers exit, and no late rebuild fires after teardown.
-        if ioc_matcher is not None:
-            await ioc_matcher.stop()
-        await taxii_manager.stop()
+        # ``assembled.teardown()`` cancels + awaits every owned lifecycle
+        # task (reload/dispatcher/pd/otlp) and stops the IoC matcher BEFORE
+        # the TAXII manager (documented order, S-068) before storage closes.
+        await assembled.teardown()
         await storage.close()
         sys.exit(1)
 
@@ -544,124 +489,15 @@ async def _run_with_config(
     # ``should_exit`` flag and stop the pipeline once the server is wired in below.
     shutdown_ctx = _install_shutdown_handlers(asyncio.get_running_loop(), pipeline)
 
-    # Load Sigma rules — degrade gracefully if loading fails
-    from seerflow.sigma.engine import SigmaEngine
-
-    sigma_engine: SigmaEngine | None = None
-    try:
-        _sigma = SigmaEngine()
-        _sigma.load_bundled()
-        if config.detection.sigma_rules_dirs:
-            _sigma.load_custom(list(config.detection.sigma_rules_dirs))
-        _log.info("Sigma: %d rules loaded", _sigma.rule_count)
-        sigma_engine = _sigma
-    except Exception:
-        _log.warning("Sigma rule loading failed — running without Sigma detection", exc_info=True)
-
-    # Build entity graph and load persisted edges
-    from seerflow.graph.entity_graph import EntityGraph
-
-    entity_graph = EntityGraph()
-    try:
-        edge_rows = await storage.load_edges()
-        entity_graph.load(edge_rows)
-        _log.info("Graph: loaded %d edges", len(edge_rows))
-    except Exception:
-        _log.warning("Graph edge loading failed — starting with empty graph", exc_info=True)
-    storage.set_entity_graph(entity_graph)
-
-    # Build graph-structural evaluator for community-crossing / betweenness / fan-out
-    from seerflow.correlation.graph_structural import GraphStructuralEvaluator
-
-    graph_structural = GraphStructuralEvaluator(config.detection.graph_structural, entity_graph)
-    _log.info("Graph-structural evaluator: enabled")
-
-    # Build kill-chain tracker for ATT&CK tactic progression detection
-    from seerflow.correlation.kill_chain import KillChainTracker
-
-    kill_chain_tracker: KillChainTracker | None = None
-    if config.detection.kill_chain.enabled:
-        kill_chain_tracker = KillChainTracker(config.detection.kill_chain)
-        _log.info(
-            "Kill-chain tracker: threshold=%d, window=%ds",
-            config.detection.kill_chain.tactic_threshold,
-            config.detection.kill_chain.window_seconds,
-        )
-
-    # Build entity window buffer for temporal correlation
-    from seerflow.correlation.window import EntityWindowBuffer
-
-    window_buffer = EntityWindowBuffer(
-        window_ns=config.correlation.window_duration_seconds * 1_000_000_000,
-        max_events=config.correlation.max_events_per_entity,
-        max_entities=config.correlation.max_entities,
-    )
-
-    # Build watermark for late-arrival tolerance
-    from seerflow.correlation.watermark import Watermark
-
-    watermark = Watermark(
-        tolerance_ns=config.correlation.late_tolerance_seconds * 1_000_000_000,
-    )
-
-    # Build risk register for per-entity risk accumulation
-    from seerflow.correlation.risk import RiskRegister
-
-    risk_register = RiskRegister(
-        half_life_ns=config.detection.risk_half_life_hours * 3600 * 1_000_000_000,
-        threshold=config.detection.risk_threshold,
-        max_entities=config.detection.risk_max_entities,
-    )
-
-    # Load correlation rules — bundled + user-configured directories
-    from seerflow.correlation.bundled import get_bundled_rule_dir
-    from seerflow.correlation.rule_loader import load_correlation_rules
-
-    bundled_dir = str(get_bundled_rule_dir())
-    rule_dirs = (bundled_dir, *config.correlation.rule_dirs)
-    correlation_rules = load_correlation_rules(rule_dirs)
-    _log.info(
-        "Correlation: loaded %d rules from %d dirs",
-        len(correlation_rules),
-        len(rule_dirs),
-    )
-
-    # Build correlation engine for real-time rule evaluation
-    from seerflow.correlation.engine import CorrelationEngine
-
-    correlation_engine = CorrelationEngine(
-        rules=correlation_rules,
-        window=window_buffer,
-    )
-    _log.info("Correlation engine: %d rules loaded", len(correlation_rules))
-
-    from seerflow.correlation.holders import EngineHolder
-
-    sigma_holder = EngineHolder(engine=sigma_engine)
-    correlation_holder: EngineHolder[CorrelationEngine | None] = EngineHolder(
-        engine=correlation_engine
-    )
-
-    # Start rule reloader for user-configured directories
-    from seerflow.correlation.reloader import RuleReloader
-
-    reloader = RuleReloader(
-        correlation_holder=correlation_holder,
-        correlation_dirs=[bundled_dir, *config.correlation.rule_dirs],
-        window_buffer=window_buffer,
-    )
-    reload_task = asyncio.create_task(reloader.watch())
-
     # Mount FastAPI dashboard + REST + WebSocket on dashboard_port via
     # uvicorn (S-217). The legacy aiohttp ``health_app`` was deleted —
     # the FastAPI ``/api/v1/health`` route mirrors its contract.
     #
-    # ``ws_manager`` is intentionally left as ``None`` so the factory
-    # builds it via ``_build_ws_manager(...)``, which honours every
-    # ``config.ws_*`` field (including the CSWSH ``allowed_origins``
-    # check). After ``create_api_app`` returns, read the constructed
-    # manager off ``app.state`` and reuse it for ``make_handler`` so
-    # the pipeline and the FastAPI route share the same fan-out.
+    # The introspection objects (sigma engine, correlation rules, ensemble,
+    # baseline store, UEBA engine) are the SAME instances the factory built
+    # — passed straight through from ``assembled.engines`` so the API
+    # observes exactly what the live pipeline runs (no duplicate
+    # construction; S-304 AC1).
 
     # ``llm`` health (S-070): three-state surface
     #   ready    → backend constructed
@@ -692,7 +528,7 @@ async def _run_with_config(
             cfg=config.llm,
             alert_store=storage,
             log_store=storage,
-            baseline_store=baseline_store,
+            baseline_store=engines.baseline_store,
         )
 
     # Natural language hunt service (S-072). Same construction pattern as
@@ -744,20 +580,24 @@ async def _run_with_config(
         alert_store=storage,
         entity_store=storage,
         config=config,
-        ws_manager=None,
-        sigma_engine=sigma_engine,
-        correlation_rules=tuple(correlation_rules),
-        baseline_store=baseline_store,
-        ueba_engine=ueba_engine,
+        ws_manager=ws_manager,
+        sigma_engine=engines.sigma_engine,
+        correlation_rules=engines.correlation_rules,
+        baseline_store=engines.baseline_store,
+        ueba_engine=engines.ueba_engine,
         sigma_state_store=storage,
         health_state=health_state,
-        ensemble=ensemble,
+        ensemble=engines.ensemble,
         explanation_service=explanation_service,
         hunt_service=hunt_service,
         rule_suggestion_service=rule_suggestion_service,
         stage_latency_tracker=stage_latency_tracker,
     )
-    ws_manager: ConnectionManager = api_app.state.ws_manager
+    # Reuse the timeline ring the injected ws_manager records into so the
+    # ``/api/v1/anomaly`` route reads the same ring (``create_api_app``
+    # builds a fresh ring by default; the injected manager already holds
+    # ``timeline_ring`` so overwrite to keep them the same instance).
+    api_app.state.anomaly_timeline_ring = timeline_ring
     uvicorn_config = uvicorn.Config(
         app=api_app,
         host=config.health_bind_address,
@@ -799,119 +639,21 @@ async def _run_with_config(
         )
 
     _log.info("Pipeline running — Ctrl+C to stop")
-    save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
 
-    from seerflow.alerting.dispatcher import (
-        AlertDispatcher,
-        build_webhook_delivery_targets,
-    )
-
-    webhook_session: aiohttp.ClientSession | None = None
-    dispatcher: AlertDispatcher | None = None
-    _dispatcher_task: asyncio.Task[None] | None = None
-    webhook_targets = config.alerting.webhook_targets
-    channel_session, router = await _build_channel_session_and_router(config.alerting)
-    if webhook_targets or router is not None:
-        if channel_session is not None:
-            webhook_session = channel_session
-        else:
-            _webhook_connector = aiohttp.TCPConnector(
-                ssl=_ssl.create_default_context(),
-                limit_per_host=10,
-            )
-            webhook_session = aiohttp.ClientSession(connector=_webhook_connector)
-        dispatcher = AlertDispatcher(
-            webhook_targets,
-            webhook_session,
-            dashboard_url=config.alerting.dashboard_url,
-            router=router,
-        )
-        if router is not None and webhook_targets:
-            for adapter in build_webhook_delivery_targets(dispatcher):
-                router.register_target(adapter)
-        _dispatcher_task = asyncio.create_task(dispatcher.run())
-        _log.info(
-            "Alert dispatcher: %d webhook target(s), router=%s",
-            len(webhook_targets),
-            "enabled" if router is not None else "disabled",
-        )
-
-    from seerflow.alerting.sinks.pagerduty import PagerDutySink
-
-    pd_sink: PagerDutySink | None = None
-    _pd_task: asyncio.Task[None] | None = None
-    pd_session: aiohttp.ClientSession | None = None
-    if config.alerting.pagerduty_routing_key:
-        _pd_connector = aiohttp.TCPConnector(
-            ssl=_ssl.create_default_context(),
-            limit_per_host=10,
-        )
-        pd_session = aiohttp.ClientSession(connector=_pd_connector)
-        pd_sink = PagerDutySink(config.alerting.pagerduty_routing_key, pd_session)
-        _pd_task = asyncio.create_task(pd_sink.run())
-        _log.info("PagerDuty sink: routing key configured")
-
-    from seerflow.alerting.sinks.otlp import OtlpSink, masked_url
-
-    otlp_sink: OtlpSink | None = None
-    _otlp_task: asyncio.Task[None] | None = None
-    if config.alerting.otlp_endpoint:
-        otlp_sink = OtlpSink(
-            endpoint=config.alerting.otlp_endpoint,
-            protocol=config.alerting.otlp_protocol,
-            export_interval=config.alerting.otlp_export_interval_seconds,
-            tls=config.alerting.otlp_tls,
-            tls_ca_file=config.alerting.otlp_tls_ca_file,
-            mtls_cert_file=config.alerting.otlp_mtls_cert_file,
-            mtls_key_file=config.alerting.otlp_mtls_key_file,
-        )
-        _otlp_task = asyncio.create_task(otlp_sink.run())
-        _log.info(
-            "OTLP sink: %s via %s (interval=%ds)",
-            masked_url(config.alerting.otlp_endpoint),
-            config.alerting.otlp_protocol,
-            config.alerting.otlp_export_interval_seconds,
-        )
-
-    handler = make_handler(
-        ensemble,
-        storage,
-        save_interval_ns=save_interval_ns,
-        sigma_holder=sigma_holder,
-        entity_graph=entity_graph,
-        graph_algo_interval=config.detection.graph_algo_interval,
-        window_buffer=window_buffer,
-        watermark=watermark,
-        risk_register=risk_register,
-        correlation_holder=correlation_holder,
-        alerting_config=config.alerting,
-        alert_dispatcher=dispatcher,
-        pagerduty_sink=pd_sink,
-        otlp_sink=otlp_sink,
-        attack_mapper=attack_mapper,
-        graph_structural=graph_structural,
-        kill_chain_tracker=kill_chain_tracker,
-        baseline_store=baseline_store,
-        ueba_engine=ueba_engine,
-        ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
-        ws_manager=ws_manager,
-        ioc_matcher=ioc_matcher,
-        ioc_enrichment_counters=ioc_enrichment_counters,
-        latency_tracker=stage_latency_tracker,
-    )
-    # Wire the live pipeline metrics provider for /api/v1/stats (S-067 ext).
-    # ``taxii_registry`` is supplied so the route can surface per-feed counters
-    # whenever ``threat_intel.enabled`` is True; otherwise the registry is
-    # empty and the route emits ``taxii=None``.
+    # ``handler`` + every alert sink + the rule reloader were already built
+    # by ``assemble_handler`` above (S-304). The metrics provider is a
+    # live-only concern (the offline ``analyze``/benchmark consumers do not
+    # expose ``/api/v1/stats``) so it stays here, sourced from the factory's
+    # introspection bundle so it observes exactly what the pipeline runs.
     from seerflow.api.metrics import build_pipeline_metrics_provider
 
     api_app.state.pipeline_metrics_provider = build_pipeline_metrics_provider(
         handler,
-        ensemble,
+        engines.ensemble,
         time.monotonic(),
-        taxii_registry=taxii_manager.metrics,
-        ioc_matcher=ioc_matcher,
-        ioc_enrichment_counters=ioc_enrichment_counters,
+        taxii_registry=engines.taxii_manager.metrics,
+        ioc_matcher=engines.ioc_matcher,
+        ioc_enrichment_counters=engines.ioc_enrichment_counters,
     )
     # Run pipeline + uvicorn server as sibling tasks (S-217). The first
     # to complete (or fail) wakes the wait so we can drain both cleanly.
@@ -926,11 +668,6 @@ async def _run_with_config(
             task.result()  # surfaces exceptions raised inside either task
     except KeyboardInterrupt:  # pragma: no cover — handled by signal path
         _log.info("Interrupt received — shutting down")
-
-    # Cancel the rule reloader on shutdown
-    reload_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await reload_task
 
     # Cancel the pipeline task if uvicorn died first (or vice versa).
     if not pipeline_task.done():
@@ -959,58 +696,39 @@ async def _run_with_config(
         # S-081: bounded cooperative drain — Drain3 templates + ML state + UEBA
         # baselines persist within ``config.shutdown_timeout_s`` (default 30 s,
         # matches kubelet ``terminationGracePeriodSeconds``). On timeout the
-        # helper returns normally so the ``finally`` block still closes
-        # uvicorn + sinks + storage; the SQLite WAL is never cancelled mid-write.
+        # helper returns normally so the ``finally`` block still tears down
+        # the assembled resources + uvicorn + storage; the SQLite WAL is
+        # never cancelled mid-write. ``ensemble``/``baseline_store`` are the
+        # SAME instances the factory built (S-304) — sourced from the
+        # introspection bundle so the final ML/UEBA save persists the live
+        # pipeline's state.
         await _run_shutdown_sequence(
             handler=handler,
             storage=storage,
-            ensemble=ensemble,
-            baseline_store=baseline_store,
+            ensemble=engines.ensemble,
+            baseline_store=engines.baseline_store,
             timeout=config.shutdown_timeout_s,
         )
     finally:
-        if dispatcher is not None:
-            await dispatcher.stop()
-        if _dispatcher_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await _dispatcher_task
-        if pd_sink is not None:
-            await pd_sink.stop()
-        if _pd_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await _pd_task
-        if pd_session is not None:
-            await pd_session.close()
-        if otlp_sink is not None:
-            await otlp_sink.stop()
-            if _otlp_task is not None:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await _otlp_task
-            await otlp_sink.close()
-        if webhook_session is not None:
-            await webhook_session.close()
+        # ``assembled.teardown()`` is idempotent and owns the full
+        # threat-intel + sink + reloader teardown: it cancels + awaits the
+        # rule reloader / dispatcher / PagerDuty / OTLP tasks (with
+        # ``CancelledError`` suppression), closes the webhook + PagerDuty
+        # sessions, then stops the IoC matcher BEFORE the TAXII manager
+        # (documented S-068 order). Do NOT double-cancel any of these.
+        await assembled.teardown()
         # Stop uvicorn so _lifespan can drain WebSocket frames before
         # the storage handle is released. ``server_task`` is created in
-        # the new sibling-task layout introduced by S-217. Suppress
+        # the sibling-task layout introduced by S-217. Suppress
         # ``TimeoutError`` as well as ``CancelledError`` so a slow uvicorn
         # shutdown never strands ``storage.close()`` (would leave the
         # SQLite WAL open).
         server.should_exit = True
         with contextlib.suppress(asyncio.CancelledError, TimeoutError):
             await asyncio.wait_for(server_task, timeout=10)
-        # Stop the IoC matcher BEFORE the manager so its debounce loop is
-        # cancelled before TAXII consumers exit (no late listener fires after
-        # the rebuild loop has stopped). The manager's stop() handles the
-        # remainder of the threat-intel teardown sequence (S-068).
-        if ioc_matcher is not None:
-            await ioc_matcher.stop()
-        # Stop TAXII feed manager BEFORE storage.close() so an in-flight
-        # ``_persist`` (snapshot + cursor save_state pair) has up to 2 s
-        # — see TAXIIFeedManager.stop() — to drain its current write
-        # before storage closes. Polls still mid-flight after the grace
-        # window are cancelled and their snapshot is dropped; the next
-        # poll will refetch from the last-persisted cursor (S-067).
-        await taxii_manager.stop()
+        # Storage is caller-owned (the factory teardown deliberately does
+        # NOT close it) so close it last, even on drain timeout, so the
+        # SQLite WAL is always allowed to flush.
         await storage.close()
         _log.info("Seerflow stopped")
 
