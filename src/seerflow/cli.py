@@ -303,6 +303,45 @@ def _status_timeout_arg(value: str) -> float:
     return parsed
 
 
+def _add_analyze_subparser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow analyze`` — one-shot full-stack batch (S-303, FR-070)."""
+    ap = subparsers.add_parser(
+        "analyze",
+        help="Run a log file/glob/stdin through the full detection stack",
+    )
+    ap.add_argument(
+        "paths",
+        nargs="+",
+        help="Log file paths or glob patterns; use '-' to read from stdin",
+    )
+    ap.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Write NDJSON alerts to this file (default: stdout)",
+    )
+    persist = ap.add_mutually_exclusive_group()
+    persist.add_argument(
+        "--persist",
+        dest="persist",
+        action="store_true",
+        default=False,
+        help="Persist events/alerts to the configured storage backend",
+    )
+    persist.add_argument(
+        "--no-persist",
+        dest="persist",
+        action="store_false",
+        help="Use an in-memory database; nothing is written to disk (default)",
+    )
+    ap.add_argument(
+        "--db",
+        type=str,
+        default=None,
+        help="SQLite path used when --persist is set (default: from config)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
@@ -425,6 +464,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     _add_graph_subparsers(subparsers)
+
+    _add_analyze_subparser(subparsers)
 
     return parser
 
