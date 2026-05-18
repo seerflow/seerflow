@@ -18,16 +18,6 @@ from seerflow.threat_intel.manager import TAXIIFeedManager, _resolve_auth
 from seerflow.threat_intel.metrics import TAXIIMetricsRegistry
 
 
-@pytest.fixture(autouse=True)
-def _bypass_dns_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S-227: bypass the startup DNS guard for tests that fabricate stub
-    hostnames (``bad.example`` / ``good.example``)."""
-    monkeypatch.setattr(
-        "seerflow.threat_intel.dns._resolve_feed_with_private_ip_guard",
-        lambda _feed_id, _hostname: "1.1.1.1",
-    )
-
-
 async def test_manager_exposes_metrics_property() -> None:
     cfg = ThreatIntelConfig(enabled=False)
     mgr = TAXIIFeedManager(config=cfg, model_store=MagicMock())
