@@ -81,6 +81,32 @@ class TestIterRawEvents:
             events = list(_iter_raw_events([str(missing)], stdin=io.StringIO("")))
         assert events == []
 
+    def test_skips_file_that_errors_mid_read(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from unittest.mock import patch
+
+        from seerflow.analyze_cmd import _iter_raw_events
+
+        f = tmp_path / "boom.log"
+        f.write_text("never reached\n")
+
+        # ``expand_paths`` admits the file; the OSError is raised when the
+        # iterator opens it for reading (exercises the in-loop except branch).
+        with (
+            patch("seerflow.analyze_cmd.open_log", side_effect=OSError("disk gone")),
+            caplog.at_level(logging.WARNING, logger="seerflow"),
+        ):
+            events = list(_iter_raw_events([str(f)], stdin=io.StringIO("")))
+        assert events == []
+        assert "unreadable" in caplog.text.lower()
+
+    def test_drops_blank_stdin_lines(self) -> None:
+        from seerflow.analyze_cmd import _iter_raw_events
+
+        events = list(_iter_raw_events(["-"], stdin=io.StringIO("real\n\n   \n\nalso\n")))
+        assert [e.data for e in events] == [b"real", b"   ", b"also"]
+
 
 class TestStorageConfigFor:
     def test_no_persist_is_in_memory(self) -> None:
@@ -161,6 +187,38 @@ class TestEmitAlertsNdjson:
         finally:
             await storage.close()
 
+    async def test_pages_through_multiple_alert_pages(self, tmp_path: Path) -> None:
+        from unittest.mock import AsyncMock
+
+        from seerflow.analyze_cmd import _emit_alerts_ndjson
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+
+        def _alert(i: int) -> Alert:
+            return Alert(
+                alert_id=f"00000000-0000-0000-0000-0000000000{i:02d}",
+                alert_type="ml",
+                timestamp_ns=10 + i,
+                severity_id=SeverityLevel.ERROR,
+                rule_name="r",
+                description="d",
+                entity_uuid="00000000-0000-0000-0000-0000000000aa",
+                entity_type="ip",
+                entity_value="1.1.1.1",
+                contributing_events=(),
+            )
+
+        # has_next True on page 1 forces the ``page += 1`` paging branch.
+        page1 = type("P", (), {"items": (_alert(1),), "has_next": True})()
+        page2 = type("P", (), {"items": (_alert(2),), "has_next": False})()
+        storage = AsyncMock()
+        storage.query_alerts = AsyncMock(side_effect=[page1, page2])
+
+        buf = io.StringIO()
+        count = await _emit_alerts_ndjson(storage, buf, 0)
+        assert count == 2
+        assert storage.query_alerts.await_count == 2
+
 
 def _ns(**kw: object) -> argparse.Namespace:
     base = {"paths": ["x.log"], "output": None, "persist": False, "db": None, "config": None}
@@ -230,6 +288,36 @@ class TestRunAnalyze:
             new=AsyncMock(return_value=_Assembled()),
         ):
             rc = await run_analyze(_ns(paths=[str(f)]))
+        assert rc == 1
+        teardown.assert_awaited()
+
+    async def test_emission_exception_returns_1(self, tmp_path: Path) -> None:
+        from seerflow.analyze_cmd import run_analyze
+
+        f = tmp_path / "q.log"
+        f.write_text("benign\n")
+        out = tmp_path / "out.ndjson"
+        teardown = AsyncMock()
+
+        class _Assembled:
+            handler = AsyncMock()
+            lifecycle = ()
+            capture_sink = None
+
+            def __init__(self) -> None:
+                self.teardown = teardown
+
+        async def boom_emit(_s: object, _stream: object, _start: int) -> int:
+            raise RuntimeError("query exploded")
+
+        with (
+            patch(
+                "seerflow.analyze_cmd.assemble_handler",
+                new=AsyncMock(return_value=_Assembled()),
+            ),
+            patch("seerflow.analyze_cmd._emit_alerts_ndjson", side_effect=boom_emit),
+        ):
+            rc = await run_analyze(_ns(paths=[str(f)], output=str(out)))
         assert rc == 1
         teardown.assert_awaited()
 
