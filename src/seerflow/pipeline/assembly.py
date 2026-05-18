@@ -159,15 +159,13 @@ def _build_correlation_stack(
     return sigma_holder, correlation_holder, reload_task, tuple(correlation_rules)
 
 
-async def _build_alert_sinks(
+async def _build_webhook_dispatcher(
     config: SeerflowConfig,
-) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
-    """Webhook dispatcher + PagerDuty + OTLP sinks (run.py:804-874).
+) -> tuple[Any, Any, asyncio.Task[None] | None]:
+    """Webhook dispatcher + channel session/router (run.py:804-837).
 
-    Returns ``(webhook_session, dispatcher, dispatcher_task, pd_sink,
-    pd_task, pd_session, otlp_sink, otlp_task)`` — any element is ``None``
-    when the corresponding target is not configured. Construction order is
-    preserved verbatim so the S-301 characterization wiring is unchanged.
+    Returns ``(webhook_session, dispatcher, dispatcher_task)`` — all
+    ``None`` when no webhook targets and no notification router.
     """
     import aiohttp
 
@@ -206,6 +204,14 @@ async def _build_alert_sinks(
             len(webhook_targets),
             "enabled" if router is not None else "disabled",
         )
+    return webhook_session, dispatcher, _dispatcher_task
+
+
+def _build_pagerduty_sink(
+    config: SeerflowConfig,
+) -> tuple[Any, asyncio.Task[None] | None, Any]:
+    """PagerDuty sink + session + run task (run.py:839-852)."""
+    import aiohttp
 
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
 
@@ -221,7 +227,13 @@ async def _build_alert_sinks(
         pd_sink = PagerDutySink(config.alerting.pagerduty_routing_key, pd_session)
         _pd_task = asyncio.create_task(pd_sink.run())
         _log.info("PagerDuty sink: routing key configured")
+    return pd_sink, _pd_task, pd_session
 
+
+def _build_otlp_sink(
+    config: SeerflowConfig,
+) -> tuple[Any, asyncio.Task[None] | None]:
+    """OTLP sink + run task (run.py:854-874)."""
     from seerflow.alerting.sinks.otlp import OtlpSink, masked_url
 
     otlp_sink: OtlpSink | None = None
@@ -243,6 +255,23 @@ async def _build_alert_sinks(
             config.alerting.otlp_protocol,
             config.alerting.otlp_export_interval_seconds,
         )
+    return otlp_sink, _otlp_task
+
+
+async def _build_alert_sinks(
+    config: SeerflowConfig,
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+    """Webhook dispatcher + PagerDuty + OTLP sinks (run.py:804-874).
+
+    Thin orchestrator over the three per-sink builders. Construction order
+    is preserved verbatim (webhook → PagerDuty → OTLP) so the S-301
+    characterization wiring is unchanged. Returns ``(webhook_session,
+    dispatcher, dispatcher_task, pd_sink, pd_task, pd_session, otlp_sink,
+    otlp_task)`` — any element ``None`` when not configured.
+    """
+    webhook_session, dispatcher, _dispatcher_task = await _build_webhook_dispatcher(config)
+    pd_sink, _pd_task, pd_session = _build_pagerduty_sink(config)
+    otlp_sink, _otlp_task = _build_otlp_sink(config)
     return (
         webhook_session,
         dispatcher,
