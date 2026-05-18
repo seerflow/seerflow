@@ -64,3 +64,43 @@ def _result_to_dict(result: ValidationResult, *, dataset_dir: str) -> dict[str, 
         "patterns_detected": sorted(result.patterns_detected),
         "dataset_dir": dataset_dir,
     }
+
+
+def _validate_dataset_dir(raw: str) -> Path:
+    """Resolve ``raw`` and confirm it is an existing directory.
+
+    Raises ``_UsageError`` (mapped to exit code 2) otherwise. The accuracy
+    harness is never invoked on a bad path.
+    """
+    path = Path(raw)
+    if not path.is_dir():
+        msg = f"dataset directory not found: {raw}"
+        raise _UsageError(msg)
+    return path
+
+
+def _emit(doc: dict[str, object], *, as_json: bool) -> None:
+    """Write ``doc`` to stdout as JSON or a human two-column table."""
+    if as_json:
+        sys.stdout.write(msgspec.json.encode(doc).decode() + "\n")
+        return
+    rows = [[k, str(doc[k])] for k in doc]
+    print(format_table(["metric", "value"], rows))
+
+
+def run_validate(args: argparse.Namespace) -> int:
+    """``seerflow validate`` entry point. Returns a process exit code."""
+    try:
+        dataset = _validate_dataset_dir(args.dataset_dir)
+    except _UsageError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    from seerflow.lanl.validator import run_validation
+
+    result = run_validation(dataset)
+    doc = _result_to_dict(result, dataset_dir=str(dataset))
+    _emit(doc, as_json=bool(args.json))
+    return EXIT_OK
+
+
+__all__ = ["run_validate"]
