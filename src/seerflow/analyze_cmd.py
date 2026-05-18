@@ -5,18 +5,18 @@ One-shot full-stack batch: drive ``pipeline.assembly.assemble_handler``
 written during the run as NDJSON. ``seerflow import`` (the fast ML-only
 path) is deliberately untouched (OQ-3 resolved: new command).
 """
-# ruff: noqa: T201 — print() is the correct output mechanism for CLI commands.
 
 from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterator
 from typing import TYPE_CHECKING, TextIO
 
 from seerflow.import_cmd import expand_paths, is_binary, open_log
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from seerflow.receivers.base import RawEvent
 
 _log = logging.getLogger("seerflow")
