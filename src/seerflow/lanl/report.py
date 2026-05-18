@@ -103,11 +103,14 @@ def render_validation_report(
         f"| {rule} | {latency:.1f} |"
         for rule, latency in sorted(result.detection_latency_s.items())
     )
-    family_rows = "\n".join(
-        f"| {fam} | {m.true_positives} | {m.false_positives} | "
-        f"{_pct(m.precision)} | {_pct(m.f1_score)} |"
-        for fam, m in sorted(result.per_family.items())
-    ) or "| (none fired) | 0 | 0 | 0.00% | 0.00% |"
+    family_rows = (
+        "\n".join(
+            f"| {fam} | {m.true_positives} | {m.false_positives} | "
+            f"{_pct(m.precision)} | {_pct(m.f1_score)} |"
+            for fam, m in sorted(result.per_family.items())
+        )
+        or "| (none fired) | 0 | 0 | 0.00% | 0.00% |"
+    )
 
     return f"""# LANL Full-Stack Validation Report
 
