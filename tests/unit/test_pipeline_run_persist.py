@@ -140,6 +140,26 @@ async def test_persist_session_state_flushes_ueba_baselines() -> None:
 
 
 @pytest.mark.unit
+async def test_persist_session_state_continues_after_ueba_flush_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failing ``baseline_store.flush`` is logged at WARNING and the
+    drain3 step still runs (run.py 207-208)."""
+    handler = _make_handler()
+    storage = _make_storage()
+    ensemble = _make_ensemble()
+    baseline_store = MagicMock()
+    baseline_store.flush = AsyncMock(side_effect=RuntimeError("flush boom"))
+    baseline_store.__len__ = MagicMock(return_value=0)
+
+    with caplog.at_level(logging.WARNING):
+        await _persist_session_state(handler, storage, ensemble, baseline_store=baseline_store)
+
+    baseline_store.flush.assert_awaited_once_with(storage)
+    assert "UEBA baseline flush failed" in caplog.text
+
+
+@pytest.mark.unit
 async def test_persist_session_state_continues_after_model_save_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
