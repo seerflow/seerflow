@@ -219,24 +219,28 @@ Key config sections:
 
 ## Validation
 
-Seerflow's correlation engine is validated against a **synthetic LANL
-subset** (~200 events modelled on the LANL Unified Host and Network
-Dataset, committed at `tests/fixtures/lanl/`). The engine detects three
-documented cross-source attack scenarios: brute-force + lateral movement,
-credential stuffing, and C2 beaconing.
+Seerflow is validated by running the **full detection stack** (Drain3 ->
+ML ensemble -> Sigma -> UEBA -> IoC -> correlation -- the exact
+`seerflow start` wiring via `assemble_handler`, S-305/FR-073) against a
+**synthetic LANL subset** (~200 events modelled on the LANL Unified Host
+and Network Dataset, committed at `tests/fixtures/lanl/`). This exercises
+the real product, not a correlation-only shortcut. The numbers below are
+honestly scoped to this small synthetic subset -- online/cold-start
+detectors (ML/UEBA) warm up but rarely fire on so few events, which the
+per-family breakdown in the generated report makes explicit.
 
 | Metric | Value |
 |--------|-------|
-| Patterns detected | 3 |
-| Precision | 92.31% |
-| Recall | 100.00% |
-| F1 score | 96.00% |
-| False-positive rate | 7.69% |
-| Events processed | 203 |
+| Precision | 16.67% |
+| Recall | 33.33% |
+| F1 score | 22.22% |
+| False-positive rate | 83.33% |
+| Events processed | 137 |
 
-> Numbers are derived from the harness, not hand-maintained -- a drift
-> test (`tests/integration/test_lanl_report_drift.py`) fails if this table
-> diverges from `run_validation()`.
+> Numbers are derived from the full-stack harness, not hand-maintained --
+> a drift test (`tests/integration/test_lanl_report_drift.py`) fails if
+> this table diverges from `run_validation()`. Scope: synthetic LANL
+> subset, full detection stack (not "end-to-end on the full LANL dataset").
 
 Reproduce locally:
 

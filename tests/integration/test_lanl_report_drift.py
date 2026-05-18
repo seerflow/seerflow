@@ -39,7 +39,6 @@ def test_readme_validation_table_matches_harness(result):
     assert f"| Recall | {_pct(result.recall)} |" in text
     assert f"| F1 score | {_pct(result.f1_score)} |" in text
     assert f"| False-positive rate | {_pct(result.false_positive_rate)} |" in text
-    assert f"| Patterns detected | {len(result.patterns_detected)} |" in text
     assert f"| Events processed | {result.total_events_processed} |" in text
 
 
@@ -59,6 +58,9 @@ def test_renderer_output_matches_harness(result):
     assert f"| False-positive rate | {_pct(result.false_positive_rate)} |" in md
     assert f"| Total events processed | {result.total_events_processed} |" in md
     assert str(len(result.patterns_detected)) in md
+    # S-305: the honest scope label must be echoed verbatim.
+    assert result.scope_label in md
+    assert "## Detection by Family" in md
 
 
 def test_renderer_main_writes_file(result, tmp_path):

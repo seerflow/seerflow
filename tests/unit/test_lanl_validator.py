@@ -489,3 +489,190 @@ def test_match_invalid_hostname_does_not_crash(validator):
     tp, _fp, _missed = validator.match_against_ground_truth(alerts, redteam)
     # Should still match on normalized username
     assert len(tp) == 1
+
+
+# ---------------------------------------------------------------------------
+# S-305: FamilyMetrics + per_family / scope_label on ValidationResult
+# ---------------------------------------------------------------------------
+
+
+def test_family_metrics_is_frozen_with_expected_fields(validator):
+    fm = validator.FamilyMetrics(
+        true_positives=2,
+        false_positives=1,
+        false_negatives=0,
+        precision=2 / 3,
+        recall=1.0,
+        f1_score=0.8,
+        total_alerts=3,
+    )
+    assert fm.true_positives == 2
+    assert fm.total_alerts == 3
+    with pytest.raises((AttributeError, TypeError)):
+        fm.true_positives = 9  # frozen
+
+
+def test_validation_result_has_per_family_and_scope_label(compute_metrics):
+    result = compute_metrics(
+        tp_alerts=[],
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=[],
+        events_processed=0,
+        detection_latencies={},
+    )
+    assert result.per_family == {}
+    assert isinstance(result.scope_label, str)
+    assert result.scope_label  # non-empty default
+
+
+def test_compute_metrics_buckets_per_family(compute_metrics):
+    """Alerts are bucketed by alert_type into per_family sub-metrics."""
+
+    def alert(alert_id, alert_type):
+        import msgspec.structs
+
+        return msgspec.structs.replace(_make_alert(alert_id=alert_id), alert_type=alert_type)
+
+    tp = [alert("1", "correlation"), alert("2", "ml"), alert("3", "ml")]
+    fp = [alert("fp1", "sigma")]
+    result = compute_metrics(
+        tp_alerts=tp,
+        fp_alerts=fp,
+        missed_redteam=[],
+        alerts=tp + fp,
+        events_processed=10,
+        detection_latencies={},
+    )
+    assert set(result.per_family) == {"correlation", "ml", "sigma"}
+    assert result.per_family["ml"].true_positives == 2
+    assert result.per_family["ml"].total_alerts == 2
+    assert result.per_family["ml"].precision == pytest.approx(1.0)
+    assert result.per_family["sigma"].false_positives == 1
+    assert result.per_family["sigma"].precision == 0.0
+    assert result.per_family["sigma"].recall == 0.0
+    assert result.per_family["correlation"].true_positives == 1
+
+
+def test_compute_metrics_per_family_empty_when_no_alerts(compute_metrics):
+    """No alerts → per_family is empty (families without alerts are skipped)."""
+    result = compute_metrics(
+        tp_alerts=[],
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=[],
+        events_processed=0,
+        detection_latencies={},
+    )
+    assert result.per_family == {}
+
+
+# ---------------------------------------------------------------------------
+# S-305: _build_raw_events — LANL records → text RawEvents (§A.5/§A.9)
+# ---------------------------------------------------------------------------
+
+
+def test_build_raw_events_emits_text_rawevents(validator):
+    from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord
+    from seerflow.receivers.base import RawEvent
+
+    auth = AuthRecord(
+        time=100,
+        src_user="U1@DOM1",
+        dst_user="U5624@DOM1",
+        src_computer="C17693",
+        dst_computer="C528",
+        auth_type="Negotiate",
+        logon_type="Network",
+        auth_orientation="LogOn",
+        success=False,
+    )
+    proc = ProcRecord(
+        time=110, user="U2@DOM1", computer="C9", process_name="P1", start_end="Start"
+    )
+    flow = FlowRecord(
+        time=120,
+        duration=1,
+        src_computer="C9999",
+        src_port=1234,
+        dst_computer="C8888",
+        dst_port=443,
+        protocol=6,
+        packet_count=5,
+        byte_count=4096,
+    )
+    raws = validator._build_raw_events([auth], [proc], [flow])
+    assert all(isinstance(r, RawEvent) for r in raws)
+    assert len(raws) == 3  # one per record
+    msgs = [r.data.decode() for r in raws]
+    assert any("authentication failure" in m and "u5624" in m for m in msgs)
+    assert any("process" in m for m in msgs)
+    assert any("flow established" in m for m in msgs)
+    assert all(r.source_type == "syslog" for r in raws)
+    assert all(r.received_ns > 0 for r in raws)
+
+
+def test_build_raw_events_success_auth_message(validator):
+    from seerflow.lanl.parser import AuthRecord
+
+    auth = AuthRecord(
+        time=200,
+        src_user="U1@DOM1",
+        dst_user="U7@DOM1",
+        src_computer="C42",
+        dst_computer="C99",
+        auth_type="Kerberos",
+        logon_type="Network",
+        auth_orientation="LogOn",
+        success=True,
+    )
+    raws = validator._build_raw_events([auth], [], [])
+    assert len(raws) == 1
+    msg = raws[0].data.decode()
+    assert "Accepted password" in msg
+    assert "u7" in msg
+    assert raws[0].received_ns == 200 * 1_000_000_000
+
+
+def test_build_raw_events_empty_inputs(validator):
+    assert validator._build_raw_events([], [], []) == []
+
+
+def test_rebased_shifts_received_ns(validator):
+    from seerflow.receivers.base import RawEvent
+
+    raw = RawEvent(
+        data=b"x",
+        source_type="syslog",
+        source_id="t",
+        received_ns=1_000,
+        metadata={},
+    )
+    shifted = validator._rebased(raw, 500)
+    assert shifted.received_ns == 1_500
+    assert shifted.data == b"x"
+    assert raw.received_ns == 1_000  # original unchanged (immutable)
+
+
+# ---------------------------------------------------------------------------
+# S-305: run_validation_async driver + sync wrapper (AC1/AC3/AC6)
+# ---------------------------------------------------------------------------
+
+
+def test_run_validation_async_exists_and_is_coroutine(validator):
+    import inspect
+
+    assert hasattr(validator, "run_validation_async")
+    assert inspect.iscoroutinefunction(validator.run_validation_async)
+
+
+def test_run_validation_no_longer_constructs_correlation_engine_directly(validator):
+    """AC1/AC6: validator.py must not build CorrelationEngine itself."""
+    import inspect
+
+    src = inspect.getsource(validator)
+    assert "CorrelationEngine(" not in src, (
+        "validator.py constructs CorrelationEngine directly — must route "
+        "through assemble_handler (FR-073 AC1/AC6)"
+    )
+    assert "assemble_handler" in src

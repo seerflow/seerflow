@@ -103,18 +103,30 @@ def render_validation_report(
         f"| {rule} | {latency:.1f} |"
         for rule, latency in sorted(result.detection_latency_s.items())
     )
+    family_rows = (
+        "\n".join(
+            f"| {fam} | {m.true_positives} | {m.false_positives} | "
+            f"{_pct(m.precision)} | {_pct(m.f1_score)} |"
+            for fam, m in sorted(result.per_family.items())
+        )
+        or "| (none fired) | 0 | 0 | 0.00% | 0.00% |"
+    )
 
-    return f"""# LANL Correlation Validation Report
+    return f"""# LANL Full-Stack Validation Report
 
 **Date:** {date}
-**Story:** S-088 -- LANL dataset validation (launch deliverable)
+**Story:** S-305 -- full-pipeline LANL validation (FR-073)
 **Dataset:** {dataset_label}
+**Scope:** {result.scope_label}
 
 ## Summary
 
-The Seerflow correlation engine detects **{len(patterns)} distinct attack
-patterns** on the {dataset_label}, validating entity-centric cross-source
-correlation for multi-stage attacks.
+The Seerflow **full detection stack** (Drain3 -> ML ensemble -> Sigma ->
+UEBA -> IoC -> correlation -- the identical `seerflow start` wiring via
+`assemble_handler`) was run against the {dataset_label}. These numbers
+describe the shipped product, not a correlation-only shortcut. On this
+small synthetic subset, online/cold-start detectors (ML/UEBA) may emit no
+alerts -- the per-family table below makes that explicit and honest.
 
 ## Results
 
@@ -131,6 +143,12 @@ correlation for multi-stage attacks.
 | Total events processed | {result.total_events_processed} |
 | Total alerts generated | {result.total_alerts} |
 
+## Detection by Family
+
+| Family | TP | FP | Precision | F1 |
+|--------|----|----|-----------|----|
+{family_rows}
+
 ## Detection Latency
 
 | Rule | Avg Latency (seconds) |
@@ -142,10 +160,14 @@ correlation for multi-stage attacks.
 
 1. **Synthetic subset:** the committed fixtures are a small synthetic
    dataset (~200 events) mimicking LANL format, not the full 1.05B-event
-   dataset.
-2. **Anonymized process names:** LANL anonymizes processes, so the
+   dataset. Run on a downloaded full-dataset directory for headline numbers.
+2. **Cold-start online detectors:** ML/UEBA are streaming learners; on a
+   ~200-event subset they warm up but rarely fire. Absent ML/UEBA rows in
+   the per-family table reflect this, not a wiring gap (the regression test
+   `tests/integration/test_lanl_full_stack_regression.py` guards the wiring).
+3. **Anonymized process names:** LANL anonymizes processes, so the
    privilege-escalation-chain rule cannot fire.
-3. **Synthetic host-to-IP mapping:** real-world validation would use
+4. **Synthetic host-to-IP mapping:** real-world validation would use
    actual IP addresses.
 
 {_REPRODUCIBILITY}"""
