@@ -56,6 +56,39 @@ class AssembledHandler:
     capture_sink: object | None
 
 
+async def _build_threat_intel(
+    config: SeerflowConfig, storage: StorageBackend
+) -> tuple[
+    TAXIIFeedManager,
+    IoCMatcher | None,
+    _IoCEnrichmentCounters | None,
+    list[str],
+]:
+    """TAXII feed manager + IoC matcher + enrichment counters (run.py:440-471).
+
+    Construction order is load-bearing: the IoC matcher's snapshot listener
+    is registered BEFORE ``taxii_manager.start()`` so any snapshot persisted
+    during the initial poll triggers a matcher rebuild.
+    """
+    taxii_manager = TAXIIFeedManager(config=config.threat_intel, model_store=storage)
+    ioc_matcher: IoCMatcher | None = None
+    if config.threat_intel.matcher.enabled:
+        ioc_matcher = IoCMatcher(config=config.threat_intel, model_store=storage)
+        taxii_manager.register_snapshot_listener(ioc_matcher.on_snapshot_updated)
+        await ioc_matcher.start()
+    ioc_enrichment_counters = _IoCEnrichmentCounters() if ioc_matcher is not None else None
+    taxii_failed = await taxii_manager.start()
+    if taxii_failed:
+        _log.warning(
+            "Threat intel: %d feed(s) failed to start: %s",
+            len(taxii_failed),
+            ", ".join(taxii_failed),
+        )
+    elif config.threat_intel.enabled:
+        _log.info("Threat intel: %d feed(s) running", len(taxii_manager.feed_ids()))
+    return taxii_manager, ioc_matcher, ioc_enrichment_counters, taxii_failed
+
+
 async def assemble_handler(
     config: SeerflowConfig,
     storage: StorageBackend,
@@ -78,22 +111,12 @@ async def assemble_handler(
     default preserves byte-identical behaviour for S-303/S-305.
     """
     # --- TAXII feed manager + IoC matcher (run.py:440-471) ---
-    taxii_manager = TAXIIFeedManager(config=config.threat_intel, model_store=storage)
-    ioc_matcher: IoCMatcher | None = None
-    if config.threat_intel.matcher.enabled:
-        ioc_matcher = IoCMatcher(config=config.threat_intel, model_store=storage)
-        taxii_manager.register_snapshot_listener(ioc_matcher.on_snapshot_updated)
-        await ioc_matcher.start()
-    ioc_enrichment_counters = _IoCEnrichmentCounters() if ioc_matcher is not None else None
-    taxii_failed = await taxii_manager.start()
-    if taxii_failed:
-        _log.warning(
-            "Threat intel: %d feed(s) failed to start: %s",
-            len(taxii_failed),
-            ", ".join(taxii_failed),
-        )
-    elif config.threat_intel.enabled:
-        _log.info("Threat intel: %d feed(s) running", len(taxii_manager.feed_ids()))
+    (
+        taxii_manager,
+        ioc_matcher,
+        ioc_enrichment_counters,
+        _taxii_failed,
+    ) = await _build_threat_intel(config, storage)
 
     # --- DetectionEnsemble + state restore (run.py:473-479) ---
     ensemble = DetectionEnsemble(config.detection)
