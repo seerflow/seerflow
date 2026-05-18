@@ -6,12 +6,16 @@ import argparse
 import io
 import logging
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from seerflow.cli import parse_args
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from typing import TextIO
+
+    import pytest
 
 
 class TestAnalyzeArgparse:
@@ -57,9 +61,7 @@ class TestIterRawEvents:
         events = list(_iter_raw_events(["-"], stdin=io.StringIO("piped a\npiped b\n")))
         assert [e.data for e in events] == [b"piped a", b"piped b"]
 
-    def test_skips_binary_file(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_skips_binary_file(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         from seerflow.analyze_cmd import _iter_raw_events
 
         b = tmp_path / "x.bin"
@@ -69,9 +71,7 @@ class TestIterRawEvents:
         assert events == []
         assert "binary" in caplog.text.lower()
 
-    def test_skips_unreadable_file(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_skips_unreadable_file(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         from seerflow.analyze_cmd import _iter_raw_events
 
         missing = tmp_path / "nope.log"
@@ -101,8 +101,8 @@ class TestStorageConfigFor:
         from seerflow.analyze_cmd import _storage_config_for
         from seerflow.config import SeerflowConfig
 
-        cfg = _storage_config_for(SeerflowConfig(), persist=True, db="/tmp/x.db")  # noqa: S108
-        assert cfg.sqlite_path == "/tmp/x.db"  # noqa: S108
+        cfg = _storage_config_for(SeerflowConfig(), persist=True, db="/tmp/x.db")
+        assert cfg.sqlite_path == "/tmp/x.db"
         assert cfg.backend == "sqlite"
 
 
@@ -158,3 +158,75 @@ class TestEmitAlertsNdjson:
             assert buf.getvalue() == ""
         finally:
             await storage.close()
+
+
+def _ns(**kw: object) -> argparse.Namespace:
+    base = {"paths": ["x.log"], "output": None, "persist": False, "db": None, "config": None}
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+class TestRunAnalyze:
+    async def test_no_input_returns_2(self, tmp_path: Path) -> None:
+        from seerflow.analyze_cmd import run_analyze
+
+        missing = str(tmp_path / "absent.log")
+        rc = await run_analyze(_ns(paths=[missing]))
+        assert rc == 2
+
+    async def test_zero_alerts_returns_0(self, tmp_path: Path) -> None:
+        from seerflow.analyze_cmd import run_analyze
+
+        f = tmp_path / "q.log"
+        f.write_text("just one benign line\n")
+        out = tmp_path / "out.ndjson"
+        rc = await run_analyze(_ns(paths=[str(f)], output=str(out)))
+        assert rc == 0
+        assert out.read_text() == ""
+
+    async def test_alert_fired_returns_1(self, tmp_path: Path) -> None:
+        from seerflow.analyze_cmd import run_analyze
+
+        f = tmp_path / "q.log"
+        f.write_text("benign\n")
+        out = tmp_path / "out.ndjson"
+
+        async def fake_emit(_storage: object, stream: TextIO, _start: int) -> int:
+            stream.write('{"type":"ml"}\n')
+            return 1
+
+        with patch("seerflow.analyze_cmd._emit_alerts_ndjson", side_effect=fake_emit):
+            rc = await run_analyze(_ns(paths=[str(f)], output=str(out)))
+        assert rc == 1
+        assert "ml" in out.read_text()
+
+    async def test_bad_output_dir_returns_2(self, tmp_path: Path) -> None:
+        from seerflow.analyze_cmd import run_analyze
+
+        f = tmp_path / "q.log"
+        f.write_text("x\n")
+        rc = await run_analyze(_ns(paths=[str(f)], output="/no/such/dir/out.ndjson"))
+        assert rc == 2
+
+    async def test_teardown_runs_on_handler_exception(self, tmp_path: Path) -> None:
+        from seerflow.analyze_cmd import run_analyze
+
+        f = tmp_path / "q.log"
+        f.write_text("boom\n")
+        teardown = AsyncMock()
+
+        class _Assembled:
+            handler = AsyncMock(side_effect=RuntimeError("kaboom"))
+            lifecycle = ()
+            capture_sink = None
+
+            def __init__(self) -> None:
+                self.teardown = teardown
+
+        with patch(
+            "seerflow.analyze_cmd.assemble_handler",
+            new=AsyncMock(return_value=_Assembled()),
+        ):
+            rc = await run_analyze(_ns(paths=[str(f)]))
+        assert rc == 1
+        teardown.assert_awaited()

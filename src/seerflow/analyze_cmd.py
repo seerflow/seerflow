@@ -5,17 +5,22 @@ One-shot full-stack batch: drive ``pipeline.assembly.assemble_handler``
 written during the run as NDJSON. ``seerflow import`` (the fast ML-only
 path) is deliberately untouched (OQ-3 resolved: new command).
 """
+# ruff: noqa: T201 — print() is the correct output mechanism for CLI commands.
 
 from __future__ import annotations
 
 import logging
+import sys
 import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
 from seerflow.import_cmd import expand_paths, is_binary, open_log
+from seerflow.pipeline.assembly import assemble_handler
 
 if TYPE_CHECKING:
+    import argparse
     from collections.abc import Iterator
 
     from seerflow.config import SeerflowConfig
@@ -131,3 +136,86 @@ async def _emit_alerts_ndjson(
         if not result.has_next:
             return emitted
         page += 1
+
+
+def _open_output(path_str: str | None) -> tuple[TextIO, bool]:
+    """Open the NDJSON sink. Returns ``(stream, should_close)``.
+
+    Stdout is never closed. A ``--output`` file requires an existing parent
+    directory (mirrors ``export_cmd._open_output``).
+    """
+    if not path_str:
+        return sys.stdout, False
+    path = Path(path_str).expanduser()
+    if not path.parent.exists() or not path.parent.is_dir():
+        msg = f"output directory does not exist: {path.parent}"
+        raise FileNotFoundError(msg)
+    return path.open("w", encoding="utf-8", newline=""), True
+
+
+async def run_analyze(args: argparse.Namespace) -> int:
+    """Run ``seerflow analyze``. Returns a process exit code.
+
+    Exit codes:
+        0 — completed, zero alerts fired
+        1 — completed, >=1 alert fired (scriptable) OR a runtime error
+        2 — input/validation error (no input, bad --output dir)
+    """
+    from seerflow.config import load_config
+    from seerflow.storage import connect_storage
+
+    raw_events = list(_iter_raw_events(args.paths, stdin=sys.stdin))
+    if not raw_events:
+        print("Error: no readable input (no files matched and no stdin)", file=sys.stderr)
+        return 2
+
+    try:
+        stream, should_close = _open_output(args.output)
+    except (FileNotFoundError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    config = load_config(args.config)
+    storage_config = _storage_config_for(config, persist=args.persist, db=args.db)
+    storage = await connect_storage(storage_config)
+
+    run_start_ns = time.time_ns()
+    rc = 0
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(storage.close)
+        if should_close:
+            stack.callback(stream.close)
+
+        assembled = await assemble_handler(config, storage)
+        try:
+            for raw in raw_events:
+                await assembled.handler(raw)
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            _log.exception("analyze run failed")
+            rc = 1
+        finally:
+            # ``assembled.teardown()`` is idempotent and already cancels +
+            # awaits every owned lifecycle task (reload/dispatcher/pd/otlp)
+            # with proper CancelledError suppression — do not double-cancel.
+            await assembled.teardown()
+
+        if rc == 0:
+            try:
+                count = await _emit_alerts_ndjson(storage, stream, run_start_ns)
+            except Exception as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                _log.exception("alert emission failed")
+                return 1
+            stream.flush()
+            print(
+                f"seerflow analyze: {count:,} alert(s) from {len(raw_events):,} lines",
+                file=sys.stderr,
+            )
+            return 1 if count > 0 else 0
+        return rc
+
+    return rc  # pragma: no cover — AsyncExitStack always returns above
+
+
+__all__ = ["run_analyze"]
