@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import time as time_mod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord, RedTeamRecord
@@ -333,6 +333,81 @@ def _rebased(raw: RawEvent, offset_ns: int) -> RawEvent:
     return dataclasses.replace(raw, received_ns=raw.received_ns + offset_ns)
 
 
+# Deterministic replay epoch. The harness rebases every LANL record so the
+# latest event sits exactly REPLAY_HEADROOM_NS before this fixed anchor; the
+# anchor is a constant (not ``time.time_ns()``) so the rebase offset — and
+# therefore every downstream timestamp — is identical on every machine.
+#
+# 2026-01-01T00:00:00Z in nanoseconds (arbitrary fixed point comfortably
+# inside the storage/correlation working range; the absolute value is
+# irrelevant, only its constancy matters).
+REPLAY_EPOCH_NS = 1_767_225_600_000_000_000
+REPLAY_HEADROOM_NS = 60_000_000_000  # 60 s between newest event and "now"
+
+
+@contextlib.contextmanager
+def _frozen_replay_clock(now_ns: int) -> Iterator[None]:
+    """Freeze ``time.time_ns()`` for the wall-clock-relative aging components.
+
+    Two components inside the full detection stack measure *event age*
+    against ``time.time_ns()`` rather than against the event stream:
+
+    * :class:`seerflow.correlation.window.EntityWindowBuffer` lazily prunes
+      events older than ``now - window_ns`` on every query.
+    * :class:`seerflow.correlation.risk.RiskRegister` applies exponential
+      decay using ``now - entry.timestamp_ns``.
+
+    In live operation ``now`` is real wall-clock and these are correct. But
+    the harness *replays* historical events as fast as the machine allows,
+    so a slower runner lets more real time elapse during the replay and the
+    aging boundary drifts relative to the (fixed) rebased event timestamps —
+    making the headline metric environment-nondeterministic (the CI failure:
+    P=16.67% locally vs 18.18% in CI).
+
+    Pinning the clock these two modules observe to a constant ``now_ns`` for
+    the duration of the replay makes window pruning and risk decay a pure
+    function of the (deterministic) event timestamps, so the metrics are
+    byte-identical on every machine. Production wiring is untouched: this
+    only patches the modules' ``time.time_ns`` within this ``with`` block and
+    restores the originals on exit (including on exception).
+    """
+    import time as _time
+    from typing import Any, cast
+
+    from seerflow.correlation import risk as _risk_mod
+    from seerflow.correlation import window as _window_mod
+
+    class _FrozenClock:
+        """Drop-in stand-in for the ``time`` module exposing a fixed
+        ``time_ns()``; every other ``time`` attribute proxies to the real
+        module so nothing else in the correlation modules breaks."""
+
+        def time_ns(self) -> int:
+            return now_ns
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(_time, name)
+
+    frozen = _FrozenClock()
+    # window.py / risk.py both do ``import time``; rebind that name in
+    # their module namespace to the frozen stand-in for the replay only,
+    # leaving the real stdlib ``time`` module untouched (surgical: no
+    # global side effects, restored in ``finally``). ``setattr`` on the
+    # cast-to-Any module objects keeps mypy happy about patching a name
+    # that the correlation modules don't re-export.
+    win: Any = cast("Any", _window_mod)
+    rsk: Any = cast("Any", _risk_mod)
+    saved_window = win.time
+    saved_risk = rsk.time
+    win.time = frozen
+    rsk.time = frozen
+    try:
+        yield
+    finally:
+        win.time = saved_window
+        rsk.time = saved_risk
+
+
 # ---------------------------------------------------------------------------
 # Full pipeline
 # ---------------------------------------------------------------------------
@@ -412,11 +487,17 @@ async def run_validation_async(fixtures_dir: Path) -> ValidationResult:
         )
 
     # ------------------------------------------------------------------
-    # 3. Time-rebase so the latest event sits 60 s before "now"
+    # 3. Time-rebase against a FIXED deterministic epoch
     # ------------------------------------------------------------------
+    #
+    # The newest event is pinned exactly REPLAY_HEADROOM_NS before the
+    # constant REPLAY_EPOCH_NS (not before live ``time.time_ns()``), so the
+    # rebase offset — and every downstream timestamp — is identical on every
+    # machine. The replay clock is then frozen to this same epoch (step 4)
+    # so the wall-clock-relative aging components stay deterministic.
 
     max_ts = max(r.received_ns for r in raw_events)
-    offset_ns = time_mod.time_ns() - max_ts - 60_000_000_000  # 60 s headroom
+    offset_ns = REPLAY_EPOCH_NS - max_ts - REPLAY_HEADROOM_NS
     raw_events = sorted(
         (_rebased(r, offset_ns) for r in raw_events),
         key=lambda r: r.received_ns,
@@ -446,8 +527,13 @@ async def run_validation_async(fixtures_dir: Path) -> ValidationResult:
             # produces); the assemble_handler capture_sink seam is S-303's.
             assembled = await assemble_handler(config, storage)
             try:
-                for raw in raw_events:
-                    await assembled.handler(raw)
+                # Freeze the clock the window-buffer / risk-register observe
+                # to the same epoch the events were rebased against, so
+                # pruning + decay are a pure function of the deterministic
+                # event timestamps (machine-speed independent).
+                with _frozen_replay_clock(REPLAY_EPOCH_NS):
+                    for raw in raw_events:
+                        await assembled.handler(raw)
             finally:
                 await assembled.teardown()
             await storage.flush()
