@@ -489,3 +489,38 @@ def test_match_invalid_hostname_does_not_crash(validator):
     tp, _fp, _missed = validator.match_against_ground_truth(alerts, redteam)
     # Should still match on normalized username
     assert len(tp) == 1
+
+
+# ---------------------------------------------------------------------------
+# S-305: FamilyMetrics + per_family / scope_label on ValidationResult
+# ---------------------------------------------------------------------------
+
+
+def test_family_metrics_is_frozen_with_expected_fields(validator):
+    fm = validator.FamilyMetrics(
+        true_positives=2,
+        false_positives=1,
+        false_negatives=0,
+        precision=2 / 3,
+        recall=1.0,
+        f1_score=0.8,
+        total_alerts=3,
+    )
+    assert fm.true_positives == 2
+    assert fm.total_alerts == 3
+    with pytest.raises((AttributeError, TypeError)):
+        fm.true_positives = 9  # frozen
+
+
+def test_validation_result_has_per_family_and_scope_label(compute_metrics):
+    result = compute_metrics(
+        tp_alerts=[],
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=[],
+        events_processed=0,
+        detection_latencies={},
+    )
+    assert result.per_family == {}
+    assert isinstance(result.scope_label, str)
+    assert result.scope_label  # non-empty default

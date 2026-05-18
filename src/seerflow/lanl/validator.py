@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time as time_mod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -29,9 +29,35 @@ _log = logging.getLogger("seerflow")
 # ---------------------------------------------------------------------------
 
 
+DEFAULT_SCOPE_LABEL = (
+    "full detection stack (Drain3+ML+Sigma+UEBA+IoC+correlation) on "
+    "synthetic LANL subset (~200 events, tests/fixtures/lanl)"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FamilyMetrics:
+    """Per-detector-family detection sub-metrics.
+
+    ``false_negatives`` is always 0 here: a missed red-team event fired no
+    alert at all, so the miss cannot be attributed to any single detector
+    family. The meaningful recall is the *combined* one on
+    :class:`ValidationResult`; per-family ``recall`` is 1.0 when the family
+    produced ≥1 true positive (every alert it fired was correct) else 0.0.
+    """
+
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+    precision: float
+    recall: float
+    f1_score: float
+    total_alerts: int
+
+
 @dataclass(frozen=True, slots=True)
 class ValidationResult:
-    """Result of running correlation validation against ground truth."""
+    """Result of running full-stack detection validation against ground truth."""
 
     true_positives: int
     false_positives: int
@@ -44,6 +70,8 @@ class ValidationResult:
     patterns_detected: frozenset[str]  # distinct rule names that fired on red-team activity
     total_events_processed: int
     total_alerts: int
+    per_family: dict[str, FamilyMetrics] = field(default_factory=dict)
+    scope_label: str = DEFAULT_SCOPE_LABEL
 
 
 # ---------------------------------------------------------------------------
