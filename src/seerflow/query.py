@@ -152,6 +152,17 @@ async def run_query_alerts(storage: StorageBackend, args: argparse.Namespace) ->
             )
             return
 
+    if args.technique is not None:
+        from seerflow.sigma.attack import is_valid_technique
+
+        if not is_valid_technique(args.technique):
+            print(
+                f"Error: invalid technique '{args.technique}'. "
+                "Expected a MITRE technique ID like 'T1059' or 'T1059.001'.",
+                file=sys.stderr,
+            )
+            return
+
     if args.severity is not None and not (0 <= args.severity <= 6):
         print(
             f"Error: --severity must be between 0 and 6, got {args.severity}",
