@@ -33,6 +33,18 @@ _log = logging.getLogger("seerflow")
 _ALERT_PAGE_SIZE = 1000
 """Page size for the post-run alert query. Mirrors export_cmd."""
 
+_ANALYZE_SOURCE_TYPE = "syslog"
+"""``source_type`` stamped on every analyzed ``RawEvent``.
+
+The bundled correlation rules and the live ``seerflow start`` syslog
+receiver both key on ``source_type == "syslog"`` (see
+``correlation/rules/*.yml`` and ``receivers/syslog.py``). Tagging analyzed
+captured logs the same way is what makes ``analyze`` exercise the *complete*
+detection stack identically to the live pipeline (FR-070 intent) rather than
+a degraded subset — unlike ``seerflow import`` which is ML-only by design and
+uses ``source_type="import"``.
+"""
+
 
 def _iter_raw_events(paths: list[str], *, stdin: TextIO) -> Iterator[RawEvent]:
     """Yield ``RawEvent``s from expanded file paths and/or stdin.
@@ -58,7 +70,7 @@ def _iter_raw_events(paths: list[str], *, stdin: TextIO) -> Iterator[RawEvent]:
                         continue
                     yield RawEvent(
                         data=text.encode("utf-8"),
-                        source_type="analyze",
+                        source_type=_ANALYZE_SOURCE_TYPE,
                         source_id=str(file_path),
                         received_ns=time.time_ns(),
                         metadata={},
@@ -74,7 +86,7 @@ def _iter_raw_events(paths: list[str], *, stdin: TextIO) -> Iterator[RawEvent]:
                 continue
             yield RawEvent(
                 data=text.encode("utf-8"),
-                source_type="analyze",
+                source_type=_ANALYZE_SOURCE_TYPE,
                 source_id="-",
                 received_ns=time.time_ns(),
                 metadata={},
@@ -164,6 +176,14 @@ async def run_analyze(args: argparse.Namespace) -> int:
     from seerflow.config import load_config
     from seerflow.storage import connect_storage
 
+    # Capture the run watermark BEFORE materializing events: each RawEvent is
+    # stamped with ``received_ns=time.time_ns()`` as it is read, and the
+    # normalizer derives an event's ``timestamp_ns`` from that received time
+    # for logs without a parseable timestamp. Capturing the watermark after
+    # reading would place the alert-query window *after* the alerts and emit
+    # nothing.
+    run_start_ns = time.time_ns()
+
     raw_events = list(_iter_raw_events(args.paths, stdin=sys.stdin))
     if not raw_events:
         print("Error: no readable input (no files matched and no stdin)", file=sys.stderr)
@@ -179,7 +199,6 @@ async def run_analyze(args: argparse.Namespace) -> int:
     storage_config = _storage_config_for(config, persist=args.persist, db=args.db)
     storage = await connect_storage(storage_config)
 
-    run_start_ns = time.time_ns()
     rc = 0
     async with AsyncExitStack() as stack:
         stack.push_async_callback(storage.close)

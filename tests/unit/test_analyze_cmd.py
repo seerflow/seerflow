@@ -53,7 +53,9 @@ class TestIterRawEvents:
         f.write_text("line one\nline two\n\n")
         events = list(_iter_raw_events([str(f)], stdin=io.StringIO("")))
         assert [e.data for e in events] == [b"line one", b"line two"]
-        assert all(e.source_type == "analyze" for e in events)
+        # analyze tags events as the live syslog receiver does so the bundled
+        # correlation/Sigma stack fires identically to the live pipeline.
+        assert all(e.source_type == "syslog" for e in events)
 
     def test_reads_stdin_on_dash(self, tmp_path: Path) -> None:
         from seerflow.analyze_cmd import _iter_raw_events
