@@ -89,6 +89,49 @@ async def _build_threat_intel(
     return taxii_manager, ioc_matcher, ioc_enrichment_counters, taxii_failed
 
 
+def _build_correlation_stack(
+    config: SeerflowConfig,
+    window_buffer: Any,
+    sigma_engine: Any,
+) -> tuple[Any, Any, asyncio.Task[Any]]:
+    """Correlation rules/engine + sigma & correlation holders + reloader task.
+
+    Reproduces run.py:616-653 (==assembly.py:233-260). Returns
+    ``(sigma_holder, correlation_holder, reload_task)`` — the only objects
+    ``make_handler`` and the lifecycle list consume. The intermediate
+    ``correlation_rules``/``correlation_engine`` are local to this build
+    (they were never read again in the original inline block).
+    """
+    from seerflow.correlation.bundled import get_bundled_rule_dir
+    from seerflow.correlation.engine import CorrelationEngine
+    from seerflow.correlation.holders import EngineHolder
+    from seerflow.correlation.reloader import RuleReloader
+    from seerflow.correlation.rule_loader import load_correlation_rules
+
+    bundled_dir = str(get_bundled_rule_dir())
+    rule_dirs = (bundled_dir, *config.correlation.rule_dirs)
+    correlation_rules = load_correlation_rules(rule_dirs)
+    _log.info(
+        "Correlation: loaded %d rules from %d dirs",
+        len(correlation_rules),
+        len(rule_dirs),
+    )
+    correlation_engine = CorrelationEngine(rules=correlation_rules, window=window_buffer)
+    _log.info("Correlation engine: %d rules loaded", len(correlation_rules))
+
+    sigma_holder = EngineHolder(engine=sigma_engine)
+    correlation_holder: EngineHolder[CorrelationEngine | None] = EngineHolder(
+        engine=correlation_engine
+    )
+    reloader = RuleReloader(
+        correlation_holder=correlation_holder,
+        correlation_dirs=[bundled_dir, *config.correlation.rule_dirs],
+        window_buffer=window_buffer,
+    )
+    reload_task = asyncio.create_task(reloader.watch())
+    return sigma_holder, correlation_holder, reload_task
+
+
 async def assemble_handler(
     config: SeerflowConfig,
     storage: StorageBackend,
@@ -231,33 +274,9 @@ async def assemble_handler(
     )
 
     # --- Correlation rules + engine + holder + reloader (run.py:616-653) ---
-    from seerflow.correlation.bundled import get_bundled_rule_dir
-    from seerflow.correlation.engine import CorrelationEngine
-    from seerflow.correlation.holders import EngineHolder
-    from seerflow.correlation.reloader import RuleReloader
-    from seerflow.correlation.rule_loader import load_correlation_rules
-
-    bundled_dir = str(get_bundled_rule_dir())
-    rule_dirs = (bundled_dir, *config.correlation.rule_dirs)
-    correlation_rules = load_correlation_rules(rule_dirs)
-    _log.info(
-        "Correlation: loaded %d rules from %d dirs",
-        len(correlation_rules),
-        len(rule_dirs),
+    sigma_holder, correlation_holder, reload_task = _build_correlation_stack(
+        config, window_buffer, sigma_engine
     )
-    correlation_engine = CorrelationEngine(rules=correlation_rules, window=window_buffer)
-    _log.info("Correlation engine: %d rules loaded", len(correlation_rules))
-
-    sigma_holder = EngineHolder(engine=sigma_engine)
-    correlation_holder: EngineHolder[CorrelationEngine | None] = EngineHolder(
-        engine=correlation_engine
-    )
-    reloader = RuleReloader(
-        correlation_holder=correlation_holder,
-        correlation_dirs=[bundled_dir, *config.correlation.rule_dirs],
-        window_buffer=window_buffer,
-    )
-    reload_task = asyncio.create_task(reloader.watch())
 
     # --- Per-stage latency tracker (run.py:740) ---
     from seerflow.api.latency import StageLatencyTracker
