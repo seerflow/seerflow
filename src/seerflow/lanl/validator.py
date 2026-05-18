@@ -190,6 +190,34 @@ def compute_metrics(
 
     patterns_detected = frozenset(a.rule_name for a in tp_alerts)
 
+    # Per-detector-family breakdown (FR-073 AC4). Families with no alerts at
+    # all are skipped so the dict only carries detectors that actually fired.
+    families = ("ml", "sigma", "correlation", "ueba", "ioc")
+    per_family: dict[str, FamilyMetrics] = {}
+    for fam in families:
+        fam_tp = [a for a in tp_alerts if a.alert_type == fam]
+        fam_fp = [a for a in fp_alerts if a.alert_type == fam]
+        n_ftp = len(fam_tp)
+        n_ffp = len(fam_fp)
+        if n_ftp == 0 and n_ffp == 0:
+            continue
+        f_precision = n_ftp / (n_ftp + n_ffp) if (n_ftp + n_ffp) > 0 else 0.0
+        f_recall = 1.0 if n_ftp > 0 else 0.0
+        f_f1 = (
+            2 * f_precision * f_recall / (f_precision + f_recall)
+            if (f_precision + f_recall) > 0
+            else 0.0
+        )
+        per_family[fam] = FamilyMetrics(
+            true_positives=n_ftp,
+            false_positives=n_ffp,
+            false_negatives=0,
+            precision=f_precision,
+            recall=f_recall,
+            f1_score=f_f1,
+            total_alerts=n_ftp + n_ffp,
+        )
+
     return ValidationResult(
         true_positives=n_tp,
         false_positives=n_fp,
@@ -202,6 +230,7 @@ def compute_metrics(
         patterns_detected=patterns_detected,
         total_events_processed=events_processed,
         total_alerts=len(alerts),
+        per_family=per_family,
     )
 
 

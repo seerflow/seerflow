@@ -524,3 +524,44 @@ def test_validation_result_has_per_family_and_scope_label(compute_metrics):
     assert result.per_family == {}
     assert isinstance(result.scope_label, str)
     assert result.scope_label  # non-empty default
+
+
+def test_compute_metrics_buckets_per_family(compute_metrics):
+    """Alerts are bucketed by alert_type into per_family sub-metrics."""
+
+    def alert(alert_id, alert_type):
+        import msgspec.structs
+
+        return msgspec.structs.replace(_make_alert(alert_id=alert_id), alert_type=alert_type)
+
+    tp = [alert("1", "correlation"), alert("2", "ml"), alert("3", "ml")]
+    fp = [alert("fp1", "sigma")]
+    result = compute_metrics(
+        tp_alerts=tp,
+        fp_alerts=fp,
+        missed_redteam=[],
+        alerts=tp + fp,
+        events_processed=10,
+        detection_latencies={},
+    )
+    assert set(result.per_family) == {"correlation", "ml", "sigma"}
+    assert result.per_family["ml"].true_positives == 2
+    assert result.per_family["ml"].total_alerts == 2
+    assert result.per_family["ml"].precision == pytest.approx(1.0)
+    assert result.per_family["sigma"].false_positives == 1
+    assert result.per_family["sigma"].precision == 0.0
+    assert result.per_family["sigma"].recall == 0.0
+    assert result.per_family["correlation"].true_positives == 1
+
+
+def test_compute_metrics_per_family_empty_when_no_alerts(compute_metrics):
+    """No alerts → per_family is empty (families without alerts are skipped)."""
+    result = compute_metrics(
+        tp_alerts=[],
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=[],
+        events_processed=0,
+        detection_latencies={},
+    )
+    assert result.per_family == {}
