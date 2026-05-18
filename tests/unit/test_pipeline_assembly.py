@@ -142,3 +142,46 @@ async def test_default_config_wiring_is_pinned(
     assert kw["alerting_config"] is config.alerting
 
     await result.teardown()
+
+
+@pytest.mark.unit
+async def test_inverted_flags_wiring_is_pinned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UEBA off + kill-chain off + IoC matcher on → pin the opposite branch
+    of every flag-gated make_handler slot. Mirrors S-301
+    test_inverted_flags_wiring_is_pinned."""
+    import seerflow.pipeline.assembly as asm_mod
+    from seerflow.config import (
+        DetectionConfig,
+        IoCMatcherConfig,
+        KillChainConfig,
+        ThreatIntelConfig,
+        UEBAConfig,
+    )
+
+    ioc_sentinel = MagicMock(name="IoCMatcher")
+    ioc_sentinel.start = AsyncMock()
+    ioc_sentinel.stop = AsyncMock()
+    ioc_sentinel.on_snapshot_updated = MagicMock()
+    monkeypatch.setattr(asm_mod, "IoCMatcher", MagicMock(return_value=ioc_sentinel))
+
+    config = SeerflowConfig(
+        storage=StorageConfig(),
+        alerting=AlertingConfig(),
+        ueba=UEBAConfig(enabled=False),
+        detection=DetectionConfig(kill_chain=KillChainConfig(enabled=False)),
+        threat_intel=ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True)),
+        shutdown_timeout_s=1.0,
+    )
+    spy, _ensemble, _storage, result = await _assemble_and_capture(monkeypatch, config)
+
+    assert spy.call_count == 1
+    kw = spy.call_args.kwargs
+
+    assert kw["baseline_store"] is None
+    assert kw["ueba_engine"] is None
+    assert kw["kill_chain_tracker"] is None
+    assert kw["ioc_matcher"] is ioc_sentinel
+
+    await result.teardown()
