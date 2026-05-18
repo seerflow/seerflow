@@ -198,7 +198,7 @@ async def test_teardown_is_idempotent_and_does_not_close_storage(
         alerting=AlertingConfig(),
         shutdown_timeout_s=1.0,
     )
-    spy, _ensemble, storage, result = await _assemble_and_capture(monkeypatch, config)
+    _spy, _ensemble, storage, result = await _assemble_and_capture(monkeypatch, config)
 
     # rule reloader task is always present in lifecycle
     assert len(result.lifecycle) == 1

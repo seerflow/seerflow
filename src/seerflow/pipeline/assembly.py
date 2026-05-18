@@ -64,9 +64,9 @@ async def assemble_handler(
 ) -> AssembledHandler:
     """Build the full-stack ``make_handler(...)`` wiring (no receivers/API).
 
-    Reproduces ``run.py::_run_with_config`` lines 440–901 minus storage
+    Reproduces ``run.py::_run_with_config`` lines 440-901 minus storage
     connect, receivers, signal handlers, FastAPI/uvicorn, LLM/services and
-    the metrics provider. Same construction, same order — the S-301
+    the metrics provider. Same construction, same order - the S-301
     characterization test pins the live side; ``test_pipeline_assembly``
     pins this side (``ws_manager`` is ``None`` here by design).
     """
@@ -112,9 +112,7 @@ async def assemble_handler(
             warmup_days=config.ueba.warmup_days,
             warmup_min_events=config.ueba.warmup_min_events,
         )
-        baseline_store = BaselineStore(
-            params=ueba_params, max_entities=config.ueba.max_entities
-        )
+        baseline_store = BaselineStore(params=ueba_params, max_entities=config.ueba.max_entities)
         try:
             restored = await baseline_store.restore(storage)
             _log.info("UEBA: restored %d baselines", restored)
