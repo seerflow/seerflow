@@ -652,3 +652,27 @@ def test_rebased_shifts_received_ns(validator):
     assert shifted.received_ns == 1_500
     assert shifted.data == b"x"
     assert raw.received_ns == 1_000  # original unchanged (immutable)
+
+
+# ---------------------------------------------------------------------------
+# S-305: run_validation_async driver + sync wrapper (AC1/AC3/AC6)
+# ---------------------------------------------------------------------------
+
+
+def test_run_validation_async_exists_and_is_coroutine(validator):
+    import inspect
+
+    assert hasattr(validator, "run_validation_async")
+    assert inspect.iscoroutinefunction(validator.run_validation_async)
+
+
+def test_run_validation_no_longer_constructs_correlation_engine_directly(validator):
+    """AC1/AC6: validator.py must not build CorrelationEngine itself."""
+    import inspect
+
+    src = inspect.getsource(validator)
+    assert "CorrelationEngine(" not in src, (
+        "validator.py constructs CorrelationEngine directly — must route "
+        "through assemble_handler (FR-073 AC1/AC6)"
+    )
+    assert "assemble_handler" in src

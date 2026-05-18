@@ -338,21 +338,26 @@ def _rebased(raw: RawEvent, offset_ns: int) -> RawEvent:
 # ---------------------------------------------------------------------------
 
 
-def run_validation(fixtures_dir: Path) -> ValidationResult:
-    """Run the full correlation validation pipeline on LANL CSV fixtures.
+async def run_validation_async(fixtures_dir: Path) -> ValidationResult:
+    """Full-stack LANL validation via the S-302 ``assemble_handler`` seam.
 
-    Orchestration steps:
+    Routes time-rebased :class:`~seerflow.receivers.base.RawEvent`\\ s through
+    the identical detection wiring as live ``seerflow start`` (Drain3 → ML →
+    Sigma → UEBA → IoC → correlation), reads the persisted alerts back from
+    SQLite, and scores them against the red-team ground truth — per detector
+    family and combined (FR-073).
 
-    1. Parse all CSV files from ``fixtures_dir`` (auth.csv, proc.csv,
-       flows.csv, redteam.csv).
-    2. Convert all records to SeerflowEvents using the converter functions.
-    3. Sort all events by timestamp_ns.
-    4. Load built-in correlation rules.
-    5. Create ``EntityWindowBuffer`` (30-minute window) and ``CorrelationEngine``.
-    6. Feed events chronologically: resolve entity refs, add to window,
-       evaluate rules, collect alerts.
-    7. Match alerts against ground truth.
-    8. Compute and return :class:`ValidationResult`.
+    Orchestration:
+
+    1. Parse the four LANL CSV files from ``fixtures_dir``.
+    2. Build one textual ``RawEvent`` per record (Drain3 + entity extraction
+       run inside the handler — functional review §A.5/§A.9).
+    3. Time-rebase so the latest event sits 60 s before wall-clock ``now``
+       (the ``EntityWindowBuffer`` lazy-prunes; LANL synthetic timestamps are
+       decades old). Apply the same offset to ``RedTeamRecord.time``.
+    4. ``connect_storage`` (temp SQLite) → ``assemble_handler`` → feed every
+       ``RawEvent`` chronologically → ``teardown`` → ``query_alerts``.
+    5. Match alerts vs ground truth and compute per-family + combined metrics.
 
     Args:
         fixtures_dir: Directory containing auth.csv, proc.csv, flows.csv,
@@ -361,18 +366,9 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     Returns:
         A frozen :class:`ValidationResult`.
     """
-    import msgspec.structs
+    import tempfile
 
-    from seerflow.correlation.bundled import get_bundled_rule_dir
-    from seerflow.correlation.engine import CorrelationEngine
-    from seerflow.correlation.rule_loader import load_correlation_rules
-    from seerflow.correlation.window import EntityWindowBuffer
-    from seerflow.lanl.converter import (
-        convert_auth_record,
-        convert_flow_record,
-        convert_proc_record,
-    )
-    from seerflow.lanl.hostmap import host_to_ip as _host_to_ip
+    from seerflow.config import SeerflowConfig, StorageConfig
     from seerflow.lanl.parser import (
         RedTeamRecord,
         parse_auth_line,
@@ -380,8 +376,9 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
         parse_proc_line,
         parse_redteam_line,
     )
-    from seerflow.models.entity import normalize_username as _norm_user
-    from seerflow.models.entity import resolve_entities
+    from seerflow.models.query import AlertQuery
+    from seerflow.pipeline.assembly import assemble_handler
+    from seerflow.storage import connect_storage
 
     # ------------------------------------------------------------------
     # 1. Parse CSV files
@@ -399,143 +396,96 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     redteam_records = [parse_redteam_line(ln) for ln in _read_lines("redteam.csv")]
 
     # ------------------------------------------------------------------
-    # 2. Convert to SeerflowEvents
+    # 2. Build textual RawEvents (one per record) — §A.5/§A.9
     # ------------------------------------------------------------------
 
-    all_events = []
-    for auth_rec in auth_records:
-        all_events.extend(convert_auth_record(auth_rec))
-    for proc_rec in proc_records:
-        all_events.extend(convert_proc_record(proc_rec))
-    for flow_rec in flow_records:
-        all_events.extend(convert_flow_record(flow_rec))
+    raw_events = _build_raw_events(auth_records, proc_records, flow_records)
 
-    # ------------------------------------------------------------------
-    # 3. Time-shift events to be "recent"
-    # ------------------------------------------------------------------
-    # The EntityWindowBuffer lazy-prunes events older than wall-clock
-    # minus window_ns.  LANL synthetic timestamps (100, 200 ...) are
-    # decades in the past, so they'd be pruned instantly.  Shift all
-    # events so the latest one sits 60 seconds before "now".
-
-    if all_events:
-        max_ts = max(e.timestamp_ns for e in all_events)
-        now_ns = time_mod.time_ns()
-        offset_ns = now_ns - max_ts - 60_000_000_000  # 60 s headroom
-        all_events = [
-            msgspec.structs.replace(
-                e,
-                timestamp_ns=e.timestamp_ns + offset_ns,
-                observed_ns=e.observed_ns + offset_ns,
-            )
-            for e in all_events
-        ]
-        # Also shift redteam record times so ground-truth matching works
-        offset_s = offset_ns // 1_000_000_000
-        redteam_records = [
-            RedTeamRecord(
-                time=rt.time + offset_s,
-                user=rt.user,
-                src_computer=rt.src_computer,
-                dst_computer=rt.dst_computer,
-            )
-            for rt in redteam_records
-        ]
-
-    # ------------------------------------------------------------------
-    # 3b. Sort chronologically
-    # ------------------------------------------------------------------
-
-    all_events.sort(key=lambda e: e.timestamp_ns)
-
-    # ------------------------------------------------------------------
-    # 4. Load correlation rules
-    # ------------------------------------------------------------------
-
-    rule_dir = get_bundled_rule_dir()
-    rules = load_correlation_rules([str(rule_dir)])
-    _log.debug("Loaded %d correlation rules from %s", len(rules), rule_dir)
-
-    # ------------------------------------------------------------------
-    # 5. Set up engine and window
-    # ------------------------------------------------------------------
-
-    window_ns = 1800 * 1_000_000_000  # 30 minutes in ns
-    window = EntityWindowBuffer(window_ns=window_ns, max_events=10_000)
-    engine = CorrelationEngine(rules, window)
-
-    # Build a lookup of first red-team timestamp per entity for latency calc
-    # Maps normalized entity name → earliest redteam time (seconds)
-    # Include both hostnames and derived IPs so ip-typed alerts match.
-    redteam_first_seen: dict[str, int] = {}
-    for rt_rec in redteam_records:
-        if rt_rec.user != "?":
-            norm_user, _ = _norm_user(rt_rec.user)
-            if norm_user not in redteam_first_seen:
-                redteam_first_seen[norm_user] = rt_rec.time
-        for computer in (rt_rec.src_computer, rt_rec.dst_computer):
-            key = computer.lower()
-            if key not in redteam_first_seen:
-                redteam_first_seen[key] = rt_rec.time
-            try:
-                ip_key = _host_to_ip(computer)
-                if ip_key not in redteam_first_seen:
-                    redteam_first_seen[ip_key] = rt_rec.time
-            except (ValueError, TypeError):
-                pass
-
-    # ------------------------------------------------------------------
-    # 6. Process events and collect alerts
-    # ------------------------------------------------------------------
-
-    all_alerts: list[Alert] = []
-    # Maps rule_name → list of latency values in seconds
-    latency_buckets: dict[str, list[float]] = {}
-
-    for event in all_events:
-        entity_refs = resolve_entities(
-            event.related_ips,
-            event.related_users,
-            event.related_hosts,
+    if not raw_events:
+        return compute_metrics(
+            tp_alerts=[],
+            fp_alerts=[],
+            missed_redteam=redteam_records,
+            alerts=[],
+            events_processed=0,
+            detection_latencies={},
         )
-        for ref in entity_refs:
-            window.add_event(ref, event)
-
-        fired = engine.evaluate(event, entity_refs)
-        for alert in fired:
-            all_alerts.append(alert)
-            # Compute detection latency relative to first redteam event for entity
-            entity_key = alert.entity_value.lower().strip()
-            first_rt = redteam_first_seen.get(entity_key)
-            if first_rt is not None:
-                latency = (alert.timestamp_ns // 1_000_000_000) - first_rt
-                latency_buckets.setdefault(alert.rule_name, []).append(float(latency))
-
-    # Average latencies per rule
-    detection_latencies: dict[str, float] = {
-        rule_name: sum(vals) / len(vals) for rule_name, vals in latency_buckets.items() if vals
-    }
 
     # ------------------------------------------------------------------
-    # 7. Match against ground truth
+    # 3. Time-rebase so the latest event sits 60 s before "now"
     # ------------------------------------------------------------------
 
-    # Use a generous matching window (5 minutes) because correlation rules
-    # accumulate evidence over their temporal windows before firing.  An
-    # alert may fire several minutes after the first red-team indicator.
+    max_ts = max(r.received_ns for r in raw_events)
+    offset_ns = time_mod.time_ns() - max_ts - 60_000_000_000  # 60 s headroom
+    raw_events = sorted(
+        (_rebased(r, offset_ns) for r in raw_events),
+        key=lambda r: r.received_ns,
+    )
+    offset_s = offset_ns // 1_000_000_000
+    redteam_records = [
+        RedTeamRecord(
+            time=rt.time + offset_s,
+            user=rt.user,
+            src_computer=rt.src_computer,
+            dst_computer=rt.dst_computer,
+        )
+        for rt in redteam_records
+    ]
+
+    # ------------------------------------------------------------------
+    # 4. Drive the full detection stack via assemble_handler
+    # ------------------------------------------------------------------
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=f"{tmpdir}/lanl.db")
+        storage = await connect_storage(storage_cfg)
+        try:
+            config = SeerflowConfig()
+            # capture_sink=None: the harness reads alerts back from the
+            # AlertStore (the same persistence `seerflow analyze --persist`
+            # produces); the assemble_handler capture_sink seam is S-303's.
+            assembled = await assemble_handler(config, storage)
+            try:
+                for raw in raw_events:
+                    await assembled.handler(raw)
+            finally:
+                await assembled.teardown()
+            await storage.flush()
+            page = await storage.query_alerts(AlertQuery(limit=10_000))
+            all_alerts: list[Alert] = list(page.items)
+        finally:
+            await storage.close()
+
+    # ------------------------------------------------------------------
+    # 5. Match against ground truth + compute metrics
+    # ------------------------------------------------------------------
+
+    # Generous 5-minute matching window: detectors accumulate evidence over
+    # their temporal windows before firing, so an alert may land minutes
+    # after the first red-team indicator.
     tp_alerts, fp_alerts, missed = match_against_ground_truth(
         all_alerts, redteam_records, time_window_s=300
     )
-
-    # ------------------------------------------------------------------
-    # 8. Compute and return metrics
-    # ------------------------------------------------------------------
 
     return compute_metrics(
         tp_alerts=tp_alerts,
         fp_alerts=fp_alerts,
         missed_redteam=missed,
         alerts=all_alerts,
-        events_processed=len(all_events),
-        detection_latencies=detection_latencies,
+        events_processed=len(raw_events),
+        detection_latencies={},
     )
+
+
+def run_validation(fixtures_dir: Path) -> ValidationResult:
+    """Synchronous entry point — wraps the async full-stack driver.
+
+    The public signature is unchanged so existing callers (tests,
+    ``report._main``) keep working. Internally delegates to
+    :func:`run_validation_async` via ``asyncio.run`` (functional review §A.7 —
+    the agreed pattern for the now-async harness). For callers already inside
+    an event loop, await :func:`run_validation_async` directly.
+    """
+    import asyncio
+
+    return asyncio.run(run_validation_async(fixtures_dir))
