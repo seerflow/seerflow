@@ -22,9 +22,7 @@ _REAL_RESOLVER_MODULES = frozenset({"test_dns.py"})
 
 
 @pytest.fixture(autouse=True)
-def _bypass_dns_guard(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _bypass_dns_guard(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     if request.path.name in _REAL_RESOLVER_MODULES:
         return
     apply_dns_guard_bypass(monkeypatch)

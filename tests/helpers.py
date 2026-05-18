@@ -8,11 +8,12 @@ import textwrap
 import time
 import uuid
 from pathlib import Path
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from seerflow.models.event import SeerflowEvent, SeverityLevel
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def make_event(
