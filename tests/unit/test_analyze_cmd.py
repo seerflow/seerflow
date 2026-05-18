@@ -78,3 +78,83 @@ class TestIterRawEvents:
         with caplog.at_level(logging.WARNING, logger="seerflow"):
             events = list(_iter_raw_events([str(missing)], stdin=io.StringIO("")))
         assert events == []
+
+
+class TestStorageConfigFor:
+    def test_no_persist_is_in_memory(self) -> None:
+        from seerflow.analyze_cmd import _storage_config_for
+        from seerflow.config import SeerflowConfig
+
+        cfg = _storage_config_for(SeerflowConfig(), persist=False, db=None)
+        assert cfg.backend == "sqlite"
+        assert cfg.sqlite_path == ":memory:"
+
+    def test_persist_uses_config_storage(self) -> None:
+        from seerflow.analyze_cmd import _storage_config_for
+        from seerflow.config import SeerflowConfig
+
+        base = SeerflowConfig()
+        cfg = _storage_config_for(base, persist=True, db=None)
+        assert cfg is base.storage
+
+    def test_persist_db_override(self) -> None:
+        from seerflow.analyze_cmd import _storage_config_for
+        from seerflow.config import SeerflowConfig
+
+        cfg = _storage_config_for(SeerflowConfig(), persist=True, db="/tmp/x.db")  # noqa: S108
+        assert cfg.sqlite_path == "/tmp/x.db"  # noqa: S108
+        assert cfg.backend == "sqlite"
+
+
+class TestEmitAlertsNdjson:
+    async def test_writes_one_json_object_per_alert(self, tmp_path: Path) -> None:
+        import msgspec.json
+
+        from seerflow.analyze_cmd import _emit_alerts_ndjson
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.storage import connect_storage
+
+        storage = await connect_storage(
+            StorageConfig(backend="sqlite", sqlite_path=":memory:", data_dir=str(tmp_path))
+        )
+        try:
+            start_ns = time.time_ns()
+            alert = Alert(
+                alert_id="00000000-0000-0000-0000-000000000001",
+                alert_type="ml",
+                timestamp_ns=start_ns + 1000,
+                severity_id=SeverityLevel.ERROR,
+                rule_name="hst-anomaly",
+                description="test",
+                entity_uuid="00000000-0000-0000-0000-0000000000aa",
+                entity_type="ip",
+                entity_value="10.0.0.1",
+                contributing_events=(),
+            )
+            await storage.write_alert(alert, dedup_window_ns=0)
+            buf = io.StringIO()
+            count = await _emit_alerts_ndjson(storage, buf, start_ns)
+            assert count == 1
+            obj = msgspec.json.decode(buf.getvalue().strip())
+            assert obj["type"] == "ml"
+            assert obj["alert_id"] == alert.alert_id
+        finally:
+            await storage.close()
+
+    async def test_zero_alerts_writes_nothing(self, tmp_path: Path) -> None:
+        from seerflow.analyze_cmd import _emit_alerts_ndjson
+        from seerflow.config import StorageConfig
+        from seerflow.storage import connect_storage
+
+        storage = await connect_storage(
+            StorageConfig(backend="sqlite", sqlite_path=":memory:", data_dir=str(tmp_path))
+        )
+        try:
+            buf = io.StringIO()
+            count = await _emit_alerts_ndjson(storage, buf, time.time_ns())
+            assert count == 0
+            assert buf.getvalue() == ""
+        finally:
+            await storage.close()

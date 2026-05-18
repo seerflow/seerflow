@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
 from seerflow.import_cmd import expand_paths, is_binary, open_log
@@ -17,9 +18,15 @@ from seerflow.import_cmd import expand_paths, is_binary, open_log
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from seerflow.config import SeerflowConfig
+    from seerflow.config import StorageConfig as _StorageConfigT
     from seerflow.receivers.base import RawEvent
+    from seerflow.storage.factory import StorageBackend
 
 _log = logging.getLogger("seerflow")
+
+_ALERT_PAGE_SIZE = 1000
+"""Page size for the post-run alert query. Mirrors export_cmd."""
 
 
 def _iter_raw_events(paths: list[str], *, stdin: TextIO) -> Iterator[RawEvent]:
@@ -67,3 +74,60 @@ def _iter_raw_events(paths: list[str], *, stdin: TextIO) -> Iterator[RawEvent]:
                 received_ns=time.time_ns(),
                 metadata={},
             )
+
+
+def _storage_config_for(
+    config: SeerflowConfig, *, persist: bool, db: str | None
+) -> _StorageConfigT:
+    """Resolve the storage config for this run.
+
+    ``--no-persist`` (default) → in-memory SQLite (nothing hits disk).
+    ``--persist`` → the configured backend, with an optional ``--db``
+    sqlite-path override (mirrors ``seerflow import``).
+    """
+    from seerflow.config import StorageConfig
+
+    if not persist:
+        return StorageConfig(backend="sqlite", sqlite_path=":memory:", data_dir="")
+    if db is not None:
+        return StorageConfig(
+            backend="sqlite",
+            data_dir=str(Path(db).parent),
+            sqlite_path=db,
+        )
+    return config.storage
+
+
+async def _emit_alerts_ndjson(
+    storage: StorageBackend,
+    stream: TextIO,
+    run_start_ns: int,
+) -> int:
+    """Write every alert stored on/after ``run_start_ns`` as NDJSON.
+
+    Pages ``storage.query_alerts`` over a ``[run_start_ns, now]`` window
+    (capture-via-query: the handler persists alerts during the run).
+    Reuses ``export_cmd._alert_to_json_dict`` for an identical JSON shape.
+    Returns the number of alert lines written.
+    """
+    import msgspec.json
+
+    from seerflow.export_cmd import _alert_to_json_dict
+    from seerflow.models.query import AlertQuery, TimeRange
+
+    window = TimeRange(start_ns=run_start_ns, end_ns=time.time_ns())
+    emitted = 0
+    page = 1
+    while True:
+        result = await storage.query_alerts(
+            AlertQuery(time_range=window, page=page, limit=_ALERT_PAGE_SIZE)
+        )
+        if not result.items:
+            return emitted
+        for alert in result.items:
+            stream.write(msgspec.json.encode(_alert_to_json_dict(alert)).decode("utf-8"))
+            stream.write("\n")
+            emitted += 1
+        if not result.has_next:
+            return emitted
+        page += 1
