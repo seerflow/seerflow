@@ -230,3 +230,29 @@ class TestRunAnalyze:
             rc = await run_analyze(_ns(paths=[str(f)]))
         assert rc == 1
         teardown.assert_awaited()
+
+
+class TestMainDispatch:
+    def test_analyze_command_dispatches(self, tmp_path: Path) -> None:
+        import sys as _sys
+
+        f = tmp_path / "d.log"
+        f.write_text("hi\n")
+
+        called: dict[str, object] = {}
+
+        async def fake_run(args: object) -> int:
+            called["paths"] = args.paths  # type: ignore[attr-defined]
+            return 0
+
+        argv = ["seerflow", "analyze", str(f)]
+        with (
+            patch.object(_sys, "argv", argv),
+            patch("seerflow.analyze_cmd.run_analyze", side_effect=fake_run),
+            patch.object(_sys, "exit") as sys_exit,
+        ):
+            from seerflow.__main__ import main
+
+            main()
+        assert called["paths"] == [str(f)]
+        sys_exit.assert_called_once_with(0)
