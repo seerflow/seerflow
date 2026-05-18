@@ -17,7 +17,7 @@ import contextlib
 import logging
 import ssl as _ssl
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from seerflow.detection.ensemble import DetectionEnsemble
 from seerflow.pipeline.handler import make_handler
@@ -27,6 +27,7 @@ from seerflow.threat_intel.enricher import _IoCEnrichmentCounters
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from seerflow.api.ws import ConnectionManager
     from seerflow.config import SeerflowConfig
     from seerflow.receivers.base import RawEvent
     from seerflow.storage.factory import StorageBackend
@@ -34,6 +35,28 @@ if TYPE_CHECKING:
     from seerflow.ueba.store import BaselineStore
 
 _log = logging.getLogger("seerflow")
+
+
+@dataclass(frozen=True, slots=True)
+class AssembledEngines:
+    """Introspection handles the live caller (S-304) needs for the FastAPI
+    app + metrics provider + shutdown drain.
+
+    S-303 ``analyze_cmd`` and S-305 (LANL) ignore this entirely — they only
+    drive ``handler`` and call ``teardown``. Bundling these here (additive,
+    behaviour-preserving for existing consumers) lets ``_run_with_config``
+    consume the shared factory without rebuilding any engine, which is the
+    S-302/S-304 reconciliation the Carried-Over Note designates S-304 to do.
+    """
+
+    ensemble: Any
+    baseline_store: Any | None
+    ueba_engine: Any | None
+    sigma_engine: Any | None
+    correlation_rules: tuple[Any, ...]
+    taxii_manager: Any
+    ioc_matcher: Any | None
+    ioc_enrichment_counters: Any | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,29 +71,32 @@ class AssembledHandler:
                          uvicorn (none built).
     - ``capture_sink`` — passthrough seam for S-303 (analyze/benchmark);
                          accepted but not yet wired into ``make_handler``.
+    - ``engines``     — S-304 introspection bundle for the live caller's
+                         FastAPI app / metrics / drain. Offline consumers
+                         (S-303/S-305) ignore it.
     """
 
     handler: Callable[[RawEvent], Awaitable[None]]
     lifecycle: tuple[asyncio.Task[Any], ...]
     teardown: Callable[[], Awaitable[None]]
     capture_sink: object | None
+    engines: AssembledEngines
 
 
-async def assemble_handler(
-    config: SeerflowConfig,
-    storage: StorageBackend,
-    *,
-    capture_sink: object | None = None,
-) -> AssembledHandler:
-    """Build the full-stack ``make_handler(...)`` wiring (no receivers/API).
+async def _build_threat_intel(
+    config: SeerflowConfig, storage: StorageBackend
+) -> tuple[
+    TAXIIFeedManager,
+    IoCMatcher | None,
+    _IoCEnrichmentCounters | None,
+    list[str],
+]:
+    """TAXII feed manager + IoC matcher + enrichment counters (run.py:440-471).
 
-    Reproduces ``run.py::_run_with_config`` lines 440-901 minus storage
-    connect, receivers, signal handlers, FastAPI/uvicorn, LLM/services and
-    the metrics provider. Same construction, same order - the S-301
-    characterization test pins the live side; ``test_pipeline_assembly``
-    pins this side (``ws_manager`` is ``None`` here by design).
+    Construction order is load-bearing: the IoC matcher's snapshot listener
+    is registered BEFORE ``taxii_manager.start()`` so any snapshot persisted
+    during the initial poll triggers a matcher rebuild.
     """
-    # --- TAXII feed manager + IoC matcher (run.py:440-471) ---
     taxii_manager = TAXIIFeedManager(config=config.threat_intel, model_store=storage)
     ioc_matcher: IoCMatcher | None = None
     if config.threat_intel.matcher.enabled:
@@ -87,6 +113,205 @@ async def assemble_handler(
         )
     elif config.threat_intel.enabled:
         _log.info("Threat intel: %d feed(s) running", len(taxii_manager.feed_ids()))
+    return taxii_manager, ioc_matcher, ioc_enrichment_counters, taxii_failed
+
+
+def _build_correlation_stack(
+    config: SeerflowConfig,
+    window_buffer: Any,
+    sigma_engine: Any,
+) -> tuple[Any, Any, asyncio.Task[Any], tuple[Any, ...]]:
+    """Correlation rules/engine + sigma & correlation holders + reloader task.
+
+    Reproduces run.py:616-653. Returns ``(sigma_holder, correlation_holder,
+    reload_task, correlation_rules)``. ``correlation_rules`` is surfaced for
+    the S-304 live caller's FastAPI app (run.py passed
+    ``correlation_rules=tuple(correlation_rules)`` to ``make_api_app``);
+    ``correlation_engine`` stays local (never read again in the original).
+    """
+    from seerflow.correlation.bundled import get_bundled_rule_dir
+    from seerflow.correlation.engine import CorrelationEngine
+    from seerflow.correlation.holders import EngineHolder
+    from seerflow.correlation.reloader import RuleReloader
+    from seerflow.correlation.rule_loader import load_correlation_rules
+
+    bundled_dir = str(get_bundled_rule_dir())
+    rule_dirs = (bundled_dir, *config.correlation.rule_dirs)
+    correlation_rules = load_correlation_rules(rule_dirs)
+    _log.info(
+        "Correlation: loaded %d rules from %d dirs",
+        len(correlation_rules),
+        len(rule_dirs),
+    )
+    correlation_engine = CorrelationEngine(rules=correlation_rules, window=window_buffer)
+    _log.info("Correlation engine: %d rules loaded", len(correlation_rules))
+
+    sigma_holder = EngineHolder(engine=sigma_engine)
+    correlation_holder: EngineHolder[CorrelationEngine | None] = EngineHolder(
+        engine=correlation_engine
+    )
+    reloader = RuleReloader(
+        correlation_holder=correlation_holder,
+        correlation_dirs=[bundled_dir, *config.correlation.rule_dirs],
+        window_buffer=window_buffer,
+    )
+    reload_task = asyncio.create_task(reloader.watch())
+    return sigma_holder, correlation_holder, reload_task, tuple(correlation_rules)
+
+
+async def _build_webhook_dispatcher(
+    config: SeerflowConfig,
+) -> tuple[Any, Any, asyncio.Task[None] | None]:
+    """Webhook dispatcher + channel session/router (run.py:804-837).
+
+    Returns ``(webhook_session, dispatcher, dispatcher_task)`` — all
+    ``None`` when no webhook targets and no notification router.
+    """
+    import aiohttp
+
+    from seerflow.alerting.dispatcher import (
+        AlertDispatcher,
+        build_webhook_delivery_targets,
+    )
+    from seerflow.pipeline.run import _build_channel_session_and_router
+
+    webhook_session: aiohttp.ClientSession | None = None
+    dispatcher: AlertDispatcher | None = None
+    _dispatcher_task: asyncio.Task[None] | None = None
+    webhook_targets = config.alerting.webhook_targets
+    channel_session, router = await _build_channel_session_and_router(config.alerting)
+    if webhook_targets or router is not None:
+        if channel_session is not None:
+            webhook_session = channel_session
+        else:
+            _webhook_connector = aiohttp.TCPConnector(
+                ssl=_ssl.create_default_context(),
+                limit_per_host=10,
+            )
+            webhook_session = aiohttp.ClientSession(connector=_webhook_connector)
+        dispatcher = AlertDispatcher(
+            webhook_targets,
+            webhook_session,
+            dashboard_url=config.alerting.dashboard_url,
+            router=router,
+        )
+        if router is not None and webhook_targets:
+            for adapter in build_webhook_delivery_targets(dispatcher):
+                router.register_target(adapter)
+        _dispatcher_task = asyncio.create_task(dispatcher.run())
+        _log.info(
+            "Alert dispatcher: %d webhook target(s), router=%s",
+            len(webhook_targets),
+            "enabled" if router is not None else "disabled",
+        )
+    return webhook_session, dispatcher, _dispatcher_task
+
+
+def _build_pagerduty_sink(
+    config: SeerflowConfig,
+) -> tuple[Any, asyncio.Task[None] | None, Any]:
+    """PagerDuty sink + session + run task (run.py:839-852)."""
+    import aiohttp
+
+    from seerflow.alerting.sinks.pagerduty import PagerDutySink
+
+    pd_sink: PagerDutySink | None = None
+    _pd_task: asyncio.Task[None] | None = None
+    pd_session: aiohttp.ClientSession | None = None
+    if config.alerting.pagerduty_routing_key:
+        _pd_connector = aiohttp.TCPConnector(
+            ssl=_ssl.create_default_context(),
+            limit_per_host=10,
+        )
+        pd_session = aiohttp.ClientSession(connector=_pd_connector)
+        pd_sink = PagerDutySink(config.alerting.pagerduty_routing_key, pd_session)
+        _pd_task = asyncio.create_task(pd_sink.run())
+        _log.info("PagerDuty sink: routing key configured")
+    return pd_sink, _pd_task, pd_session
+
+
+def _build_otlp_sink(
+    config: SeerflowConfig,
+) -> tuple[Any, asyncio.Task[None] | None]:
+    """OTLP sink + run task (run.py:854-874)."""
+    from seerflow.alerting.sinks.otlp import OtlpSink, masked_url
+
+    otlp_sink: OtlpSink | None = None
+    _otlp_task: asyncio.Task[None] | None = None
+    if config.alerting.otlp_endpoint:
+        otlp_sink = OtlpSink(
+            endpoint=config.alerting.otlp_endpoint,
+            protocol=config.alerting.otlp_protocol,
+            export_interval=config.alerting.otlp_export_interval_seconds,
+            tls=config.alerting.otlp_tls,
+            tls_ca_file=config.alerting.otlp_tls_ca_file,
+            mtls_cert_file=config.alerting.otlp_mtls_cert_file,
+            mtls_key_file=config.alerting.otlp_mtls_key_file,
+        )
+        _otlp_task = asyncio.create_task(otlp_sink.run())
+        _log.info(
+            "OTLP sink: %s via %s (interval=%ds)",
+            masked_url(config.alerting.otlp_endpoint),
+            config.alerting.otlp_protocol,
+            config.alerting.otlp_export_interval_seconds,
+        )
+    return otlp_sink, _otlp_task
+
+
+async def _build_alert_sinks(
+    config: SeerflowConfig,
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+    """Webhook dispatcher + PagerDuty + OTLP sinks (run.py:804-874).
+
+    Thin orchestrator over the three per-sink builders. Construction order
+    is preserved verbatim (webhook → PagerDuty → OTLP) so the S-301
+    characterization wiring is unchanged. Returns ``(webhook_session,
+    dispatcher, dispatcher_task, pd_sink, pd_task, pd_session, otlp_sink,
+    otlp_task)`` — any element ``None`` when not configured.
+    """
+    webhook_session, dispatcher, _dispatcher_task = await _build_webhook_dispatcher(config)
+    pd_sink, _pd_task, pd_session = _build_pagerduty_sink(config)
+    otlp_sink, _otlp_task = _build_otlp_sink(config)
+    return (
+        webhook_session,
+        dispatcher,
+        _dispatcher_task,
+        pd_sink,
+        _pd_task,
+        pd_session,
+        otlp_sink,
+        _otlp_task,
+    )
+
+
+async def assemble_handler(
+    config: SeerflowConfig,
+    storage: StorageBackend,
+    *,
+    capture_sink: object | None = None,
+    ws_manager: object | None = None,
+) -> AssembledHandler:
+    """Build the full-stack ``make_handler(...)`` wiring (no receivers/API).
+
+    Reproduces ``run.py::_run_with_config`` lines 440-901 minus storage
+    connect, receivers, signal handlers, FastAPI/uvicorn, LLM/services and
+    the metrics provider. Same construction, same order - the S-301
+    characterization test pins the live side; ``test_pipeline_assembly``
+    pins this side.
+
+    ``ws_manager`` defaults to ``None`` (analyze/benchmark consumers build
+    no FastAPI app). The live caller (S-304 ``_run_with_config``) passes the
+    real ``ConnectionManager`` read off ``api_app.state.ws_manager`` so the
+    pipeline handler and the ``/api/v1/ws`` route share one fan-out. The
+    default preserves byte-identical behaviour for S-303/S-305.
+    """
+    # --- TAXII feed manager + IoC matcher (run.py:440-471) ---
+    (
+        taxii_manager,
+        ioc_matcher,
+        ioc_enrichment_counters,
+        _taxii_failed,
+    ) = await _build_threat_intel(config, storage)
 
     # --- DetectionEnsemble + state restore (run.py:473-479) ---
     ensemble = DetectionEnsemble(config.detection)
@@ -201,33 +426,12 @@ async def assemble_handler(
     )
 
     # --- Correlation rules + engine + holder + reloader (run.py:616-653) ---
-    from seerflow.correlation.bundled import get_bundled_rule_dir
-    from seerflow.correlation.engine import CorrelationEngine
-    from seerflow.correlation.holders import EngineHolder
-    from seerflow.correlation.reloader import RuleReloader
-    from seerflow.correlation.rule_loader import load_correlation_rules
-
-    bundled_dir = str(get_bundled_rule_dir())
-    rule_dirs = (bundled_dir, *config.correlation.rule_dirs)
-    correlation_rules = load_correlation_rules(rule_dirs)
-    _log.info(
-        "Correlation: loaded %d rules from %d dirs",
-        len(correlation_rules),
-        len(rule_dirs),
-    )
-    correlation_engine = CorrelationEngine(rules=correlation_rules, window=window_buffer)
-    _log.info("Correlation engine: %d rules loaded", len(correlation_rules))
-
-    sigma_holder = EngineHolder(engine=sigma_engine)
-    correlation_holder: EngineHolder[CorrelationEngine | None] = EngineHolder(
-        engine=correlation_engine
-    )
-    reloader = RuleReloader(
-        correlation_holder=correlation_holder,
-        correlation_dirs=[bundled_dir, *config.correlation.rule_dirs],
-        window_buffer=window_buffer,
-    )
-    reload_task = asyncio.create_task(reloader.watch())
+    (
+        sigma_holder,
+        correlation_holder,
+        reload_task,
+        correlation_rules,
+    ) = _build_correlation_stack(config, window_buffer, sigma_engine)
 
     # --- Per-stage latency tracker (run.py:740) ---
     from seerflow.api.latency import StageLatencyTracker
@@ -237,83 +441,17 @@ async def assemble_handler(
     # --- save interval (run.py:802) ---
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
 
-    # --- Alert dispatcher + channel session/router (run.py:804-837) ---
-    import aiohttp
-
-    from seerflow.alerting.dispatcher import (
-        AlertDispatcher,
-        build_webhook_delivery_targets,
-    )
-    from seerflow.pipeline.run import _build_channel_session_and_router
-
-    webhook_session: aiohttp.ClientSession | None = None
-    dispatcher: AlertDispatcher | None = None
-    _dispatcher_task: asyncio.Task[None] | None = None
-    webhook_targets = config.alerting.webhook_targets
-    channel_session, router = await _build_channel_session_and_router(config.alerting)
-    if webhook_targets or router is not None:
-        if channel_session is not None:
-            webhook_session = channel_session
-        else:
-            _webhook_connector = aiohttp.TCPConnector(
-                ssl=_ssl.create_default_context(),
-                limit_per_host=10,
-            )
-            webhook_session = aiohttp.ClientSession(connector=_webhook_connector)
-        dispatcher = AlertDispatcher(
-            webhook_targets,
-            webhook_session,
-            dashboard_url=config.alerting.dashboard_url,
-            router=router,
-        )
-        if router is not None and webhook_targets:
-            for adapter in build_webhook_delivery_targets(dispatcher):
-                router.register_target(adapter)
-        _dispatcher_task = asyncio.create_task(dispatcher.run())
-        _log.info(
-            "Alert dispatcher: %d webhook target(s), router=%s",
-            len(webhook_targets),
-            "enabled" if router is not None else "disabled",
-        )
-
-    # --- PagerDuty sink (run.py:839-852) ---
-    from seerflow.alerting.sinks.pagerduty import PagerDutySink
-
-    pd_sink: PagerDutySink | None = None
-    _pd_task: asyncio.Task[None] | None = None
-    pd_session: aiohttp.ClientSession | None = None
-    if config.alerting.pagerduty_routing_key:
-        _pd_connector = aiohttp.TCPConnector(
-            ssl=_ssl.create_default_context(),
-            limit_per_host=10,
-        )
-        pd_session = aiohttp.ClientSession(connector=_pd_connector)
-        pd_sink = PagerDutySink(config.alerting.pagerduty_routing_key, pd_session)
-        _pd_task = asyncio.create_task(pd_sink.run())
-        _log.info("PagerDuty sink: routing key configured")
-
-    # --- OTLP sink (run.py:854-874) ---
-    from seerflow.alerting.sinks.otlp import OtlpSink, masked_url
-
-    otlp_sink: OtlpSink | None = None
-    _otlp_task: asyncio.Task[None] | None = None
-    if config.alerting.otlp_endpoint:
-        otlp_sink = OtlpSink(
-            endpoint=config.alerting.otlp_endpoint,
-            protocol=config.alerting.otlp_protocol,
-            export_interval=config.alerting.otlp_export_interval_seconds,
-            tls=config.alerting.otlp_tls,
-            tls_ca_file=config.alerting.otlp_tls_ca_file,
-            mtls_cert_file=config.alerting.otlp_mtls_cert_file,
-            mtls_key_file=config.alerting.otlp_mtls_key_file,
-        )
-        _otlp_task = asyncio.create_task(otlp_sink.run())
-        _log.info(
-            "OTLP sink: %s via %s (interval=%ds)",
-            masked_url(config.alerting.otlp_endpoint),
-            config.alerting.otlp_protocol,
-            config.alerting.otlp_export_interval_seconds,
-        )
+    # --- Alert dispatcher + PagerDuty + OTLP sinks (run.py:804-874) ---
+    (
+        webhook_session,
+        dispatcher,
+        _dispatcher_task,
+        pd_sink,
+        _pd_task,
+        pd_session,
+        otlp_sink,
+        _otlp_task,
+    ) = await _build_alert_sinks(config)
 
     # --- Wired make_handler — IDENTICAL 25 args, ws_manager=None (run.py:876-901) ---
     handler = make_handler(
@@ -337,7 +475,7 @@ async def assemble_handler(
         baseline_store=baseline_store,
         ueba_engine=ueba_engine,
         ueba_alert_cooldown_ns=config.ueba.alert_cooldown_seconds * 1_000_000_000,
-        ws_manager=None,
+        ws_manager=cast("ConnectionManager | None", ws_manager),
         ioc_matcher=ioc_matcher,
         ioc_enrichment_counters=ioc_enrichment_counters,
         latency_tracker=stage_latency_tracker,
@@ -391,4 +529,14 @@ async def assemble_handler(
         lifecycle=tuple(lifecycle),
         teardown=_teardown,
         capture_sink=capture_sink,
+        engines=AssembledEngines(
+            ensemble=ensemble,
+            baseline_store=baseline_store,
+            ueba_engine=ueba_engine,
+            sigma_engine=sigma_engine,
+            correlation_rules=correlation_rules,
+            taxii_manager=taxii_manager,
+            ioc_matcher=ioc_matcher,
+            ioc_enrichment_counters=ioc_enrichment_counters,
+        ),
     )

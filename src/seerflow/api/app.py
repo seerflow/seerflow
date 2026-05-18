@@ -102,6 +102,23 @@ def _build_ws_manager(
     )
 
 
+def build_ws_manager(
+    alert_store: AlertStore,
+    config: SeerflowConfig | None,
+    timeline_ring: AnomalyTimelineRing | None = None,
+) -> ConnectionManager:
+    """Public wrapper over :func:`_build_ws_manager` (S-304).
+
+    ``pipeline.run._run_with_config`` builds the ``ConnectionManager`` +
+    ``AnomalyTimelineRing`` itself so it can pass the SAME instance to both
+    ``assemble_handler`` (so the live pipeline handler broadcasts) and
+    ``create_api_app`` (so the WebSocket route shares the fan-out) — one
+    construction site, identical CSWSH/queue/tick wiring as the default
+    in-app build.
+    """
+    return _build_ws_manager(alert_store, config, timeline_ring)
+
+
 _SIGMA_FLUSH_INTERVAL_S = 60.0
 
 

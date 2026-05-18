@@ -76,6 +76,7 @@ def _patch_sink(monkeypatch: pytest.MonkeyPatch, dotted: str) -> MagicMock:
 
 async def _drive(monkeypatch: pytest.MonkeyPatch, alerting: AlertingConfig) -> dict[str, Any]:
     """Run ``_run_with_config`` to completion with everything stubbed."""
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     storage = MagicMock()
@@ -88,19 +89,25 @@ async def _drive(monkeypatch: pytest.MonkeyPatch, alerting: AlertingConfig) -> d
     monkeypatch.setattr(run_mod, "build_pipeline", AsyncMock(return_value=fake_pipeline))
     monkeypatch.setattr(run_mod.uvicorn, "Server", _FakeServer)
 
-    # Threat-intel + ensemble are heavy; stub their lifecycles.
+    # S-304: TAXII / DetectionEnsemble / make_handler moved from run.py into
+    # ``pipeline.assembly.assemble_handler`` (the S-302 extraction). The
+    # sink construction (AlertDispatcher / PagerDutySink / OtlpSink) is
+    # still patched by full module path below — those classes are imported
+    # at call time inside ``assembly._build_alert_sinks`` from their own
+    # modules, so the string-target patches keep working unchanged.
     taxii = MagicMock()
     taxii.start = AsyncMock(return_value=[])
     taxii.stop = AsyncMock()
     taxii.feed_ids = MagicMock(return_value=())
     taxii.metrics = MagicMock()
-    monkeypatch.setattr(run_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
+    taxii.register_snapshot_listener = MagicMock()
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
 
     ensemble = MagicMock()
     ensemble.load_all_state = AsyncMock(return_value=0)
     ensemble.save_all_state = AsyncMock(return_value=0)
-    monkeypatch.setattr(run_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
-    monkeypatch.setattr(run_mod, "make_handler", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(asm_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
+    monkeypatch.setattr(asm_mod, "make_handler", MagicMock(return_value=MagicMock()))
 
     disp = _patch_sink(monkeypatch, "seerflow.alerting.dispatcher.AlertDispatcher")
     monkeypatch.setattr(

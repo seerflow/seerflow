@@ -7,8 +7,9 @@ does not reach:
 - ``_run`` entrypoint (1020-1021): load_config → _run_with_config.
 - ``_serve_or_hint`` EADDRINUSE hint + re-raise + ready-task cancel (385-396).
 - ``_log_when_started`` bind-wait loop (401-403).
-- ``build_pipeline`` raising RuntimeError → ordered teardown + sys.exit(1)
-  (522-537), with ioc_matcher present so the matcher.stop() branch runs.
+- ``build_pipeline`` raising RuntimeError → fail-fast clean exit BEFORE
+  the engine factory runs (S-141 / S-304): storage.close() + sys.exit(1),
+  no engine constructed.
 - LLM-backend-present branches: explanation / hunt / rule-suggestion
   services + ioc_matcher construction (449-454, 685-735).
 
@@ -152,6 +153,7 @@ class _FakeServer:
 
 
 def _common_patches(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     storage = MagicMock()
@@ -161,19 +163,23 @@ def _common_patches(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(run_mod, "connect_storage", AsyncMock(return_value=storage))
     monkeypatch.setattr(run_mod.uvicorn, "Server", _FakeServer)
 
+    # S-304: TAXII / DetectionEnsemble / make_handler moved from run.py into
+    # ``pipeline.assembly.assemble_handler`` (the S-302 extraction this
+    # suite was written before). ``_run_with_config`` now CONSUMES the
+    # factory; patch the symbols where they live now.
     taxii = MagicMock()
     taxii.start = AsyncMock(return_value=[])
     taxii.stop = AsyncMock()
     taxii.feed_ids = MagicMock(return_value=())
     taxii.metrics = MagicMock()
     taxii.register_snapshot_listener = MagicMock()
-    monkeypatch.setattr(run_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
+    monkeypatch.setattr(asm_mod, "TAXIIFeedManager", MagicMock(return_value=taxii))
 
     ensemble = MagicMock()
     ensemble.load_all_state = AsyncMock(return_value=1)
     ensemble.save_all_state = AsyncMock(return_value=0)
-    monkeypatch.setattr(run_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
-    monkeypatch.setattr(run_mod, "make_handler", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(asm_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
+    monkeypatch.setattr(asm_mod, "make_handler", MagicMock(return_value=MagicMock()))
     return storage
 
 
@@ -188,9 +194,20 @@ def _fake_app() -> MagicMock:
 
 
 @pytest.mark.unit
-async def test_build_pipeline_runtime_error_triggers_ordered_teardown(
+async def test_build_pipeline_runtime_error_fails_fast_before_assembly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """build_pipeline RuntimeError → clean exit BEFORE the engine factory.
+
+    S-141 / S-304: the original ``_run_with_config`` called
+    ``build_pipeline`` before the arithmetic-heavy engine assembly so a
+    receiver bind failure exits cleanly without constructing any engine.
+    S-304 preserves that fail-fast ordering: ``assemble_handler`` (which
+    owns IoC/TAXII construction + the IoC-before-TAXII teardown) is never
+    invoked on this path, so there is nothing to tear down — only
+    ``storage.close()`` runs, then ``SystemExit(1)``.
+    """
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     storage = _common_patches(monkeypatch)
@@ -199,13 +216,10 @@ async def test_build_pipeline_runtime_error_triggers_ordered_teardown(
         "build_pipeline",
         AsyncMock(side_effect=RuntimeError("receiver bind failed")),
     )
-    # ioc_matcher present so the `if ioc_matcher is not None: await stop()`
-    # branch in the failure path executes.
-    matcher = MagicMock()
-    matcher.start = AsyncMock()
-    matcher.stop = AsyncMock()
-    matcher.on_snapshot_updated = MagicMock()
-    monkeypatch.setattr(run_mod, "IoCMatcher", MagicMock(return_value=matcher))
+    # If assembly ran, the IoCMatcher factory would be hit; assert it is
+    # NOT — receivers fail fast before any engine is constructed.
+    ioc_factory = MagicMock()
+    monkeypatch.setattr(asm_mod, "IoCMatcher", ioc_factory)
 
     config = SeerflowConfig(
         storage=StorageConfig(),
@@ -217,8 +231,8 @@ async def test_build_pipeline_runtime_error_triggers_ordered_teardown(
         await _run_with_config(config, make_api_app=lambda **_kw: _fake_app())
 
     assert exc.value.code == 1
-    matcher.stop.assert_awaited()
     storage.close.assert_awaited()
+    ioc_factory.assert_not_called()
 
 
 # ── LLM-backend-present services + ioc_matcher construction ─────────────
@@ -228,20 +242,23 @@ async def test_build_pipeline_runtime_error_triggers_ordered_teardown(
 async def test_llm_backend_present_constructs_all_services(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     _common_patches(monkeypatch)
     monkeypatch.setattr(run_mod, "build_pipeline", AsyncMock(return_value=_FakePipeline()))
     # LLM backend present → explanation + hunt + rule-suggestion services
-    # all construct (lines 684-735).
+    # all construct. ``build_llm_backend`` is still called from run.py
+    # (live-only concern, kept in the caller).
     monkeypatch.setattr("seerflow.llm.build_llm_backend", MagicMock(return_value=MagicMock()))
-    # ioc_matcher enabled → construction + listener registration (449-454).
+    # ioc_matcher enabled → construction + listener registration now happen
+    # inside the factory (S-304); patch IoCMatcher on asm_mod.
     matcher = MagicMock()
     matcher.start = AsyncMock()
     matcher.stop = AsyncMock()
     matcher.on_snapshot_updated = MagicMock()
     matcher.check_event = MagicMock(return_value=())
-    monkeypatch.setattr(run_mod, "IoCMatcher", MagicMock(return_value=matcher))
+    monkeypatch.setattr(asm_mod, "IoCMatcher", MagicMock(return_value=matcher))
 
     config = SeerflowConfig(
         storage=StorageConfig(),
@@ -266,6 +283,7 @@ async def test_degrade_paths_when_subsystems_raise(
     """ensemble restore / UEBA restore / Sigma load / graph edges all raise
     → each logged + swallowed; startup still completes (478-479, 501-502,
     558-559, 569-570)."""
+    import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
     storage = _common_patches(monkeypatch)
@@ -275,13 +293,16 @@ async def test_degrade_paths_when_subsystems_raise(
     ensemble = MagicMock()
     ensemble.load_all_state = AsyncMock(side_effect=RuntimeError("restore boom"))
     ensemble.save_all_state = AsyncMock(return_value=0)
-    monkeypatch.setattr(run_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
+    # S-304: ensemble + UEBA baseline restore happen inside the factory.
+    # ``DetectionEnsemble`` is an asm_mod attribute; ``BaselineStore`` is a
+    # function-local import in assembly, so patch it at its source module.
+    monkeypatch.setattr(asm_mod, "DetectionEnsemble", MagicMock(return_value=ensemble))
 
     bad_baseline = MagicMock()
     bad_baseline.restore = AsyncMock(side_effect=RuntimeError("ueba boom"))
     bad_baseline.flush = AsyncMock()
     bad_baseline.__len__ = MagicMock(return_value=0)
-    monkeypatch.setattr(run_mod, "BaselineStore", MagicMock(return_value=bad_baseline))
+    monkeypatch.setattr("seerflow.ueba.store.BaselineStore", MagicMock(return_value=bad_baseline))
 
     sigma_cls = MagicMock()
     sigma_inst = MagicMock()
