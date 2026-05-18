@@ -75,9 +75,9 @@ class TestSharedConnectionManager:
 
         src = function_source_text(run_mod._run_with_config)
         # Built ONCE via the public factory wrapper, carrying the shared ring.
-        assert re.search(
-            r"ws_manager\s*:\s*ConnectionManager\s*=\s*build_ws_manager\(", src
-        ), "expected the ConnectionManager to be built once via build_ws_manager(...)"
+        assert re.search(r"ws_manager\s*:\s*ConnectionManager\s*=\s*build_ws_manager\(", src), (
+            "expected the ConnectionManager to be built once via build_ws_manager(...)"
+        )
         # Injected into the detection factory so the pipeline handler
         # broadcasts (S-304 additive ws_manager kwarg on assemble_handler).
         assert re.search(

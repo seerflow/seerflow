@@ -1,10 +1,11 @@
 """S-304: ``_run_with_config`` consumes ``assemble_handler`` (live-integration).
 
 Pins that the live runner builds its detection handler via the shared
-factory (S-302 seam) and supplies the real ``ConnectionManager`` read off
-``api_app.state.ws_manager`` (the one intentional divergence from the
-factory default of ``None``), and that the startup-failure path tears down
-the assembled resources before closing storage.
+factory (S-302 seam) and injects the real ``ConnectionManager`` (built once
+via ``api.app.build_ws_manager``) into the factory — the one intentional
+divergence from the factory default of ``None`` — and that a
+``build_pipeline`` failure exits fast BEFORE the factory runs (S-141), so
+nothing is assembled and only storage is closed.
 
 Self-contained stub stack: a regression guard must not cross-import another
 test module's private helpers. Everything mocked: no real uvicorn, no
@@ -97,9 +98,7 @@ async def test_run_with_config_calls_assemble_handler_with_real_ws_manager(
         captured["ws_manager"] = kw.get("ws_manager")
         captured["storage"] = stg
         captured["config"] = cfg
-        return MagicMock(
-            handler=_handler, lifecycle=(), teardown=teardown, capture_sink=None
-        )
+        return MagicMock(handler=_handler, lifecycle=(), teardown=teardown, capture_sink=None)
 
     monkeypatch.setattr(run_mod, "assemble_handler", _fake_assemble)
 
@@ -118,26 +117,27 @@ async def test_run_with_config_calls_assemble_handler_with_real_ws_manager(
 
 
 @pytest.mark.unit
-async def test_startup_failure_tears_down_assembled_then_storage(
+async def test_startup_failure_closes_storage_without_assembling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """build_pipeline RuntimeError → assembled.teardown() then storage.close()
-    then SystemExit(1). No background task is stranded on the failure path."""
+    """build_pipeline RuntimeError → clean exit BEFORE the factory runs.
+
+    S-141 / S-304: receivers are validated first (fail fast). On a
+    build_pipeline RuntimeError the engine factory is never invoked, so
+    there is nothing assembled to tear down — only ``storage.close()`` runs
+    (SQLite WAL flushed) then ``SystemExit(1)``. ``assemble_handler`` must
+    NOT have been called on this path.
+    """
     import seerflow.pipeline.run as run_mod
 
     storage = _patch_common(monkeypatch)
-    monkeypatch.setattr(
-        run_mod, "build_pipeline", AsyncMock(side_effect=RuntimeError("boom"))
-    )
+    monkeypatch.setattr(run_mod, "build_pipeline", AsyncMock(side_effect=RuntimeError("boom")))
 
-    order: list[str] = []
-    teardown = AsyncMock(side_effect=lambda: order.append("teardown"))
-    storage.close = AsyncMock(side_effect=lambda: order.append("storage_close"))
+    assemble_calls: list[int] = []
 
-    async def _fake_assemble(cfg: Any, stg: Any, **kw: Any) -> Any:
-        return MagicMock(
-            handler=AsyncMock(), lifecycle=(), teardown=teardown, capture_sink=None
-        )
+    async def _fake_assemble(cfg: Any, stg: Any, **kw: Any) -> Any:  # pragma: no cover
+        assemble_calls.append(1)
+        return MagicMock(handler=AsyncMock(), lifecycle=(), teardown=AsyncMock())
 
     monkeypatch.setattr(run_mod, "assemble_handler", _fake_assemble)
 
@@ -148,8 +148,6 @@ async def test_startup_failure_tears_down_assembled_then_storage(
         await run_mod._run_with_config(cfg, make_api_app=lambda **_k: _fake_app())
 
     assert exc_info.value.code == 1
-    teardown.assert_awaited_once()
     storage.close.assert_awaited()
-    # teardown must run before storage.close (assembled resources first,
-    # storage last for SQLite WAL safety).
-    assert order == ["teardown", "storage_close"]
+    # The factory must NOT run when receivers fail to bind (fail fast).
+    assert assemble_calls == []

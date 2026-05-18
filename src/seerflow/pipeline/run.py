@@ -449,6 +449,25 @@ async def _run_with_config(
     # ``/api/v1/ws`` route shares the same fan-out). The
     # ``AnomalyTimelineRing`` is built here too and reused so the
     # ``/api/v1/anomaly`` route reads the ring the manager records into.
+    # Validate receivers FIRST (fail fast, S-141). The original
+    # ``_run_with_config`` called ``build_pipeline`` before the
+    # arithmetic-heavy engine assembly so a receiver bind failure exits
+    # cleanly before any engine is constructed; preserve that ordering —
+    # nothing is assembled yet on the failure path, so only storage needs
+    # closing (no factory teardown required).
+    try:
+        pipeline = await build_pipeline(config)
+    except RuntimeError as exc:
+        _log.error("Startup failed: %s", exc)
+        _log.error(
+            "Suggestions:\n"
+            "  - Check file permissions for configured log paths\n"
+            "  - Ensure ports are not already in use\n"
+            "  - Verify receiver settings in seerflow.yaml"
+        )
+        await storage.close()
+        sys.exit(1)
+
     timeline_ring = AnomalyTimelineRing()
     ws_manager: ConnectionManager = build_ws_manager(storage, config, timeline_ring)
 
@@ -463,23 +482,6 @@ async def _run_with_config(
     from seerflow.llm import LLMBackend, build_llm_backend
 
     llm_backend: LLMBackend | None = build_llm_backend(config.llm)
-
-    try:
-        pipeline = await build_pipeline(config)
-    except RuntimeError as exc:
-        _log.error("Startup failed: %s", exc)
-        _log.error(
-            "Suggestions:\n"
-            "  - Check file permissions for configured log paths\n"
-            "  - Ensure ports are not already in use\n"
-            "  - Verify receiver settings in seerflow.yaml"
-        )
-        # ``assembled.teardown()`` cancels + awaits every owned lifecycle
-        # task (reload/dispatcher/pd/otlp) and stops the IoC matcher BEFORE
-        # the TAXII manager (documented order, S-068) before storage closes.
-        await assembled.teardown()
-        await storage.close()
-        sys.exit(1)
 
     # Startup banner — only list healthy receivers
     receivers = [sid for sid, r in pipeline.manager._receivers.items() if r.is_healthy()]

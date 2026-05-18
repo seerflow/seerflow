@@ -7,8 +7,9 @@ does not reach:
 - ``_run`` entrypoint (1020-1021): load_config → _run_with_config.
 - ``_serve_or_hint`` EADDRINUSE hint + re-raise + ready-task cancel (385-396).
 - ``_log_when_started`` bind-wait loop (401-403).
-- ``build_pipeline`` raising RuntimeError → ordered teardown + sys.exit(1)
-  (522-537), with ioc_matcher present so the matcher.stop() branch runs.
+- ``build_pipeline`` raising RuntimeError → fail-fast clean exit BEFORE
+  the engine factory runs (S-141 / S-304): storage.close() + sys.exit(1),
+  no engine constructed.
 - LLM-backend-present branches: explanation / hunt / rule-suggestion
   services + ioc_matcher construction (449-454, 685-735).
 
@@ -193,9 +194,19 @@ def _fake_app() -> MagicMock:
 
 
 @pytest.mark.unit
-async def test_build_pipeline_runtime_error_triggers_ordered_teardown(
+async def test_build_pipeline_runtime_error_fails_fast_before_assembly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """build_pipeline RuntimeError → clean exit BEFORE the engine factory.
+
+    S-141 / S-304: the original ``_run_with_config`` called
+    ``build_pipeline`` before the arithmetic-heavy engine assembly so a
+    receiver bind failure exits cleanly without constructing any engine.
+    S-304 preserves that fail-fast ordering: ``assemble_handler`` (which
+    owns IoC/TAXII construction + the IoC-before-TAXII teardown) is never
+    invoked on this path, so there is nothing to tear down — only
+    ``storage.close()`` runs, then ``SystemExit(1)``.
+    """
     import seerflow.pipeline.assembly as asm_mod
     import seerflow.pipeline.run as run_mod
 
@@ -205,14 +216,10 @@ async def test_build_pipeline_runtime_error_triggers_ordered_teardown(
         "build_pipeline",
         AsyncMock(side_effect=RuntimeError("receiver bind failed")),
     )
-    # ioc_matcher present so the factory's teardown stops it on the
-    # build_pipeline-failure path (S-304: ``assembled.teardown()`` owns the
-    # IoC-before-TAXII teardown order). IoCMatcher now lives on asm_mod.
-    matcher = MagicMock()
-    matcher.start = AsyncMock()
-    matcher.stop = AsyncMock()
-    matcher.on_snapshot_updated = MagicMock()
-    monkeypatch.setattr(asm_mod, "IoCMatcher", MagicMock(return_value=matcher))
+    # If assembly ran, the IoCMatcher factory would be hit; assert it is
+    # NOT — receivers fail fast before any engine is constructed.
+    ioc_factory = MagicMock()
+    monkeypatch.setattr(asm_mod, "IoCMatcher", ioc_factory)
 
     config = SeerflowConfig(
         storage=StorageConfig(),
@@ -224,8 +231,8 @@ async def test_build_pipeline_runtime_error_triggers_ordered_teardown(
         await _run_with_config(config, make_api_app=lambda **_kw: _fake_app())
 
     assert exc.value.code == 1
-    matcher.stop.assert_awaited()
     storage.close.assert_awaited()
+    ioc_factory.assert_not_called()
 
 
 # ── LLM-backend-present services + ioc_matcher construction ─────────────
@@ -295,9 +302,7 @@ async def test_degrade_paths_when_subsystems_raise(
     bad_baseline.restore = AsyncMock(side_effect=RuntimeError("ueba boom"))
     bad_baseline.flush = AsyncMock()
     bad_baseline.__len__ = MagicMock(return_value=0)
-    monkeypatch.setattr(
-        "seerflow.ueba.store.BaselineStore", MagicMock(return_value=bad_baseline)
-    )
+    monkeypatch.setattr("seerflow.ueba.store.BaselineStore", MagicMock(return_value=bad_baseline))
 
     sigma_cls = MagicMock()
     sigma_inst = MagicMock()
