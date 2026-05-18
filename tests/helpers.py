@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 
 
@@ -135,4 +137,24 @@ def _find_function_node(tree: ast.AST, qualname: str) -> ast.FunctionDef | ast.A
             raise ValueError(f"could not resolve {qualname} in module source")
     raise AssertionError(  # pragma: no cover - unreachable, satisfies mypy
         f"unreachable: parts non-empty and loop must return or raise: qualname={qualname!r}"
+    )
+
+
+def apply_dns_guard_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Substitute a sentinel public IP for the S-227 startup SSRF DNS guard.
+
+    ``aioresponses`` mocks at the aiohttp request layer; the S-227 startup
+    DNS guard runs at socket level and is not intercepted. Threat-intel
+    tests use the ``*.example`` reserved domain or bare stub hostnames —
+    pin a sentinel public IP so the static-resolver map builds without
+    hitting the real DNS root.
+
+    Single canonical definition (S-238 / SEE-251); applied via the
+    directory-scoped autouse conftests in ``tests/unit/threat_intel`` and
+    ``tests/integration/threat_intel``. Do not re-inline per test file —
+    ``tests/unit/test_dns_guard_fixture_convention.py`` enforces this.
+    """
+    monkeypatch.setattr(
+        "seerflow.threat_intel.dns._resolve_feed_with_private_ip_guard",
+        lambda _feed_id, _hostname: "1.1.1.1",
     )
