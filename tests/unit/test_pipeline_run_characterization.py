@@ -186,3 +186,60 @@ async def test_default_config_wiring_is_pinned(
     assert kw["graph_algo_interval"] == config.detection.graph_algo_interval
     assert kw["ueba_alert_cooldown_ns"] == config.ueba.alert_cooldown_seconds * 1_000_000_000
     assert kw["alerting_config"] is config.alerting
+
+
+@pytest.mark.unit
+async def test_inverted_flags_wiring_is_pinned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UEBA off + kill-chain off + IoC matcher on → pin the *opposite*
+    branch of every flag-gated make_handler slot.
+
+    Together with ``test_default_config_wiring_is_pinned`` this exercises
+    BOTH branches of every flag gate, so the regression guard catches a
+    refactor that inverts or drops a gate.
+
+    The four flag-gated classes are sentinel-stubbed so the *enabled* path
+    (IoCMatcher) is deterministic and side-effect-free (``IoCMatcher.start``
+    / ``BaselineStore.restore`` would otherwise touch storage + register a
+    snapshot listener). The default-config test deliberately does NOT stub
+    them — so the two scenarios pin the real engines on one branch and the
+    None gate on the other.
+    """
+    import seerflow.pipeline.run as run_mod
+    from seerflow.config import (
+        DetectionConfig,
+        IoCMatcherConfig,
+        KillChainConfig,
+        ThreatIntelConfig,
+        UEBAConfig,
+    )
+
+    ioc_sentinel = MagicMock(name="IoCMatcher")
+    ioc_sentinel.start = AsyncMock()
+    ioc_sentinel.stop = AsyncMock()
+    ioc_sentinel.on_snapshot_updated = MagicMock()
+    monkeypatch.setattr(run_mod, "IoCMatcher", MagicMock(return_value=ioc_sentinel))
+
+    # Immutable construction (no in-place mutation): flip the three flag
+    # gates away from their defaults via explicit nested configs.
+    config = SeerflowConfig(
+        storage=StorageConfig(),
+        alerting=AlertingConfig(),
+        ueba=UEBAConfig(enabled=False),
+        detection=DetectionConfig(kill_chain=KillChainConfig(enabled=False)),
+        threat_intel=ThreatIntelConfig(matcher=IoCMatcherConfig(enabled=True)),
+        shutdown_timeout_s=1.0,
+    )
+    spy, _ensemble, _storage = await _drive_and_capture(monkeypatch, config)
+
+    assert spy.call_count == 1
+    kw = spy.call_args.kwargs
+
+    # UEBA + kill-chain disabled → those slots are None (opposite of the
+    # default-config scenario, which pins the real engines).
+    assert kw["baseline_store"] is None
+    assert kw["ueba_engine"] is None
+    assert kw["kill_chain_tracker"] is None
+    # Matcher enabled → the IoCMatcher sentinel is wired through.
+    assert kw["ioc_matcher"] is ioc_sentinel
