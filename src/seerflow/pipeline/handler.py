@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from seerflow.alerting.dispatcher import AlertDispatcher
     from seerflow.alerting.sinks.file import FileSink
+    from seerflow.alerting.sinks.console import ConsoleSink
     from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
     from seerflow.api.latency import StageLatencyTracker
@@ -82,6 +83,7 @@ def make_handler(
     pagerduty_sink: PagerDutySink | None = None,
     otlp_sink: OtlpSink | None = None,
     file_sink: FileSink | None = None,
+    console_sink: ConsoleSink | None = None,
     attack_mapper: AttackMapper | None = None,
     graph_structural: GraphStructuralEvaluator | None = None,
     kill_chain_tracker: KillChainTracker | None = None,
@@ -141,6 +143,8 @@ def make_handler(
                         otlp_sink.enqueue(kc)
                     if file_sink is not None:
                         file_sink.enqueue(kc)
+                    if console_sink is not None:
+                        console_sink.enqueue(kc)
                     if ws_manager is not None:
                         ws_manager.broadcast_alert(kc)
             except Exception:
@@ -259,6 +263,8 @@ def make_handler(
                             otlp_sink.enqueue(ueba_alert)
                         if file_sink is not None:
                             file_sink.enqueue(ueba_alert)
+                        if console_sink is not None:
+                            console_sink.enqueue(ueba_alert)
                         if ws_manager is not None:
                             ws_manager.broadcast_alert(ueba_alert)
                     await _feed_kill_chain(ueba_alert)
@@ -301,6 +307,8 @@ def make_handler(
                                 otlp_sink.enqueue(ioc_alert)
                             if file_sink is not None:
                                 file_sink.enqueue(ioc_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(ioc_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(ioc_alert)
                             await _feed_kill_chain(ioc_alert)
@@ -374,6 +382,8 @@ def make_handler(
                                 otlp_sink.enqueue(corr_alert)
                             if file_sink is not None:
                                 file_sink.enqueue(corr_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(corr_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(corr_alert)
                         await _feed_kill_chain(corr_alert)
@@ -443,6 +453,8 @@ def make_handler(
                                     otlp_sink.enqueue(cc_alert)
                                 if file_sink is not None:
                                     file_sink.enqueue(cc_alert)
+                                if console_sink is not None:
+                                    console_sink.enqueue(cc_alert)
                                 if ws_manager is not None:
                                     ws_manager.broadcast_alert(cc_alert)
                             await _feed_kill_chain(cc_alert)
@@ -592,6 +604,8 @@ def make_handler(
                             otlp_sink.enqueue(alert)
                         if file_sink is not None:
                             file_sink.enqueue(alert)
+                        if console_sink is not None:
+                            console_sink.enqueue(alert)
                         if ws_manager is not None:
                             ws_manager.broadcast_alert(alert)
                     await _feed_kill_chain(alert)
@@ -633,6 +647,8 @@ def make_handler(
                                 otlp_sink.enqueue(sigma_alert)
                             if file_sink is not None:
                                 file_sink.enqueue(sigma_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(sigma_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(sigma_alert)
                         await _feed_kill_chain(sigma_alert)
@@ -700,6 +716,8 @@ def make_handler(
                                 otlp_sink.enqueue(risk_alert)
                             if file_sink is not None:
                                 file_sink.enqueue(risk_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(risk_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(risk_alert)
                     except Exception:
@@ -754,6 +772,8 @@ def make_handler(
                                 otlp_sink.enqueue(pa)
                             if file_sink is not None:
                                 file_sink.enqueue(pa)
+                            if console_sink is not None:
+                                console_sink.enqueue(pa)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(pa)
                         await _feed_kill_chain(pa)

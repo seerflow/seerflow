@@ -285,22 +285,48 @@ def _build_file_sink(
     return file_sink, _file_task
 
 
+def _build_console_sink(
+    config: SeerflowConfig,
+) -> tuple[Any, asyncio.Task[None] | None]:
+    """Console sink + run task (S-312/FR-071). ``(None, None)`` when disabled."""
+    from seerflow.alerting.sinks.console import ConsoleSink
+
+    console_sink: ConsoleSink | None = None
+    _console_task: asyncio.Task[None] | None = None
+    if config.alerting.console_enabled:
+        console_sink = ConsoleSink(
+            config.alerting.console_stream,
+            fmt=config.alerting.console_format,
+            min_severity=config.alerting.console_min_severity,
+        )
+        _console_task = asyncio.create_task(console_sink.run())
+        _log.info(
+            "Console sink: %s (%s, min_severity=%d)",
+            config.alerting.console_stream,
+            config.alerting.console_format,
+            config.alerting.console_min_severity,
+        )
+    return console_sink, _console_task
+
+
 async def _build_alert_sinks(
     config: SeerflowConfig,
-) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any, Any]:
-    """Webhook dispatcher + PagerDuty + OTLP + File sinks (run.py:804-874).
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any]:
+    """Webhook dispatcher + PagerDuty + OTLP + File + Console sinks (run.py:804-874).
 
     Thin orchestrator over the per-sink builders. Construction order is
     preserved verbatim (webhook → PagerDuty → OTLP) so the S-301
-    characterization wiring is unchanged; the S-313 file sink is appended
-    last (additive, no reorder). Returns ``(webhook_session, dispatcher,
-    dispatcher_task, pd_sink, pd_task, pd_session, otlp_sink, otlp_task,
-    file_sink, file_task)`` — any element ``None`` when not configured.
+    characterization wiring is unchanged; the S-313 file sink and the S-312
+    console sink are appended last (additive, no reorder). Returns
+    ``(webhook_session, dispatcher, dispatcher_task, pd_sink, pd_task,
+    pd_session, otlp_sink, otlp_task, file_sink, file_task, console_sink,
+    console_task)`` — any element ``None`` when not configured.
     """
     webhook_session, dispatcher, _dispatcher_task = await _build_webhook_dispatcher(config)
     pd_sink, _pd_task, pd_session = _build_pagerduty_sink(config)
     otlp_sink, _otlp_task = _build_otlp_sink(config)
     file_sink, _file_task = _build_file_sink(config)
+    console_sink, _console_task = _build_console_sink(config)
     return (
         webhook_session,
         dispatcher,
@@ -312,6 +338,8 @@ async def _build_alert_sinks(
         _otlp_task,
         file_sink,
         _file_task,
+        console_sink,
+        _console_task,
     )
 
 
@@ -472,7 +500,7 @@ async def assemble_handler(
     # --- save interval (run.py:802) ---
     save_interval_ns = config.detection.model_save_interval_seconds * 1_000_000_000
 
-    # --- Alert dispatcher + PagerDuty + OTLP sinks (run.py:804-874) ---
+    # --- Alert dispatcher + PagerDuty + OTLP + Console sinks (run.py:804-874) ---
     (
         webhook_session,
         dispatcher,
@@ -484,6 +512,8 @@ async def assemble_handler(
         _otlp_task,
         file_sink,
         _file_task,
+        console_sink,
+        _console_task,
     ) = await _build_alert_sinks(config)
 
     # --- Wired make_handler — IDENTICAL 25 args, ws_manager=None (run.py:876-901) ---
@@ -503,6 +533,7 @@ async def assemble_handler(
         pagerduty_sink=pd_sink,
         otlp_sink=otlp_sink,
         file_sink=file_sink,
+        console_sink=console_sink,
         attack_mapper=attack_mapper,
         graph_structural=graph_structural,
         kill_chain_tracker=kill_chain_tracker,
@@ -524,6 +555,8 @@ async def assemble_handler(
         lifecycle.append(_otlp_task)
     if _file_task is not None:
         lifecycle.append(_file_task)
+    if _console_task is not None:
+        lifecycle.append(_console_task)
 
     _torn_down = False
 
@@ -560,6 +593,12 @@ async def assemble_handler(
                 with contextlib.suppress(asyncio.CancelledError):
                     await _file_task
             await file_sink.close()
+        if console_sink is not None:
+            await console_sink.stop()
+            if _console_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await _console_task
+            await console_sink.close()
         if webhook_session is not None:
             await webhook_session.close()
         if ioc_matcher is not None:
