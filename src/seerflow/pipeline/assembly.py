@@ -258,20 +258,49 @@ def _build_otlp_sink(
     return otlp_sink, _otlp_task
 
 
+def _build_file_sink(
+    config: SeerflowConfig,
+) -> tuple[Any, asyncio.Task[None] | None]:
+    """File sink + run task (S-313/FR-072). ``(None, None)`` when disabled."""
+    from seerflow.alerting.sinks.file import FileSink
+
+    file_sink: FileSink | None = None
+    _file_task: asyncio.Task[None] | None = None
+    if config.alerting.file_enabled and config.alerting.file_path:
+        file_sink = FileSink(
+            config.alerting.file_path,
+            rotation=config.alerting.file_rotation,
+            max_bytes=config.alerting.file_max_bytes,
+            interval_seconds=config.alerting.file_interval_seconds,
+            backup_count=config.alerting.file_backup_count,
+            min_severity=config.alerting.file_min_severity,
+        )
+        _file_task = asyncio.create_task(file_sink.run())
+        _log.info(
+            "File sink: %s (rotation=%s, min_severity=%d)",
+            config.alerting.file_path,
+            config.alerting.file_rotation,
+            config.alerting.file_min_severity,
+        )
+    return file_sink, _file_task
+
+
 async def _build_alert_sinks(
     config: SeerflowConfig,
-) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
-    """Webhook dispatcher + PagerDuty + OTLP sinks (run.py:804-874).
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any, Any]:
+    """Webhook dispatcher + PagerDuty + OTLP + File sinks (run.py:804-874).
 
-    Thin orchestrator over the three per-sink builders. Construction order
-    is preserved verbatim (webhook → PagerDuty → OTLP) so the S-301
-    characterization wiring is unchanged. Returns ``(webhook_session,
-    dispatcher, dispatcher_task, pd_sink, pd_task, pd_session, otlp_sink,
-    otlp_task)`` — any element ``None`` when not configured.
+    Thin orchestrator over the per-sink builders. Construction order is
+    preserved verbatim (webhook → PagerDuty → OTLP) so the S-301
+    characterization wiring is unchanged; the S-313 file sink is appended
+    last (additive, no reorder). Returns ``(webhook_session, dispatcher,
+    dispatcher_task, pd_sink, pd_task, pd_session, otlp_sink, otlp_task,
+    file_sink, file_task)`` — any element ``None`` when not configured.
     """
     webhook_session, dispatcher, _dispatcher_task = await _build_webhook_dispatcher(config)
     pd_sink, _pd_task, pd_session = _build_pagerduty_sink(config)
     otlp_sink, _otlp_task = _build_otlp_sink(config)
+    file_sink, _file_task = _build_file_sink(config)
     return (
         webhook_session,
         dispatcher,
@@ -281,6 +310,8 @@ async def _build_alert_sinks(
         pd_session,
         otlp_sink,
         _otlp_task,
+        file_sink,
+        _file_task,
     )
 
 
@@ -451,6 +482,8 @@ async def assemble_handler(
         pd_session,
         otlp_sink,
         _otlp_task,
+        file_sink,
+        _file_task,
     ) = await _build_alert_sinks(config)
 
     # --- Wired make_handler — IDENTICAL 25 args, ws_manager=None (run.py:876-901) ---
@@ -469,6 +502,7 @@ async def assemble_handler(
         alert_dispatcher=dispatcher,
         pagerduty_sink=pd_sink,
         otlp_sink=otlp_sink,
+        file_sink=file_sink,
         attack_mapper=attack_mapper,
         graph_structural=graph_structural,
         kill_chain_tracker=kill_chain_tracker,
@@ -488,6 +522,8 @@ async def assemble_handler(
         lifecycle.append(_pd_task)
     if _otlp_task is not None:
         lifecycle.append(_otlp_task)
+    if _file_task is not None:
+        lifecycle.append(_file_task)
 
     _torn_down = False
 
@@ -518,6 +554,12 @@ async def assemble_handler(
                 with contextlib.suppress(asyncio.CancelledError):
                     await _otlp_task
             await otlp_sink.close()
+        if file_sink is not None:
+            await file_sink.stop()
+            if _file_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await _file_task
+            await file_sink.close()
         if webhook_session is not None:
             await webhook_session.close()
         if ioc_matcher is not None:

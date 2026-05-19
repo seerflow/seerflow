@@ -777,22 +777,39 @@ class TestTailSubcommand:
             mock_run_async.assert_called_once()
 
     def test_main_dispatches_start_no_tui(self) -> None:
-        """main() dispatches plain `start` to _run, never to the TUI (S-079)."""
+        """main() dispatches plain `start` to _run_with_config, never the TUI.
+
+        S-079 pins "never the TUI"; S-313 reroutes the non-TUI path through
+        ``_apply_alerts_to`` + ``_run_with_config`` (behaviour-equivalent to the
+        old ``_run(config)`` when no ``--alerts-to`` flag is passed).
+        """
         import argparse
         from unittest.mock import patch
 
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None, command="start", tui=False)
+        mock_args = argparse.Namespace(
+            config=None,
+            command="start",
+            tui=False,
+            alerts_to=None,
+        )
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.pipeline.run._run") as mock_run,
+            patch("seerflow.config.load_config", return_value="CFG") as mock_load,
+            patch(
+                "seerflow.__main__._apply_alerts_to",
+                return_value="CFG",
+            ) as mock_apply,
+            patch("seerflow.pipeline.run._run_with_config") as mock_run_with_config,
             patch("seerflow.tui.launch_tui_with_pipeline") as mock_launch,
             patch("seerflow.__main__._run_async") as mock_run_async,
         ):
             mock_run_async.return_value = None
             main()
-            mock_run.assert_called_once_with(None)
+            mock_load.assert_called_once_with(None)
+            mock_apply.assert_called_once_with("CFG", None)
+            mock_run_with_config.assert_called_once_with("CFG")
             mock_launch.assert_not_called()
 
     def test_main_dispatches_tail(self) -> None:

@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine
     from typing import Any
 
+    from seerflow.config import SeerflowConfig
+
 from seerflow.cli import parse_args
 
 
@@ -33,6 +35,22 @@ def _run_async_int(coro: Coroutine[Any, Any, int]) -> int:
         return asyncio.run(coro)
 
 
+def _apply_alerts_to(config: SeerflowConfig, alerts_to: str | None) -> SeerflowConfig:
+    """Return ``config`` with a CLI ``--alerts-to`` file target applied (S-313).
+
+    No-op (identity) when ``alerts_to`` is ``None``. Config is frozen, so the
+    override is a ``dataclasses.replace`` copy (no mutation). Path validity is
+    enforced by ``_validate_writable_target`` via the assembly path / config
+    load — an invalid path fails fast at startup.
+    """
+    if alerts_to is None:
+        return config
+    import dataclasses
+
+    alerting = dataclasses.replace(config.alerting, file_enabled=True, file_path=alerts_to)
+    return dataclasses.replace(config, alerting=alerting)
+
+
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
@@ -54,9 +72,11 @@ def main() -> None:
 
                 _run_async(launch_tui_with_pipeline(load_config(args.config)))
             else:
-                from seerflow.pipeline.run import _run
+                from seerflow.config import load_config
+                from seerflow.pipeline.run import _run_with_config
 
-                _run_async(_run(args.config))
+                _cfg = _apply_alerts_to(load_config(args.config), getattr(args, "alerts_to", None))
+                _run_async(_run_with_config(_cfg))
         elif args.command == "status":
             from seerflow.status_cmd import run_status
 

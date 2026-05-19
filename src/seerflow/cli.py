@@ -457,6 +457,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Launch the Textual headless terminal dashboard alongside the pipeline",
     )
+    start_parser.add_argument(
+        "--alerts-to",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Append alerts as rotating NDJSON to this file path (enables the "
+            "file sink). Overrides alerting.file_path; an invalid path fails "
+            "fast at startup."
+        ),
+    )
 
     status_parser = subparsers.add_parser(
         "status",

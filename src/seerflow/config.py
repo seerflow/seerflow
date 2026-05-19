@@ -216,6 +216,15 @@ class AlertingConfig:
     otlp_tls_ca_file: str = ""
     otlp_mtls_cert_file: str = ""
     otlp_mtls_key_file: str = ""
+    # S-313 / FR-072: rotating NDJSON file alert sink. Disabled unless a
+    # path is configured (yaml ``alerting.file_path`` or ``--alerts-to``).
+    file_enabled: bool = False
+    file_path: str = ""
+    file_rotation: Literal["size", "time"] = "size"
+    file_max_bytes: int = 10 * 1024 * 1024
+    file_interval_seconds: int = 86_400
+    file_backup_count: int = 5
+    file_min_severity: int = 0
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
