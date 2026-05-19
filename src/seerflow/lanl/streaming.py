@@ -19,6 +19,8 @@ import heapq
 import logging
 from typing import TYPE_CHECKING, Callable, TypeVar
 
+import msgspec
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
@@ -29,6 +31,36 @@ if TYPE_CHECKING:
 _log = logging.getLogger("seerflow")
 
 _R = TypeVar("_R")
+
+CURSOR_STATE_KEY = "lanl_stream:cursor"
+
+
+class StreamCursor(msgspec.Struct, frozen=True):
+    """Resume cursor persisted via ``ModelStore.save_state``.
+
+    ``positions`` is the count of source lines already consumed per source
+    (line index to skip on resume — robust on text files, no byte-seek
+    fragility). ``offset_ns`` is the constant rebase offset; it is restored
+    (NOT recomputed) on resume so post-resume timestamps match the pre-kill
+    run exactly.
+    """
+
+    events_processed: int
+    offset_ns: int
+    positions: dict[str, int]
+
+
+def _encode_cursor(cursor: StreamCursor) -> bytes:
+    return msgspec.json.encode(cursor)
+
+
+def _decode_cursor(blob: bytes) -> StreamCursor | None:
+    """Decode a cursor; corrupt/invalid payload → ``None`` (start fresh)."""
+    try:
+        return msgspec.json.decode(blob, type=StreamCursor)
+    except (msgspec.DecodeError, msgspec.ValidationError, ValueError):
+        _log.warning("Corrupt LANL stream cursor — starting fresh", exc_info=True)
+        return None
 
 
 def _iter_record_source(path: Path, parse_fn: Callable[[str], _R]) -> Iterator[_R]:

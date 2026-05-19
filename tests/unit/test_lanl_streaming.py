@@ -101,3 +101,20 @@ def test_record_to_raw_applies_offset_and_metadata(streaming):
     assert raw.source_type == "syslog"
     assert raw.source_id == "lanl-proc"
     assert raw.metadata == {}
+
+
+def test_cursor_round_trip(streaming):
+    cur = streaming.StreamCursor(
+        events_processed=42,
+        offset_ns=-123_456,
+        positions={"auth": 10, "proc": 5, "flows": 7, "dns": 0},
+    )
+    blob = streaming._encode_cursor(cur)
+    assert isinstance(blob, bytes)
+    back = streaming._decode_cursor(blob)
+    assert back == cur
+
+
+def test_decode_cursor_corrupt_returns_none(streaming):
+    assert streaming._decode_cursor(b"not json at all") is None
+    assert streaming._decode_cursor(b'{"events_processed": "bad"}') is None
