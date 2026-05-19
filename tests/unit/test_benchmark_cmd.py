@@ -153,3 +153,31 @@ def test_run_scorecard_bad_dataset_dir_exit_2(
     )
     assert rc == benchmark_cmd.EXIT_USAGE
     assert "Error:" in capsys.readouterr().err
+
+
+def test_validate_integration_smoke_real_fixtures() -> None:
+    """`validate` over the committed synthetic fixtures returns parseable JSON
+    whose numbers equal a direct run_validation call (no recomputation)."""
+    import json as _json
+    from pathlib import Path
+
+    from seerflow.lanl.validator import run_validation
+    from seerflow.validate_cmd import _result_to_dict
+
+    fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "lanl"
+    direct = _result_to_dict(run_validation(fixtures), dataset_dir=str(fixtures))
+    encoded = _json.loads(_json.dumps(direct))
+    assert encoded["auc"] is None
+    assert encoded["precision"] == direct["precision"]
+    assert encoded["total_events_processed"] == direct["total_events_processed"]
+
+
+def test_main_dispatches_validate(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys as _sys
+
+    import seerflow.__main__ as m
+
+    monkeypatch.setattr(_sys, "argv", ["seerflow", "validate", "/no/such/dir"])
+    with pytest.raises(SystemExit) as exc:
+        m.main()
+    assert exc.value.code == 2

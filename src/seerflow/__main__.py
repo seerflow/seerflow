@@ -116,6 +116,14 @@ def main() -> None:
             from seerflow.graph_migrate_cmd import run_graph_migrate
 
             sys.exit(_run_async_int(run_graph_migrate(args)))
+        elif args.command == "validate":
+            from seerflow.validate_cmd import run_validate
+
+            sys.exit(run_validate(args))
+        elif args.command == "benchmark":
+            from seerflow.benchmark_cmd import run_benchmark_cmd
+
+            sys.exit(run_benchmark_cmd(args))
         else:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:
