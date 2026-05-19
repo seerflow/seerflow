@@ -105,8 +105,26 @@ class RedTeamRecord:
     dst_computer: str
 
 
+@dataclass(frozen=True, slots=True)
+class DnsRecord:
+    """Single row from the LANL DNS log (``dns.txt``).
+
+    Fields follow the published CSV column order::
+
+        time, src_computer, resolved_computer
+
+    ``resolved_computer`` may be the missing marker ``?`` (kept verbatim).
+    DNS records carry no user and no own red-team label; they contribute to
+    detection via the *resolving* host's entity (S-315 / FR-081).
+    """
+
+    time: int
+    src_computer: str
+    resolved_computer: str
+
+
 # Public union type for all record variants.
-AnyRecord = AuthRecord | ProcRecord | FlowRecord | RedTeamRecord
+AnyRecord = AuthRecord | ProcRecord | FlowRecord | RedTeamRecord | DnsRecord
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +281,37 @@ def parse_redteam_line(line: str) -> RedTeamRecord:
     )
 
 
+def parse_dns_line(line: str) -> DnsRecord:
+    """Parse a single DNS log CSV line into a :class:`DnsRecord`.
+
+    Expected column order::
+
+        time, src_computer, resolved_computer
+
+    ``resolved_computer`` may be the LANL missing marker ``?`` — it is kept
+    verbatim (no host-to-IP derivation; only the *resolving* host drives the
+    entity/match path).
+
+    Args:
+        line: A raw CSV line.
+
+    Returns:
+        An immutable :class:`DnsRecord`.
+
+    Raises:
+        ValueError: If the line does not have exactly 3 fields.
+    """
+    parts = line.strip().split(",")
+    if len(parts) != 3:
+        msg = f"dns line must have 3 fields, got {len(parts)}: {line!r}"
+        raise ValueError(msg)
+    return DnsRecord(
+        time=_parse_int(parts[0]),
+        src_computer=parts[1],
+        resolved_computer=parts[2],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Streaming iterator
 # ---------------------------------------------------------------------------
@@ -272,6 +321,7 @@ _PARSERS: dict[str, Callable[[str], AnyRecord]] = {
     "proc": parse_proc_line,
     "flow": parse_flow_line,
     "redteam": parse_redteam_line,
+    "dns": parse_dns_line,
 }
 
 

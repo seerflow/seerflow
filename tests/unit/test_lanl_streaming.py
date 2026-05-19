@@ -103,6 +103,67 @@ def test_record_to_raw_applies_offset_and_metadata(streaming):
     assert raw.metadata == {}
 
 
+def test_dns_message_is_detection_attributable(streaming):
+    """S-315 AC2/AC4: DNS message carries the resolver IP + beacon tokens."""
+    from seerflow.lanl.hostmap import host_to_ip
+    from seerflow.lanl.parser import DnsRecord
+
+    rec = DnsRecord(2, "C17693", "C5030")
+    msg = streaming._dns_message(rec)
+    assert "beacon" in msg
+    assert "established" in msg
+    assert host_to_ip("C17693") in msg
+    assert "C5030" in msg
+
+
+def test_dns_message_preserves_missing_resolved_marker(streaming):
+    from seerflow.lanl.parser import DnsRecord
+
+    msg = streaming._dns_message(DnsRecord(2, "C17693", "?"))
+    assert "?" in msg
+
+
+def test_dns_message_matches_c2_beaconing_rule(streaming):
+    """S-315 AC2: the DNS message must satisfy the built-in c2-beaconing regex."""
+    import re
+    from pathlib import Path
+
+    import yaml
+
+    from seerflow.lanl.parser import DnsRecord
+
+    rule_path = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "seerflow"
+        / "correlation"
+        / "rules"
+        / "c2_beaconing.yml"
+    )
+    rule = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
+    pattern = rule["sources"][0]["conditions"]["message"]
+    msg = streaming._dns_message(DnsRecord(110, "C17693", "C5030"))
+    assert re.search(pattern, msg) is not None
+
+
+def test_record_to_raw_dns_branch(streaming):
+    from seerflow.lanl.parser import DnsRecord
+    from seerflow.receivers.base import RawEvent
+
+    rec = DnsRecord(7, "C17693", "C5030")
+    raw = streaming._record_to_raw(rec, offset_ns=1_000)
+    assert isinstance(raw, RawEvent)
+    assert raw.received_ns == 7 * 1_000_000_000 + 1_000
+    assert raw.source_type == "syslog"
+    assert raw.source_id == "lanl-dns"
+    assert raw.metadata == {}
+
+
+def test_dns_cursor_name_mapping(streaming):
+    assert streaming._CURSOR_NAME_BY_SOURCE_ID["lanl-dns"] == "dns"
+    assert streaming._SOURCE_BY_TYPE["DnsRecord"] == "lanl-dns"
+
+
 def test_cursor_round_trip(streaming):
     cur = streaming.StreamCursor(
         events_processed=42,

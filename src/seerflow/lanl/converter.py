@@ -32,7 +32,7 @@ from seerflow.models.entity import normalize_username
 from seerflow.models.event import SeerflowEvent, SeverityLevel
 
 if TYPE_CHECKING:
-    from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord
+    from seerflow.lanl.parser import AuthRecord, DnsRecord, FlowRecord, ProcRecord
 
 # ---------------------------------------------------------------------------
 # Auth record converter
@@ -159,6 +159,43 @@ def convert_flow_record(rec: FlowRecord) -> list[SeerflowEvent]:
         observed_ns=observed_ns,
         severity_id=SeverityLevel.INFORMATIONAL,
         message=message,
+        source_type="syslog",
+        related_ips=(src_ip,),
+        related_users=(),
+        related_hosts=(),
+    )
+
+    return [event]
+
+
+# ---------------------------------------------------------------------------
+# DNS record converter (S-315 / FR-081)
+# ---------------------------------------------------------------------------
+
+
+def convert_dns_record(rec: DnsRecord) -> list[SeerflowEvent]:
+    """Convert one LANL DNS record to a single SeerflowEvent (ip-view).
+
+    The DNS lookup is attributed to the *resolving* host's deterministic IP
+    so the event keys on an ``ip`` entity that the built-in C2-beaconing
+    rule (and red-team ground-truth matching) already use. The message is
+    produced by :func:`seerflow.lanl.streaming._dns_message` so the
+    streaming and in-memory ingest paths are byte-identical by construction
+    (S-315 AC4). Returns a single-element list for API consistency.
+    """
+    from seerflow.lanl.streaming import _dns_message
+
+    timestamp_ns = rec.time * 1_000_000_000
+    observed_ns = timestamp_ns + 1_000_000
+
+    src_ip = host_to_ip(rec.src_computer)
+
+    event = SeerflowEvent(
+        event_id=uuid.uuid4(),
+        timestamp_ns=timestamp_ns,
+        observed_ns=observed_ns,
+        severity_id=SeverityLevel.INFORMATIONAL,
+        message=_dns_message(rec),
         source_type="syslog",
         related_ips=(src_ip,),
         related_users=(),

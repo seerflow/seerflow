@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from seerflow.lanl.parser import (
         AnyRecord,
         AuthRecord,
+        DnsRecord,
         FlowRecord,
         ProcRecord,
         RedTeamRecord,
@@ -136,10 +137,29 @@ def _flow_message(rec: FlowRecord) -> str:
     )
 
 
+def _dns_message(rec: DnsRecord) -> str:
+    """Render a DNS lookup as a detection-attributable beacon message.
+
+    Byte-identical to ``converter.convert_dns_record``'s message (S-315
+    AC4 parity). The *resolving* host (``src_computer``) is rendered as its
+    deterministic IP so the event attributes to an ``ip`` entity that the
+    built-in c2-beaconing rule (and red-team ground-truth matching) keys on;
+    ``resolved_computer`` is kept verbatim (incl. the LANL ``?`` marker).
+    """
+    from seerflow.lanl.hostmap import host_to_ip
+
+    src_ip = host_to_ip(rec.src_computer)
+    return (
+        f"established dns beacon to {rec.resolved_computer} "
+        f"from {src_ip} resolved {rec.resolved_computer}"
+    )
+
+
 _SOURCE_BY_TYPE: dict[str, str] = {
     "AuthRecord": "lanl-auth",
     "ProcRecord": "lanl-proc",
     "FlowRecord": "lanl-flow",
+    "DnsRecord": "lanl-dns",
 }
 
 # Maps a ``RawEvent.source_id`` (kept byte-identical to
@@ -152,12 +172,13 @@ _CURSOR_NAME_BY_SOURCE_ID: dict[str, str] = {
     "lanl-auth": "auth",
     "lanl-proc": "proc",
     "lanl-flow": "flows",
+    "lanl-dns": "dns",
 }
 
 
 def _record_to_raw(rec: AnyRecord, offset_ns: int) -> RawEvent:
     """Build the rebased textual ``RawEvent`` for one merged record."""
-    from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord
+    from seerflow.lanl.parser import AuthRecord, DnsRecord, FlowRecord, ProcRecord
     from seerflow.receivers.base import RawEvent
 
     if isinstance(rec, AuthRecord):
@@ -166,6 +187,8 @@ def _record_to_raw(rec: AnyRecord, offset_ns: int) -> RawEvent:
         msg = _proc_message(rec)
     elif isinstance(rec, FlowRecord):
         msg = _flow_message(rec)
+    elif isinstance(rec, DnsRecord):
+        msg = _dns_message(rec)
     else:  # pragma: no cover - RedTeamRecord never enters the RawEvent stream
         raise TypeError(f"unsupported record type: {type(rec).__name__}")
     return RawEvent(
