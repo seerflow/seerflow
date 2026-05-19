@@ -575,3 +575,27 @@ def run_validation(fixtures_dir: Path) -> ValidationResult:
     import asyncio
 
     return asyncio.run(run_validation_async(fixtures_dir))
+
+
+def run_streaming_validation(
+    dataset_dir: Path,
+    *,
+    checkpoint_interval: int = 10_000,
+    max_events: int | None = None,
+) -> object:
+    """Additive streaming-scale entry point (S-309 / FR-077).
+
+    Thin forwarder to :func:`seerflow.lanl.streaming.run_streaming_validation`
+    — the bounded-memory, resumable, k-way-merged path. This does NOT alter
+    :func:`run_validation` / :func:`run_validation_async` (the S-305
+    in-memory path and its published numbers are unchanged); it is a
+    separate opt-in surface. Returns a ``StreamingValidationResult``
+    (transparent ``ValidationResult`` passthrough + throughput/latency).
+    """
+    from seerflow.lanl.streaming import run_streaming_validation as _impl
+
+    return _impl(
+        dataset_dir,
+        checkpoint_interval=checkpoint_interval,
+        max_events=max_events,
+    )

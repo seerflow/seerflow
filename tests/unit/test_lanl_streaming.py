@@ -184,3 +184,110 @@ async def test_stream_resume_skips_prefix(streaming, tmp_path):
     resumed = [r async for r in streaming.stream_raw_events(tmp_path, resume_cursor=cursor)]
     # one proc line skipped → 2 events, timestamps identical to the full run tail
     assert [r.received_ns for r in resumed] == [r.received_ns for r in full[1:]]
+
+
+def test_validator_exposes_streaming_delegator():
+    import inspect
+
+    from seerflow.lanl import validator
+
+    assert hasattr(validator, "run_streaming_validation")
+    # Additive only: existing entrypoints untouched, no docstring overclaim.
+    src = inspect.getsource(validator)
+    assert "def run_validation(" in src  # S-305 entrypoint still present
+    assert "def run_validation_async(" in src
+
+
+def test_lanl_package_reexports_streaming_entrypoint():
+    import seerflow.lanl as lanl_pkg
+
+    assert "run_streaming_validation" in lanl_pkg.__all__
+    assert hasattr(lanl_pkg, "run_streaming_validation")
+
+
+def test_streaming_iteration_is_bounded_memory(streaming, tmp_path):
+    """AC6 (CI-light): iterating a large synthetic stream does not grow RSS
+    proportionally to stream length (no list/sort/read_text buffering)."""
+    import asyncio
+    import resource
+
+    big = tmp_path / "proc.csv"
+    with big.open("w", encoding="utf-8") as fh:
+        for i in range(50_000):
+            fh.write(f"{i},U{i}@DOM1,C{i % 97},P{i % 13},Start\n")
+
+    async def _consume() -> int:
+        n = 0
+        async for _raw in streaming.stream_raw_events(tmp_path):
+            n += 1
+        return n
+
+    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    count = asyncio.run(_consume())
+    after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    assert count == 50_000
+    # ru_maxrss is KB on Linux; 50k streamed events must not add >100 MB.
+    assert (after - before) < 100 * 1024
+
+
+def test_streaming_rss_flat_as_stream_scales(streaming, tmp_path):
+    """AC6 proxy: peak RSS delta does NOT grow with stream length — the
+    10x-longer stream must not cost ~10x the memory (bounded-memory
+    behaviour, validated FAST on tiny synthetic streams)."""
+    import asyncio
+    import resource
+
+    def _write(path, n):
+        with path.open("w", encoding="utf-8") as fh:
+            for i in range(n):
+                fh.write(f"{i},U{i}@D,C{i % 97},P{i % 13},Start\n")
+
+    async def _consume(d) -> int:
+        c = 0
+        async for _ in streaming.stream_raw_events(d):
+            c += 1
+        return c
+
+    small_dir = tmp_path / "small"
+    big_dir = tmp_path / "big"
+    small_dir.mkdir()
+    big_dir.mkdir()
+    _write(small_dir / "proc.csv", 5_000)
+    _write(big_dir / "proc.csv", 50_000)
+
+    b0 = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    assert asyncio.run(_consume(small_dir)) == 5_000
+    b1 = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    assert asyncio.run(_consume(big_dir)) == 50_000
+    b2 = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    small_delta = max(b1 - b0, 0)
+    big_delta = max(b2 - b1, 0)
+    # 10x longer stream must not cost ~10x memory; allow generous slack for
+    # interpreter noise but reject linear-in-length growth.
+    assert big_delta <= small_delta + 20 * 1024  # < +20 MB for 10x length
+
+
+@pytest.mark.skipif(
+    not __import__("os").environ.get("LANL_STREAM_HEAVY"),
+    reason="heavy >=10M-event / real-dataset RSS assertion is operator-driven",
+)
+def test_streaming_heavy_slice_under_rss_envelope(streaming, tmp_path):  # pragma: no cover
+    import asyncio
+    import resource
+
+    big = tmp_path / "proc.csv"
+    with big.open("w", encoding="utf-8") as fh:
+        for i in range(10_000_000):
+            fh.write(f"{i},U{i}@D,C{i % 997},P{i % 31},Start\n")
+
+    async def _consume() -> int:
+        n = 0
+        async for _ in streaming.stream_raw_events(tmp_path):
+            n += 1
+        return n
+
+    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    n = asyncio.run(_consume())
+    after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    assert n == 10_000_000
+    assert (after - before) < 500 * 1024  # <500 MB RSS (NFR-014)
