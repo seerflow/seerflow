@@ -1025,14 +1025,10 @@ def _validate_file_settings(data: dict[str, Any]) -> _FileFields:
     enabled = bool(path)
     rotation = data.get("file_rotation", "size")
     if rotation not in ("size", "time"):
-        raise ConfigError(
-            f"alerting.file_rotation must be 'size' or 'time', got {rotation!r}"
-        )
+        raise ConfigError(f"alerting.file_rotation must be 'size' or 'time', got {rotation!r}")
     max_bytes = data.get("file_max_bytes", 10 * 1024 * 1024)
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
-        raise ConfigError(
-            f"alerting.file_max_bytes must be an integer >= 1, got {max_bytes!r}"
-        )
+        raise ConfigError(f"alerting.file_max_bytes must be an integer >= 1, got {max_bytes!r}")
     interval = data.get("file_interval_seconds", 86_400)
     if not isinstance(interval, int) or isinstance(interval, bool) or interval < 1:
         raise ConfigError(
@@ -1040,9 +1036,7 @@ def _validate_file_settings(data: dict[str, Any]) -> _FileFields:
         )
     backup = data.get("file_backup_count", 5)
     if not isinstance(backup, int) or isinstance(backup, bool) or backup < 0:
-        raise ConfigError(
-            f"alerting.file_backup_count must be an integer >= 0, got {backup!r}"
-        )
+        raise ConfigError(f"alerting.file_backup_count must be an integer >= 0, got {backup!r}")
     min_sev = data.get("file_min_severity", 0)
     if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
         raise ConfigError(

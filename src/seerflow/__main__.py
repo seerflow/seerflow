@@ -75,9 +75,7 @@ def main() -> None:
                 from seerflow.config import load_config
                 from seerflow.pipeline.run import _run_with_config
 
-                _cfg = _apply_alerts_to(
-                    load_config(args.config), getattr(args, "alerts_to", None)
-                )
+                _cfg = _apply_alerts_to(load_config(args.config), getattr(args, "alerts_to", None))
                 _run_async(_run_with_config(_cfg))
         elif args.command == "status":
             from seerflow.status_cmd import run_status

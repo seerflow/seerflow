@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from seerflow._config_builders import _build_alerting
 from seerflow.config import AlertingConfig, ConfigError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_defaults_disable_file_sink() -> None:

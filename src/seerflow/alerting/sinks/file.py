@@ -82,9 +82,7 @@ class FileSink:
             raise ValueError(f"FileSink rotation must be 'size' or 'time', got {rotation!r}")
         self._path = path
         self._min_severity = min_severity
-        self._handler = _build_handler(
-            path, rotation, max_bytes, interval_seconds, backup_count
-        )
+        self._handler = _build_handler(path, rotation, max_bytes, interval_seconds, backup_count)
         self._handler.setFormatter(logging.Formatter("%(message)s"))
         self._queue: asyncio.Queue[Alert] = asyncio.Queue(maxsize=queue_maxsize)
         self._running = True

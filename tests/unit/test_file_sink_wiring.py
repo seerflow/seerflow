@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seerflow.config import AlertingConfig, SeerflowConfig
 from seerflow.pipeline.assembly import _build_file_sink
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_file_sink_none_when_disabled() -> None:
@@ -56,9 +59,7 @@ async def test_build_alert_sinks_returns_file_sink_slot(tmp_path: Path) -> None:
     base = SeerflowConfig()
     cfg = dataclasses.replace(
         base,
-        alerting=dataclasses.replace(
-            base.alerting, file_enabled=True, file_path=str(target)
-        ),
+        alerting=dataclasses.replace(base.alerting, file_enabled=True, file_path=str(target)),
     )
     result = await _build_alert_sinks(cfg)
     assert len(result) == 10

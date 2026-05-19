@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seerflow.__main__ import _apply_alerts_to
 from seerflow.cli import parse_args
 from seerflow.config import SeerflowConfig
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def test_start_accepts_alerts_to_path() -> None:
-    ns = parse_args(["start", "--alerts-to", "/tmp/a.ndjson"])  # noqa: S108
+    ns = parse_args(["start", "--alerts-to", "/tmp/a.ndjson"])
     assert ns.command == "start"
-    assert ns.alerts_to == "/tmp/a.ndjson"  # noqa: S108
+    assert ns.alerts_to == "/tmp/a.ndjson"
 
 
 def test_start_alerts_to_defaults_none() -> None:

@@ -8,12 +8,15 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from seerflow.models.alert import Alert
 from seerflow.models.event import SeverityLevel
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_alert(
