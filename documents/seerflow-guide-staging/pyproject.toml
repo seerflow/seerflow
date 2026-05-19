@@ -1,0 +1,36 @@
+[project]
+name = "seerflow-guide-staging"
+version = "0.0.0"
+description = "Staged artifacts for the seerflow-guide companion PR. Authored under the seerflow repo so review history travels with the source story."
+requires-python = ">=3.11"
+dependencies = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.24",
+    "pyyaml>=6.0",
+    # NOTE: When this pyproject.toml is copied into `seerflow-guide` by
+    # S-180-F1, also install `seerflow @ git+https://github.com/seerflow/seerflow@main`
+    # alongside these deps so the drift checker can import the real schema.
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    # seerflow is sourced via the companion-PR's docs-drift workflow with
+    # `pip install seerflow @ git+https://github.com/seerflow/seerflow@main`.
+    # The staging tests in this directory exercise the helpers with synthetic
+    # fixtures so they do not require the real seerflow package to be
+    # installed.
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["drift_check*"]

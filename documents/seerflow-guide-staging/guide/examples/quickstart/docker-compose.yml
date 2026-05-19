@@ -1,0 +1,18 @@
+# Alternative quickstart path — Docker compose.
+#
+# The primary quickstart instructions in ../../quickstart.md use
+# `uv tool install seerflow` and the bundled `sample-logs.jsonl`. This compose
+# file is the equivalent containerised path and is kept here for users who
+# prefer Docker. It is intentionally `image: ghcr.io/seerflow/seerflow:0.0.0`
+# pinned to a placeholder until the seerflow image-publish workflow is verified
+# end-to-end (tracked as a follow-up to S-180).
+
+services:
+  seerflow:
+    image: ghcr.io/seerflow/seerflow:0.0.0  # pinned placeholder
+    command: ["analyze", "/work/sample-logs.jsonl"]
+    volumes:
+      - ./sample-logs.jsonl:/work/sample-logs.jsonl:ro
+    environment:
+      SEERFLOW_LOG_LEVEL: INFO
+    stop_grace_period: 5s
