@@ -94,7 +94,7 @@ async def test_resume_reproduces_completed_prefix() -> None:
                 resume_cursor=None,
             )
             ref_cur = streaming._decode_cursor(
-                await streaming._load_state_or_none(storage, streaming.CURSOR_STATE_KEY)
+                await storage.load_state(streaming.CURSOR_STATE_KEY)
             )
         finally:
             await storage.close()
@@ -118,9 +118,7 @@ async def test_resume_reproduces_completed_prefix() -> None:
                 max_events=None,
                 resume_cursor=None,
             )
-            cur = streaming._decode_cursor(
-                await streaming._load_state_or_none(storage, streaming.CURSOR_STATE_KEY)
-            )
+            cur = streaming._decode_cursor(await storage.load_state(streaming.CURSOR_STATE_KEY))
             assert cur is not None and cur.events_processed == full_n
             resumed = await streaming._drive(
                 FIXTURES_DIR,

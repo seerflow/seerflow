@@ -67,8 +67,11 @@ def _encode_cursor(cursor: StreamCursor) -> bytes:
     return msgspec.json.encode(cursor)
 
 
-def _decode_cursor(blob: bytes) -> StreamCursor | None:
-    """Decode a cursor; corrupt/invalid payload → ``None`` (start fresh)."""
+def _decode_cursor(blob: bytes | None) -> StreamCursor | None:
+    """Decode a cursor; absent (``None``) or corrupt payload → ``None``
+    (start fresh)."""
+    if blob is None:
+        return None
     try:
         return msgspec.json.decode(blob, type=StreamCursor)
     except (msgspec.DecodeError, msgspec.ValidationError, ValueError):
@@ -266,11 +269,6 @@ def _first_record_time_ns(dataset_dir: Path) -> int:
     return 0 if first is None else first.time * 1_000_000_000
 
 
-async def _load_state_or_none(storage: StorageBackend, key: str) -> bytes | None:
-    """Read a ``ModelStore`` key, returning ``None`` when absent."""
-    return await storage.load_state(key)
-
-
 async def _persist_cursor(
     storage: StorageBackend, processed: int, offset_ns: int, counts: dict[str, int]
 ) -> None:
@@ -466,8 +464,7 @@ async def resume_streaming_validation_async(
     The caller owns ``storage`` (so it survives a process kill, unlike the
     temp-DB :func:`run_streaming_validation_async` convenience wrapper).
     """
-    blob = await storage.load_state(CURSOR_STATE_KEY)
-    cursor = _decode_cursor(blob) if blob is not None else None
+    cursor = _decode_cursor(await storage.load_state(CURSOR_STATE_KEY))
     return await _drive(
         dataset_dir,
         storage,

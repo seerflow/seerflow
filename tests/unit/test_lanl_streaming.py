@@ -120,6 +120,11 @@ def test_decode_cursor_corrupt_returns_none(streaming):
     assert streaming._decode_cursor(b'{"events_processed": "bad"}') is None
 
 
+def test_decode_cursor_none_input_returns_none(streaming):
+    """Absent cursor (``load_state`` miss → ``None``) → ``None`` (start fresh)."""
+    assert streaming._decode_cursor(None) is None
+
+
 async def test_stream_raw_events_rebases_from_first_record(streaming, tmp_path):
     from seerflow.lanl import validator
     from seerflow.receivers.base import RawEvent
