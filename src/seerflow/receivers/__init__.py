@@ -7,6 +7,7 @@ from seerflow.receivers.file_tail import FileTailReceiver
 from seerflow.receivers.manager import ReceiverManager
 from seerflow.receivers.otlp_grpc import OtlpGrpcReceiver
 from seerflow.receivers.otlp_http import OtlpHttpReceiver
+from seerflow.receivers.stdin import StdinReceiver
 from seerflow.receivers.syslog import SyslogReceiver
 from seerflow.receivers.webhook import WebhookConfig, WebhookReceiver
 
@@ -17,6 +18,7 @@ __all__ = [
     "RawEvent",
     "Receiver",
     "ReceiverManager",
+    "StdinReceiver",
     "SyslogReceiver",
     "WebhookConfig",
     "WebhookReceiver",

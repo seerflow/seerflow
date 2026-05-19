@@ -105,6 +105,7 @@ class ReceiverConfig:
     webhooks: tuple[WebhookEndpointConfig, ...] = ()
     webhook_enabled: bool = False
     webhook_port: int = 8081
+    stdin_enabled: bool = False
     bind_addr: str = "0.0.0.0"  # noqa: S104  # nosec B104
     queue_maxsize: int = 10_000
 
