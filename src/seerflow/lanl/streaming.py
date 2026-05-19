@@ -19,18 +19,25 @@ import heapq
 import itertools
 import logging
 import time as _time
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import msgspec
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Callable, Iterator
     from pathlib import Path
 
-    from seerflow.lanl.parser import AnyRecord, AuthRecord, FlowRecord, ProcRecord
+    from seerflow.lanl.parser import (
+        AnyRecord,
+        AuthRecord,
+        FlowRecord,
+        ProcRecord,
+        RedTeamRecord,
+    )
     from seerflow.lanl.validator import ValidationResult
+    from seerflow.models.alert import Alert
+    from seerflow.pipeline.assembly import AssembledHandler
     from seerflow.receivers.base import RawEvent
     from seerflow.storage.factory import StorageBackend
 
@@ -103,9 +110,7 @@ def _auth_message(rec: AuthRecord) -> str:
     dst_user, _domain = normalize_username(rec.dst_user)
     if rec.success:
         return f"Accepted password for {dst_user} session opened from {rec.src_computer}"
-    return (
-        f"authentication failure for {dst_user} from {rec.src_computer} via {rec.auth_type}"
-    )
+    return f"authentication failure for {dst_user} from {rec.src_computer} via {rec.auth_type}"
 
 
 def _proc_message(rec: ProcRecord) -> str:
@@ -124,8 +129,7 @@ def _flow_message(rec: FlowRecord) -> str:
     src_ip = host_to_ip(rec.src_computer)
     dst_ip = host_to_ip(rec.dst_computer)
     return (
-        f"flow established {dst_ip}:{rec.dst_port} from "
-        f"{src_ip}:{rec.src_port} {rec.byte_count}B"
+        f"flow established {dst_ip}:{rec.dst_port} from {src_ip}:{rec.src_port} {rec.byte_count}B"
     )
 
 
@@ -283,6 +287,93 @@ async def _persist_cursor(
     await storage.save_state(CURSOR_STATE_KEY, _encode_cursor(cursor))
 
 
+def _read_redteam(dataset_dir: Path) -> list[RedTeamRecord]:
+    """Parse ``redteam.csv`` (ground truth); missing file → empty list."""
+    from seerflow.lanl.parser import parse_redteam_line
+
+    rt_path = dataset_dir / "redteam.csv"
+    if not rt_path.exists():
+        return []
+    return [
+        parse_redteam_line(ln.strip())
+        for ln in rt_path.read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
+
+
+async def _replay_stream(
+    dataset_dir: Path,
+    storage: StorageBackend,
+    assembled: AssembledHandler,
+    *,
+    checkpoint_interval: int,
+    max_events: int | None,
+    resume_cursor: StreamCursor | None,
+) -> tuple[int, int | None]:
+    """Drive the rebased stream through the handler under the frozen clock,
+    checkpointing ``save_all_state`` + the resume cursor periodically.
+
+    Returns ``(segment_events_processed, offset_ns)``.
+    """
+    from seerflow.lanl import validator
+
+    processed = 0  # events processed in THIS segment (drives throughput)
+    # Cumulative consumed prefix (carried across resumes via the cursor).
+    consumed = resume_cursor.events_processed if resume_cursor else 0
+    offset_ns: int | None = resume_cursor.offset_ns if resume_cursor else None
+    counts: dict[str, int] = dict(resume_cursor.positions) if resume_cursor else {}
+    with validator._frozen_replay_clock(validator.REPLAY_EPOCH_NS):
+        async for raw in stream_raw_events(dataset_dir, resume_cursor=resume_cursor):
+            await assembled.handler(raw)
+            processed += 1
+            consumed += 1
+            src = _CURSOR_NAME_BY_SOURCE_ID[raw.source_id]
+            counts[src] = counts.get(src, 0) + 1
+            if offset_ns is None:
+                offset_ns = raw.received_ns - _first_record_time_ns(dataset_dir)
+            if processed % checkpoint_interval == 0:
+                await assembled.engines.ensemble.save_all_state(storage)
+                await _persist_cursor(storage, consumed, offset_ns, counts)
+            if max_events is not None and processed >= max_events:
+                break
+    await assembled.engines.ensemble.save_all_state(storage)
+    if offset_ns is not None:
+        await _persist_cursor(storage, consumed, offset_ns, counts)
+    return processed, offset_ns
+
+
+def _score(
+    alerts: list[Alert],
+    redteam: list[RedTeamRecord],
+    offset_ns: int | None,
+    processed: int,
+) -> ValidationResult:
+    """Rebase ground truth by the same constant offset, match, and compute
+    combined + per-family metrics (reusing S-305's ``compute_metrics``)."""
+    from seerflow.lanl import validator
+    from seerflow.lanl.parser import RedTeamRecord
+
+    base_off_s = (offset_ns or 0) // 1_000_000_000
+    rebased_rt = [
+        RedTeamRecord(
+            time=r.time + base_off_s,
+            user=r.user,
+            src_computer=r.src_computer,
+            dst_computer=r.dst_computer,
+        )
+        for r in redteam
+    ]
+    tp, fp, missed = validator.match_against_ground_truth(alerts, rebased_rt, time_window_s=300)
+    return validator.compute_metrics(
+        tp_alerts=tp,
+        fp_alerts=fp,
+        missed_redteam=missed,
+        alerts=alerts,
+        events_processed=processed,
+        detection_latencies={},
+    )
+
+
 async def _drive(
     dataset_dir: Path,
     storage: StorageBackend,
@@ -301,76 +392,27 @@ async def _drive(
     storage so a resumed run scores the full persisted prefix.
     """
     from seerflow.config import SeerflowConfig
-    from seerflow.lanl import validator
-    from seerflow.lanl.parser import RedTeamRecord, parse_redteam_line
     from seerflow.models.query import AlertQuery
     from seerflow.pipeline.assembly import assemble_handler
 
-    rt_path = dataset_dir / "redteam.csv"
-    redteam = (
-        [
-            parse_redteam_line(ln.strip())
-            for ln in rt_path.read_text(encoding="utf-8").splitlines()
-            if ln.strip()
-        ]
-        if rt_path.exists()
-        else []
-    )
-
-    config = SeerflowConfig()
-    assembled = await assemble_handler(config, storage)
-    processed = 0  # events processed in THIS segment (drives throughput)
-    # Cumulative consumed prefix (carried across resumes via the cursor).
-    consumed = resume_cursor.events_processed if resume_cursor else 0
-    offset_ns: int | None = resume_cursor.offset_ns if resume_cursor else None
-    counts: dict[str, int] = dict(resume_cursor.positions) if resume_cursor else {}
+    redteam = _read_redteam(dataset_dir)
+    assembled = await assemble_handler(SeerflowConfig(), storage)
     t0 = _time.perf_counter()
     try:
-        with validator._frozen_replay_clock(validator.REPLAY_EPOCH_NS):
-            async for raw in stream_raw_events(dataset_dir, resume_cursor=resume_cursor):
-                await assembled.handler(raw)
-                processed += 1
-                consumed += 1
-                src = _CURSOR_NAME_BY_SOURCE_ID[raw.source_id]
-                counts[src] = counts.get(src, 0) + 1
-                if offset_ns is None:
-                    offset_ns = raw.received_ns - _first_record_time_ns(dataset_dir)
-                if processed % checkpoint_interval == 0:
-                    await assembled.engines.ensemble.save_all_state(storage)
-                    await _persist_cursor(storage, consumed, offset_ns, counts)
-                if max_events is not None and processed >= max_events:
-                    break
-        await assembled.engines.ensemble.save_all_state(storage)
-        if offset_ns is not None:
-            await _persist_cursor(storage, consumed, offset_ns, counts)
+        processed, offset_ns = await _replay_stream(
+            dataset_dir,
+            storage,
+            assembled,
+            checkpoint_interval=checkpoint_interval,
+            max_events=max_events,
+            resume_cursor=resume_cursor,
+        )
     finally:
         await assembled.teardown()
     elapsed = max(_time.perf_counter() - t0, 1e-9)
     await storage.flush()
     page = await storage.query_alerts(AlertQuery(limit=10_000))
-    alerts = list(page.items)
-
-    base_off_s = (offset_ns or 0) // 1_000_000_000
-    rebased_rt = [
-        RedTeamRecord(
-            time=r.time + base_off_s,
-            user=r.user,
-            src_computer=r.src_computer,
-            dst_computer=r.dst_computer,
-        )
-        for r in redteam
-    ]
-    tp, fp, missed = validator.match_against_ground_truth(
-        alerts, rebased_rt, time_window_s=300
-    )
-    base = validator.compute_metrics(
-        tp_alerts=tp,
-        fp_alerts=fp,
-        missed_redteam=missed,
-        alerts=alerts,
-        events_processed=processed,
-        detection_latencies={},
-    )
+    base = _score(list(page.items), redteam, offset_ns, processed)
     return StreamingValidationResult(
         base=base,
         throughput_events_per_s=processed / elapsed if processed else 0.0,

@@ -205,6 +205,39 @@ def test_lanl_package_reexports_streaming_entrypoint():
     assert hasattr(lanl_pkg, "run_streaming_validation")
 
 
+def test_read_redteam_missing_file_is_empty(streaming, tmp_path):
+    """`_read_redteam` returns [] when redteam.csv is absent (graceful)."""
+    assert streaming._read_redteam(tmp_path) == []
+
+
+def test_validator_delegator_forwards_to_streaming(monkeypatch, tmp_path):
+    """`validator.run_streaming_validation` is a thin forwarder into
+    `streaming.run_streaming_validation` (covers the additive hook body)."""
+    from seerflow.lanl import streaming as streaming_mod
+    from seerflow.lanl import validator
+
+    captured: dict[str, object] = {}
+
+    def _fake(dataset_dir, *, checkpoint_interval, max_events):
+        captured["args"] = (dataset_dir, checkpoint_interval, max_events)
+        return "SENTINEL"
+
+    monkeypatch.setattr(streaming_mod, "run_streaming_validation", _fake)
+    out = validator.run_streaming_validation(tmp_path, checkpoint_interval=7, max_events=3)
+    assert out == "SENTINEL"
+    assert captured["args"] == (tmp_path, 7, 3)
+
+
+def test_run_streaming_validation_sync_wrapper_empty_dataset(streaming, tmp_path):
+    """Sync wrapper over an empty dataset → zero-metric result, no crash
+    (covers run_streaming_validation + the no-events scoring path)."""
+    result = streaming.run_streaming_validation(tmp_path, checkpoint_interval=5)
+    assert result.total_events_processed == 0
+    assert result.precision == 0.0
+    assert result.throughput_events_per_s == 0.0
+    assert result.mean_event_latency_s == 0.0
+
+
 def test_streaming_iteration_is_bounded_memory(streaming, tmp_path):
     """AC6 (CI-light): iterating a large synthetic stream does not grow RSS
     proportionally to stream length (no list/sort/read_text buffering)."""
