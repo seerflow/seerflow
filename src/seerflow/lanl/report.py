@@ -80,6 +80,16 @@ def _pct(value: float) -> str:
     return f"{value * 100:.2f}%"
 
 
+def _auc_str(value: float | None) -> str:
+    """AUC display: 4-dp float, or ``N/A`` (never a bare ``None``)."""
+    return "N/A" if value is None else f"{value:.4f}"
+
+
+def _mttd_str(value: float | None) -> str:
+    """Per-scenario MTTD display: seconds, or an explicit miss marker."""
+    return "not detected" if value is None else f"{value:.1f}"
+
+
 def render_validation_report(
     result: ValidationResult,
     *,
@@ -110,6 +120,14 @@ def render_validation_report(
             for fam, m in sorted(result.per_family.items())
         )
         or "| (none fired) | 0 | 0 | 0.00% | 0.00% |"
+    )
+    scenario_rows = (
+        "\n".join(
+            f"| {s.name} | {s.record_count} | {s.missed_record_count} | "
+            f"{'yes' if s.detected else 'no'} | {_mttd_str(s.mttd_seconds)} |"
+            for s in result.attack_scenarios
+        )
+        or "| (no red-team scenarios) | 0 | 0 | no | not detected |"
     )
 
     return f"""# LANL Full-Stack Validation Report
@@ -148,6 +166,21 @@ alerts -- the per-family table below makes that explicit and honest.
 | Family | TP | FP | Precision | F1 |
 |--------|----|----|-----------|----|
 {family_rows}
+
+## Attack-Level Metrics
+
+Per-attack-scenario detection (FR-079). AUC is the trapezoidal area under
+the ROC curve from a risk-score threshold sweep; MTTD is the time from a
+scenario's first ground-truth event to the first alert covering its
+entities (``not detected`` when no alert covered the scenario -- never a
+silent ``0.0``).
+
+| AUC | {_auc_str(result.auc)} |
+|-----|-------|
+
+| Attack scenario | Records | Missed | Detected | MTTD (s) |
+|-----------------|---------|--------|----------|----------|
+{scenario_rows}
 
 ## Detection Latency
 
