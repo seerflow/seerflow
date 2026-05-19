@@ -34,9 +34,7 @@ def real_card() -> dict:
     """Build a scorecard from the real harness + a small real benchmark."""
     validation = run_validation(FIXTURES)
     benchmark = run_benchmark(200)
-    sc = build_scorecard(
-        validation, benchmark, git_sha="itest", timestamp="itest"
-    )
+    sc = build_scorecard(validation, benchmark, git_sha="itest", timestamp="itest")
     return scorecard_to_dict(sc)
 
 
@@ -100,6 +98,46 @@ def test_committed_baseline_passes_against_itself() -> None:
     base = json.loads(BASELINE.read_text(encoding="utf-8"))
     res = evaluate_regression(base, base)
     assert res.passed is True
+
+
+def test_main_end_to_end_writes_real_artifact(tmp_path) -> None:
+    """AC1/AC2 end-to-end: `main` runs the real harness + benchmark and
+    writes a populated, append-only artifact (no `--check`)."""
+    from seerflow.benchmark import scorecard as mod
+
+    out = tmp_path / "benchmark-results.json"
+    rc = mod.main(["--out", str(out)])
+    assert rc == 0
+    assert out.exists()
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["schema_version"] == 1
+    assert doc["git_sha"]  # resolved (sha or "unknown"), never empty
+    assert doc["timestamp"]  # real UTC ISO-8601 stamp
+    assert "T" in doc["timestamp"]
+    assert doc["history"] == []
+    assert 0.0 <= doc["accuracy"]["recall"] <= 1.0
+    assert doc["performance"]["throughput_eps"] > 0
+    # Second run appends history (append-only proven end-to-end).
+    rc2 = mod.main(["--out", str(out)])
+    assert rc2 == 0
+    doc2 = json.loads(out.read_text(encoding="utf-8"))
+    assert len(doc2["history"]) == 1
+    assert doc2["history"][0]["git_sha"] == doc["git_sha"]
+
+
+def test_real_run_passes_committed_baseline(real_card) -> None:
+    """AC4/AC5: a real harness run is regression-free vs the committed
+    baseline.
+
+    Uses the module-scoped ``real_card`` (one harness+benchmark build) so
+    the assertion is not perturbed by other tests' repeated heavy runs in
+    the same process. The committed baseline pins the deterministic S-305
+    accuracy numbers and a conservative throughput floor; a clean run must
+    clear all four NFR-016 metrics.
+    """
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+    res = evaluate_regression(real_card, baseline)
+    assert res.passed is True, res.failures
 
 
 def test_ci_yaml_is_valid_and_additive() -> None:

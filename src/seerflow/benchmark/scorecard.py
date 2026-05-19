@@ -15,15 +15,20 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # noqa: S404 - fixed argv, shell=False; see resolve_git_sha
+import shutil
+import subprocess  # nosec B404 - only a fixed-argv `git rev-parse`; see resolve_git_sha
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from seerflow.lanl.validator import ValidationResult
     from seerflow.launch.benchmark import BenchmarkResult
+
+# Heterogeneous JSON object (scorecard dicts mix str/float/int/nested maps).
+# ``TypeAlias`` (not PEP 695 ``type``) keeps the 3.11 floor (project NFR).
+JsonDict: TypeAlias = "dict[str, object]"
 
 SCHEMA_VERSION = 1
 # NFR-016: regression iff relative drop is strictly greater than 5 %.
@@ -116,7 +121,7 @@ def build_scorecard(
     )
 
 
-def scorecard_to_dict(sc: Scorecard) -> dict:
+def scorecard_to_dict(sc: Scorecard) -> JsonDict:
     """Serialize a Scorecard to a stable, deterministic dict."""
     return {
         "schema_version": SCHEMA_VERSION,
@@ -145,48 +150,59 @@ def scorecard_to_dict(sc: Scorecard) -> dict:
     }
 
 
-def _summary(d: dict) -> dict:
+def _section(d: JsonDict, key: str) -> JsonDict:
+    """Return a nested object section, narrowed to ``JsonDict`` for mypy."""
+    value = d[key]
+    if not isinstance(value, dict):
+        msg = f"scorecard section {key!r} is not an object"
+        raise TypeError(msg)
+    return value
+
+
+def _summary(d: JsonDict) -> JsonDict:
+    acc = _section(d, "accuracy")
+    perf = _section(d, "performance")
     return {
         "git_sha": d["git_sha"],
         "timestamp": d["timestamp"],
         "accuracy_summary": {
-            "precision": d["accuracy"]["precision"],
-            "recall": d["accuracy"]["recall"],
-            "f1_score": d["accuracy"]["f1_score"],
+            "precision": acc["precision"],
+            "recall": acc["recall"],
+            "f1_score": acc["f1_score"],
         },
-        "performance_summary": {
-            "throughput_eps": d["performance"]["throughput_eps"]
-        },
+        "performance_summary": {"throughput_eps": perf["throughput_eps"]},
     }
 
 
-def append_history(new_dict: dict, existing_path: Path) -> dict:
+def append_history(new_dict: JsonDict, existing_path: Path) -> JsonDict:
     """Return ``new_dict`` with an append-only ``history`` array.
 
     Prior runs (the previous top-level entry plus its own history) are
     carried forward. A missing or corrupt existing file yields an empty
     history (fail-open: a fresh artifact must still be writable).
     """
-    history: list[dict] = []
+    history: list[JsonDict] = []
     if existing_path.exists():
         try:
             prev = json.loads(existing_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             prev = None
         if isinstance(prev, dict):
-            history = list(prev.get("history", []))
+            prior = prev.get("history", [])
+            if isinstance(prior, list):
+                history = list(prior)
             if "git_sha" in prev and "accuracy" in prev:
                 history.append(_summary(prev))
     return {**new_dict, "history": history}
 
 
-def _metric(card: dict, name: str) -> float:
+def _metric(card: JsonDict, name: str) -> float:
     if name == "throughput_eps":
-        return float(card["performance"]["throughput_eps"])
-    return float(card["accuracy"][name])
+        return float(_section(card, "performance")["throughput_eps"])  # type: ignore[arg-type]
+    return float(_section(card, "accuracy")[name])  # type: ignore[arg-type]
 
 
-def evaluate_regression(candidate: dict, baseline: dict) -> GateResult:
+def evaluate_regression(candidate: JsonDict, baseline: JsonDict) -> GateResult:
     """Apply the NFR-016 rule to precision/recall/F1/throughput.
 
     A metric regresses iff ``baseline > 0`` and the relative drop
@@ -212,15 +228,20 @@ def evaluate_regression(candidate: dict, baseline: dict) -> GateResult:
 def resolve_git_sha() -> str:
     """Resolve the commit SHA: ``GITHUB_SHA`` env, then ``git``, else unknown.
 
-    ``subprocess.run`` uses a fixed argv list with ``shell=False`` and no
-    untrusted input, so there is no command-injection surface (bandit-safe).
+    The ``git`` executable is resolved to an absolute path via
+    ``shutil.which`` (no partial-path lookup), invoked with a fixed argv
+    list, ``shell=False``, and zero untrusted input — there is no
+    command-injection surface.
     """
     env_sha = os.environ.get("GITHUB_SHA")
     if env_sha:
         return env_sha
+    git_exe = shutil.which("git")
+    if git_exe is None:
+        return "unknown"
     try:
-        cp = subprocess.run(  # noqa: S603 - fixed argv, shell=False
-            ["git", "rev-parse", "HEAD"],  # noqa: S607 - git on PATH by design
+        cp = subprocess.run(  # noqa: S603  # nosec B603 - absolute git path, fixed argv, shell=False
+            [git_exe, "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
@@ -232,9 +253,9 @@ def resolve_git_sha() -> str:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _run_validation_for_scorecard() -> ValidationResult:
@@ -242,9 +263,7 @@ def _run_validation_for_scorecard() -> ValidationResult:
 
     from seerflow.lanl.validator import run_validation
 
-    fixtures = (
-        Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "lanl"
-    )
+    fixtures = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "lanl"
     return run_validation(fixtures)
 
 
@@ -269,22 +288,23 @@ def run_scorecard(out_path: Path, baseline_path: Path | None) -> int:
         timestamp=_now_iso(),
     )
     merged = append_history(scorecard_to_dict(sc), out_path)
-    out_path.write_text(
-        json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    out_path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if baseline_path is None:
         return 0
     if not baseline_path.exists():
-        print(f"scorecard gate: baseline not found: {baseline_path}")
+        # CLI stdout is the gate contract (matches launch.benchmark.main).
+        print(  # noqa: T201 -- CLI stdout is the contract
+            f"scorecard gate: baseline not found: {baseline_path}"
+        )
         return 1
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     result = evaluate_regression(merged, baseline)
     if result.passed:
-        print("scorecard gate: PASS")
+        print("scorecard gate: PASS")  # noqa: T201 -- CLI stdout is the contract
         return 0
-    print("scorecard gate: FAIL")
+    print("scorecard gate: FAIL")  # noqa: T201 -- CLI stdout is the contract
     for f in result.failures:
-        print(f"  - {f}")
+        print(f"  - {f}")  # noqa: T201 -- CLI stdout is the contract
     return 1
 
 
@@ -294,9 +314,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="seerflow.benchmark.scorecard",
-        description=(
-            "Build the benchmark scorecard artifact and gate on NFR-016."
-        ),
+        description=("Build the benchmark scorecard artifact and gate on NFR-016."),
     )
     parser.add_argument(
         "--out",
