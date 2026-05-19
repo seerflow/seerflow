@@ -27,9 +27,7 @@ def test_streaming_result_has_combined_and_perf(streaming_result) -> None:
 
 def test_streaming_result_per_family_is_recognised(streaming_result) -> None:
     assert isinstance(streaming_result.per_family, dict)
-    assert set(streaming_result.per_family).issubset(
-        {"ml", "sigma", "correlation", "ueba", "ioc"}
-    )
+    assert set(streaming_result.per_family).issubset({"ml", "sigma", "correlation", "ueba", "ioc"})
 
 
 def test_two_streaming_runs_are_byte_identical() -> None:
