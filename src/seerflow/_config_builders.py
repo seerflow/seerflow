@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 from urllib.parse import urlparse
@@ -825,6 +826,23 @@ class _OtlpFields(NamedTuple):
     mtls_key_file: str
 
 
+class _FileFields(NamedTuple):
+    """Validated file-sink settings extracted from ``alerting`` YAML (S-313).
+
+    Mirrors :class:`_OtlpFields`: the ``Literal`` ``rotation`` type lets mypy
+    narrow the guarded ``data.get`` value so :func:`_build_alerting` can pass
+    it straight into :class:`AlertingConfig` without a cast.
+    """
+
+    enabled: bool
+    path: str
+    rotation: Literal["size", "time"]
+    max_bytes: int
+    interval_seconds: int
+    backup_count: int
+    min_severity: int
+
+
 def _validate_otlp_str_path(field_name: str, value: Any) -> str:
     """Validate that a YAML value is a string (path-shaped). Empty allowed.
 
@@ -969,6 +987,80 @@ def _merge_unique_channel_names(
     return seen
 
 
+def _validate_writable_target(field_name: str, path: str) -> None:
+    """Fail fast if ``path`` cannot be an appendable file target (S-313).
+
+    Rejects an existing directory and a missing/unwritable parent. Performs a
+    real create+unlink write-probe of a uniquely-named sibling so read-only
+    mounts surface deterministically at config load rather than at first alert.
+    """
+    p = Path(path)
+    if p.is_dir():
+        raise ConfigError(f"alerting.{field_name}: {path!r} is a directory")
+    parent = p.parent
+    if not parent.is_dir():
+        raise ConfigError(
+            f"alerting.{field_name}: parent directory {str(parent)!r} does not exist"
+        )
+    try:
+        fd, probe = tempfile.mkstemp(prefix=".seerflow-probe-", dir=str(parent))
+        os.close(fd)
+        os.unlink(probe)
+    except OSError as exc:
+        raise ConfigError(
+            f"alerting.{field_name}: cannot write to {str(parent)!r}: {exc}"
+        ) from exc
+
+
+def _validate_file_settings(data: dict[str, Any]) -> _FileFields:
+    """Validate alerting.file.* (S-313/FR-072).
+
+    Fails fast with a clear ``ConfigError`` so a hand-edited seerflow.yaml or
+    a bad ``--alerts-to`` path is rejected at load time rather than silently
+    dropping every alert at runtime.
+    """
+    path = data.get("file_path", "")
+    if not isinstance(path, str):
+        raise ConfigError(f"alerting.file_path must be a string, got {type(path).__name__}")
+    enabled = bool(path)
+    rotation = data.get("file_rotation", "size")
+    if rotation not in ("size", "time"):
+        raise ConfigError(
+            f"alerting.file_rotation must be 'size' or 'time', got {rotation!r}"
+        )
+    max_bytes = data.get("file_max_bytes", 10 * 1024 * 1024)
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
+        raise ConfigError(
+            f"alerting.file_max_bytes must be an integer >= 1, got {max_bytes!r}"
+        )
+    interval = data.get("file_interval_seconds", 86_400)
+    if not isinstance(interval, int) or isinstance(interval, bool) or interval < 1:
+        raise ConfigError(
+            f"alerting.file_interval_seconds must be an integer >= 1, got {interval!r}"
+        )
+    backup = data.get("file_backup_count", 5)
+    if not isinstance(backup, int) or isinstance(backup, bool) or backup < 0:
+        raise ConfigError(
+            f"alerting.file_backup_count must be an integer >= 0, got {backup!r}"
+        )
+    min_sev = data.get("file_min_severity", 0)
+    if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
+        raise ConfigError(
+            f"alerting.file_min_severity must be an integer in [0, 6], got {min_sev!r}"
+        )
+    if enabled:
+        _validate_writable_target("file_path", path)
+    return _FileFields(
+        enabled=enabled,
+        path=path,
+        rotation=rotation,
+        max_bytes=max_bytes,
+        interval_seconds=interval,
+        backup_count=backup,
+        min_severity=min_sev,
+    )
+
+
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
@@ -1000,6 +1092,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         data.get("default_routing"), known_channels, has_rules=bool(routing_rules)
     )
     otlp_fields = _validate_otlp_settings(data)
+    file_fields = _validate_file_settings(data)
 
     quiet_hours: list[tuple[str, QuietHours]] = list(
         _collect_quiet_hours(webhooks, webhook_targets)
@@ -1030,6 +1123,13 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         otlp_tls_ca_file=otlp_fields.tls_ca_file,
         otlp_mtls_cert_file=otlp_fields.mtls_cert_file,
         otlp_mtls_key_file=otlp_fields.mtls_key_file,
+        file_enabled=file_fields.enabled,
+        file_path=file_fields.path,
+        file_rotation=file_fields.rotation,
+        file_max_bytes=file_fields.max_bytes,
+        file_interval_seconds=file_fields.interval_seconds,
+        file_backup_count=file_fields.backup_count,
+        file_min_severity=file_fields.min_severity,
     )
 
 
