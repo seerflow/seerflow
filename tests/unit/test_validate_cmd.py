@@ -150,3 +150,82 @@ def test_run_validate_table_mode(
     out = capsys.readouterr().out
     assert "precision" in out.lower()
     assert "mttd" in out.lower()
+
+
+def test_cli_parses_validate() -> None:
+    from seerflow.cli import parse_args
+
+    ns = parse_args(["validate", "/data/lanl", "--json"])
+    assert ns.command == "validate"
+    assert ns.dataset_dir == "/data/lanl"
+    assert ns.json is True
+
+
+def test_cli_parses_benchmark_defaults() -> None:
+    from seerflow.cli import parse_args
+
+    ns = parse_args(["benchmark"])
+    assert ns.command == "benchmark"
+    assert ns.count == 20000
+    assert ns.seed == 42
+    assert ns.json is False
+    assert ns.scorecard is False
+
+
+def test_cli_benchmark_count_zero_rejected() -> None:
+    from seerflow.cli import parse_args
+
+    with pytest.raises(SystemExit) as exc:
+        parse_args(["benchmark", "--count", "0"])
+    assert exc.value.code == 2
+
+
+def test_cli_benchmark_count_negative_rejected() -> None:
+    from seerflow.cli import parse_args
+
+    with pytest.raises(SystemExit) as exc:
+        parse_args(["benchmark", "--count", "-5"])
+    assert exc.value.code == 2
+
+
+def test_cli_benchmark_scorecard_flags() -> None:
+    from seerflow.cli import parse_args
+
+    ns = parse_args(["benchmark", "--scorecard", "--dataset-dir", "/d", "--count", "5"])
+    assert ns.scorecard is True
+    assert ns.dataset_dir == "/d"
+    assert ns.count == 5
+
+
+def test_cli_validate_help_documents_json(capsys: pytest.CaptureFixture[str]) -> None:
+    from seerflow.cli import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["validate", "--help"])
+    out = capsys.readouterr().out
+    assert "--json" in out
+    assert "dataset" in out.lower()
+
+
+def test_cli_benchmark_help_documents_scorecard(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from seerflow.cli import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["benchmark", "--help"])
+    out = capsys.readouterr().out
+    assert "--scorecard" in out
+    assert "--count" in out
+
+
+def test_top_level_help_lists_new_commands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from seerflow.cli import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    out = capsys.readouterr().out
+    assert "validate" in out
+    assert "benchmark" in out

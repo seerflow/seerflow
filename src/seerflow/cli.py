@@ -342,6 +342,90 @@ def _add_analyze_subparser(subparsers: argparse._SubParsersAction) -> None:  # t
     )
 
 
+_DEFAULT_BENCHMARK_COUNT = 20_000
+"""Default ``--count`` for ``seerflow benchmark`` (matches launch/benchmark)."""
+
+_SYNTHETIC_LANL_FIXTURES = "tests/fixtures/lanl"
+"""Default ``--dataset-dir`` for ``benchmark --scorecard`` (committed subset)."""
+
+
+def _add_validate_subparser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow validate <dataset-dir> [--json]`` (S-307, FR-075).
+
+    Surfaces the LANL accuracy harness. AUC over a score-threshold sweep
+    is FR-079 (S-309) and is reported as ``null`` here.
+    """
+    p = subparsers.add_parser(
+        "validate",
+        help="Run the LANL accuracy harness (precision/recall/F1/MTTD; AUC=FR-079)",
+    )
+    p.add_argument(
+        "dataset_dir",
+        help="Directory of auth.csv/proc.csv/flows.csv/redteam.csv to score",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit a single machine-readable JSON object instead of a table",
+    )
+
+
+def _add_benchmark_subparser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow benchmark`` (S-307, FR-075).
+
+    Without ``--scorecard`` it reports throughput/latency/peak-RSS. With
+    ``--scorecard`` it runs accuracy + performance and prints ONE
+    consolidated human table (``--json`` is ignored in that mode).
+    """
+    p = subparsers.add_parser(
+        "benchmark",
+        help=(
+            "Measure pipeline throughput/latency/peak-RSS; --scorecard "
+            "combines accuracy + performance"
+        ),
+    )
+    p.add_argument(
+        "--count",
+        type=_positive_int_arg,
+        default=_DEFAULT_BENCHMARK_COUNT,
+        help=(
+            f"Synthetic events to drive (default: {_DEFAULT_BENCHMARK_COUNT}, "
+            "must be > 0)"
+        ),
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Synthetic-event RNG seed (default: 42, deterministic)",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit a single JSON object instead of a table (ignored with --scorecard)",
+    )
+    p.add_argument(
+        "--scorecard",
+        action="store_true",
+        default=False,
+        help=(
+            "Run accuracy + performance and print ONE consolidated human "
+            "table (human-readable by contract; --json is ignored)"
+        ),
+    )
+    p.add_argument(
+        "--dataset-dir",
+        dest="dataset_dir",
+        type=str,
+        default=_SYNTHETIC_LANL_FIXTURES,
+        help=(
+            f"Accuracy dataset for --scorecard (default: {_SYNTHETIC_LANL_FIXTURES})"
+        ),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
@@ -466,6 +550,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_graph_subparsers(subparsers)
 
     _add_analyze_subparser(subparsers)
+
+    _add_validate_subparser(subparsers)
+    _add_benchmark_subparser(subparsers)
 
     return parser
 
