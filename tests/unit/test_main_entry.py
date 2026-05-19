@@ -159,11 +159,16 @@ class TestMainConfigErrorHandling:
         from seerflow.__main__ import main
         from seerflow.config import ConfigError
 
-        mock_args = argparse.Namespace(config="seerflow.yaml", command="start", tui=False)
+        mock_args = argparse.Namespace(
+            config="seerflow.yaml",
+            command="start",
+            tui=False,
+            alerts_to=None,
+        )
         bad_msg = "storage.backend must be one of {'sqlite','postgresql'}, got 'sqlitez'"
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.pipeline.run._run", side_effect=ConfigError(bad_msg)),
+            patch("seerflow.config.load_config", side_effect=ConfigError(bad_msg)),
             pytest.raises(SystemExit) as exc,
         ):
             main()
@@ -202,10 +207,20 @@ class TestMainConfigErrorHandling:
         """Only ``ConfigError`` is translated; other errors must not be swallowed."""
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None, command="start", tui=False)
+        mock_args = argparse.Namespace(
+            config=None,
+            command="start",
+            tui=False,
+            alerts_to=None,
+        )
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.pipeline.run._run", side_effect=RuntimeError("boom")),
+            patch("seerflow.config.load_config", return_value="CFG"),
+            patch("seerflow.__main__._apply_alerts_to", return_value="CFG"),
+            patch(
+                "seerflow.pipeline.run._run_with_config",
+                side_effect=RuntimeError("boom"),
+            ),
             pytest.raises(RuntimeError, match="boom"),
         ):
             main()
@@ -214,10 +229,20 @@ class TestMainConfigErrorHandling:
         """``KeyboardInterrupt`` handling is unchanged (still a clean exit 0)."""
         from seerflow.__main__ import main
 
-        mock_args = argparse.Namespace(config=None, command="start", tui=False)
+        mock_args = argparse.Namespace(
+            config=None,
+            command="start",
+            tui=False,
+            alerts_to=None,
+        )
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
-            patch("seerflow.pipeline.run._run", side_effect=KeyboardInterrupt),
+            patch("seerflow.config.load_config", return_value="CFG"),
+            patch("seerflow.__main__._apply_alerts_to", return_value="CFG"),
+            patch(
+                "seerflow.pipeline.run._run_with_config",
+                side_effect=KeyboardInterrupt,
+            ),
             pytest.raises(SystemExit) as exc,
         ):
             main()
