@@ -128,3 +128,59 @@ def test_render_validation_report_exported_from_package():
 
     assert hasattr(lanl_pkg, "render_validation_report")
     assert "render_validation_report" in lanl_pkg.__all__
+
+
+# ---------------------------------------------------------------------------
+# S-311 / FR-079 — AUC line + per-attack-scenario MTTD table
+# ---------------------------------------------------------------------------
+
+
+def test_report_contains_auc_line(render):
+    from seerflow.lanl.attack_metrics import AttackScenarioMetrics
+
+    r = ValidationResult(
+        true_positives=2,
+        false_positives=10,
+        false_negatives=4,
+        precision=0.1667,
+        recall=0.3333,
+        f1_score=0.2222,
+        false_positive_rate=0.8333,
+        detection_latency_s={},
+        patterns_detected=frozenset({"c2-beaconing"}),
+        total_events_processed=137,
+        total_alerts=12,
+        auc=0.0,
+        attack_scenarios=(
+            AttackScenarioMetrics(
+                name="c2-beaconing",
+                first_event_time_s=300,
+                record_count=2,
+                detected=True,
+                mttd_seconds=300.0,
+                missed_record_count=0,
+            ),
+            AttackScenarioMetrics(
+                name="brute-force-lateral-movement",
+                first_event_time_s=110,
+                record_count=1,
+                detected=False,
+                mttd_seconds=None,
+                missed_record_count=1,
+            ),
+        ),
+    )
+    out = render(r, dataset_label="synthetic LANL subset", date="2026-05-16")
+    assert "## Attack-Level Metrics" in out
+    assert "AUC" in out
+    assert "0.0000" in out  # AUC formatted to 4dp
+    # Per-scenario MTTD table: detected scenario shows seconds, undetected "not detected".
+    assert "c2-beaconing" in out
+    assert "300.0" in out
+    assert "not detected" in out
+
+
+def test_report_auc_none_renders_na(render):
+    out = render(_make_result(), dataset_label="synthetic LANL subset", date="2026-05-16")
+    # _make_result leaves auc=None -> rendered as N/A, never a bare "None".
+    assert "N/A" in out

@@ -676,3 +676,102 @@ def test_run_validation_no_longer_constructs_correlation_engine_directly(validat
         "through assemble_handler (FR-073 AC1/AC6)"
     )
     assert "assemble_handler" in src
+
+
+# ---------------------------------------------------------------------------
+# S-311 / FR-079 — attack-level metrics on ValidationResult
+# ---------------------------------------------------------------------------
+
+
+def test_validation_result_has_attack_metric_fields(compute_metrics):
+    """S-311: ValidationResult carries additive attack-level fields."""
+    tp = [_make_alert(alert_id="tp1")]
+    result = compute_metrics(
+        tp_alerts=tp,
+        fp_alerts=[],
+        missed_redteam=[],
+        alerts=tp,
+        events_processed=5,
+        detection_latencies={},
+        redteam_records=[_make_redteam(time=100)],
+    )
+    assert isinstance(result.attack_scenarios, tuple)
+    assert isinstance(result.roc_points, tuple)
+    assert isinstance(result.pr_points, tuple)
+    assert isinstance(result.missed_attributions, tuple)
+    assert result.auc is None or 0.0 <= result.auc <= 1.0
+
+
+def test_validation_result_attack_fields_default_empty(validation_result_cls):
+    """Additive fields default to safe empties — existing callers unaffected."""
+    r = validation_result_cls(
+        true_positives=0,
+        false_positives=0,
+        false_negatives=0,
+        precision=0.0,
+        recall=0.0,
+        f1_score=0.0,
+        false_positive_rate=0.0,
+        detection_latency_s={},
+        patterns_detected=frozenset(),
+        total_events_processed=0,
+        total_alerts=0,
+    )
+    assert r.attack_scenarios == ()
+    assert r.roc_points == ()
+    assert r.pr_points == ()
+    assert r.missed_attributions == ()
+    assert r.auc is None
+
+
+def test_compute_metrics_populates_scenarios_and_attribution(compute_metrics):
+    """Detected brute-force scenario + a missed C2 record get scored."""
+    tp = [
+        _make_alert(
+            alert_id="tp1",
+            timestamp_ns=150_000_000_000,
+            rule_name="brute-force-lateral-movement",
+            entity_value="u5624",
+        )
+    ]
+    missed = [_make_redteam(time=300, user="?", src_computer="C9999", dst_computer="C8888")]
+    all_rt = [
+        _make_redteam(time=110, user="U5624@DOM1", src_computer="C17693", dst_computer="C528"),
+        *missed,
+    ]
+    result = compute_metrics(
+        tp_alerts=tp,
+        fp_alerts=[],
+        missed_redteam=missed,
+        alerts=tp,
+        events_processed=10,
+        detection_latencies={},
+        redteam_records=all_rt,
+    )
+    names = {s.name for s in result.attack_scenarios}
+    assert "brute-force-lateral-movement" in names
+    assert "c2-beaconing" in names
+    brute = next(s for s in result.attack_scenarios if s.name == "brute-force-lateral-movement")
+    assert brute.detected is True
+    assert brute.mttd_seconds == 40.0
+    assert len(result.missed_attributions) == 1
+    assert result.missed_attributions[0].scenario_name == "c2-beaconing"
+    assert result.missed_attributions[0].silent_family == "correlation"
+
+
+def test_compute_metrics_headline_unchanged_by_attack_fields(compute_metrics):
+    """AC5 regression: adding attack metrics must not move P/R/F1/FPR."""
+    tp = [_make_alert(alert_id=str(i)) for i in range(3)]
+    fp = [_make_alert(alert_id="fp-1")]
+    result = compute_metrics(
+        tp_alerts=tp,
+        fp_alerts=fp,
+        missed_redteam=[_make_redteam()],
+        alerts=tp + fp,
+        events_processed=10,
+        detection_latencies={},
+        redteam_records=[_make_redteam()],
+    )
+    assert result.precision == pytest.approx(0.75)
+    assert result.recall == pytest.approx(0.75)
+    assert result.false_positive_rate == pytest.approx(0.25)

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from seerflow.lanl.attack_metrics import AttackScenarioMetrics, MissedAttribution
     from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord, RedTeamRecord
     from seerflow.models.alert import Alert
     from seerflow.receivers.base import RawEvent
@@ -79,6 +80,13 @@ class ValidationResult:
     total_alerts: int
     per_family: dict[str, FamilyMetrics] = field(default_factory=dict)
     scope_label: str = DEFAULT_SCOPE_LABEL
+    # S-311 / FR-079 — attack-level metrics. Additive with safe empties so
+    # every existing constructor / caller keeps working untouched.
+    attack_scenarios: tuple[AttackScenarioMetrics, ...] = ()
+    pr_points: tuple[tuple[float, float, float], ...] = ()
+    roc_points: tuple[tuple[float, float, float], ...] = ()
+    auc: float | None = None
+    missed_attributions: tuple[MissedAttribution, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +180,7 @@ def compute_metrics(
     alerts: list[Alert],
     events_processed: int,
     detection_latencies: dict[str, float],
+    redteam_records: list[RedTeamRecord] | None = None,
 ) -> ValidationResult:
     """Compute precision, recall, and metadata from matched results.
 
@@ -182,6 +191,11 @@ def compute_metrics(
         alerts: All alerts (tp + fp combined).
         events_processed: Total number of SeerflowEvents fed to the engine.
         detection_latencies: Mapping of rule_name → average latency in seconds.
+        redteam_records: The *full* (detected + missed) rebased red-team set,
+            used for S-311 scenario grouping / MTTD. Optional and defaulting
+            to ``missed_redteam`` so pre-S-311 callers (and the headline
+            metrics) are byte-identical; the harness passes the full set so
+            per-scenario MTTD can resolve covering alerts.
 
     Returns:
         A frozen :class:`ValidationResult`.
@@ -225,6 +239,46 @@ def compute_metrics(
             total_alerts=n_ftp + n_ffp,
         )
 
+    # S-311 / FR-079 — attack-level metrics. Pure functions of the matched
+    # alert set + the *full* rebased red-team set (so scenario MTTD can
+    # resolve covering alerts even for detected records). Strictly additive:
+    # the headline numbers above are untouched.
+    from seerflow.lanl.attack_metrics import (
+        AttackScenarioMetrics,
+        attribute_missed,
+        classify_scenario,
+        group_scenarios,
+        roc_auc,
+        scenario_mttd,
+        threshold_sweep,
+    )
+
+    full_redteam = redteam_records if redteam_records is not None else missed_redteam
+    scenarios = group_scenarios(full_redteam)
+    missed_repr = {f"{r.time}|{r.user}|{r.src_computer}|{r.dst_computer}" for r in missed_redteam}
+
+    def _enrich(sc: AttackScenarioMetrics) -> AttackScenarioMetrics:
+        mttd = scenario_mttd(sc, full_redteam, tp_alerts)
+        n_missed = sum(
+            1
+            for r in full_redteam
+            if f"{r.time}|{r.user}|{r.src_computer}|{r.dst_computer}" in missed_repr
+            and classify_scenario(r) == sc.name
+        )
+        return AttackScenarioMetrics(
+            name=sc.name,
+            first_event_time_s=sc.first_event_time_s,
+            record_count=sc.record_count,
+            detected=mttd is not None,
+            mttd_seconds=mttd,
+            missed_record_count=n_missed,
+        )
+
+    enriched_scenarios = tuple(_enrich(sc) for sc in scenarios)
+    pr_points, roc_points = threshold_sweep(tp_alerts, fp_alerts, n_redteam=len(full_redteam))
+    auc = roc_auc(roc_points)
+    missed_attributions = attribute_missed(missed_redteam)
+
     return ValidationResult(
         true_positives=n_tp,
         false_positives=n_fp,
@@ -238,6 +292,11 @@ def compute_metrics(
         total_events_processed=events_processed,
         total_alerts=len(alerts),
         per_family=per_family,
+        attack_scenarios=enriched_scenarios,
+        pr_points=pr_points,
+        roc_points=roc_points,
+        auc=auc,
+        missed_attributions=missed_attributions,
     )
 
 
@@ -484,6 +543,7 @@ async def run_validation_async(fixtures_dir: Path) -> ValidationResult:
             alerts=[],
             events_processed=0,
             detection_latencies={},
+            redteam_records=redteam_records,
         )
 
     # ------------------------------------------------------------------
@@ -560,6 +620,7 @@ async def run_validation_async(fixtures_dir: Path) -> ValidationResult:
         alerts=all_alerts,
         events_processed=len(raw_events),
         detection_latencies={},
+        redteam_records=redteam_records,
     )
 
 

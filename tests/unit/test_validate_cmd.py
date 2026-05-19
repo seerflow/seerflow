@@ -8,10 +8,13 @@ import json
 import pytest
 
 from seerflow import validate_cmd
+from seerflow.lanl.attack_metrics import AttackScenarioMetrics, MissedAttribution
 from seerflow.lanl.validator import ValidationResult
-from seerflow.validate_cmd import _mttd_seconds, _result_to_dict
+from seerflow.validate_cmd import _result_to_dict
 
-_AUC_NOTE = (
+# S-311 removed the FR-079/S-309 "not computed" placeholder note; this
+# constant is kept only to assert the deprecated string is absent.
+_OLD_AUC_NOTE = (
     "AUC over a score-threshold sweep is delivered by FR-079 (S-309); "
     "not computed by run_validation."
 )
@@ -30,35 +33,69 @@ def _vr(**over: object) -> ValidationResult:
         patterns_detected=frozenset({"c2-beaconing", "brute-force"}),
         total_events_processed=203,
         total_alerts=13,
+        attack_scenarios=(
+            AttackScenarioMetrics(
+                name="brute-force-lateral-movement",
+                first_event_time_s=110,
+                record_count=1,
+                detected=True,
+                mttd_seconds=40.0,
+                missed_record_count=0,
+            ),
+            AttackScenarioMetrics(
+                name="c2-beaconing",
+                first_event_time_s=300,
+                record_count=2,
+                detected=False,
+                mttd_seconds=None,
+                missed_record_count=2,
+            ),
+        ),
+        pr_points=((0.0, 0.92, 1.0), (1.0, 1.0, 0.0)),
+        roc_points=((0.0, 0.0, 1.0), (1.0, 0.0, 0.0)),
+        auc=0.875,
+        missed_attributions=(
+            MissedAttribution(
+                record_repr="300|?|C9999|C8888",
+                scenario_name="c2-beaconing",
+                silent_family="correlation",
+            ),
+        ),
     )
     base.update(over)
     return ValidationResult(**base)  # type: ignore[arg-type]
 
 
-def test_mttd_seconds_mean_of_latencies() -> None:
-    assert _mttd_seconds({"a": 10.0, "b": 30.0}) == 20.0
-
-
-def test_mttd_seconds_empty_is_zero() -> None:
-    assert _mttd_seconds({}) == 0.0
-
-
-def test_result_to_dict_shape_and_auc_null() -> None:
+def test_result_to_dict_emits_real_auc_and_no_placeholder() -> None:
+    """S-311 / FR-079 AC4: real AUC, per-scenario MTTD, placeholder gone."""
     d = _result_to_dict(_vr(), dataset_dir="/data/lanl")
-    assert d["auc"] is None
-    assert d["auc_note"] == _AUC_NOTE
-    assert d["mttd_seconds"] == 20.0
+    assert d["auc"] == 0.875
+    assert "auc_note" not in d
+    assert _OLD_AUC_NOTE not in str(d)
+    scenarios = d["attack_scenarios"]
+    assert isinstance(scenarios, list)
+    by_name = {s["name"]: s for s in scenarios}
+    assert by_name["brute-force-lateral-movement"]["mttd_seconds"] == 40.0
+    assert by_name["c2-beaconing"]["mttd_seconds"] is None
+    assert d["missed_attributions"][0]["silent_family"] == "correlation"
+    assert d["pr_points"] == [[0.0, 0.92, 1.0], [1.0, 1.0, 0.0]]
+    assert d["roc_points"] == [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
     assert d["precision"] == 0.9231
     assert d["recall"] == 1.0
     assert d["f1"] == 0.96
     assert d["false_positive_rate"] == 0.0769
     assert d["true_positives"] == 12
-    assert d["false_positives"] == 1
-    assert d["false_negatives"] == 0
-    assert d["total_events_processed"] == 203
-    assert d["total_alerts"] == 13
     assert d["dataset_dir"] == "/data/lanl"
     assert d["patterns_detected"] == ["brute-force", "c2-beaconing"]
+
+
+def test_result_to_dict_is_msgspec_encodable_and_deterministic() -> None:
+    """AC4: the document round-trips through msgspec and is stable."""
+    import msgspec.json
+
+    a = msgspec.json.encode(_result_to_dict(_vr(), dataset_dir="/d"))
+    b = msgspec.json.encode(_result_to_dict(_vr(), dataset_dir="/d"))
+    assert a == b
 
 
 def _ns(**kw: object) -> argparse.Namespace:
@@ -121,8 +158,11 @@ def test_run_validate_json_emits_object(
     rc = validate_cmd.run_validate(_ns(dataset_dir=str(tmp_path), json=True))
     assert rc == validate_cmd.EXIT_OK
     out = json.loads(capsys.readouterr().out)
+    # No alerts/scenarios in this minimal VR -> auc stays None (sentinel),
+    # but the attack-metric keys are present and the placeholder is gone.
     assert out["auc"] is None
-    assert out["mttd_seconds"] == 10.0
+    assert "auc_note" not in out
+    assert out["attack_scenarios"] == []
     assert out["dataset_dir"] == str(tmp_path)
 
 
@@ -147,7 +187,8 @@ def test_run_validate_table_mode(
     assert rc == validate_cmd.EXIT_OK
     out = capsys.readouterr().out
     assert "precision" in out.lower()
-    assert "mttd" in out.lower()
+    assert "auc" in out.lower()
+    assert "attack_scenarios" in out.lower()
 
 
 def test_cli_parses_validate() -> None:

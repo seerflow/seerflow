@@ -141,3 +141,29 @@ def test_renderer_main_prints_to_stdout(capsys):
     captured = capsys.readouterr()
     assert rc == 0
     assert captured.out.startswith("# LANL")
+
+
+# ---------------------------------------------------------------------------
+# S-311 / FR-079 — AUC + per-scenario MTTD drift guards
+# ---------------------------------------------------------------------------
+
+
+def _auc_str(v: object) -> str:
+    return "N/A" if v is None else f"{v:.4f}"
+
+
+def test_readme_validation_table_has_harness_auc(result):
+    """AC5: the README AUC row equals the freshly computed harness AUC."""
+    text = README.read_text(encoding="utf-8")
+    assert f"| AUC | {_auc_str(result.auc)} |" in text
+
+
+def test_renderer_emits_attack_level_section_consistent(result):
+    from seerflow.lanl.report import render_validation_report
+
+    md = render_validation_report(result, dataset_label="synthetic LANL subset", date="2026-05-16")
+    assert "## Attack-Level Metrics" in md
+    assert f"AUC | {_auc_str(result.auc)}" in md
+    # every scenario name from the harness appears in the MTTD table
+    for s in result.attack_scenarios:
+        assert s.name in md

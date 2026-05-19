@@ -235,7 +235,17 @@ per-family breakdown in the generated report makes explicit.
 | Recall | 33.33% |
 | F1 score | 22.22% |
 | False-positive rate | 83.33% |
+| AUC | 0.0000 |
 | Events processed | 137 |
+
+Attack-level metrics (FR-079 / S-311) -- per red-team scenario
+mean-time-to-detect, precision-recall + ROC curves, AUC over a risk-score
+threshold sweep, and the silent detector family for every missed red-team
+event -- are emitted by the full report (`python -m seerflow.lanl.report`)
+and by `seerflow validate <dir> --json`. On this small synthetic subset
+only the C2-beaconing scenario is detected; the brute-force and
+credential-stuffing scenarios are missed by the (cold-start) stack and
+attributed to the `correlation` family in the JSON output.
 
 > Numbers are derived from the full-stack harness, not hand-maintained --
 > a drift test (`tests/integration/test_lanl_report_drift.py`) fails if

@@ -1,14 +1,16 @@
-"""``seerflow validate`` — surface the LANL accuracy harness from the CLI (S-307).
+"""``seerflow validate`` — surface the LANL accuracy harness from the CLI.
 
-Wraps the read-only ``seerflow.lanl.validator.run_validation`` seam (S-305).
-AUC over a score-threshold sweep is FR-079 (S-309) and is intentionally
-``null`` here; MTTD is derived as the mean per-rule detection latency.
+Wraps the read-only ``seerflow.lanl.validator.run_validation`` seam (S-305)
+and emits the S-311 / FR-079 attack-level metrics: real AUC over a
+risk-score threshold sweep, per-attack-scenario mean-time-to-detect,
+precision-recall + ROC curves, and the silent detector family for every
+missed red-team event. The document is deterministic and msgspec-encodable
+so ``--json`` is consumable with no Python required (FR-075).
 """
 # ruff: noqa: T201 -- print() is the CLI output mechanism.
 
 from __future__ import annotations
 
-import statistics
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,11 +24,6 @@ if TYPE_CHECKING:
 
     from seerflow.lanl.validator import ValidationResult
 
-_AUC_NOTE = (
-    "AUC over a score-threshold sweep is delivered by FR-079 (S-309); "
-    "not computed by run_validation."
-)
-
 EXIT_OK = 0
 EXIT_USAGE = 2
 
@@ -35,27 +32,51 @@ class _UsageError(Exception):
     """Raised for an operator input error; mapped to exit code 2."""
 
 
-def _mttd_seconds(detection_latency_s: dict[str, float]) -> float:
-    """Mean detection latency (seconds) across rules; 0.0 when empty."""
-    if not detection_latency_s:
-        return 0.0
-    return statistics.fmean(detection_latency_s.values())
+def _scenario_doc(result: ValidationResult) -> list[dict[str, object]]:
+    """Per-attack-scenario rows: name, MTTD (``None`` if undetected), counts."""
+    return [
+        {
+            "name": s.name,
+            "first_event_time_s": s.first_event_time_s,
+            "record_count": s.record_count,
+            "detected": s.detected,
+            "mttd_seconds": s.mttd_seconds,
+            "missed_record_count": s.missed_record_count,
+        }
+        for s in result.attack_scenarios
+    ]
+
+
+def _missed_doc(result: ValidationResult) -> list[dict[str, object]]:
+    """Silent-family attribution rows for every missed red-team record."""
+    return [
+        {
+            "record": m.record_repr,
+            "scenario": m.scenario_name,
+            "silent_family": m.silent_family,
+        }
+        for m in result.missed_attributions
+    ]
 
 
 def _result_to_dict(result: ValidationResult, *, dataset_dir: str) -> dict[str, object]:
-    """Build the deterministic machine-readable metric document.
+    """Build the deterministic machine-readable metric document (FR-079).
 
-    ``auc`` is ``None`` by design (FR-079/S-309 owns the real value);
-    ``mttd_seconds`` is the mean of per-rule detection latencies.
+    ``auc`` is the real trapezoidal area under the swept ROC curve (``None``
+    only when there were zero alerts and zero red-team events); MTTD is
+    reported *per attack scenario* (not a flat per-rule latency mean — the
+    S-307 placeholder that this story removes).
     """
     return {
         "precision": result.precision,
         "recall": result.recall,
         "f1": result.f1_score,
         "false_positive_rate": result.false_positive_rate,
-        "mttd_seconds": _mttd_seconds(result.detection_latency_s),
-        "auc": None,
-        "auc_note": _AUC_NOTE,
+        "auc": result.auc,
+        "attack_scenarios": _scenario_doc(result),
+        "pr_points": [list(p) for p in result.pr_points],
+        "roc_points": [list(p) for p in result.roc_points],
+        "missed_attributions": _missed_doc(result),
         "true_positives": result.true_positives,
         "false_positives": result.false_positives,
         "false_negatives": result.false_negatives,

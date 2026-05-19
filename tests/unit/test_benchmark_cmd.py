@@ -168,7 +168,7 @@ def test_validate_integration_smoke_real_fixtures() -> None:
     fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "lanl"
     direct = _result_to_dict(run_validation(fixtures), dataset_dir=str(fixtures))
     encoded = _json.loads(_json.dumps(direct))
-    assert encoded["auc"] is None
+    assert encoded["auc"] == direct["auc"]
     assert encoded["precision"] == direct["precision"]
     assert encoded["total_events_processed"] == direct["total_events_processed"]
 
