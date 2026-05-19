@@ -98,12 +98,13 @@ def test_render_scorecard_has_both_sections() -> None:
         total_events_processed=203,
         total_alerts=13,
     )
-    text = benchmark_cmd._render_scorecard(vr, _br(), dataset_dir="/d")
+    text = benchmark_cmd._render_scorecard(vr, _br(), dataset_dir="/d", seed=42)
     low = text.lower()
     assert "accuracy" in low
     assert "performance" in low
     assert "precision" in low
     assert "throughput" in low
+    assert "seed" in low
 
 
 def test_run_scorecard_runs_both_harnesses(

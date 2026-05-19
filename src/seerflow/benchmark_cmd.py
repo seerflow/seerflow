@@ -61,12 +61,16 @@ def _render_scorecard(
     benchmark: BenchmarkResult,
     *,
     dataset_dir: str,
+    seed: int,
 ) -> str:
-    """One consolidated human table: Accuracy section + Performance section."""
+    """One consolidated human table: Accuracy section + Performance section.
+
+    ``seed`` is the benchmark RNG seed; it is kept in the Performance
+    section so the scorecard is self-describing and reproducible.
+    """
     acc = _result_to_dict(validation, dataset_dir=dataset_dir)
     acc_rows = [[k, str(acc[k])] for k in acc]
-    perf = _benchmark_to_dict(benchmark, seed=0)
-    perf.pop("seed")
+    perf = _benchmark_to_dict(benchmark, seed=seed)
     perf_rows = [[k, str(perf[k])] for k in perf]
     return "\n".join(
         (
@@ -97,7 +101,7 @@ def _run_scorecard(args: argparse.Namespace) -> int:
 
     validation = run_validation(dataset)
     bench = run_benchmark(args.count, seed=args.seed)
-    print(_render_scorecard(validation, bench, dataset_dir=str(dataset)))
+    print(_render_scorecard(validation, bench, dataset_dir=str(dataset), seed=args.seed))
     return EXIT_OK
 
 
