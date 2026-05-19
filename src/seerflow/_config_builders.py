@@ -843,6 +843,20 @@ class _FileFields(NamedTuple):
     min_severity: int
 
 
+class _ConsoleFields(NamedTuple):
+    """Validated console-sink settings extracted from ``alerting`` YAML (S-312).
+
+    Mirrors :class:`_OtlpFields`: the ``Literal`` field types let mypy narrow
+    the guarded ``data.get`` values so :func:`_build_alerting` can pass them
+    straight into :class:`AlertingConfig` without a cast.
+    """
+
+    enabled: bool
+    stream: Literal["stdout", "stderr"]
+    fmt: Literal["human", "json"]
+    min_severity: int
+
+
 def _validate_otlp_str_path(field_name: str, value: Any) -> str:
     """Validate that a YAML value is a string (path-shaped). Empty allowed.
 
@@ -1055,6 +1069,28 @@ def _validate_file_settings(data: dict[str, Any]) -> _FileFields:
     )
 
 
+def _validate_console_settings(data: dict[str, Any]) -> _ConsoleFields:
+    """Validate alerting.console.* (S-312/FR-071).
+
+    Fails fast with a clear ``ConfigError`` so a hand-edited seerflow.yaml is
+    rejected at load time rather than producing a cryptic sink-construction
+    failure later.
+    """
+    enabled = bool(data.get("console_enabled", False))
+    stream = data.get("console_stream", "stdout")
+    if stream not in ("stdout", "stderr"):
+        raise ConfigError(f"alerting.console_stream must be 'stdout' or 'stderr', got {stream!r}")
+    fmt = data.get("console_format", "human")
+    if fmt not in ("human", "json"):
+        raise ConfigError(f"alerting.console_format must be 'human' or 'json', got {fmt!r}")
+    min_sev = data.get("console_min_severity", 0)
+    if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
+        raise ConfigError(
+            f"alerting.console_min_severity must be an integer in [0, 6], got {min_sev!r}"
+        )
+    return _ConsoleFields(enabled=enabled, stream=stream, fmt=fmt, min_severity=min_sev)
+
+
 def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     webhooks = data.get("webhooks", ())
     if isinstance(webhooks, list):
@@ -1087,6 +1123,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     )
     otlp_fields = _validate_otlp_settings(data)
     file_fields = _validate_file_settings(data)
+    console_fields = _validate_console_settings(data)
 
     quiet_hours: list[tuple[str, QuietHours]] = list(
         _collect_quiet_hours(webhooks, webhook_targets)
@@ -1124,6 +1161,10 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         file_interval_seconds=file_fields.interval_seconds,
         file_backup_count=file_fields.backup_count,
         file_min_severity=file_fields.min_severity,
+        console_enabled=console_fields.enabled,
+        console_stream=console_fields.stream,
+        console_format=console_fields.fmt,
+        console_min_severity=console_fields.min_severity,
     )
 
 

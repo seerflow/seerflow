@@ -225,6 +225,12 @@ class AlertingConfig:
     file_interval_seconds: int = 86_400
     file_backup_count: int = 5
     file_min_severity: int = 0
+    # S-312 / FR-071: console alert sink. Off by default for ``start``;
+    # ``seerflow tail`` forces ``console_enabled=True`` in _build_tail_config.
+    console_enabled: bool = False
+    console_stream: Literal["stdout", "stderr"] = "stdout"
+    console_format: Literal["human", "json"] = "human"
+    console_min_severity: int = 0
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
