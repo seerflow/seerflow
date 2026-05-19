@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -13,6 +14,33 @@ if TYPE_CHECKING:
     from seerflow.config import SeerflowConfig
 
 from seerflow.cli import parse_args
+
+
+def _apply_console_overrides(
+    cfg: SeerflowConfig,
+    alerts_to: str | None,
+    alerts_format: Literal["human", "json"] | None,
+) -> SeerflowConfig:
+    """Apply ``start --alerts-to/--alerts-format`` over the loaded config.
+
+    S-312/FR-071: ``--alerts-to`` is shared with the S-313 file sink, so only
+    the ``"stdout"``/``"stderr"`` values select the console stream here (any
+    other value is a file path handled by :func:`_apply_alerts_to`).
+    ``--alerts-format`` selects the console format. Both win over
+    ``seerflow.yaml``. Config is frozen, so a new instance is returned via
+    ``dataclasses.replace`` (no mutation).
+    """
+    console_stream = alerts_to if alerts_to in ("stdout", "stderr") else None
+    if console_stream is None and alerts_format is None:
+        return cfg
+    alerting = cfg.alerting
+    if console_stream is not None:
+        alerting = dataclasses.replace(
+            alerting, console_enabled=True, console_stream=console_stream
+        )
+    if alerts_format is not None:
+        alerting = dataclasses.replace(alerting, console_format=alerts_format)
+    return dataclasses.replace(cfg, alerting=alerting)
 
 
 def _run_async(coro: Coroutine[Any, Any, None]) -> None:
@@ -38,12 +66,15 @@ def _run_async_int(coro: Coroutine[Any, Any, int]) -> int:
 def _apply_alerts_to(config: SeerflowConfig, alerts_to: str | None) -> SeerflowConfig:
     """Return ``config`` with a CLI ``--alerts-to`` file target applied (S-313).
 
-    No-op (identity) when ``alerts_to`` is ``None``. Config is frozen, so the
-    override is a ``dataclasses.replace`` copy (no mutation). Path validity is
-    enforced by ``_validate_writable_target`` via the assembly path / config
-    load — an invalid path fails fast at startup.
+    No-op (identity) when ``alerts_to`` is ``None`` or one of the console
+    stream sentinels ``"stdout"``/``"stderr"`` (those are owned by
+    :func:`_apply_console_overrides`, since S-312 and S-313 share the
+    ``--alerts-to`` flag). Config is frozen, so the override is a
+    ``dataclasses.replace`` copy (no mutation). Path validity is enforced by
+    ``_validate_writable_target`` via the assembly path / config load — an
+    invalid path fails fast at startup.
     """
-    if alerts_to is None:
+    if alerts_to is None or alerts_to in ("stdout", "stderr"):
         return config
     import dataclasses
 
@@ -75,7 +106,13 @@ def main() -> None:
                 from seerflow.config import load_config
                 from seerflow.pipeline.run import _run_with_config
 
-                _cfg = _apply_alerts_to(load_config(args.config), getattr(args, "alerts_to", None))
+                _alerts_to = getattr(args, "alerts_to", None)
+                _cfg = _apply_console_overrides(
+                    load_config(args.config),
+                    _alerts_to,
+                    getattr(args, "alerts_format", None),
+                )
+                _cfg = _apply_alerts_to(_cfg, _alerts_to)
                 _run_async(_run_with_config(_cfg))
         elif args.command == "status":
             from seerflow.status_cmd import run_status

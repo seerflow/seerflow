@@ -461,12 +461,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--alerts-to",
         type=str,
         default=None,
-        metavar="PATH",
+        metavar="PATH|stdout|stderr",
         help=(
-            "Append alerts as rotating NDJSON to this file path (enables the "
-            "file sink). Overrides alerting.file_path; an invalid path fails "
-            "fast at startup."
+            "Where to deliver alerts. 'stdout' or 'stderr' enables the console "
+            "sink on that stream (S-312); any other value is treated as a file "
+            "path and enables the rotating-NDJSON file sink (S-313). Overrides "
+            "the matching alerting.* config; an invalid file path fails fast "
+            "at startup."
         ),
+    )
+    start_parser.add_argument(
+        "--alerts-format",
+        choices=("human", "json"),
+        default=None,
+        help="Console alert format: human (default) or json (NDJSON)",
     )
 
     status_parser = subparsers.add_parser(
