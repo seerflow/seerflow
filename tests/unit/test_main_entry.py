@@ -164,6 +164,7 @@ class TestMainConfigErrorHandling:
             command="start",
             tui=False,
             alerts_to=None,
+            alerts_format=None,
         )
         bad_msg = "storage.backend must be one of {'sqlite','postgresql'}, got 'sqlitez'"
         with (
@@ -212,10 +213,12 @@ class TestMainConfigErrorHandling:
             command="start",
             tui=False,
             alerts_to=None,
+            alerts_format=None,
         )
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.config.load_config", return_value="CFG"),
+            patch("seerflow.__main__._apply_console_overrides", return_value="CFG"),
             patch("seerflow.__main__._apply_alerts_to", return_value="CFG"),
             patch(
                 "seerflow.pipeline.run._run_with_config",
@@ -234,10 +237,12 @@ class TestMainConfigErrorHandling:
             command="start",
             tui=False,
             alerts_to=None,
+            alerts_format=None,
         )
         with (
             patch("seerflow.__main__.parse_args", return_value=mock_args),
             patch("seerflow.config.load_config", return_value="CFG"),
+            patch("seerflow.__main__._apply_console_overrides", return_value="CFG"),
             patch("seerflow.__main__._apply_alerts_to", return_value="CFG"),
             patch(
                 "seerflow.pipeline.run._run_with_config",
