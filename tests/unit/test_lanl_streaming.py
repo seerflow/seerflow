@@ -118,3 +118,69 @@ def test_cursor_round_trip(streaming):
 def test_decode_cursor_corrupt_returns_none(streaming):
     assert streaming._decode_cursor(b"not json at all") is None
     assert streaming._decode_cursor(b'{"events_processed": "bad"}') is None
+
+
+async def test_stream_raw_events_rebases_from_first_record(streaming, tmp_path):
+    from seerflow.lanl import validator
+    from seerflow.receivers.base import RawEvent
+
+    (tmp_path / "proc.csv").write_text(
+        "100,U1@DOM1,C1,P1,Start\n300,U2@DOM1,C2,P2,End\n", encoding="utf-8"
+    )
+    out = [r async for r in streaming.stream_raw_events(tmp_path)]
+    assert all(isinstance(r, RawEvent) for r in out)
+    assert len(out) == 2
+    # first record (min_ts=100s) lands exactly at REPLAY_EPOCH_NS
+    assert out[0].received_ns == validator.REPLAY_EPOCH_NS
+    # spacing preserved (300-100 = 200 s)
+    assert out[1].received_ns - out[0].received_ns == 200 * 1_000_000_000
+
+
+async def test_stream_raw_events_empty_dir_yields_nothing(streaming, tmp_path):
+    out = [r async for r in streaming.stream_raw_events(tmp_path)]
+    assert out == []
+
+
+async def test_stream_rebase_is_additive_constant_vs_s305(streaming, tmp_path):
+    """AC3 property: streaming timestamps differ from S-305's shift-all
+    rebase only by a single global constant (both are pure additive)."""
+    from seerflow.lanl import validator
+    from seerflow.lanl.parser import parse_proc_line
+
+    (tmp_path / "proc.csv").write_text(
+        "100,U1@DOM1,C1,P1,Start\n250,U2@DOM1,C2,P2,End\n900,U3@DOM1,C3,P3,Start\n",
+        encoding="utf-8",
+    )
+    recs = [
+        parse_proc_line(ln)
+        for ln in (tmp_path / "proc.csv").read_text(encoding="utf-8").splitlines()
+    ]
+    s305_raw = validator._build_raw_events([], recs, [])
+    max_ts = max(r.received_ns for r in s305_raw)
+    s305_off = validator.REPLAY_EPOCH_NS - max_ts - validator.REPLAY_HEADROOM_NS
+    s305_ts = sorted(r.received_ns + s305_off for r in s305_raw)
+
+    stream_ts = [r.received_ns async for r in streaming.stream_raw_events(tmp_path)]
+
+    deltas = {s - a for s, a in zip(s305_ts, stream_ts, strict=True)}
+    assert len(deltas) == 1  # a single global constant offset
+
+
+async def test_stream_resume_skips_prefix(streaming, tmp_path):
+    from seerflow.lanl import validator
+
+    (tmp_path / "proc.csv").write_text(
+        "10,U1@D,C1,P1,Start\n20,U2@D,C2,P2,End\n30,U3@D,C3,P3,Start\n",
+        encoding="utf-8",
+    )
+    full = [r async for r in streaming.stream_raw_events(tmp_path)]
+    # The fresh-run offset is the same constant the cursor must restore.
+    offset_ns = validator.REPLAY_EPOCH_NS - 10 * 1_000_000_000
+    cursor = streaming.StreamCursor(
+        events_processed=1,
+        offset_ns=offset_ns,
+        positions={"auth": 0, "proc": 1, "flows": 0, "dns": 0},
+    )
+    resumed = [r async for r in streaming.stream_raw_events(tmp_path, resume_cursor=cursor)]
+    # one proc line skipped → 2 events, timestamps identical to the full run tail
+    assert [r.received_ns for r in resumed] == [r.received_ns for r in full[1:]]

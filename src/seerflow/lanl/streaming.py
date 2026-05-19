@@ -16,7 +16,9 @@ offsets, so inter-event deltas are identical under the frozen clock).
 from __future__ import annotations
 
 import heapq
+import itertools
 import logging
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 import msgspec
@@ -150,3 +152,67 @@ def _record_to_raw(rec: AnyRecord, offset_ns: int) -> RawEvent:
         received_ns=rec.time * 1_000_000_000 + offset_ns,
         metadata={},
     )
+
+
+_SOURCE_FILES: tuple[tuple[str, str, str], ...] = (
+    ("auth", "auth.csv", "parse_auth_line"),
+    ("proc", "proc.csv", "parse_proc_line"),
+    ("flows", "flows.csv", "parse_flow_line"),
+    ("dns", "dns.csv", "parse_dns_line"),  # optional; absent parser/file → skipped
+)
+
+
+def _open_sources(
+    dataset_dir: Path, positions: dict[str, int] | None
+) -> list[Iterator[AnyRecord]]:
+    """Build per-source line-lazy record iterators, ``islice``-skipping any
+    already-consumed prefix on resume.
+
+    ``dns`` is skipped unless its parser exists (FR-081 is a later story) —
+    keeps the merge source-count agnostic without implementing DNS here.
+    """
+    from seerflow.lanl import parser as _parser
+
+    iters: list[Iterator[AnyRecord]] = []
+    for name, filename, parse_attr in _SOURCE_FILES:
+        parse_fn = getattr(_parser, parse_attr, None)
+        if parse_fn is None:
+            continue
+        src: Iterator[AnyRecord] = _iter_record_source(dataset_dir / filename, parse_fn)
+        skip = (positions or {}).get(name, 0)
+        if skip:
+            src = itertools.islice(src, skip, None)
+        iters.append(src)
+    return iters
+
+
+async def stream_raw_events(
+    dataset_dir: Path,
+    *,
+    resume_cursor: StreamCursor | None = None,
+) -> AsyncIterator[RawEvent]:
+    """Pull-based async iterator of rebased textual ``RawEvent``\\ s.
+
+    The rebase offset is a single constant: on a fresh run it is
+    ``REPLAY_EPOCH_NS - first_merged_record.time * 1e9`` (the first merged
+    record carries ``min_ts`` because every source is ``time``-ascending);
+    on resume it is taken verbatim from ``resume_cursor.offset_ns`` (NOT
+    recomputed) so post-resume timestamps match the pre-kill run exactly.
+    Memory is O(#sources): no list/sort/read_text over the dataset.
+    """
+    from seerflow.lanl import validator
+
+    positions = resume_cursor.positions if resume_cursor is not None else None
+    merged = _merged_records(_open_sources(dataset_dir, positions))
+
+    if resume_cursor is not None:
+        offset_ns = resume_cursor.offset_ns
+    else:
+        first = next(merged, None)
+        if first is None:
+            return
+        offset_ns = validator.REPLAY_EPOCH_NS - first.time * 1_000_000_000
+        yield _record_to_raw(first, offset_ns)
+
+    for rec in merged:
+        yield _record_to_raw(rec, offset_ns)
