@@ -141,3 +141,29 @@ async def test_run_writes_within_one_second() -> None:
     assert "[ERROR] hst-anomaly" in buf.getvalue()
     await sink.stop()
     await asyncio.wait_for(task, timeout=3.0)
+
+
+def test_enqueue_overflow_drops_and_counts() -> None:
+    from seerflow.alerting.sinks.console import ConsoleSink
+
+    sink = ConsoleSink(io.StringIO(), fmt="json", queue_maxsize=1)
+    sink.enqueue(_make_alert())
+    sink.enqueue(_make_alert())  # dropped
+    b = sink.bounds()
+    assert b["current"] == 1
+    assert b["max"] == 1
+    assert b["evictions"] == 1
+
+
+async def test_run_drains_then_exits_on_stop() -> None:
+    from seerflow.alerting.sinks.console import ConsoleSink
+
+    buf = io.StringIO()
+    sink = ConsoleSink(buf, fmt="json")
+    sink.enqueue(_make_alert(rule_name="r1"))
+    sink.enqueue(_make_alert(rule_name="r2"))
+    task = asyncio.create_task(sink.run())
+    await sink.stop()
+    await asyncio.wait_for(task, timeout=3.0)
+    lines = [json.loads(x) for x in buf.getvalue().splitlines()]
+    assert {line["rule_name"] for line in lines} == {"r1", "r2"}
