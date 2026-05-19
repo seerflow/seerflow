@@ -135,6 +135,18 @@ _SOURCE_BY_TYPE: dict[str, str] = {
     "FlowRecord": "lanl-flow",
 }
 
+# Maps a ``RawEvent.source_id`` (kept byte-identical to
+# ``validator._build_raw_events`` — note ``lanl-flow`` is singular) to the
+# canonical per-source cursor name used by ``_SOURCE_FILES`` /
+# ``StreamCursor.positions`` (``flows`` is plural there). Decoupling these
+# two namespaces here keeps message parity intact while making the resume
+# islice-skip key-correct.
+_CURSOR_NAME_BY_SOURCE_ID: dict[str, str] = {
+    "lanl-auth": "auth",
+    "lanl-proc": "proc",
+    "lanl-flow": "flows",
+}
+
 
 def _record_to_raw(rec: AnyRecord, offset_ns: int) -> RawEvent:
     """Build the rebased textual ``RawEvent`` for one merged record."""
@@ -250,6 +262,11 @@ def _first_record_time_ns(dataset_dir: Path) -> int:
     return 0 if first is None else first.time * 1_000_000_000
 
 
+async def _load_state_or_none(storage: StorageBackend, key: str) -> bytes | None:
+    """Read a ``ModelStore`` key, returning ``None`` when absent."""
+    return await storage.load_state(key)
+
+
 async def _persist_cursor(
     storage: StorageBackend, processed: int, offset_ns: int, counts: dict[str, int]
 ) -> None:
@@ -302,7 +319,9 @@ async def _drive(
 
     config = SeerflowConfig()
     assembled = await assemble_handler(config, storage)
-    processed = 0
+    processed = 0  # events processed in THIS segment (drives throughput)
+    # Cumulative consumed prefix (carried across resumes via the cursor).
+    consumed = resume_cursor.events_processed if resume_cursor else 0
     offset_ns: int | None = resume_cursor.offset_ns if resume_cursor else None
     counts: dict[str, int] = dict(resume_cursor.positions) if resume_cursor else {}
     t0 = _time.perf_counter()
@@ -311,18 +330,19 @@ async def _drive(
             async for raw in stream_raw_events(dataset_dir, resume_cursor=resume_cursor):
                 await assembled.handler(raw)
                 processed += 1
-                src = raw.source_id.removeprefix("lanl-")
+                consumed += 1
+                src = _CURSOR_NAME_BY_SOURCE_ID[raw.source_id]
                 counts[src] = counts.get(src, 0) + 1
                 if offset_ns is None:
                     offset_ns = raw.received_ns - _first_record_time_ns(dataset_dir)
                 if processed % checkpoint_interval == 0:
                     await assembled.engines.ensemble.save_all_state(storage)
-                    await _persist_cursor(storage, processed, offset_ns, counts)
+                    await _persist_cursor(storage, consumed, offset_ns, counts)
                 if max_events is not None and processed >= max_events:
                     break
         await assembled.engines.ensemble.save_all_state(storage)
         if offset_ns is not None:
-            await _persist_cursor(storage, processed, offset_ns, counts)
+            await _persist_cursor(storage, consumed, offset_ns, counts)
     finally:
         await assembled.teardown()
     elapsed = max(_time.perf_counter() - t0, 1e-9)
@@ -389,6 +409,30 @@ async def run_streaming_validation_async(
             )
         finally:
             await storage.close()
+
+
+async def resume_streaming_validation_async(
+    dataset_dir: Path,
+    storage: StorageBackend,
+    *,
+    checkpoint_interval: int = 10_000,
+    max_events: int | None = None,
+) -> StreamingValidationResult:
+    """Resumable surface: load any persisted cursor from ``storage`` and
+    continue; if none, run from the start.
+
+    The caller owns ``storage`` (so it survives a process kill, unlike the
+    temp-DB :func:`run_streaming_validation_async` convenience wrapper).
+    """
+    blob = await storage.load_state(CURSOR_STATE_KEY)
+    cursor = _decode_cursor(blob) if blob is not None else None
+    return await _drive(
+        dataset_dir,
+        storage,
+        checkpoint_interval=checkpoint_interval,
+        max_events=max_events,
+        resume_cursor=cursor,
+    )
 
 
 def run_streaming_validation(
