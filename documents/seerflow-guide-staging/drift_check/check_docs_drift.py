@@ -259,19 +259,26 @@ def _report_to_payload(
 
 
 def _print_human_report(payload: dict[str, Any]) -> None:
-    """Print a human-readable summary to stdout."""
+    """Print a human-readable summary to stdout.
 
-    for section, _label in (("config", "Config drift"), ("cli", "CLI drift")):
+    The output is captured by the GitHub Action so CI logs stay readable when
+    a reviewer is debugging a failed drift run.
+    """
+
+    for section, label in (("config", "Config drift"), ("cli", "CLI drift")):
         if section not in payload:
             continue
         block = payload[section]
-        "OK" if block["ok"] else "DRIFT"
+        status = "OK" if block["ok"] else "DRIFT"
+        print(f"== {label}: {status} ==")  # noqa: T201 — CLI tool stdout
         if block["extra_in_docs"]:
-            for _k in block["extra_in_docs"]:
-                pass
+            print("  Extra in docs (failures):")  # noqa: T201
+            for k in block["extra_in_docs"]:
+                print(f"    + {k}")  # noqa: T201
         if block["missing_in_docs"]:
-            for _k in block["missing_in_docs"]:
-                pass
+            print("  Missing in docs (warnings):")  # noqa: T201
+            for k in block["missing_in_docs"]:
+                print(f"    - {k}")  # noqa: T201
 
 
 def main(
