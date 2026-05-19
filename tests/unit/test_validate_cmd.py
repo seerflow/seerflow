@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
+import json
+
+import pytest
+
+from seerflow import validate_cmd
 from seerflow.lanl.validator import ValidationResult
 from seerflow.validate_cmd import _mttd_seconds, _result_to_dict
 
@@ -53,14 +59,6 @@ def test_result_to_dict_shape_and_auc_null() -> None:
     assert d["total_alerts"] == 13
     assert d["dataset_dir"] == "/data/lanl"
     assert d["patterns_detected"] == ["brute-force", "c2-beaconing"]
-
-
-import argparse
-import json
-
-import pytest
-
-from seerflow import validate_cmd
 
 
 def _ns(**kw: object) -> argparse.Namespace:

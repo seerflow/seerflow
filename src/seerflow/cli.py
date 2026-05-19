@@ -389,10 +389,7 @@ def _add_benchmark_subparser(subparsers: argparse._SubParsersAction) -> None:  #
         "--count",
         type=_positive_int_arg,
         default=_DEFAULT_BENCHMARK_COUNT,
-        help=(
-            f"Synthetic events to drive (default: {_DEFAULT_BENCHMARK_COUNT}, "
-            "must be > 0)"
-        ),
+        help=(f"Synthetic events to drive (default: {_DEFAULT_BENCHMARK_COUNT}, must be > 0)"),
     )
     p.add_argument(
         "--seed",
@@ -420,9 +417,7 @@ def _add_benchmark_subparser(subparsers: argparse._SubParsersAction) -> None:  #
         dest="dataset_dir",
         type=str,
         default=_SYNTHETIC_LANL_FIXTURES,
-        help=(
-            f"Accuracy dataset for --scorecard (default: {_SYNTHETIC_LANL_FIXTURES})"
-        ),
+        help=(f"Accuracy dataset for --scorecard (default: {_SYNTHETIC_LANL_FIXTURES})"),
     )
 
 
