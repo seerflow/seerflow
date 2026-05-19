@@ -236,6 +236,7 @@ def _build_receivers(data: dict[str, Any]) -> ReceiverConfig:
         webhooks=_build_webhook_configs(data.get("webhooks", ())),
         webhook_enabled=data.get("webhook_enabled", False),
         webhook_port=data.get("webhook_port", 8081),
+        stdin_enabled=data.get("stdin_enabled", False),
         bind_addr=data.get("bind_addr", "0.0.0.0"),  # noqa: S104  # nosec B104
         queue_maxsize=data.get("queue_maxsize", 10_000),
     )

@@ -137,6 +137,14 @@ async def build_pipeline(config: SeerflowConfig) -> Pipeline:
             ),
         )
 
+    if r.stdin_enabled:
+        from seerflow.receivers.stdin import StdinReceiver
+
+        mgr.register(
+            "stdin",
+            StdinReceiver(mgr, source_id="stdin"),
+        )
+
     failed = await mgr.start()
     if failed:
         started = [k for k in mgr._receivers if k not in failed]
