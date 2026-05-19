@@ -183,11 +183,13 @@ def threshold_sweep(
 
     Cut-points are ``sorted({0.0, 1.0} | {distinct risk scores})`` (explicit
     sort — no set-iteration order). At each threshold an alert counts toward
-    TP/FP only if ``risk_score >= threshold``; recall denominator is the
-    fixed red-team count, FPR denominator the total negatives proxy
-    (``FP + TP`` at threshold 0). Returns ``(pr_points, roc_points)`` as
-    immutable sorted tuples of ``(threshold, precision, recall)`` /
-    ``(threshold, fpr, tpr)``.
+    TP/FP only if ``risk_score >= threshold``. Recall (= ROC ``tpr``)
+    denominator is the fixed red-team count. There are no labelled negatives
+    in an unsupervised alert stream, so ``fpr`` uses the total false-positive
+    alert count at threshold 0 as the negatives proxy (a higher threshold can
+    only reduce the FP numerator, so ``fpr`` is monotone non-increasing).
+    Returns ``(pr_points, roc_points)`` as immutable sorted tuples of
+    ``(threshold, precision, recall)`` / ``(threshold, fpr, tpr)``.
     """
     # Degenerate input (no alerts AND no ground truth) -> no curve at all,
     # so roc_auc() can return its None sentinel (AC2).
