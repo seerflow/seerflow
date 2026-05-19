@@ -23,7 +23,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from seerflow.lanl.parser import AnyRecord
+    from seerflow.lanl.parser import AnyRecord, AuthRecord, FlowRecord, ProcRecord
+    from seerflow.receivers.base import RawEvent
 
 _log = logging.getLogger("seerflow")
 
@@ -55,3 +56,65 @@ def _merged_records(
     stable left-to-right for equal keys → deterministic ordering.
     """
     yield from heapq.merge(*record_iters, key=lambda r: r.time)
+
+
+def _auth_message(rec: AuthRecord) -> str:
+    """Byte-identical to validator._build_raw_events auth branch."""
+    from seerflow.models.entity import normalize_username
+
+    dst_user, _domain = normalize_username(rec.dst_user)
+    if rec.success:
+        return f"Accepted password for {dst_user} session opened from {rec.src_computer}"
+    return (
+        f"authentication failure for {dst_user} from {rec.src_computer} via {rec.auth_type}"
+    )
+
+
+def _proc_message(rec: ProcRecord) -> str:
+    """Byte-identical to validator._build_raw_events proc branch."""
+    from seerflow.models.entity import normalize_username
+
+    username, _domain = normalize_username(rec.user)
+    action = "start" if rec.start_end.lower() == "start" else "end"
+    return f"process {action}: {rec.process_name} by {username} on {rec.computer}"
+
+
+def _flow_message(rec: FlowRecord) -> str:
+    """Byte-identical to validator._build_raw_events flow branch."""
+    from seerflow.lanl.hostmap import host_to_ip
+
+    src_ip = host_to_ip(rec.src_computer)
+    dst_ip = host_to_ip(rec.dst_computer)
+    return (
+        f"flow established {dst_ip}:{rec.dst_port} from "
+        f"{src_ip}:{rec.src_port} {rec.byte_count}B"
+    )
+
+
+_SOURCE_BY_TYPE: dict[str, str] = {
+    "AuthRecord": "lanl-auth",
+    "ProcRecord": "lanl-proc",
+    "FlowRecord": "lanl-flow",
+}
+
+
+def _record_to_raw(rec: AnyRecord, offset_ns: int) -> RawEvent:
+    """Build the rebased textual ``RawEvent`` for one merged record."""
+    from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord
+    from seerflow.receivers.base import RawEvent
+
+    if isinstance(rec, AuthRecord):
+        msg = _auth_message(rec)
+    elif isinstance(rec, ProcRecord):
+        msg = _proc_message(rec)
+    elif isinstance(rec, FlowRecord):
+        msg = _flow_message(rec)
+    else:  # pragma: no cover - RedTeamRecord never enters the RawEvent stream
+        raise TypeError(f"unsupported record type: {type(rec).__name__}")
+    return RawEvent(
+        data=msg.encode("utf-8"),
+        source_type="syslog",
+        source_id=_SOURCE_BY_TYPE[type(rec).__name__],
+        received_ns=rec.time * 1_000_000_000 + offset_ns,
+        metadata={},
+    )
