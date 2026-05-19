@@ -11,7 +11,10 @@ stdin is a blocking fd by default. The default line source uses
 the event loop (the dashboard and other receivers keep running). A
 ``<``-redirected regular file is rejected by ``connect_read_pipe`` on some
 platforms, so a threaded ``run_in_executor`` blocking-readline fallback
-keeps production robust whether stdin is a true pipe or a redirect.
+keeps production robust whether stdin is a true pipe or a redirect. The
+fallback's blocked ``readline`` is uninterruptible by ``stop()`` (a
+C-level read); it unblocks on EOF — the normal end state for a piped
+source (``cat``/``docker logs`` closes its end) — or at process exit.
 
 EOF semantics are receiver-scoped, matching ``SyslogReceiver`` and
 ``FileTailReceiver``: on EOF the read task ends cleanly, ``stop()`` is
@@ -35,6 +38,7 @@ from seerflow.receivers.base import RawEvent
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
+    from typing import BinaryIO
 
     from seerflow.receivers.manager import ReceiverManager
 
@@ -93,11 +97,10 @@ async def _stream_reader_lines(read_fd: int) -> AsyncIterator[bytes]:
             pipe.close()
 
 
-async def _executor_lines(loop: asyncio.AbstractEventLoop, pipe: object) -> AsyncIterator[bytes]:
+async def _executor_lines(loop: asyncio.AbstractEventLoop, pipe: BinaryIO) -> AsyncIterator[bytes]:
     """Threaded blocking ``readline`` fallback yielding one line at a time."""
-    readline = pipe.readline  # type: ignore[attr-defined]
     while True:
-        line: bytes = await loop.run_in_executor(None, readline)
+        line: bytes = await loop.run_in_executor(None, pipe.readline)
         if not line:
             return
         yield line
