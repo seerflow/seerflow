@@ -167,3 +167,10 @@ async def test_run_drains_then_exits_on_stop() -> None:
     await asyncio.wait_for(task, timeout=3.0)
     lines = [json.loads(x) for x in buf.getvalue().splitlines()]
     assert {line["rule_name"] for line in lines} == {"r1", "r2"}
+
+
+def test_console_sink_exported_from_package() -> None:
+    from seerflow.alerting.sinks import ConsoleSink as Exported
+    from seerflow.alerting.sinks.console import ConsoleSink as Direct
+
+    assert Exported is Direct
