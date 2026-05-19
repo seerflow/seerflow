@@ -161,6 +161,102 @@ async def test_resume_reproduces_completed_prefix() -> None:
     ) == expected
 
 
+async def test_resume_restores_ueba_baselines_no_cold_start() -> None:
+    """AC1/AC4: the streaming benchmark flushes UEBA baselines on its
+    checkpoint cadence, so the persisted ``ueba.baselines`` state key is
+    present and a fresh ``BaselineStore`` restores a non-empty LRU after a
+    completed run (proving no cold-start would occur on resume)."""
+    import tempfile
+
+    from seerflow.config import SeerflowConfig, StorageConfig
+    from seerflow.lanl import streaming
+    from seerflow.storage import connect_storage
+    from seerflow.ueba.baseline import UEBAParams
+    from seerflow.ueba.store import BaselineStore
+
+    with tempfile.TemporaryDirectory() as d:
+        cfg = StorageConfig(backend="sqlite", sqlite_path=f"{d}/u.db")
+        storage = await connect_storage(cfg)
+        try:
+            result = await streaming._drive(
+                FIXTURES_DIR,
+                storage,
+                checkpoint_interval=20,
+                max_events=None,
+                resume_cursor=None,
+            )
+            assert result.total_events_processed > 0
+            ueba = SeerflowConfig().ueba
+            params = UEBAParams(
+                alpha=ueba.ema_alpha,
+                source_ip_cap=ueba.source_ip_cap,
+                template_top_k=ueba.template_top_k,
+                warmup_days=ueba.warmup_days,
+                warmup_min_events=ueba.warmup_min_events,
+            )
+            fresh = BaselineStore(params=params, max_entities=ueba.max_entities)
+            restored = await fresh.restore(storage)
+        finally:
+            await storage.close()
+
+    # The benchmark learned + persisted baselines; a fresh store restores them
+    # (this FAILS before the periodic/final baseline flush is wired).
+    assert restored > 0
+    assert len(fresh) == restored
+
+
+async def test_kill_then_resume_keeps_ueba_baseline_count() -> None:
+    """AC2/AC4: a bounded segment checkpoints baselines; a second bounded
+    segment over the SAME storage (the resume path) restores them via
+    ``assemble_handler`` instead of cold-starting, and the persisted count
+    never resets to empty across the simulated restart."""
+    import tempfile
+
+    from seerflow.config import SeerflowConfig, StorageConfig
+    from seerflow.lanl import streaming
+    from seerflow.storage import connect_storage
+    from seerflow.ueba.baseline import UEBAParams
+    from seerflow.ueba.store import BaselineStore
+
+    ueba = SeerflowConfig().ueba
+    params = UEBAParams(
+        alpha=ueba.ema_alpha,
+        source_ip_cap=ueba.source_ip_cap,
+        template_top_k=ueba.template_top_k,
+        warmup_days=ueba.warmup_days,
+        warmup_min_events=ueba.warmup_min_events,
+    )
+
+    async def persisted_count(storage: object) -> int:
+        store = BaselineStore(params=params, max_entities=ueba.max_entities)
+        return await store.restore(storage)  # type: ignore[arg-type]
+
+    with tempfile.TemporaryDirectory() as d:
+        cfg = StorageConfig(backend="sqlite", sqlite_path=f"{d}/k.db")
+        storage = await connect_storage(cfg)
+        try:
+            first = await streaming.resume_streaming_validation_async(
+                FIXTURES_DIR, storage, checkpoint_interval=20, max_events=20
+            )
+            assert first.total_events_processed == 20
+            n1 = await persisted_count(storage)
+            assert n1 > 0  # segment 1 checkpointed baselines
+
+            # Simulated restart: a second bounded segment resumes against the
+            # same storage. assemble_handler restores the persisted baselines
+            # before processing -> no 7-day cold-start.
+            second = await streaming.resume_streaming_validation_async(
+                FIXTURES_DIR, storage, checkpoint_interval=20, max_events=20
+            )
+            assert second.total_events_processed == 20
+            n2 = await persisted_count(storage)
+        finally:
+            await storage.close()
+
+    # Baselines carried across the restart; never reset to empty.
+    assert n2 >= n1 > 0
+
+
 async def test_resume_streaming_validation_async_fresh_then_resume() -> None:
     """The public resumable surface loads any persisted cursor and continues."""
     import tempfile

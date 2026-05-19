@@ -299,6 +299,22 @@ def _read_redteam(dataset_dir: Path) -> list[RedTeamRecord]:
     ]
 
 
+async def _checkpoint_baselines(
+    assembled: AssembledHandler,
+    storage: StorageBackend,
+) -> None:
+    """Flush the UEBA baseline LRU as part of a checkpoint group (S-314).
+
+    No-op when UEBA is disabled (``baseline_store is None``). ``flush``
+    itself is best-effort (swallows + logs per-call failures) to match the
+    ``ensemble.save_all_state`` / cursor checkpoint contract, so a transient
+    persist failure never aborts the replay.
+    """
+    baseline_store = assembled.engines.baseline_store
+    if baseline_store is not None:
+        await baseline_store.flush(storage)
+
+
 async def _replay_stream(
     dataset_dir: Path,
     storage: StorageBackend,
@@ -309,7 +325,8 @@ async def _replay_stream(
     resume_cursor: StreamCursor | None,
 ) -> tuple[int, int | None]:
     """Drive the rebased stream through the handler under the frozen clock,
-    checkpointing ``save_all_state`` + the resume cursor periodically.
+    checkpointing ``save_all_state`` + UEBA baselines + the resume cursor
+    periodically (S-314: baselines on the ensemble checkpoint cadence).
 
     Returns ``(segment_events_processed, offset_ns)``.
     """
@@ -332,11 +349,13 @@ async def _replay_stream(
             if processed % checkpoint_interval == 0:
                 await assembled.engines.ensemble.save_all_state(storage)
                 await _persist_cursor(storage, consumed, offset_ns, counts)
+                await _checkpoint_baselines(assembled, storage)
             if max_events is not None and processed >= max_events:
                 break
     await assembled.engines.ensemble.save_all_state(storage)
     if offset_ns is not None:
         await _persist_cursor(storage, consumed, offset_ns, counts)
+    await _checkpoint_baselines(assembled, storage)
     return processed, offset_ns
 
 
