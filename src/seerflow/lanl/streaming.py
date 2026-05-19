@@ -18,7 +18,9 @@ from __future__ import annotations
 import heapq
 import itertools
 import logging
+import time as _time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 import msgspec
@@ -28,7 +30,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from seerflow.lanl.parser import AnyRecord, AuthRecord, FlowRecord, ProcRecord
+    from seerflow.lanl.validator import ValidationResult
     from seerflow.receivers.base import RawEvent
+    from seerflow.storage.factory import StorageBackend
 
 _log = logging.getLogger("seerflow")
 
@@ -216,3 +220,190 @@ async def stream_raw_events(
 
     for rec in merged:
         yield _record_to_raw(rec, offset_ns)
+
+
+@dataclass(frozen=True, slots=True)
+class StreamingValidationResult:
+    """:class:`~seerflow.lanl.validator.ValidationResult` fields plus
+    streaming throughput/latency (AC7).
+
+    Reuses ``compute_metrics`` for the accuracy fields so the metric
+    semantics are identical to S-305. Attribute access transparently
+    delegates to the wrapped result, so callers use ``r.precision`` /
+    ``r.per_family`` / ``r.total_events_processed`` directly.
+    """
+
+    base: ValidationResult
+    throughput_events_per_s: float
+    mean_event_latency_s: float
+
+    def __getattr__(self, name: str) -> object:
+        # Only reached for names not defined on this dataclass (base /
+        # throughput / latency resolve normally) — pass through to the
+        # wrapped ValidationResult for precision/recall/per_family/etc.
+        return getattr(self.base, name)
+
+
+def _first_record_time_ns(dataset_dir: Path) -> int:
+    """``min_ts`` in ns of the merged stream (first merged record's time)."""
+    first = next(_merged_records(_open_sources(dataset_dir, None)), None)
+    return 0 if first is None else first.time * 1_000_000_000
+
+
+async def _persist_cursor(
+    storage: StorageBackend, processed: int, offset_ns: int, counts: dict[str, int]
+) -> None:
+    cursor = StreamCursor(
+        events_processed=processed,
+        offset_ns=offset_ns,
+        positions={
+            "auth": counts.get("auth", 0),
+            "proc": counts.get("proc", 0),
+            "flows": counts.get("flows", 0),
+            "dns": counts.get("dns", 0),
+        },
+    )
+    await storage.save_state(CURSOR_STATE_KEY, _encode_cursor(cursor))
+
+
+async def _drive(
+    dataset_dir: Path,
+    storage: StorageBackend,
+    *,
+    checkpoint_interval: int,
+    max_events: int | None,
+    resume_cursor: StreamCursor | None,
+) -> StreamingValidationResult:
+    """Shared replay engine for fresh + resumed runs.
+
+    Drives the streamed LANL events through the full ``assemble_handler``
+    stack under S-305's inherited deterministic frozen replay clock,
+    checkpointing ``ensemble.save_all_state`` + a resume cursor every
+    ``checkpoint_interval`` events, then scores per-family + combined with
+    throughput/latency. Alerts are read back from the (caller-owned)
+    storage so a resumed run scores the full persisted prefix.
+    """
+    from seerflow.config import SeerflowConfig
+    from seerflow.lanl import validator
+    from seerflow.lanl.parser import RedTeamRecord, parse_redteam_line
+    from seerflow.models.query import AlertQuery
+    from seerflow.pipeline.assembly import assemble_handler
+
+    rt_path = dataset_dir / "redteam.csv"
+    redteam = (
+        [
+            parse_redteam_line(ln.strip())
+            for ln in rt_path.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        if rt_path.exists()
+        else []
+    )
+
+    config = SeerflowConfig()
+    assembled = await assemble_handler(config, storage)
+    processed = 0
+    offset_ns: int | None = resume_cursor.offset_ns if resume_cursor else None
+    counts: dict[str, int] = dict(resume_cursor.positions) if resume_cursor else {}
+    t0 = _time.perf_counter()
+    try:
+        with validator._frozen_replay_clock(validator.REPLAY_EPOCH_NS):
+            async for raw in stream_raw_events(dataset_dir, resume_cursor=resume_cursor):
+                await assembled.handler(raw)
+                processed += 1
+                src = raw.source_id.removeprefix("lanl-")
+                counts[src] = counts.get(src, 0) + 1
+                if offset_ns is None:
+                    offset_ns = raw.received_ns - _first_record_time_ns(dataset_dir)
+                if processed % checkpoint_interval == 0:
+                    await assembled.engines.ensemble.save_all_state(storage)
+                    await _persist_cursor(storage, processed, offset_ns, counts)
+                if max_events is not None and processed >= max_events:
+                    break
+        await assembled.engines.ensemble.save_all_state(storage)
+        if offset_ns is not None:
+            await _persist_cursor(storage, processed, offset_ns, counts)
+    finally:
+        await assembled.teardown()
+    elapsed = max(_time.perf_counter() - t0, 1e-9)
+    await storage.flush()
+    page = await storage.query_alerts(AlertQuery(limit=10_000))
+    alerts = list(page.items)
+
+    base_off_s = (offset_ns or 0) // 1_000_000_000
+    rebased_rt = [
+        RedTeamRecord(
+            time=r.time + base_off_s,
+            user=r.user,
+            src_computer=r.src_computer,
+            dst_computer=r.dst_computer,
+        )
+        for r in redteam
+    ]
+    tp, fp, missed = validator.match_against_ground_truth(
+        alerts, rebased_rt, time_window_s=300
+    )
+    base = validator.compute_metrics(
+        tp_alerts=tp,
+        fp_alerts=fp,
+        missed_redteam=missed,
+        alerts=alerts,
+        events_processed=processed,
+        detection_latencies={},
+    )
+    return StreamingValidationResult(
+        base=base,
+        throughput_events_per_s=processed / elapsed if processed else 0.0,
+        mean_event_latency_s=elapsed / processed if processed else 0.0,
+    )
+
+
+async def run_streaming_validation_async(
+    dataset_dir: Path,
+    *,
+    checkpoint_interval: int = 10_000,
+    max_events: int | None = None,
+) -> StreamingValidationResult:
+    """Bounded-memory streaming LANL validation over a fresh temp SQLite DB.
+
+    Convenience surface mirroring :func:`validator.run_validation_async`.
+    For a resumable run whose storage survives a process kill use
+    :func:`resume_streaming_validation_async` with a caller-owned backend.
+    """
+    import tempfile
+
+    from seerflow.config import StorageConfig
+    from seerflow.storage import connect_storage
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage = await connect_storage(
+            StorageConfig(backend="sqlite", sqlite_path=f"{tmpdir}/lanl.db")
+        )
+        try:
+            return await _drive(
+                dataset_dir,
+                storage,
+                checkpoint_interval=checkpoint_interval,
+                max_events=max_events,
+                resume_cursor=None,
+            )
+        finally:
+            await storage.close()
+
+
+def run_streaming_validation(
+    dataset_dir: Path,
+    *,
+    checkpoint_interval: int = 10_000,
+    max_events: int | None = None,
+) -> StreamingValidationResult:
+    """Synchronous wrapper (mirrors :func:`validator.run_validation`)."""
+    import asyncio
+
+    return asyncio.run(
+        run_streaming_validation_async(
+            dataset_dir,
+            checkpoint_interval=checkpoint_interval,
+            max_events=max_events,
+        )
+    )
