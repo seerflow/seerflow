@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
     from seerflow.alerting.dispatcher import AlertDispatcher
-    from seerflow.alerting.sinks.file import FileSink
     from seerflow.alerting.sinks.console import ConsoleSink
+    from seerflow.alerting.sinks.file import FileSink
     from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
     from seerflow.api.latency import StageLatencyTracker

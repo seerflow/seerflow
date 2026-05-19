@@ -62,7 +62,9 @@ async def test_build_alert_sinks_returns_file_sink_slot(tmp_path: Path) -> None:
         alerting=dataclasses.replace(base.alerting, file_enabled=True, file_path=str(target)),
     )
     result = await _build_alert_sinks(cfg)
-    assert len(result) == 10
+    # S-312 appended the console sink/task after the S-313 file slot, so the
+    # tuple is now 12-wide; the file slot stays at indices 8/9.
+    assert len(result) == 12
     file_sink, file_task = result[8], result[9]
     try:
         assert file_sink is not None

@@ -20,9 +20,12 @@ def test_start_alerts_flags_default_none() -> None:
     assert ns.alerts_format is None
 
 
-def test_start_rejects_bad_stream() -> None:
-    with pytest.raises(SystemExit):
-        parse_args(["start", "--alerts-to", "syslog"])
+def test_start_alerts_to_accepts_non_stream_path() -> None:
+    # S-312 and S-313 share ``--alerts-to``: a non-stdout/stderr value is a
+    # valid file-sink path (no argparse ``choices`` rejection), routed to the
+    # file sink by _apply_alerts_to rather than the console sink.
+    ns = parse_args(["start", "--alerts-to", "/var/log/seerflow/alerts.ndjson"])
+    assert ns.alerts_to == "/var/log/seerflow/alerts.ndjson"
 
 
 def test_start_rejects_bad_format() -> None:

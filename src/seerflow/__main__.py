@@ -30,7 +30,11 @@ def _apply_console_overrides(
     ``seerflow.yaml``. Config is frozen, so a new instance is returned via
     ``dataclasses.replace`` (no mutation).
     """
-    console_stream = alerts_to if alerts_to in ("stdout", "stderr") else None
+    console_stream: Literal["stdout", "stderr"] | None = None
+    if alerts_to == "stdout":
+        console_stream = "stdout"
+    elif alerts_to == "stderr":
+        console_stream = "stderr"
     if console_stream is None and alerts_format is None:
         return cfg
     alerting = cfg.alerting
