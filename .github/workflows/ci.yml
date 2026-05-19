@@ -185,3 +185,38 @@ jobs:
             frontend/playwright-report/
           retention-days: 7
           if-no-files-found: ignore
+
+  scorecard-gate:
+    # S-310 / FR-078 / NFR-016. Independent of `check` (no `needs:`) so it can
+    # never block sibling PRs. Synthetic subset only (~200 LANL events + a
+    # small synthetic pipeline benchmark) => fast. The pass/fail gate logic is
+    # self-contained in src/seerflow/benchmark/scorecard.py and compares
+    # against the committed tests/fixtures/scorecard_baseline.json baseline.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --extra tui
+
+      - name: Scorecard regression gate (synthetic subset)
+        run: |
+          uv run python -m seerflow.benchmark.scorecard \
+            --out benchmark-results.json \
+            --check tests/fixtures/scorecard_baseline.json
+
+      - name: Upload scorecard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-scorecard-${{ github.run_id }}
+          path: benchmark-results.json
+          if-no-files-found: ignore
+          retention-days: 14

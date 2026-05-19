@@ -1,0 +1,35 @@
+{
+  "accuracy": {
+    "f1_score": 0.2222222222222222,
+    "false_negatives": 4,
+    "false_positive_rate": 0.8333333333333334,
+    "false_positives": 10,
+    "per_family": {
+      "correlation": {
+        "f1_score": 0.2857142857142857,
+        "false_negatives": 0,
+        "false_positives": 10,
+        "precision": 0.16666666666666666,
+        "recall": 1.0,
+        "total_alerts": 12,
+        "true_positives": 2
+      }
+    },
+    "precision": 0.16666666666666666,
+    "recall": 0.3333333333333333,
+    "scope_label": "full detection stack (Drain3+ML+Sigma+UEBA+IoC+correlation) on synthetic LANL subset (~200 events, tests/fixtures/lanl)",
+    "total_alerts": 12,
+    "total_events_processed": 137,
+    "true_positives": 2
+  },
+  "git_sha": "baseline",
+  "performance": {
+    "benchmark_event_count": 2000,
+    "latency_p50_ms": 0.9012285,
+    "latency_p95_ms": 5.943005,
+    "peak_rss_mb": 230.21875,
+    "throughput_eps": 329
+  },
+  "schema_version": 1,
+  "timestamp": "baseline"
+}
