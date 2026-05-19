@@ -80,3 +80,76 @@ def test_run_benchmark_cmd_table(
     )
     assert rc == benchmark_cmd.EXIT_OK
     assert "throughput" in capsys.readouterr().out.lower()
+
+
+def test_render_scorecard_has_both_sections() -> None:
+    from seerflow.lanl.validator import ValidationResult
+
+    vr = ValidationResult(
+        true_positives=12,
+        false_positives=1,
+        false_negatives=0,
+        precision=0.92,
+        recall=1.0,
+        f1_score=0.96,
+        false_positive_rate=0.08,
+        detection_latency_s={"r": 10.0},
+        patterns_detected=frozenset({"r"}),
+        total_events_processed=203,
+        total_alerts=13,
+    )
+    text = benchmark_cmd._render_scorecard(vr, _br(), dataset_dir="/d")
+    low = text.lower()
+    assert "accuracy" in low
+    assert "performance" in low
+    assert "precision" in low
+    assert "throughput" in low
+
+
+def test_run_scorecard_runs_both_harnesses(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: object,
+) -> None:
+    from seerflow.lanl.validator import ValidationResult
+
+    vr = ValidationResult(
+        true_positives=1,
+        false_positives=0,
+        false_negatives=0,
+        precision=1.0,
+        recall=1.0,
+        f1_score=1.0,
+        false_positive_rate=0.0,
+        detection_latency_s={"r": 5.0},
+        patterns_detected=frozenset({"r"}),
+        total_events_processed=1,
+        total_alerts=1,
+    )
+    monkeypatch.setattr("seerflow.lanl.validator.run_validation", lambda _p: vr)
+    monkeypatch.setattr(
+        "seerflow.launch.benchmark.run_benchmark",
+        lambda count, *, seed=42, data_dir=None: _br(event_count=count),
+    )
+    rc = benchmark_cmd.run_benchmark_cmd(
+        _ns(count=10, seed=42, json=True, scorecard=True, dataset_dir=str(tmp_path))
+    )
+    assert rc == benchmark_cmd.EXIT_OK
+    out = capsys.readouterr().out.lower()
+    assert "accuracy" in out and "performance" in out
+
+
+def test_run_scorecard_bad_dataset_dir_exit_2(
+    capsys: pytest.CaptureFixture[str], tmp_path: object
+) -> None:
+    rc = benchmark_cmd.run_benchmark_cmd(
+        _ns(
+            count=10,
+            seed=42,
+            json=False,
+            scorecard=True,
+            dataset_dir=str(tmp_path / "nope"),  # type: ignore[operator]
+        )
+    )
+    assert rc == benchmark_cmd.EXIT_USAGE
+    assert "Error:" in capsys.readouterr().err
