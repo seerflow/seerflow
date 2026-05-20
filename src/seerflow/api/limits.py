@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+from functools import cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING
@@ -222,24 +223,43 @@ def configure_limiter(config: SeerflowConfig) -> None:
 # reads the current config-driven value at request time. A single
 # module slot is fine because only one ``SeerflowConfig`` is active
 # per process (single-tenant service).
-_DEFAULTS = SeerflowConfig()
-_current_list_limit = _DEFAULTS.api_list_rate_limit
-_current_detail_limit = _DEFAULTS.api_detail_rate_limit
-_current_coverage_limit = _DEFAULTS.api_coverage_rate_limit
+#
+# Defaults are deferred to first call (issue #196): constructing
+# ``SeerflowConfig()`` at import time would surface any future
+# ``__init__`` validation failure on ``import seerflow.api.limits``
+# rather than at ``configure_limiter`` / limit-callable call time.
+_current_list_limit: str | None = None
+_current_detail_limit: str | None = None
+_current_coverage_limit: str | None = None
+
+
+@cache
+def _default_config() -> SeerflowConfig:
+    """Return a cached default ``SeerflowConfig`` for limit fallbacks.
+
+    Lazy by design — see the comment above ``_current_list_limit``.
+    """
+    return SeerflowConfig()
 
 
 def list_limit() -> str:
     """Return the current list-endpoint rate limit string."""
+    if _current_list_limit is None:
+        return _default_config().api_list_rate_limit
     return _current_list_limit
 
 
 def detail_limit() -> str:
     """Return the current detail-endpoint rate limit string."""
+    if _current_detail_limit is None:
+        return _default_config().api_detail_rate_limit
     return _current_detail_limit
 
 
 def coverage_limit() -> str:
     """Return the current coverage-endpoint rate limit string."""
+    if _current_coverage_limit is None:
+        return _default_config().api_coverage_rate_limit
     return _current_coverage_limit
 
 
