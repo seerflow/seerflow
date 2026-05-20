@@ -1,0 +1,15 @@
+[
+  {"story_id": "S-139A", "linear_id": "SEE-174", "planned_pts": 3},
+  {"story_id": "S-139B", "linear_id": "SEE-175", "planned_pts": 5},
+  {"story_id": "S-139C", "linear_id": "SEE-176", "planned_pts": 5},
+  {"story_id": "S-139D", "linear_id": "SEE-177", "planned_pts": 5},
+  {"story_id": "S-139E", "linear_id": "SEE-178", "planned_pts": 8},
+  {"story_id": "S-139F", "linear_id": "SEE-179", "planned_pts": 5},
+  {"story_id": "S-139G", "linear_id": "SEE-180", "planned_pts": 5},
+  {"story_id": "S-139G-F1", "linear_id": "SEE-190", "planned_pts": 1},
+  {"story_id": "S-139G-F2", "linear_id": "SEE-192", "planned_pts": 2},
+  {"story_id": "S-139H", "linear_id": "SEE-181", "planned_pts": 5},
+  {"story_id": "S-139H-F1", "linear_id": "SEE-193", "planned_pts": 1},
+  {"story_id": "S-175", "linear_id": "SEE-186", "planned_pts": 5},
+  {"story_id": "S-176", "linear_id": "SEE-187", "planned_pts": 3}
+]

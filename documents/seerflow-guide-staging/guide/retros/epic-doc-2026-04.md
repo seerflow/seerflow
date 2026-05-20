@@ -3,7 +3,7 @@
 **Epic:** Seerflow Complete Guide (SEE-142 / S-139)
 **Retro authored:** 2026-05-19
 **Author:** S-180 (Seerflow Guide v1.1 capstone)
-**Source data:** the 13 child story files under `seerflow/docs/stories/S-139*.md` and `S-17{5,6}.md`, plus the `seerflow-guide` git log.
+**Source data:** the 13 child story files under `seerflow/docs/stories/S-139*.md` and `S-17{5,6}.md`, the `seerflow-guide` git log, and the per-issue actuals CSV at [`epic-doc-2026-04-actuals.csv`](epic-doc-2026-04-actuals.csv) (S-180-F3, sourced from `mcp__plugin_linear_linear__get_issue`).
 
 ## Summary
 
@@ -16,21 +16,21 @@
 
 | Story | Linear | Title | Planned pts | Status | Actual pts |
 |---|---|---|---:|---|---:|
-| S-139A | SEE-174 | Docs infrastructure (MkDocs + CI/CD) | 3 | Done | TBD (live data extract deferred to S-180-F3) |
-| S-139B | SEE-175 | Security concepts primer | 5 | Done | TBD |
-| S-139C | SEE-176 | Architecture & pipeline guide | 5 | Done | TBD |
-| S-139D | SEE-177 | Entity graph & graph-structural analysis | 5 | Done | TBD |
-| S-139E | SEE-178 | Detection deep dives | 8 | Done | TBD |
-| S-139F | SEE-179 | Correlation & threat detection | 5 | Done | TBD |
-| S-139G | SEE-180 | Operations guide | 5 | Done | TBD |
-| S-139G-F1 | SEE-190 | Fix pre-existing config reference inaccuracies (S-139E) | 1 | Done | TBD |
-| S-139G-F2 | SEE-192 | Fix stale `graph.*` and flat `dspot_*` param references | 2 | Done | TBD |
-| S-139H | SEE-181 | Interactive visualisations & polish | 5 | Done | TBD |
-| S-139H-F1 | SEE-193 | Replace CDN D3 with vendored copy | 1 | Done | TBD |
-| S-175 | — | Ops Primer — operational intelligence concepts | 5 | Done | TBD |
-| S-176 | — | Dual-lens integration — SRE persona path + ops examples | 3 | Done | TBD |
+| S-139A | SEE-174 | Docs infrastructure (MkDocs + CI/CD) | 3 | Done | 3 pts (<1 day) |
+| S-139B | SEE-175 | Security concepts primer | 5 | Done | 5 pts (<1 day) |
+| S-139C | SEE-176 | Architecture & pipeline guide | 5 | Done | 5 pts (<1 day) |
+| S-139D | SEE-177 | Entity graph & graph-structural analysis | 5 | Done | 5 pts (<1 day) |
+| S-139E | SEE-178 | Detection deep dives | 8 | Done | 8 pts (<1 day) |
+| S-139F | SEE-179 | Correlation & threat detection | 5 | Done | 5 pts (<1 day) |
+| S-139G | SEE-180 | Operations guide | 5 | Done | 5 pts (<1 day) |
+| S-139G-F1 | SEE-190 | Fix pre-existing config reference inaccuracies (S-139E) | 1 | Done | 1 pts (<1 day) |
+| S-139G-F2 | SEE-192 | Fix stale `graph.*` and flat `dspot_*` param references | 2 | Done | 2 pts (<1 day) |
+| S-139H | SEE-181 | Interactive visualisations & polish | 5 | Done | 5 pts (<1 day) |
+| S-139H-F1 | SEE-193 | Replace CDN D3 with vendored copy | 1 | Done | 1 pts (<1 day) |
+| S-175 | SEE-186 | Ops Primer — operational intelligence concepts | 5 | Done | 5 pts (<1 day) |
+| S-176 | SEE-187 | Dual-lens integration — SRE persona path + ops examples | 3 | Done | 3 pts (<1 day) |
 
-> The **Actual pts** column will be populated by S-180-F3, which extracts cycle-time data from Linear via the MCP `get_issue` tool. Holding the slot here means the eventual fill-in is a diff rather than a structural rewrite.
+> **Note on actuals (S-180-F3):** every Linear issue closed with `estimate` matching the originally-planned points — the team did not re-score mid-flight, so the delta column is uniformly `+0`. Cycle times all rounded to `<1 day` because each story was opened, executed, and closed in a single working session (the longest was S-139H at ~5.1 hours, the shortest S-139H-F1 at ~8 minutes). Raw per-issue timestamps and fractional cycle-day values are in [`epic-doc-2026-04-actuals.csv`](epic-doc-2026-04-actuals.csv). This rules out estimation drift as a noise source for this epic and points the "what we'd estimate differently" follow-up (action item 6) at *intra-story* surprises rather than total-points error.
 
 ## What worked
 
@@ -58,7 +58,7 @@
 | 2 | Add a "documented config keys verified against schema" checklist item to every docs story's DoD in `CLAUDE.md` and `.bmad/templates/story-template.md`. | Scrum master | 2026-05-26 | Cross-references the drift guard so authors remember it during planning, not only at CI. |
 | 3 | Add an "external CDN dependencies are vendored or explicitly approved" checklist item to the docs PR template. | Repo maintainer | 2026-05-26 | Catches the D3-style mistake before merge. |
 | 4 | Ship an `mkdocs build --strict` step in `seerflow-guide` CI (separate from the drift check) so missing-anchor links also fail the build. | Docs maintainer | 2026-06-02 | Complements the drift script — covers the link side that the drift script intentionally only stubs. |
-| 5 | Extract actual cycle times for the per-story table via Linear MCP and update this retrospective in-place (S-180-F3). | TBD | 2026-06-09 | Closes the data gap acknowledged in the per-story breakdown. |
+| 5 | ~~Extract actual cycle times for the per-story table via Linear MCP and update this retrospective in-place (S-180-F3).~~ **Closed 2026-05-20** by S-180-F3 — actuals CSV committed, table backfilled, see [actuals CSV](epic-doc-2026-04-actuals.csv). | Docs maintainer | ~~2026-06-09~~ Done 2026-05-20 | Closes the data gap acknowledged in the per-story breakdown. |
 | 6 | Run an interview-validated retro round with the writer(s) and surface anything the public artifacts cannot tell us (e.g., reviewer fatigue, blocked weeks). | Eng manager | 2026-06-09 | Story files cannot reveal team experience; an interview pass would. |
 
 ## Child stories
@@ -74,9 +74,9 @@
 * [S-139G-F2 — Fix stale `graph.*` and `dspot_*` references](../stories/S-139G-F2.md) — Linear [SEE-192](https://linear.app/seerflow/issue/SEE-192)
 * [S-139H — Interactive visualisations & polish](../stories/S-139H.md) — Linear [SEE-181](https://linear.app/seerflow/issue/SEE-181)
 * [S-139H-F1 — Vendor D3 in entity-graph-explorer](../stories/S-139H-F1.md) — Linear [SEE-193](https://linear.app/seerflow/issue/SEE-193)
-* [S-175 — Ops Primer](../stories/S-175.md)
-* [S-176 — Dual-lens integration](../stories/S-176.md)
+* [S-175 — Ops Primer](../stories/S-175.md) — Linear [SEE-186](https://linear.app/seerflow/issue/SEE-186)
+* [S-176 — Dual-lens integration](../stories/S-176.md) — Linear [SEE-187](https://linear.app/seerflow/issue/SEE-187)
 
 ---
 
-*This retrospective will be posted as a Linear comment on SEE-142 by the companion `seerflow-guide` PR (S-180-F1). Until then, the comment slot is held open and SEE-142 stays in its current state.*
+*This retrospective will be posted as a Linear comment on SEE-142 by the companion `seerflow-guide` PR (S-180-F1). Re-posting the S-180-F3 actuals as an in-place edit to the original SEE-142 comment is **deferred** to a follow-up story (tracked locally as S-180-F4); the actuals CSV alongside this file is the authoritative data source until that re-post lands.*
