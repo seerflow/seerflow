@@ -20,7 +20,6 @@ Output:
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -30,7 +29,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CSV_COLUMNS",
-    "RetroRow",
     "build_csv_row",
     "compute_cycle_days",
     "format_delta",
@@ -57,25 +55,9 @@ CSV_COLUMNS: tuple[str, ...] = (
     "status",
 )
 
-
-@dataclass(frozen=True)
-class RetroRow:
-    """Typed view of a single retrospective row.
-
-    Kept as a plain dataclass — :func:`build_csv_row` returns ``dict`` for
-    direct CSV use, but downstream callers (markdown updater) can promote a
-    dict to ``RetroRow(**row)`` when type-safety matters.
-    """
-
-    story_id: str
-    linear_id: str
-    planned_pts: int | None
-    actual_pts: int | None
-    started_at: str | None
-    completed_at: str | None
-    cycle_days: float | None
-    delta: str
-    status: str
+# Cycle-day precision used in the CSV — 4 decimals gives sub-second accuracy
+# without bloating the file with float-repr noise.
+_CYCLE_DAYS_PRECISION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -209,9 +191,10 @@ def build_csv_row(
 def write_csv(rows: Iterable[dict[str, Any]], dest: Path) -> None:
     """Write rows to ``dest`` with stable column ordering.
 
-    ``None`` values are serialised as empty strings via the default
-    ``csv.DictWriter`` behaviour (we hand it ``""`` explicitly to avoid the
-    ``"None"`` literal).
+    Side effect: creates ``dest.parent`` if it does not exist. ``None`` values
+    are serialised as empty strings (otherwise ``DictWriter`` would emit the
+    literal ``"None"``). ``cycle_days`` is rounded to
+    :data:`_CYCLE_DAYS_PRECISION` decimals to keep the CSV diff-friendly.
     """
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -219,17 +202,22 @@ def write_csv(rows: Iterable[dict[str, Any]], dest: Path) -> None:
         writer = csv.DictWriter(fp, fieldnames=list(CSV_COLUMNS))
         writer.writeheader()
         for row in rows:
-            writer.writerow(
-                {col: ("" if row.get(col) is None else row[col]) for col in CSV_COLUMNS}
-            )
+            writer.writerow({col: _serialize_cell(col, row.get(col)) for col in CSV_COLUMNS})
+
+
+def _serialize_cell(column: str, value: Any) -> Any:
+    """Convert a row value to its CSV-friendly representation."""
+
+    if value is None:
+        return ""
+    if column == "cycle_days" and isinstance(value, float):
+        return round(value, _CYCLE_DAYS_PRECISION)
+    return value
 
 
 # ---------------------------------------------------------------------------
 # Markdown table updater
 # ---------------------------------------------------------------------------
-
-
-_ROW_PREFIX_TPL = "| {story_id} |"
 
 
 def update_markdown_table(md_text: str, rows: Iterable[dict[str, Any]]) -> str:

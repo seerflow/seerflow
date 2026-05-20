@@ -254,6 +254,33 @@ class TestWriteCsv:
         assert loaded[1]["actual_pts"] == ""
         assert loaded[1]["cycle_days"] == ""
 
+    def test_cycle_days_rounded_to_four_decimals(self, tmp_path: Path) -> None:
+        rows = [
+            {
+                "story_id": "S-1",
+                "linear_id": "SEE-1",
+                "planned_pts": 1,
+                "actual_pts": 1,
+                "started_at": "2026-01-01T00:00:00.000Z",
+                "completed_at": "2026-01-01T00:00:01.000Z",
+                # Raw float would serialise as 1.1574074074074074e-05 — noisy.
+                "cycle_days": 0.0000115740740740740,
+                "delta": "+0",
+                "status": "ok",
+            }
+        ]
+        dest = tmp_path / "actuals.csv"
+        backfill.write_csv(rows, dest)
+        text = dest.read_text(encoding="utf-8")
+        # 0.0000... rounds to 0.0 at 4 decimals — csv writes the plain literal.
+        assert ",0.0," in text
+        assert "e-05" not in text  # no float-repr noise
+
+    def test_creates_missing_parent_directory(self, tmp_path: Path) -> None:
+        dest = tmp_path / "nested" / "actuals.csv"
+        backfill.write_csv([], dest)
+        assert dest.exists()
+
     def test_empty_input_writes_header_only(self, tmp_path: Path) -> None:
         dest = tmp_path / "actuals.csv"
         backfill.write_csv([], dest)
