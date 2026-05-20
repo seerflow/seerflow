@@ -1,0 +1,88 @@
+name: docs-drift
+
+# Runs the seerflow-guide docs-drift checker against the current PR whenever a
+# change touches the config schema or CLI surface. The drift script itself
+# lives in seerflow-guide so the two repos cannot disagree about what counts
+# as drift. See ``.github/check_docs_drift.py`` for the seerflow-side wrapper.
+#
+# Until S-180-F1 publishes ``scripts/check_docs_drift.py`` in seerflow-guide,
+# the wrapper exits zero with a clear "skipping" notice — the gate fails open
+# on purpose so dev PRs are not blocked on the upstream contract.
+
+on:
+  pull_request:
+    paths:
+      - 'src/seerflow/config.py'
+      - 'src/seerflow/cli.py'
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # required to post the drift summary as a PR comment
+    steps:
+      - name: Checkout seerflow
+        uses: actions/checkout@v4
+
+      - name: Checkout seerflow-guide@main
+        uses: actions/checkout@v4
+        with:
+          repository: seerflow/seerflow-guide
+          ref: main
+          path: _guide
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: 'latest'
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install seerflow
+        run: uv sync
+
+      - name: Run docs-drift wrapper
+        id: drift
+        run: |
+          uv run python .github/check_docs_drift.py \
+            --guide-dir _guide \
+            --report-path drift-report.json
+
+      - name: Upload drift report
+        if: always() && hashFiles('drift-report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-drift-report
+          path: drift-report.json
+          if-no-files-found: ignore
+
+      - name: Post drift summary to PR
+        if: failure() && hashFiles('drift-report.json') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('drift-report.json', 'utf8'));
+            const lines = ['## docs-drift detected', ''];
+            for (const section of ['config', 'cli']) {
+              const block = report[section];
+              if (!block) continue;
+              lines.push(`### ${section.toUpperCase()}`);
+              if (block.extra_in_docs && block.extra_in_docs.length > 0) {
+                lines.push('**Documented but missing from schema/parser:**');
+                for (const k of block.extra_in_docs) lines.push(`- \`${k}\``);
+              }
+              if (block.missing_in_docs && block.missing_in_docs.length > 0) {
+                lines.push('**In schema/parser but undocumented (warning only):**');
+                for (const k of block.missing_in_docs) lines.push(`- \`${k}\``);
+              }
+              lines.push('');
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: lines.join('\n'),
+            });
