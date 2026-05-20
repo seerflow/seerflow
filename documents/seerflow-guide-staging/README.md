@@ -98,3 +98,36 @@ owns:
 
 Until S-180-F1 lands, SEE-195 (this story) stops at **In Review / QA** as
 specified by the dev-story workflow — no `Done` transition on either issue.
+
+## S-180-F1 closure note (2026-05-20)
+
+Companion PR is open: <https://github.com/seerflow/seerflow-guide/pull/16>.
+
+Tracked deltas in this seerflow-side PR are limited to this README closure
+note because every other artifact intended for cross-repo handoff lives at
+paths that are excluded by `.git/info/exclude` on this development snapshot:
+
+* `docs/stories/S-180-F1.md` (Status flipped to **Done** locally)
+* `docs/stories/S-139.md` (Retrospective pointer line added locally — see
+  PR description below for the text the next tracked update should include)
+* `docs/sprint-plan-seerflow-2026-03-17.md` (EPIC-DOC retrospective closing
+  subsection added locally — same caveat as above)
+
+The companion PR carries the full content: drift guard relocated to
+`scripts/check_docs_drift.py`, quickstart + minimum-viable references +
+frontend stub + EPIC-DOC retro under `docs/`, mkdocstrings wired into
+`mkdocs.yml`, and `mkdocs build --strict` exits zero locally. The
+`docs-drift` workflow ships in that same PR and dogfoods itself on the
+introducing PR.
+
+Linear sync planned by this story:
+
+* Post the full markdown of `docs/retros/epic-doc-2026-04.md` (now landed in
+  seerflow-guide via the companion PR) as a comment on SEE-142.
+* Transition SEE-142 → **Done**.
+* Transition SEE-195 → **Done** only after SEE-142 is Done.
+
+Each Linear MCP call is best-effort under the free-issue quota policy:
+updates to existing issues are allowed, only new issue creation is blocked.
+On 429 / quota errors the call is deferred and surfaced in the parent
+agent's deferred-issues list.
