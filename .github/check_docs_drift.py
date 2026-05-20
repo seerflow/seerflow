@@ -50,6 +50,10 @@ _SKIP_MESSAGE = (
     "docs-drift: canonical script not found in seerflow-guide checkout; "
     "skipping (will activate once seerflow-guide exposes scripts/check_docs_drift.py)."
 )
+# Generous upper bound — the drift script reads two markdown files and walks
+# one dataclass + one argparse parser. Anything past five minutes signals a
+# hang (network call gone wrong, infinite loop) and should fail the job.
+_SUBPROCESS_TIMEOUT_S = 300
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -109,7 +113,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--report-path",
         str(report_path),
     ]
-    completed = subprocess.run(cmd, check=False)  # noqa: S603 — args fully controlled
+    try:
+        completed = subprocess.run(  # noqa: S603 — args fully controlled
+            cmd, check=False, timeout=_SUBPROCESS_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired:
+        print(  # noqa: T201 — CLI tool stdout
+            f"docs-drift: canonical script timed out after {_SUBPROCESS_TIMEOUT_S}s; "
+            "treating as failure."
+        )
+        return 124  # conventional shell timeout exit code
     return completed.returncode
 
 

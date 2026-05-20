@@ -34,7 +34,7 @@ WRAPPER_PATH = REPO_ROOT / ".github" / "check_docs_drift.py"
 def _load_wrapper() -> ModuleType:
     """Load the wrapper as a module from its on-disk path.
 
-    The wrapper lives under ``scripts/`` (not a Python package) so a normal
+    The wrapper lives under ``.github/`` (not a Python package) so a normal
     ``import`` would fail. ``importlib.util.spec_from_file_location`` lets the
     tests target the real file the CI workflow invokes.
     """
@@ -142,6 +142,41 @@ def test_wrapper_propagates_nonzero_exit(tmp_path: Path) -> None:
     )
 
     assert exit_code == 1
+
+
+def test_wrapper_returns_124_when_canonical_script_hangs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Subprocess timeout → wrapper returns 124 (POSIX timeout convention)."""
+
+    wrapper = _load_wrapper()
+    guide_dir = tmp_path / "guide"
+    (guide_dir / "docs").mkdir(parents=True)
+    # The script body does not matter — we patch ``subprocess.run`` to raise.
+    _write_stub_drift_script(
+        guide_dir / "scripts" / "check_docs_drift.py",
+        exit_code=0,
+        marker=None,
+    )
+    report_path = tmp_path / "report.json"
+
+    import subprocess as _subprocess
+
+    def _raise_timeout(*_args: object, **_kwargs: object) -> None:
+        raise _subprocess.TimeoutExpired(cmd="stub", timeout=1)
+
+    monkeypatch.setattr(wrapper.subprocess, "run", _raise_timeout)
+
+    exit_code = wrapper.main(
+        [
+            "--guide-dir",
+            str(guide_dir),
+            "--report-path",
+            str(report_path),
+        ]
+    )
+
+    assert exit_code == 124
 
 
 def test_wrapper_runs_as_script_entry(tmp_path: Path) -> None:
