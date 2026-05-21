@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/seerflow/seerflow/compare/v0.6.0...v0.6.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **tests:** isolate global-exception-handler tests from dashboard mount ([baad3e6](https://github.com/seerflow/seerflow/commit/baad3e62bba35df7968cd9fad2a874c63fdab979))
+* **tests:** isolate global-exception-handler tests from dashboard mount ([aecfd7f](https://github.com/seerflow/seerflow/commit/aecfd7f56f4af872fdb0a945bf1ca1699bfe5ac6))
+
 ## [0.6.0](https://github.com/seerflow/seerflow/compare/v0.5.1...v0.6.0) (2026-05-21)
 
 
