@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "seerflow"
-version = "0.6.0"
+version = "0.6.1"
 description = "Streaming log intelligence agent — detects operational failures and security threats with online ML"
 readme = "README.md"
 requires-python = ">=3.11"
