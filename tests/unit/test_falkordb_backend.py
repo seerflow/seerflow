@@ -42,7 +42,6 @@ def test_satisfies_graph_backend_protocol() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_add_edge_runs_merge_query() -> None:
     query = AsyncMock(return_value=_fake_result())
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -56,7 +55,6 @@ async def test_add_edge_runs_merge_query() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_neighbors_returns_entity_id_dicts() -> None:
     query = AsyncMock(return_value=_fake_result([["b"], ["c"]]))
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -65,7 +63,6 @@ async def test_get_neighbors_returns_entity_id_dicts() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_neighbors_returns_empty_when_no_rows() -> None:
     query = AsyncMock(return_value=_fake_result([]))
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -74,7 +71,6 @@ async def test_get_neighbors_returns_empty_when_no_rows() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_neighbors_filters_by_rel_types() -> None:
     query = AsyncMock(return_value=_fake_result([]))
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -88,7 +84,6 @@ async def test_get_neighbors_filters_by_rel_types() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_shortest_path_returns_list_of_ids() -> None:
     query = AsyncMock(return_value=_fake_result([[["a", "b", "c"]]]))
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -96,7 +91,6 @@ async def test_shortest_path_returns_list_of_ids() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_shortest_path_returns_empty_when_no_path() -> None:
     query = AsyncMock(return_value=_fake_result([]))
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -104,7 +98,6 @@ async def test_shortest_path_returns_empty_when_no_path() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_subgraph_returns_nodes_and_edges() -> None:
     # First query returns nodes (incl. seed), second returns edges.
     query = AsyncMock(
@@ -121,7 +114,6 @@ async def test_get_subgraph_returns_nodes_and_edges() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_related_returns_entity_relations() -> None:
     query = AsyncMock(return_value=_fake_result([["b", "uses"], ["c", "owns"]]))
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -131,7 +123,6 @@ async def test_get_related_returns_entity_relations() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_related_skips_empty_relation_types() -> None:
     """Defensive: a missing rel_type column is filtered out."""
     query = AsyncMock(return_value=_fake_result([["b", ""], ["c", "owns"]]))
@@ -141,7 +132,6 @@ async def test_get_related_skips_empty_relation_types() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_load_clears_then_bulk_inserts() -> None:
     query = AsyncMock(return_value=_fake_result())
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -166,7 +156,6 @@ async def test_load_clears_then_bulk_inserts() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_load_no_rows_only_clears() -> None:
     query = AsyncMock(return_value=_fake_result())
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -176,7 +165,6 @@ async def test_load_no_rows_only_clears() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_export_edges_returns_storage_tuples() -> None:
     query = AsyncMock(
         return_value=_fake_result([["a", "b", "uses", 1, 5, 3], ["b", "c", "uses", 2, 6, 7]])
@@ -190,7 +178,6 @@ async def test_export_edges_returns_storage_tuples() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_vertex_and_edge_counts_refresh_from_server() -> None:
     query = AsyncMock(side_effect=[_fake_result([[7]]), _fake_result([[12]])])
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -202,7 +189,6 @@ async def test_vertex_and_edge_counts_refresh_from_server() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_refresh_counts_handles_empty_result_set() -> None:
     query = AsyncMock(side_effect=[_fake_result([]), _fake_result([])])
     backend = FalkorDBGraphBackend(client=_fake_client(query))
@@ -212,7 +198,6 @@ async def test_refresh_counts_handles_empty_result_set() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_close_calls_client_aclose() -> None:
     client = _fake_client(AsyncMock())
     backend = FalkorDBGraphBackend(client=client)
@@ -221,7 +206,6 @@ async def test_close_calls_client_aclose() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_connect_class_method_builds_client_from_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -278,7 +262,6 @@ def test_load_falkordb_returns_real_class_when_installed(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 @pytest.mark.parametrize("bad", ["bad`type", "has'quote", "has\\backslash"])
 async def test_add_edge_rejects_unsafe_chars_in_rel_type(bad: str) -> None:
     """Cypher-injection guard: backtick / single quote / backslash rejected."""
@@ -290,7 +273,6 @@ async def test_add_edge_rejects_unsafe_chars_in_rel_type(bad: str) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_load_rejects_unsafe_chars_in_rel_type() -> None:
     """Same guard applies to bulk-load rows."""
     query = AsyncMock(return_value=_fake_result())
@@ -300,7 +282,6 @@ async def test_load_rejects_unsafe_chars_in_rel_type() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 @pytest.mark.parametrize("bad", ["ba`d", "ba'd", "ba\\d"])
 async def test_get_neighbors_rejects_unsafe_chars_in_rel_types(bad: str) -> None:
     query = AsyncMock(return_value=_fake_result())
@@ -310,7 +291,6 @@ async def test_get_neighbors_rejects_unsafe_chars_in_rel_types(bad: str) -> None
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_shortest_path_returns_empty_when_first_row_empty() -> None:
     """The path column is None / empty — fall back to ``[]``."""
     query = AsyncMock(return_value=_fake_result([[None]]))
@@ -319,7 +299,6 @@ async def test_shortest_path_returns_empty_when_first_row_empty() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_shortest_path_returns_empty_when_first_row_is_falsy_list() -> None:
     """Falsy outer row (``[]``) → empty path."""
     query = AsyncMock(return_value=_fake_result([[]]))
@@ -328,7 +307,6 @@ async def test_shortest_path_returns_empty_when_first_row_is_falsy_list() -> Non
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_get_subgraph_returns_empty_when_seed_unknown() -> None:
     """Seed not in the graph → first query has no rows → both lists empty."""
     query = AsyncMock(return_value=_fake_result([]))

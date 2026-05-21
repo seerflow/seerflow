@@ -52,14 +52,12 @@ def _alert(
     )
 
 
-@pytest.mark.asyncio
 async def test_empty_store_returns_empty_tuple(sqlite_storage: SqliteBackend) -> None:
     """AC2: no alerts → empty result."""
     result = await sqlite_storage.aggregate_tp_feedback(min_tp=3)
     assert result == ()
 
 
-@pytest.mark.asyncio
 async def test_three_tps_same_pattern_returns_one_row(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -84,7 +82,6 @@ async def test_three_tps_same_pattern_returns_one_row(
     assert row.contributing_alert_ids == ("a-2", "a-1", "a-0")
 
 
-@pytest.mark.asyncio
 async def test_below_threshold_filtered_out(sqlite_storage: SqliteBackend) -> None:
     """AC2: patterns with ``tp_count < min_tp`` are filtered."""
     alert = _alert(alert_id="solo")
@@ -100,7 +97,6 @@ async def test_below_threshold_filtered_out(sqlite_storage: SqliteBackend) -> No
     assert result == ()
 
 
-@pytest.mark.asyncio
 async def test_latest_verdict_per_alert_dedups(sqlite_storage: SqliteBackend) -> None:
     """AC2: TP→FP→TP sequence on the same alert counts as one TP."""
     alert = _alert(alert_id="flip")
@@ -132,7 +128,6 @@ async def test_latest_verdict_per_alert_dedups(sqlite_storage: SqliteBackend) ->
     assert row.tp_count == 3
 
 
-@pytest.mark.asyncio
 async def test_latest_verdict_fp_excludes_alert(sqlite_storage: SqliteBackend) -> None:
     """AC2: TP→FP sequence excludes the alert (latest verdict is FP)."""
     alert = _alert(alert_id="became-fp")
@@ -150,7 +145,6 @@ async def test_latest_verdict_fp_excludes_alert(sqlite_storage: SqliteBackend) -
     assert result == ()
 
 
-@pytest.mark.asyncio
 async def test_multiple_patterns_ordered_tp_count_desc(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -185,7 +179,6 @@ async def test_multiple_patterns_ordered_tp_count_desc(
     assert [r.tp_count for r in result] == [5, 3]
 
 
-@pytest.mark.asyncio
 async def test_window_ns_clipping(sqlite_storage: SqliteBackend) -> None:
     """AC2: ``window_ns`` filters out feedback older than the window.
 
@@ -224,7 +217,6 @@ async def test_window_ns_clipping(sqlite_storage: SqliteBackend) -> None:
     assert result[0].tp_count == 2
 
 
-@pytest.mark.asyncio
 async def test_contributing_alert_ids_capped_at_16(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -247,7 +239,6 @@ async def test_contributing_alert_ids_capped_at_16(
     assert result[0].contributing_alert_ids[-1] == "a-04"
 
 
-@pytest.mark.asyncio
 async def test_limit_truncates_returned_rows(sqlite_storage: SqliteBackend) -> None:
     """AC2: ``limit`` parameter truncates the returned rows."""
     for i in range(3):
@@ -274,7 +265,6 @@ async def test_limit_truncates_returned_rows(sqlite_storage: SqliteBackend) -> N
     assert len(result) == 1
 
 
-@pytest.mark.asyncio
 async def test_missing_alert_row_excluded(sqlite_storage: SqliteBackend) -> None:
     """AC2: feedback rows referencing a deleted alert are silently dropped.
 

@@ -124,6 +124,43 @@ async def test_store_flush_and_restore_round_trip(tmp_path: Path) -> None:
         await backend.close()
 
 
+async def test_flush_restore_preserves_baseline_fields(tmp_path: Path) -> None:
+    """S-314 AC3 storage parity: a fully-populated EntityBaseline survives a
+    flush/restore round-trip field-for-field (no baseline reset)."""
+    from seerflow.ueba.baseline import EntityBaseline
+
+    populated = EntityBaseline(
+        entity_uuid="u-parity",
+        entity_type="user",
+        first_seen_ns=1_000,
+        last_seen_ns=9_000,
+        event_count=123,
+        warmup_complete=True,
+        hours=tuple(range(24)),
+        source_ips=(("10.0.0.1", 5_000), ("10.0.0.2", 6_000)),
+        volume_ema_min=3.5,
+        volume_ema_hour=42.0,
+        volume_last_ns=8_500,
+        templates=(("t1", 0.9), ("t2", 0.4)),
+    )
+
+    cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "p.db"))
+    backend = await SqliteBackend.connect(cfg)
+    try:
+        a = BaselineStore(params=_params(), max_entities=4)
+        a._baselines["u-parity"] = populated
+        await a.flush(backend)
+
+        b = BaselineStore(params=_params(), max_entities=4)
+        assert await b.restore(backend) == 1
+        restored = b.get("u-parity")
+    finally:
+        await backend.close()
+
+    # msgspec.Struct equality is field-for-field; lossless round-trip.
+    assert restored == populated
+
+
 async def test_restore_missing_key_is_noop(tmp_path: Path) -> None:
     cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "t.db"))
     backend = await SqliteBackend.connect(cfg)

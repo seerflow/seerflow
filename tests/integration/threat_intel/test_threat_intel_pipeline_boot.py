@@ -32,20 +32,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.fixture(autouse=True)
-def _bypass_dns_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S-227: ``aioresponses`` mocks at the aiohttp request layer; the new
-    startup DNS guard runs at socket level and is not intercepted. Tests
-    use the ``*.example`` reserved domain — substitute a sentinel public
-    IP so the static-resolver map builds without hitting the real DNS root.
-    """
-    monkeypatch.setattr(
-        "seerflow.threat_intel.dns._resolve_feed_with_private_ip_guard",
-        lambda _feed_id, _hostname: "1.1.1.1",
-    )
-
-
-@pytest.mark.asyncio
 async def test_disabled_threat_intel_does_not_construct_session(tmp_path: Path) -> None:
     cfg = SeerflowConfig(
         storage=StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "s.db")),
@@ -62,7 +48,6 @@ async def test_disabled_threat_intel_does_not_construct_session(tmp_path: Path) 
         await storage.close()
 
 
-@pytest.mark.asyncio
 async def test_two_feeds_persist_snapshots(tmp_path: Path) -> None:
     feeds = (
         TAXIIFeedConfig(
@@ -129,7 +114,6 @@ async def test_two_feeds_persist_snapshots(tmp_path: Path) -> None:
         await storage.close()
 
 
-@pytest.mark.asyncio
 async def test_load_config_yaml_wires_threat_intel_block(tmp_path) -> None:
     """Regression for the production path: ``load_config()`` must call the
     threat_intel builder and validator, otherwise an opt-in YAML block is
@@ -163,7 +147,6 @@ threat_intel:
     assert feed.poll_interval_s == 600
 
 
-@pytest.mark.asyncio
 async def test_load_config_yaml_runs_validator_for_insecure_url(tmp_path) -> None:
     """Validator must reject ``http://`` URLs without an explicit opt-in,
     proving ``validate_seerflow_config`` is wired into ``load_config``.

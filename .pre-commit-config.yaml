@@ -32,6 +32,17 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: no-redundant-asyncio-marker
+        name: no redundant @pytest.mark.asyncio (asyncio_mode=auto)
+        entry: >-
+          bash -c 'hits=$(grep -rnE "^[[:space:]]*@pytest\.mark\.asyncio(\(\))?[[:space:]]*$"
+          tests/ --include="*.py" | grep -v "tests/unit/test_asyncio_marker_convention.py" || true);
+          if [ -n "$hits" ]; then echo "Redundant @pytest.mark.asyncio found
+          (asyncio_mode=\"auto\" collects async tests automatically — remove it):";
+          echo "$hits"; exit 1; fi'
+        language: system
+        pass_filenames: false
+
       - id: pytest
         name: pytest (95% coverage)
         entry: uv run pytest --cov=src/seerflow --cov-fail-under=95 -q --no-header -m "not slow and not docker and not e2e and not requires_falkordb and not requires_postgres_age"

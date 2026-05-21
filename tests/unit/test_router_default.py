@@ -16,7 +16,6 @@ from tests.unit.alert_factory import make_alert
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_default_drop_when_no_rule_matches() -> None:
     slack = FakeDeliveryTarget(name="slack")
     rules = (RoutingRule(match=RoutingRuleMatch(alert_type="correlation"), notify=()),)
@@ -30,7 +29,6 @@ async def test_default_drop_when_no_rule_matches() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_default_notify_when_no_rule_matches() -> None:
     slack = FakeDeliveryTarget(name="slack")
     rules = (RoutingRule(match=RoutingRuleMatch(alert_type="correlation"), notify=()),)
@@ -49,7 +47,6 @@ async def test_default_notify_when_no_rule_matches() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_default_absent_with_no_rules_is_drop() -> None:
     slack = FakeDeliveryTarget(name="slack")
     router = NotificationRouter(targets=(slack,), rules=())

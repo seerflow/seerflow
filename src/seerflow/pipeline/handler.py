@@ -14,8 +14,11 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
     from seerflow.alerting.dispatcher import AlertDispatcher
+    from seerflow.alerting.sinks.console import ConsoleSink
+    from seerflow.alerting.sinks.file import FileSink
     from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.alerting.sinks.pagerduty import PagerDutySink
+    from seerflow.api.latency import StageLatencyTracker
     from seerflow.api.ws import ConnectionManager
     from seerflow.config import AlertingConfig
     from seerflow.correlation.engine import CorrelationEngine
@@ -79,6 +82,8 @@ def make_handler(
     alert_dispatcher: AlertDispatcher | None = None,
     pagerduty_sink: PagerDutySink | None = None,
     otlp_sink: OtlpSink | None = None,
+    file_sink: FileSink | None = None,
+    console_sink: ConsoleSink | None = None,
     attack_mapper: AttackMapper | None = None,
     graph_structural: GraphStructuralEvaluator | None = None,
     kill_chain_tracker: KillChainTracker | None = None,
@@ -88,6 +93,7 @@ def make_handler(
     ueba_alert_cooldown_ns: int = 900_000_000_000,
     ioc_matcher: IoCMatcher | None = None,
     ioc_enrichment_counters: _IoCEnrichmentCounters | None = None,
+    latency_tracker: StageLatencyTracker | None = None,
 ) -> Callable[[RawEvent], Awaitable[None]]:
     """Create an event handler that runs detection and persists events."""
     from seerflow.config import AlertingConfig as _AlertingConfig
@@ -135,6 +141,10 @@ def make_handler(
                         pagerduty_sink.enqueue_trigger(kc)
                     if otlp_sink is not None:
                         otlp_sink.enqueue(kc)
+                    if file_sink is not None:
+                        file_sink.enqueue(kc)
+                    if console_sink is not None:
+                        console_sink.enqueue(kc)
                     if ws_manager is not None:
                         ws_manager.broadcast_alert(kc)
             except Exception:
@@ -142,7 +152,16 @@ def make_handler(
 
     async def handler(event: RawEvent) -> None:
         nonlocal event_count, anomaly_count, last_save_ns
+        # S-080: per-stage latency tracking. ``perf_counter_ns`` is cheap
+        # (single VDSO call on Linux); the conditional ``latency_tracker``
+        # check keeps the no-tracker path zero-cost.
+        _parse_t0 = time.perf_counter_ns() if latency_tracker is not None else 0
         seerflow_event = normalizer.normalize(event)
+        if latency_tracker is not None:
+            latency_tracker.record(
+                "parse",
+                (time.perf_counter_ns() - _parse_t0) / 1_000_000.0,
+            )
 
         # Resolve entities to deterministic UUID5 strings.
         # Resolve each type separately to build both entity_refs (flat tuple
@@ -242,6 +261,10 @@ def make_handler(
                             pagerduty_sink.enqueue_trigger(ueba_alert)
                         if otlp_sink is not None:
                             otlp_sink.enqueue(ueba_alert)
+                        if file_sink is not None:
+                            file_sink.enqueue(ueba_alert)
+                        if console_sink is not None:
+                            console_sink.enqueue(ueba_alert)
                         if ws_manager is not None:
                             ws_manager.broadcast_alert(ueba_alert)
                     await _feed_kill_chain(ueba_alert)
@@ -282,6 +305,10 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(ioc_alert)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(ioc_alert)
+                            if file_sink is not None:
+                                file_sink.enqueue(ioc_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(ioc_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(ioc_alert)
                             await _feed_kill_chain(ioc_alert)
@@ -353,6 +380,10 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(corr_alert)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(corr_alert)
+                            if file_sink is not None:
+                                file_sink.enqueue(corr_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(corr_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(corr_alert)
                         await _feed_kill_chain(corr_alert)
@@ -420,6 +451,10 @@ def make_handler(
                                     pagerduty_sink.enqueue_trigger(cc_alert)
                                 if otlp_sink is not None:
                                     otlp_sink.enqueue(cc_alert)
+                                if file_sink is not None:
+                                    file_sink.enqueue(cc_alert)
+                                if console_sink is not None:
+                                    console_sink.enqueue(cc_alert)
                                 if ws_manager is not None:
                                     ws_manager.broadcast_alert(cc_alert)
                             await _feed_kill_chain(cc_alert)
@@ -457,9 +492,21 @@ def make_handler(
                 )
 
         # Persist to storage (WriteBuffer handles batching + 100ms timer flush)
+        _storage_t0 = time.perf_counter_ns() if latency_tracker is not None else 0
         await storage.write_events([seerflow_event])
+        if latency_tracker is not None:
+            latency_tracker.record(
+                "storage",
+                (time.perf_counter_ns() - _storage_t0) / 1_000_000.0,
+            )
 
+        _detect_t0 = time.perf_counter_ns() if latency_tracker is not None else 0
         result = ensemble.process_event(seerflow_event)
+        if latency_tracker is not None:
+            latency_tracker.record(
+                "detect",
+                (time.perf_counter_ns() - _detect_t0) / 1_000_000.0,
+            )
         event_count += 1
 
         if ws_manager is not None:
@@ -555,6 +602,10 @@ def make_handler(
                             pagerduty_sink.enqueue_trigger(alert)
                         if otlp_sink is not None:
                             otlp_sink.enqueue(alert)
+                        if file_sink is not None:
+                            file_sink.enqueue(alert)
+                        if console_sink is not None:
+                            console_sink.enqueue(alert)
                         if ws_manager is not None:
                             ws_manager.broadcast_alert(alert)
                     await _feed_kill_chain(alert)
@@ -594,6 +645,10 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(sigma_alert)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(sigma_alert)
+                            if file_sink is not None:
+                                file_sink.enqueue(sigma_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(sigma_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(sigma_alert)
                         await _feed_kill_chain(sigma_alert)
@@ -659,6 +714,10 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(risk_alert)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(risk_alert)
+                            if file_sink is not None:
+                                file_sink.enqueue(risk_alert)
+                            if console_sink is not None:
+                                console_sink.enqueue(risk_alert)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(risk_alert)
                     except Exception:
@@ -711,6 +770,10 @@ def make_handler(
                                 pagerduty_sink.enqueue_trigger(pa)
                             if otlp_sink is not None:
                                 otlp_sink.enqueue(pa)
+                            if file_sink is not None:
+                                file_sink.enqueue(pa)
+                            if console_sink is not None:
+                                console_sink.enqueue(pa)
                             if ws_manager is not None:
                                 ws_manager.broadcast_alert(pa)
                         await _feed_kill_chain(pa)
@@ -721,4 +784,8 @@ def make_handler(
                         )
 
     handler.get_stats = lambda: (event_count, anomaly_count, template_meta, start_time)  # type: ignore[attr-defined]
+    # S-081: expose the EventNormalizer so the shutdown drain layer in
+    # ``pipeline.run`` can call ``save_drain_state(handler.get_normalizer().parser, ...)``
+    # without reaching into the closure.
+    handler.get_normalizer = lambda: normalizer  # type: ignore[attr-defined]
     return handler

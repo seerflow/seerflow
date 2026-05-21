@@ -12,11 +12,13 @@ if TYPE_CHECKING:
 
 from seerflow.lanl.parser import (
     AuthRecord,
+    DnsRecord,
     FlowRecord,
     ProcRecord,
     RedTeamRecord,
     iter_records,
     parse_auth_line,
+    parse_dns_line,
     parse_flow_line,
     parse_proc_line,
     parse_redteam_line,
@@ -135,6 +137,38 @@ class TestParseRedteamLine:
             record.time = 0  # type: ignore[misc]
 
 
+class TestParseDnsLine:
+    """S-315 / FR-081: LANL ``dns.txt`` 3-field schema parser."""
+
+    def test_parse_dns(self) -> None:
+        record = parse_dns_line("2,C4653,C5030")
+        assert isinstance(record, DnsRecord)
+        assert record.time == 2
+        assert record.src_computer == "C4653"
+        assert record.resolved_computer == "C5030"
+
+    def test_parse_dns_missing_resolved_marker(self) -> None:
+        record = parse_dns_line("9,C17693,?")
+        assert record.resolved_computer == "?"
+
+    def test_parse_dns_strips_whitespace(self) -> None:
+        record = parse_dns_line("  3,C1,C2  \n")
+        assert record == DnsRecord(time=3, src_computer="C1", resolved_computer="C2")
+
+    def test_dns_record_is_frozen(self) -> None:
+        record = parse_dns_line("2,C4653,C5030")
+        with pytest.raises((AttributeError, TypeError)):
+            record.time = 0  # type: ignore[misc]
+
+    def test_parse_dns_line_wrong_field_count(self) -> None:
+        with pytest.raises(ValueError, match="3 fields"):
+            parse_dns_line("2,C4653")
+
+    def test_parse_dns_line_too_many_fields(self) -> None:
+        with pytest.raises(ValueError, match="3 fields"):
+            parse_dns_line("2,C4653,C5030,extra")
+
+
 class TestIterRecords:
     def test_iter_records_from_file(self, tmp_path: Path) -> None:
         csv_file = tmp_path / "auth.csv"
@@ -168,6 +202,14 @@ class TestIterRecords:
         records = list(iter_records(csv_file, "redteam"))
         assert len(records) == 1
         assert isinstance(records[0], RedTeamRecord)
+
+    def test_iter_records_dns(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "dns.csv"
+        csv_file.write_text("2,C4653,C5030\n3,C17693,?\n")
+        records = list(iter_records(csv_file, "dns"))
+        assert len(records) == 2
+        assert all(isinstance(r, DnsRecord) for r in records)
+        assert records[1].resolved_computer == "?"
 
     def test_iter_records_gz(self, tmp_path: Path) -> None:
         gz_file = tmp_path / "auth.csv.gz"

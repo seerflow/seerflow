@@ -191,6 +191,32 @@ class TestConfigLoading:
         config = load_config(None, search_dir=tmp_path)
         assert config.log_level == "DEBUG"
 
+    def test_shutdown_timeout_default_is_30s(self, tmp_path: Path) -> None:
+        """S-081: shutdown_timeout_s defaults to 30.0 s per NFR-008."""
+        config = load_config(None, search_dir=tmp_path)
+        assert config.shutdown_timeout_s == 30.0
+
+    def test_shutdown_timeout_override_via_yaml(self, tmp_path: Path) -> None:
+        """S-081: operators can shrink the bound for fast-restart deployments."""
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("shutdown_timeout_s: 5.0\n")
+        config = load_config(str(yaml_file))
+        assert config.shutdown_timeout_s == 5.0
+
+    def test_shutdown_timeout_rejects_non_numeric(self, tmp_path: Path) -> None:
+        """S-081: bad config surfaces at boot, not mid-shutdown."""
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("shutdown_timeout_s: forever\n")
+        with pytest.raises(ConfigError, match="shutdown_timeout_s must be a number"):
+            load_config(str(yaml_file))
+
+    def test_shutdown_timeout_rejects_non_positive(self, tmp_path: Path) -> None:
+        """S-081: a 0 s timeout would force exit before drain ever ran."""
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("shutdown_timeout_s: 0\n")
+        with pytest.raises(ConfigError, match="shutdown_timeout_s must be > 0"):
+            load_config(str(yaml_file))
+
 
 class TestConfigValidation:
     def test_nonexistent_explicit_path_raises(self, tmp_path: Path) -> None:

@@ -11,7 +11,50 @@ A streaming, entity-centric log intelligence agent that detects operational fail
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-green)](LICENSE)
 
+## Installation
+
+### From PyPI (recommended — fastest path)
+
+```bash
+pip install seerflow
+# or, with uv:
+uv pip install seerflow
+```
+
+The wheel bundles the pre-built React dashboard, the 63 curated Sigma rules,
+and every runtime dependency. No build step, no Node toolchain required.
+
+### From source
+
+```bash
+git clone https://github.com/seerflow/seerflow.git
+cd seerflow
+uv sync
+```
+
+Use the source install for development or to run the latest unreleased
+changes. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev setup.
+
 ## Quick Start
+
+### Zero to first alert in under 5 minutes
+
+These steps take **well under 5 minutes** on a fresh machine — no Docker, no
+database, no config file, no tuning required (Seerflow runs zero-config with
+sensible defaults — NFR-006):
+
+1. **Install** (~30s): `pip install seerflow`
+2. **Start the pipeline** (~10s): `seerflow start` — boots receivers,
+   detection engines, and the dashboard with built-in defaults (SQLite,
+   syslog + OTLP + webhooks). No config file needed for the first run.
+3. **Send a log line that trips an anomaly or Sigma rule** (~1m, see the
+   syslog example below) and watch the `WARNING ANOMALY ...` /
+   `WARNING SIGMA ...` line print to the console and the alert appear in the
+   dashboard at `http://127.0.0.1:8080/`.
+
+Total: well inside 5 minutes — install dominates, detection is instant once
+events flow. Drop in a `seerflow.yaml` (copy `seerflow.example.yaml`) only
+when you want to change ports, backends, or detector tuning.
 
 ```bash
 # Install from source
@@ -174,17 +217,70 @@ Key config sections:
 | File tailing | -- | Glob + watchfiles | Done |
 | Webhooks | 8081 | JSON/form + auth | Done |
 
-## Detection Pipeline
+## Validation
 
+Seerflow is validated by running the **full detection stack** (Drain3 ->
+ML ensemble -> Sigma -> UEBA -> IoC -> correlation -- the exact
+`seerflow start` wiring via `assemble_handler`, S-305/FR-073) against a
+**synthetic LANL subset** (~200 events modelled on the LANL Unified Host
+and Network Dataset, committed at `tests/fixtures/lanl/`). This exercises
+the real product, not a correlation-only shortcut. The numbers below are
+honestly scoped to this small synthetic subset -- online/cold-start
+detectors (ML/UEBA) warm up but rarely fire on so few events, which the
+per-family breakdown in the generated report makes explicit.
+
+| Metric | Value |
+|--------|-------|
+| Precision | 16.67% |
+| Recall | 33.33% |
+| F1 score | 22.22% |
+| False-positive rate | 83.33% |
+| AUC | 0.0000 |
+| Events processed | 137 |
+
+Attack-level metrics (FR-079 / S-311) -- per red-team scenario
+mean-time-to-detect, precision-recall + ROC curves, AUC over a risk-score
+threshold sweep, and the silent detector family for every missed red-team
+event -- are emitted by the full report (`python -m seerflow.lanl.report`)
+and by `seerflow validate <dir> --json`. On this small synthetic subset
+only the C2-beaconing scenario is detected; the brute-force and
+credential-stuffing scenarios are missed by the (cold-start) stack and
+attributed to the `correlation` family in the JSON output.
+
+> Numbers are derived from the full-stack harness, not hand-maintained --
+> a drift test (`tests/integration/test_lanl_report_drift.py`) fails if
+> this table diverges from `run_validation()`. Scope: synthetic LANL
+> subset, full detection stack (not "end-to-end on the full LANL dataset").
+
+Reproduce locally:
+
+```bash
+uv run pytest tests/integration/test_lanl_validation.py -v
+uv run python -m seerflow.lanl.report
 ```
-Log Sources → Receivers → Drain3 → UUID5 Entities → ML Ensemble → Sigma Rules
-                                        ↓                ↓              ↓
-                                  Entity Graph      blended score   ATT&CK tags
-                                  Window Buffer     [0.0 - 1.0]    tactic/technique
-                                  Risk Register         ↓              ↓
-                                        ↓          Risk Accumulation → Alert
-                                  PageRank, Louvain
-                                  Fan-out, Betweenness
+
+To run against the full downloaded LANL dataset, see the
+**Run on the full LANL dataset** section emitted by
+`python -m seerflow.lanl.report`.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    SRC["Log Sources<br/>(syslog · OTLP · files · webhooks)"] --> RCV[Receivers]
+    RCV --> DRAIN["Drain3<br/>template extraction"]
+    DRAIN --> ENT["UUID5 Entity<br/>Resolution"]
+    ENT --> ML["ML Ensemble<br/>HST · Holt-Winters · CUSUM · Markov"]
+    ENT --> SIGMA["Sigma Engine<br/>63 rules"]
+    ENT --> GRAPH["Entity Graph<br/>igraph · PageRank · Louvain"]
+
+    ML -->|blended score 0.0–1.0| RISK["Risk Accumulation<br/>per-entity decay register"]
+    SIGMA -->|MITRE tactic/technique| RISK
+    GRAPH -->|centrality / fan-out| RISK
+    ML --> ALERT([Alert])
+    SIGMA --> ALERT
+    RISK -->|threshold exceeded| ALERT
+    ALERT --> STORE[("SQLite / PostgreSQL")]
 ```
 
 - **Drain3**: Streaming log template extraction (120K msgs/sec)
@@ -271,10 +367,22 @@ tests/
 
 ### Benchmarks
 
+Benchmarks are produced by a committed, runnable harness — not hand-typed.
+Reproduce the full-pipeline benchmark on your own hardware:
+
+```bash
+python -m seerflow.launch.benchmark --count 20000 --markdown
+```
+
+Component micro-benchmarks (pytest-benchmark, CI history tracking):
+
 ```bash
 uv run pytest tests/benchmarks/ --benchmark-autosave
 uv run pytest tests/benchmarks/ --benchmark-compare
 ```
+
+Representative measured figures (commodity hardware, synthetic syslog
+workload — your numbers will differ; reproduce with the command above):
 
 | Component | Throughput |
 |-----------|-----------|
@@ -282,7 +390,35 @@ uv run pytest tests/benchmarks/ --benchmark-compare
 | Drain3 templates | ~120K msgs/sec |
 | Entity extraction | ~41K msgs/sec |
 | Full normalizer | ~39.5K msgs/sec |
-| **Full pipeline** (parse + ML + Sigma + storage) | **~1,800 events/sec** |
+| **Full pipeline** (parse + ML + Sigma + storage) | measured by `python -m seerflow.launch.benchmark` |
+
+Detection quality (precision / recall / F1 / FP-rate) is validated
+separately — see [Validation](#validation).
+
+## How Seerflow Compares
+
+Seerflow is not a SIEM replacement — it is a lightweight, streaming anomaly +
+detection layer you can run in minutes. Comparison is category-level
+(deployment posture and approach), not a feature-for-feature scorecard:
+
+| Dimension | Seerflow | Wazuh | OpenSearch | Splunk |
+|-----------|----------|-------|------------|--------|
+| Primary model | Streaming entity-centric anomaly + rule detection | Host-agent XDR / SIEM | Search + analytics engine (security analytics plugin) | Log analytics + SIEM platform |
+| Deployment | Single `pip install`, zero-config, SQLite default | Manager + agents + indexer (Elastic stack) | Cluster (data/manager nodes) + Dashboards | Indexers + search heads (self-host or cloud) |
+| Detection approach | Online ML ensemble (HST/Holt-Winters/CUSUM/Markov) + 3,000+ Sigma rules | Signature/rule + FIM + rootcheck | Query + correlation / anomaly-detection plugin (batch ML) | SPL queries + correlation searches + premium ES app |
+| Streaming / online learning | Yes — constant-memory online detectors, no batch retrain | Limited (rule-based) | Batch / scheduled detectors | Batch search; ML via paid add-on |
+| Sigma rule support | Native (pySigma, logsource-indexed dispatch) | Partial / via integrations | Via third-party conversion | Via third-party conversion |
+| Footprint | Megabytes; one process | Multi-component cluster | JVM cluster | Heavy; indexer cluster |
+| Cost posture | Open source (AGPL-3.0), no per-GB pricing | Open source | Open source (Apache-2.0) | Commercial, ingest-volume priced |
+
+Numbers and tiers for Wazuh, OpenSearch and Splunk reflect their general
+product categories at the time of writing and are deliberately not
+version-pinned; consult their docs for specifics.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, quality gates, branching model, and pull-request process.
 
 ## License
 

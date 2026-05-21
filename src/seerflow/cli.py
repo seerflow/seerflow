@@ -303,24 +303,179 @@ def _status_timeout_arg(value: str) -> float:
     return parsed
 
 
+def _add_analyze_subparser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow analyze`` — one-shot full-stack batch (S-303, FR-070)."""
+    ap = subparsers.add_parser(
+        "analyze",
+        help="Run a log file/glob/stdin through the full detection stack",
+    )
+    ap.add_argument(
+        "paths",
+        nargs="+",
+        help="Log file paths or glob patterns; use '-' to read from stdin",
+    )
+    ap.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Write NDJSON alerts to this file (default: stdout)",
+    )
+    persist = ap.add_mutually_exclusive_group()
+    persist.add_argument(
+        "--persist",
+        dest="persist",
+        action="store_true",
+        default=False,
+        help="Persist events/alerts to the configured storage backend",
+    )
+    persist.add_argument(
+        "--no-persist",
+        dest="persist",
+        action="store_false",
+        help="Use an in-memory database; nothing is written to disk (default)",
+    )
+    ap.add_argument(
+        "--db",
+        type=str,
+        default=None,
+        help="SQLite path used when --persist is set (default: from config)",
+    )
+
+
+_DEFAULT_BENCHMARK_COUNT = 20_000
+"""Default ``--count`` for ``seerflow benchmark`` (matches launch/benchmark)."""
+
+_SYNTHETIC_LANL_FIXTURES = "tests/fixtures/lanl"
+"""Default ``--dataset-dir`` for ``benchmark --scorecard`` (committed subset)."""
+
+
+def _add_validate_subparser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow validate <dataset-dir> [--json]`` (S-307, FR-075).
+
+    Surfaces the LANL accuracy harness. AUC over a score-threshold sweep
+    is FR-079 (S-309) and is reported as ``null`` here.
+    """
+    p = subparsers.add_parser(
+        "validate",
+        help="Run the LANL accuracy harness (precision/recall/F1/MTTD; AUC=FR-079)",
+    )
+    p.add_argument(
+        "dataset_dir",
+        help="Directory of auth.csv/proc.csv/flows.csv/redteam.csv to score",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit a single machine-readable JSON object instead of a table",
+    )
+
+
+def _add_benchmark_subparser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow benchmark`` (S-307, FR-075).
+
+    Without ``--scorecard`` it reports throughput/latency/peak-RSS. With
+    ``--scorecard`` it runs accuracy + performance and prints ONE
+    consolidated human table (``--json`` is ignored in that mode).
+    """
+    p = subparsers.add_parser(
+        "benchmark",
+        help=(
+            "Measure pipeline throughput/latency/peak-RSS; --scorecard "
+            "combines accuracy + performance"
+        ),
+    )
+    p.add_argument(
+        "--count",
+        type=_positive_int_arg,
+        default=_DEFAULT_BENCHMARK_COUNT,
+        help=(f"Synthetic events to drive (default: {_DEFAULT_BENCHMARK_COUNT}, must be > 0)"),
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Synthetic-event RNG seed (default: 42, deterministic)",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit a single JSON object instead of a table (ignored with --scorecard)",
+    )
+    p.add_argument(
+        "--scorecard",
+        action="store_true",
+        default=False,
+        help=(
+            "Run accuracy + performance and print ONE consolidated human "
+            "table (human-readable by contract; --json is ignored)"
+        ),
+    )
+    p.add_argument(
+        "--dataset-dir",
+        dest="dataset_dir",
+        type=str,
+        default=_SYNTHETIC_LANL_FIXTURES,
+        help=(f"Accuracy dataset for --scorecard (default: {_SYNTHETIC_LANL_FIXTURES})"),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
         prog="seerflow",
-        description="Streaming log intelligence agent",
+        description=(
+            "Seerflow - streaming, entity-centric log intelligence. Detects "
+            "operational failures and security threats across log sources "
+            "using online ML and Sigma rules."
+        ),
+        epilog=(
+            "Quickstart: seerflow start (zero-config: SQLite + bundled Sigma "
+            "rules)  |  Docs: README.md and docs/operator-guide.md"
+        ),
     )
     parser.add_argument("--version", action="version", version=f"seerflow {__version__}")
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help="Path to seerflow.yaml config file",
+        help=(
+            "Optional path to a seerflow.yaml config file. Omit to run with "
+            "built-in defaults (zero-config: SQLite storage, bundled Sigma "
+            "rules)."
+        ),
     )
 
     subparsers = parser.add_subparsers(dest="command")
     subparsers.required = True
 
-    subparsers.add_parser("start", help="Start the Seerflow pipeline")
+    start_parser = subparsers.add_parser("start", help="Start the Seerflow pipeline")
+    start_parser.add_argument(
+        "--tui",
+        action="store_true",
+        default=False,
+        help="Launch the Textual headless terminal dashboard alongside the pipeline",
+    )
+    start_parser.add_argument(
+        "--alerts-to",
+        type=str,
+        default=None,
+        metavar="PATH|stdout|stderr",
+        help=(
+            "Where to deliver alerts. 'stdout' or 'stderr' enables the console "
+            "sink on that stream (S-312); any other value is treated as a file "
+            "path and enables the rotating-NDJSON file sink (S-313). Overrides "
+            "the matching alerting.* config; an invalid file path fails fast "
+            "at startup."
+        ),
+    )
+    start_parser.add_argument(
+        "--alerts-format",
+        choices=("human", "json"),
+        default=None,
+        help="Console alert format: human (default) or json (NDJSON)",
+    )
 
     status_parser = subparsers.add_parser(
         "status",
@@ -407,6 +562,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     _add_graph_subparsers(subparsers)
+
+    _add_analyze_subparser(subparsers)
+
+    _add_validate_subparser(subparsers)
+    _add_benchmark_subparser(subparsers)
 
     return parser
 

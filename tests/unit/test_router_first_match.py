@@ -15,7 +15,6 @@ from tests.unit.alert_factory import make_alert
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_first_matching_rule_wins() -> None:
     slack = FakeDeliveryTarget(name="slack")
     email = FakeDeliveryTarget(name="email")
@@ -38,7 +37,6 @@ async def test_first_matching_rule_wins() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_empty_notify_is_explicit_drop() -> None:
     slack = FakeDeliveryTarget(name="slack")
     email = FakeDeliveryTarget(name="email")
@@ -58,7 +56,6 @@ async def test_empty_notify_is_explicit_drop() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_per_target_min_severity_still_applies() -> None:
     slack = FakeDeliveryTarget(name="slack", min_severity=5)  # CRITICAL+
     rules = (

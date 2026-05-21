@@ -13,15 +13,28 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, Request
 
 if TYPE_CHECKING:
+    from seerflow.alerting.dispatcher import AlertDispatcher
+    from seerflow.alerting.sinks.otlp import OtlpSink
+    from seerflow.alerting.sinks.pagerduty import PagerDutySink
     from seerflow.api.anomaly_timeline import AnomalyTimelineRing
+    from seerflow.api.latency import StageLatencyTracker
     from seerflow.api.metrics import MetricsProvider
+    from seerflow.api.ws import ConnectionManager
+    from seerflow.correlation.kill_chain import KillChainTracker
+    from seerflow.correlation.risk import RiskRegister
+    from seerflow.correlation.window import EntityWindowBuffer
     from seerflow.detection.ensemble import DetectionEnsemble
+    from seerflow.llm.explanation.cache import ExplanationCache
     from seerflow.llm.explanation.service import AlertExplanationService
+    from seerflow.llm.hunt.cache import HuntCache
     from seerflow.llm.hunt.service import NaturalLanguageHuntService
+    from seerflow.llm.rule_suggestion.cache import RuleSuggestionCache
     from seerflow.llm.rule_suggestion.service import RuleSuggestionService
     from seerflow.models.alert import CorrelationRule
+    from seerflow.receivers.manager import ReceiverManager
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
+    from seerflow.ueba.store import BaselineStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +161,91 @@ def get_hunt_service(request: Request) -> NaturalLanguageHuntService | None:
     """
     service: NaturalLanguageHuntService | None = getattr(request.app.state, "hunt_service", None)
     return service
+
+
+def get_stage_latency_tracker(request: Request) -> StageLatencyTracker | None:
+    """FastAPI Depends provider — returns the rolling latency tracker or None.
+
+    Returns the ``StageLatencyTracker`` stashed at
+    ``app.state.stage_latency_tracker`` (S-080), or ``None`` when the
+    attribute is missing (test mode / API running without a pipeline).
+    The health route degrades to an empty ``latency_ms`` field when this
+    is ``None``.
+    """
+    tracker: StageLatencyTracker | None = getattr(request.app.state, "stage_latency_tracker", None)
+    return tracker
+
+
+def get_baseline_store(request: Request) -> BaselineStore | None:
+    """FastAPI Depends — return the UEBA baseline store or ``None`` (S-082)."""
+    store: BaselineStore | None = getattr(request.app.state, "baseline_store", None)
+    return store
+
+
+def get_window_buffer(request: Request) -> EntityWindowBuffer | None:
+    """FastAPI Depends — return the entity-temporal window buffer (S-082)."""
+    buf: EntityWindowBuffer | None = getattr(request.app.state, "window_buffer", None)
+    return buf
+
+
+def get_risk_register(request: Request) -> RiskRegister | None:
+    """FastAPI Depends — return the per-entity risk register (S-082)."""
+    reg: RiskRegister | None = getattr(request.app.state, "risk_register", None)
+    return reg
+
+
+def get_kill_chain_tracker(request: Request) -> KillChainTracker | None:
+    """FastAPI Depends — return the kill-chain tracker (S-082)."""
+    kc: KillChainTracker | None = getattr(request.app.state, "kill_chain_tracker", None)
+    return kc
+
+
+def get_receiver_manager(request: Request) -> ReceiverManager | None:
+    """FastAPI Depends — return the receiver intake manager (S-082)."""
+    mgr: ReceiverManager | None = getattr(request.app.state, "receiver_manager", None)
+    return mgr
+
+
+def get_alert_dispatcher(request: Request) -> AlertDispatcher | None:
+    """FastAPI Depends — return the alert dispatcher (S-082)."""
+    dispatcher: AlertDispatcher | None = getattr(request.app.state, "alert_dispatcher", None)
+    return dispatcher
+
+
+def get_otlp_sink(request: Request) -> OtlpSink | None:
+    """FastAPI Depends — return the OTLP alert sink (S-082)."""
+    sink: OtlpSink | None = getattr(request.app.state, "otlp_sink", None)
+    return sink
+
+
+def get_pagerduty_sink(request: Request) -> PagerDutySink | None:
+    """FastAPI Depends — return the PagerDuty alert sink (S-082)."""
+    sink: PagerDutySink | None = getattr(request.app.state, "pagerduty_sink", None)
+    return sink
+
+
+def get_connection_manager(request: Request) -> ConnectionManager | None:
+    """FastAPI Depends — return the WebSocket connection manager (S-082)."""
+    mgr: ConnectionManager | None = getattr(request.app.state, "ws_manager", None)
+    return mgr
+
+
+def get_explanation_cache(request: Request) -> ExplanationCache | None:
+    """FastAPI Depends — return the explanation LRU+TTL cache (S-082)."""
+    cache: ExplanationCache | None = getattr(request.app.state, "explanation_cache", None)
+    return cache
+
+
+def get_hunt_cache(request: Request) -> HuntCache | None:
+    """FastAPI Depends — return the natural-language hunt cache (S-082)."""
+    cache: HuntCache | None = getattr(request.app.state, "hunt_cache", None)
+    return cache
+
+
+def get_rule_suggestion_cache(request: Request) -> RuleSuggestionCache | None:
+    """FastAPI Depends — return the rule-suggestion cache (S-082)."""
+    cache: RuleSuggestionCache | None = getattr(request.app.state, "rule_suggestion_cache", None)
+    return cache
 
 
 def get_rule_suggestion_service(request: Request) -> RuleSuggestionService | None:

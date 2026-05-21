@@ -48,7 +48,6 @@ def _make_indicator(value: str = "1.2.3.4") -> Indicator:
     )
 
 
-@pytest.mark.asyncio
 async def test_poll_once_persists_snapshot_and_advances_cursor(
     feed_cfg: TAXIIFeedConfig, defaults: ThreatIntelConfig
 ) -> None:
@@ -96,7 +95,6 @@ async def test_poll_once_persists_snapshot_and_advances_cursor(
     assert decoded.feed_id == "otx"
 
 
-@pytest.mark.asyncio
 async def test_poll_once_truncates_at_cap(
     feed_cfg: TAXIIFeedConfig, defaults: ThreatIntelConfig
 ) -> None:
@@ -134,7 +132,6 @@ async def test_poll_once_truncates_at_cap(
     assert snap_metrics.indicators_truncated_total == 3
 
 
-@pytest.mark.asyncio
 async def test_run_forever_stops_on_event(
     feed_cfg: TAXIIFeedConfig, defaults: ThreatIntelConfig
 ) -> None:

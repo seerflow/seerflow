@@ -38,6 +38,8 @@ class RuleSuggestionCache:
         self._ttl_seconds = int(ttl_seconds)
         self._store: OrderedDict[str, tuple[RuleSuggestionResult, float]] = OrderedDict()
         self._lock = asyncio.Lock()
+        # S-082: cumulative LRU+TTL evictions since process start.
+        self._eviction_count = 0
 
     def __len__(self) -> int:
         return len(self._store)
@@ -53,6 +55,7 @@ class RuleSuggestionCache:
             if now - inserted_at > self._ttl_seconds:
                 # Expired — prune and report miss.
                 del self._store[pattern_key]
+                self._eviction_count += 1
                 return None
             # LRU bump.
             self._store.move_to_end(pattern_key)
@@ -73,6 +76,7 @@ class RuleSuggestionCache:
             self._store[pattern_key] = (result, now)
             while len(self._store) > self._max_entries:
                 self._store.popitem(last=False)  # evict LRU
+                self._eviction_count += 1
 
     async def delete(self, pattern_key: str) -> None:
         """Remove a single entry. Idempotent; never raises.
@@ -88,3 +92,11 @@ class RuleSuggestionCache:
         """Remove all entries."""
         async with self._lock:
             self._store.clear()
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": len(self._store),
+            "max": self._max_entries,
+            "evictions": self._eviction_count,
+        }

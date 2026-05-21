@@ -14,21 +14,18 @@ from seerflow.graph.factory import connect_graph
 
 
 class TestConnectGraphDefault:
-    @pytest.mark.asyncio
     async def test_returns_in_memory_backend_for_igraph(self) -> None:
         cfg = StorageConfig(backend="sqlite", graph_backend="igraph")
         backend = await connect_graph(cfg)
         assert isinstance(backend, InMemoryIgraphBackend)
         assert isinstance(backend, GraphBackend)
 
-    @pytest.mark.asyncio
     async def test_in_memory_backend_starts_empty(self) -> None:
         cfg = StorageConfig(backend="sqlite", graph_backend="igraph")
         backend = await connect_graph(cfg)
         assert backend.vertex_count == 0
         assert backend.edge_count == 0
 
-    @pytest.mark.asyncio
     async def test_each_call_returns_fresh_backend(self) -> None:
         cfg = StorageConfig(backend="sqlite", graph_backend="igraph")
         first = await connect_graph(cfg)
@@ -58,7 +55,6 @@ def _fake_falkor_class() -> Any:
 class TestConnectGraphFalkorDB:
     """S-155-F1 — ``graph_backend == 'falkordb'`` returns a connected adapter."""
 
-    @pytest.mark.asyncio
     async def test_returns_falkordb_backend(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -75,13 +71,11 @@ class TestConnectGraphFalkorDB:
         assert isinstance(backend, falkor_mod.FalkorDBGraphBackend)
         assert isinstance(backend, GraphBackend)
 
-    @pytest.mark.asyncio
     async def test_raises_config_error_when_url_empty(self) -> None:
         cfg = StorageConfig(backend="sqlite", graph_backend="falkordb")
         with pytest.raises(ConfigError, match="falkordb_url"):
             await connect_graph(cfg)
 
-    @pytest.mark.asyncio
     async def test_propagates_config_error_when_extra_missing(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -146,7 +140,6 @@ def _fake_asyncpg_module() -> Any:
 class TestConnectGraphPostgresAGE:
     """S-155-F2 — ``graph_backend == 'postgres_age'`` returns a connected adapter."""
 
-    @pytest.mark.asyncio
     async def test_returns_postgres_age_backend(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -163,13 +156,11 @@ class TestConnectGraphPostgresAGE:
         assert isinstance(backend, age_mod.PostgresAGEGraphBackend)
         assert isinstance(backend, GraphBackend)
 
-    @pytest.mark.asyncio
     async def test_raises_config_error_when_url_empty(self) -> None:
         cfg = StorageConfig(backend="sqlite", graph_backend="postgres_age")
         with pytest.raises(ConfigError, match="postgresql_url"):
             await connect_graph(cfg)
 
-    @pytest.mark.asyncio
     async def test_propagates_config_error_when_extra_missing(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -191,7 +182,6 @@ class TestConnectGraphPostgresAGE:
 
 
 class TestConnectGraphDefenceInDepth:
-    @pytest.mark.asyncio
     async def test_raises_value_error_for_unknown_backend(self) -> None:
         """Defence-in-depth — config validation should catch this first.
 
@@ -207,7 +197,6 @@ class TestConnectGraphDefenceInDepth:
 
 
 class TestConnectGraphLogging:
-    @pytest.mark.asyncio
     async def test_logs_active_backend_at_info_level(
         self,
         caplog: pytest.LogCaptureFixture,

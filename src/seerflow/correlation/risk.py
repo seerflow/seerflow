@@ -32,6 +32,7 @@ class RiskRegister:
 
     __slots__ = (
         "_entries",
+        "_eviction_count",
         "_half_life_ns",
         "_lambda",
         "_max_entities",
@@ -54,6 +55,8 @@ class RiskRegister:
         self._max_entities = max_entities
         self._max_entries_per_entity = max_entries_per_entity
         self._entries: dict[str, list[RiskEntry]] = {}
+        # S-082: cumulative LRU evictions since process start.
+        self._eviction_count = 0
 
     def add_risk(self, entity_id: str, entry: RiskEntry) -> float:
         """Add a risk entry and return the current accumulated score."""
@@ -64,6 +67,7 @@ class RiskRegister:
             while len(self._entries) >= self._max_entities:
                 oldest = next(iter(self._entries))
                 del self._entries[oldest]
+                self._eviction_count += 1
             self._entries[entity_id] = []
         self._entries[entity_id].append(entry)
         # Cap entries per entity
@@ -98,3 +102,16 @@ class RiskRegister:
     def entity_count(self) -> int:
         """Number of entities currently tracked."""
         return len(self._entries)
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot.
+
+        ``current`` is the number of tracked entities; the per-entity
+        entry tail-trim is bounded but not surfaced here (operators care
+        about the entity-cardinality cap, not the per-entity floor).
+        """
+        return {
+            "current": len(self._entries),
+            "max": self._max_entities,
+            "evictions": self._eviction_count,
+        }

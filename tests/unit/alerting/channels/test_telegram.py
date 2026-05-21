@@ -64,7 +64,6 @@ def test_telegram_target_hides_bot_token_in_repr() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_telegram_deliver_posts_to_bot_api() -> None:
     target = TelegramTarget(
         name="t",
@@ -84,7 +83,6 @@ async def test_telegram_deliver_posts_to_bot_api() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_telegram_deliver_includes_chat_id_and_parse_mode() -> None:
     target = TelegramTarget(
         name="t",
@@ -116,7 +114,6 @@ async def test_telegram_deliver_includes_chat_id_and_parse_mode() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_telegram_digest_single_message_with_tail() -> None:
     target = TelegramTarget(
         name="t",
@@ -146,7 +143,6 @@ async def test_telegram_digest_single_message_with_tail() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_telegram_empty_digest_no_network_io() -> None:
     target = TelegramTarget(
         name="t",

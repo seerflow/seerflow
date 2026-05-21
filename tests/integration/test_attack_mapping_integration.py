@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-import pytest
-
 from seerflow.detection.ensemble import DetectionResult
 from seerflow.models.event import SeverityLevel
 from seerflow.receivers.base import RawEvent
@@ -16,7 +14,6 @@ if TYPE_CHECKING:
 
 
 class TestAttackMappingIntegration:
-    @pytest.mark.asyncio
     async def test_ml_alert_gets_mitre_from_mapper(self, tmp_path: Path) -> None:
         from seerflow.config import SeerflowConfig, StorageConfig
         from seerflow.detection.attack_mapping import AttackMapper

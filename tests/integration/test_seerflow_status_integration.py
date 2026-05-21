@@ -113,7 +113,6 @@ async def _build_app_client(backend: SqliteBackend) -> httpx.AsyncClient:
 class TestStatusCommandIntegration:
     """End-to-end: run_status hits the in-process FastAPI app."""
 
-    @pytest.mark.asyncio
     async def test_human_output_reports_ensemble_derived_model_count(
         self,
         backend: SqliteBackend,
@@ -152,7 +151,6 @@ class TestStatusCommandIntegration:
         finally:
             await client.aclose()
 
-    @pytest.mark.asyncio
     async def test_json_output_carries_model_count(
         self,
         backend: SqliteBackend,

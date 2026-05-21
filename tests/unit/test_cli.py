@@ -10,7 +10,33 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from seerflow.cli import parse_args
+from seerflow.cli import build_parser, parse_args
+
+
+class TestCLIHelpClarity:
+    """S-089: ``--help`` must guide a first-time evaluator (NFR-005/006).
+
+    The ``--config`` flag is optional and zero-config works without it
+    (NFR-006); the root help should say so and point at a next step.
+    """
+
+    def test_config_help_mentions_optional_and_zero_config(self) -> None:
+        """``--config`` help states the flag is optional + zero-config works."""
+        parser = build_parser()
+        action = parser._option_string_actions["--config"]
+        help_text = (action.help or "").lower()
+        assert "optional" in help_text
+        assert "default" in help_text or "zero-config" in help_text
+
+    def test_parser_description_and_epilog_point_to_docs(self) -> None:
+        """Root description is descriptive; epilog points at a command + docs."""
+        parser = build_parser()
+        description = parser.description or ""
+        # Must be more than the old bare one-liner.
+        assert len(description) > len("Streaming log intelligence agent")
+        epilog = parser.epilog or ""
+        assert "seerflow start" in epilog
+        assert "operator-guide" in epilog or "README" in epilog
 
 
 class TestCLIArgs:
@@ -63,6 +89,29 @@ class TestCLIStatusArgs:
         args = parse_args(["--config", "/tmp/c.yaml", "status"])
         assert args.command == "status"
         assert args.config == "/tmp/c.yaml"
+
+
+class TestCLIStartTUIArgs:
+    """Parser surface for ``seerflow start --tui`` (S-079, FR-048)."""
+
+    def test_start_default_tui_false(self) -> None:
+        """Without --tui, the start command sets tui=False (backward compat)."""
+        args = parse_args(["start"])
+        assert args.command == "start"
+        assert args.tui is False
+
+    def test_start_tui_flag_enables(self) -> None:
+        """--tui sets tui=True so the dispatcher can branch to the TUI path."""
+        args = parse_args(["start", "--tui"])
+        assert args.command == "start"
+        assert args.tui is True
+
+    def test_start_tui_composes_with_global_config(self) -> None:
+        """--tui composes with the global --config flag (no parser conflict)."""
+        args = parse_args(["--config", "x.yaml", "start", "--tui"])
+        assert args.command == "start"
+        assert args.tui is True
+        assert args.config == "x.yaml"
 
 
 class TestMainImport:
@@ -161,18 +210,22 @@ class TestRunLoop:
 
         # Patch build_pipeline to get a handle on the pipeline
         built_pipeline = None
+        built_event = asyncio.Event()
 
         async def _capture_build(config):
             nonlocal built_pipeline
             from seerflow.pipeline import build_pipeline
 
             built_pipeline = await build_pipeline(config)
+            built_event.set()
             return built_pipeline
 
         with patch("seerflow.pipeline.run.build_pipeline", side_effect=_capture_build):
             task = asyncio.create_task(_run(str(yaml_file)))
-            # Wait for pipeline to be built
-            await asyncio.sleep(0.3)
+            # Deterministically wait until the pipeline has been built
+            # (replaces a fixed asyncio.sleep(0.3) that flaked under
+            # full-suite parallel load — see S-234 / SEE-258).
+            await asyncio.wait_for(built_event.wait(), timeout=5.0)
             assert built_pipeline is not None
             # Inject event then stop
             event = RawEvent(
@@ -702,6 +755,71 @@ class TestTailSubcommand:
         assert config.log_level == "DEBUG"
         assert config.detection.hst_window_size == 500
 
+    def test_main_dispatches_start_tui(self) -> None:
+        """main() dispatches `start --tui` to launch_tui_with_pipeline (S-079)."""
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(config=None, command="start", tui=True)
+        sentinel_config = object()
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.config.load_config", return_value=sentinel_config) as mock_load,
+            patch("seerflow.tui.launch_tui_with_pipeline") as mock_launch,
+            patch("seerflow.__main__._run_async") as mock_run_async,
+        ):
+            mock_run_async.return_value = None
+            main()
+            mock_load.assert_called_once_with(None)
+            mock_launch.assert_called_once_with(sentinel_config)
+            mock_run_async.assert_called_once()
+
+    def test_main_dispatches_start_no_tui(self) -> None:
+        """main() dispatches plain `start` to _run_with_config, never the TUI.
+
+        S-079 pins "never the TUI". S-312 and S-313 both reroute the non-TUI
+        path; merged, it is
+        ``load_config -> _apply_console_overrides -> _apply_alerts_to ->
+        _run_with_config`` (behaviour-equivalent to the old ``_run(config)``
+        when no ``--alerts-*`` flags are passed).
+        """
+        import argparse
+        from unittest.mock import patch
+
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(
+            config=None,
+            command="start",
+            tui=False,
+            alerts_to=None,
+            alerts_format=None,
+        )
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.config.load_config", return_value="CFG") as mock_load,
+            patch(
+                "seerflow.__main__._apply_console_overrides",
+                return_value="CFG",
+            ) as mock_console,
+            patch(
+                "seerflow.__main__._apply_alerts_to",
+                return_value="CFG",
+            ) as mock_file,
+            patch("seerflow.pipeline.run._run_with_config") as mock_run_with_config,
+            patch("seerflow.tui.launch_tui_with_pipeline") as mock_launch,
+            patch("seerflow.__main__._run_async") as mock_run_async,
+        ):
+            mock_run_async.return_value = None
+            main()
+            mock_load.assert_called_once_with(None)
+            mock_console.assert_called_once_with("CFG", None, None)
+            mock_file.assert_called_once_with("CFG", None)
+            mock_run_with_config.assert_called_once_with("CFG")
+            mock_launch.assert_not_called()
+
     def test_main_dispatches_tail(self) -> None:
         """main() dispatches to _build_tail_config + _run_with_config for tail."""
         import argparse
@@ -738,7 +856,6 @@ class TestQueryHealthParsing:
 class TestGracefulStartupError:
     """S-141: Clean error when all receivers fail to start."""
 
-    @pytest.mark.asyncio
     async def test_all_receivers_fail_exits_with_code_1(self) -> None:
         from unittest.mock import AsyncMock, patch
 
@@ -760,7 +877,6 @@ class TestGracefulStartupError:
 
         assert exc_info.value.code == 1
 
-    @pytest.mark.asyncio
     async def test_all_receivers_fail_logs_suggestions(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -787,7 +903,6 @@ class TestGracefulStartupError:
         assert any("Startup failed" in r.message for r in caplog.records)
         assert any("seerflow.yaml" in r.message for r in caplog.records)
 
-    @pytest.mark.asyncio
     async def test_partial_failure_logs_warning_and_continues(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:

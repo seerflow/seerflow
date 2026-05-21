@@ -174,7 +174,6 @@ def _forced_anomaly() -> DetectionResult:
     )
 
 
-@pytest.mark.asyncio
 class TestWebhookPipeline:
     """Integration tests for handler → dispatcher → HTTP POST flow."""
 

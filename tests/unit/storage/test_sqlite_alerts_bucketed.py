@@ -52,7 +52,6 @@ def _alert(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_bucketed_groups_by_hour(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -69,7 +68,6 @@ async def test_count_alerts_bucketed_groups_by_hour(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_bucketed_filters_by_rule_name_and_type(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -87,7 +85,6 @@ async def test_count_alerts_bucketed_filters_by_rule_name_and_type(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_bucketed_empty_returns_empty_list(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -101,7 +98,6 @@ async def test_count_alerts_bucketed_empty_returns_empty_list(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_bucketed_raises_on_non_positive_bucket(
     sqlite_storage: SqliteBackend,
 ) -> None:
@@ -123,7 +119,6 @@ async def test_count_alerts_bucketed_raises_on_non_positive_bucket(
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_count_alerts_bucketed_half_open_window_boundaries(
     sqlite_storage: SqliteBackend,
 ) -> None:

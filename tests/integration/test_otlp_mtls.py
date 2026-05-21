@@ -154,7 +154,6 @@ def _make_alert() -> Alert:
 
 
 class TestOtlpMtlsEndToEnd:
-    @pytest.mark.asyncio
     async def test_mtls_export_full_handshake(self, tmp_path: pathlib.Path) -> None:
         """End-to-end: OtlpSink → secure_channel → mTLS handshake → Export."""
         ca_key = _gen_key()

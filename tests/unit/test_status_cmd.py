@@ -235,7 +235,6 @@ def _ns(config: Path, *, json_flag: bool = False, timeout: float = 3.0) -> argpa
 
 
 class TestRunStatusHealthy:
-    @pytest.mark.asyncio
     async def test_healthy_exit_zero(
         self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -250,7 +249,6 @@ class TestRunStatusHealthy:
         code = await run_status(_ns(healthy_config))
         assert code == EXIT_HEALTHY == 0
 
-    @pytest.mark.asyncio
     async def test_healthy_human_output(
         self,
         healthy_config: Path,
@@ -269,7 +267,6 @@ class TestRunStatusHealthy:
         assert "model_count" in out
         assert "12" in out
 
-    @pytest.mark.asyncio
     async def test_healthy_json_output_is_parseable(
         self,
         healthy_config: Path,
@@ -290,7 +287,6 @@ class TestRunStatusHealthy:
 
 
 class TestRunStatusDegraded:
-    @pytest.mark.asyncio
     async def test_degraded_exit_two(
         self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -303,7 +299,6 @@ class TestRunStatusDegraded:
         code = await run_status(_ns(healthy_config))
         assert code == EXIT_DEGRADED == 2
 
-    @pytest.mark.asyncio
     async def test_degraded_still_prints_body(
         self,
         healthy_config: Path,
@@ -324,7 +319,6 @@ class TestRunStatusDegraded:
 
 
 class TestRunStatusUnreachable:
-    @pytest.mark.asyncio
     async def test_connection_refused_exit_three(
         self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -337,7 +331,6 @@ class TestRunStatusUnreachable:
         code = await run_status(_ns(healthy_config))
         assert code == EXIT_UNREACHABLE == 3
 
-    @pytest.mark.asyncio
     async def test_connection_refused_writes_hint_to_stderr(
         self,
         healthy_config: Path,
@@ -357,7 +350,6 @@ class TestRunStatusUnreachable:
         assert "dashboard_port" in err
         assert "health_bind_address" in err
 
-    @pytest.mark.asyncio
     async def test_timeout_exit_three(
         self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -370,7 +362,6 @@ class TestRunStatusUnreachable:
         code = await run_status(_ns(healthy_config))
         assert code == EXIT_UNREACHABLE == 3
 
-    @pytest.mark.asyncio
     async def test_unparseable_body_exit_three(
         self, healthy_config: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

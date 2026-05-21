@@ -229,6 +229,65 @@ def test_alert_count_24h_populated_when_alerts_exist(
         )
 
 
+def test_alert_count_24h_not_capped_at_10k(
+    app_with_sigma,  # type: ignore[no-untyped-def]
+    backend: SqliteBackend,
+) -> None:
+    """``alert_count_24h`` reflects every matching alert — no 10 000-row
+    Python-scan cap (S-229 / SEE-240).
+
+    Seeds 10 050 sigma alerts for the loaded rule (title doubles as
+    ``rule_name``) inside the trailing-24h window. The removed
+    ``_ALERT_SCAN_LIMIT`` path would truncate this to 10 000; the SQL
+    ``count_alerts_grouped`` aggregator returns the full count.
+    """
+    import asyncio
+    import time
+
+    n = 10_050
+    rule_name = "Sigma S151 Routes Test Rule"
+    now_ns = time.time_ns()
+    base_ns = now_ns - 3_600 * 1_000_000_000  # 1h ago, well inside 24h window
+    rows = [
+        (
+            f"a-{i}",  # alert_id
+            "sigma",  # alert_type
+            base_ns + i,  # timestamp_ns (distinct, ascending)
+            3,  # severity_id
+            rule_name,  # rule_name
+            "00000000-0000-0000-0000-000000000001",  # entity_uuid
+            "host",  # entity_type
+            "web-01",  # entity_value
+            f"dk-{i}",  # dedup_key (unique → distinct rows)
+            1,  # dedup_count
+            0.0,  # risk_score
+            None,  # feedback
+            b"",  # data
+        )
+        for i in range(n)
+    ]
+
+    async def _seed() -> None:
+        await backend._conn.executemany(
+            "INSERT INTO alerts ("
+            "  alert_id, alert_type, timestamp_ns, severity_id, rule_name, "
+            "  entity_uuid, entity_type, entity_value, dedup_key, dedup_count, "
+            "  risk_score, feedback, data) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        await backend._conn.commit()
+
+    asyncio.run(_seed())
+
+    with TestClient(app_with_sigma) as client:
+        body = client.get("/api/v1/sigma/rules").json()
+        target = body["items"][0]
+        assert target["alert_count_24h"] == n, (
+            f"alert_count_24h must not be capped at 10k; got {target['alert_count_24h']}"
+        )
+
+
 def test_yaml_anchor_bomb_rejected(app_with_sigma) -> None:  # type: ignore[no-untyped-def]
     """Hostile payload with >32 anchors fails fast in the validator."""
     payload = "title: T\n" + "\n".join(f"k{i}: &a{i} x" for i in range(40))

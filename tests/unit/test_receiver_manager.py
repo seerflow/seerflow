@@ -264,6 +264,7 @@ class TestExports:
             "RawEvent",
             "Receiver",
             "ReceiverManager",
+            "StdinReceiver",
             "SyslogReceiver",
             "WebhookConfig",
             "WebhookReceiver",

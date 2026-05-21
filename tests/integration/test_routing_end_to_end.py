@@ -21,7 +21,6 @@ from tests.unit.alert_factory import make_alert
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_end_to_end_routes_and_digests() -> None:
     slack = FakeDeliveryTarget(name="slack")
     email = FakeDeliveryTarget(name="email")

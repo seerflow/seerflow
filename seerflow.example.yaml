@@ -1,8 +1,20 @@
-# Seerflow Configuration
-# All settings are optional — sensible defaults are used when omitted.
-# Use ${ENV_VAR} or ${ENV_VAR:-default} for secrets and environment-specific values.
+# Seerflow Configuration — annotated reference
+#
+# All settings are OPTIONAL — sensible defaults are used when omitted, so
+# this file is runnable as-is (copy it to seerflow.yaml). Uncomment and
+# edit only the knobs you need.
+#
+# Secrets and environment-specific values use ${ENV_VAR} or
+# ${ENV_VAR:-default} interpolation. NEVER put a literal secret in this
+# file — always reference an environment variable.
+#
 # Default config file: seerflow.yaml in the current working directory.
+# Full per-key reference: docs/settings-reference.md
+# SQLite -> PostgreSQL runbook: STORAGE_MIGRATION.md
 
+# ===========================================================================
+# storage — event/alert/model persistence
+# ===========================================================================
 storage:
   backend: sqlite                        # sqlite | postgresql
 
@@ -34,12 +46,17 @@ storage:
   # graph_backend: igraph                     # igraph | falkordb | postgres_age
   # falkordb_url: ${SEERFLOW_FALKORDB_URL:-falkor://localhost:6379}  # required when graph_backend=falkordb
 
+# ===========================================================================
+# receivers — log ingestion endpoints
+# ===========================================================================
 receivers:
   # Network binding
   bind_addr: "0.0.0.0"                   # address to bind all receivers; use 127.0.0.1 to restrict to localhost
   queue_maxsize: 10000                   # internal event queue depth before back-pressure
 
-  # Syslog receiver
+  # Syslog receiver. Defaults below use non-privileged ports so Seerflow
+  # runs without root. The IANA syslog ports are 514 (UDP) / 601 (TCP) —
+  # use those only when running as root or with cap_net_bind_service.
   syslog_enabled: true                   # enable UDP + TCP syslog listener
   syslog_udp_port: 5514                  # UDP syslog port (use 514 with root/cap_net_bind)
   syslog_tcp_port: 5601                  # TCP syslog port (use 601 with root/cap_net_bind)
@@ -48,12 +65,12 @@ receivers:
   # OpenTelemetry gRPC receiver
   otlp_grpc_enabled: true
   otlp_grpc_port: 4317                   # standard OTLP/gRPC port
-  otlp_grpc_max_workers: 4              # gRPC thread-pool size
+  otlp_grpc_max_workers: 4               # gRPC thread-pool size
 
   # OpenTelemetry HTTP receiver
   otlp_http_enabled: true
   otlp_http_port: 4318                   # standard OTLP/HTTP port
-  otlp_http_max_request_bytes: 4194304  # 4 MiB max request body; raise for high-volume batches
+  otlp_http_max_request_bytes: 4194304   # 4 MiB max request body; raise for high-volume batches
 
   # File tailing
   # file_paths:                          # glob patterns for file tailing
@@ -68,7 +85,7 @@ receivers:
   # webhooks:
   #   - path: /ingest/github
   #     auth_header: X-Hub-Signature-256
-  #     auth_token: ${GITHUB_WEBHOOK_SECRET}
+  #     auth_token: ${GITHUB_WEBHOOK_SECRET}   # secret via env var only
   #     source_id: github
   #     field_mapping:
   #       message: action
@@ -78,37 +95,248 @@ receivers:
   #   - /var/log
   #   - /home
 
+# ===========================================================================
+# detection — ML anomaly detectors + blended scoring
+# ===========================================================================
 detection:
   # Sigma rules — 63 bundled rules loaded automatically; add custom directories below
   # sigma_rules_dirs:
   #   - /etc/seerflow/sigma-rules
   #   - /opt/custom-rules
+  # sigma_custom_upload_dir: ~/.local/share/seerflow/sigma-custom  # dashboard-uploaded rules persist here
 
+  # Half-Space Trees (content anomaly)
   hst_window_size: 1000
   hst_n_trees: 25
+
+  # DSPOT auto-threshold (extreme value theory)
   dspot:
     calibration_window: 1000             # minimum events before DSPOT activates
     risk_level: 0.0001                   # false positive rate (1 in 10,000)
     initial_percentile: 98               # seed percentile for DSPOT threshold initialization
+  # dspot_threshold_cap_multiplier: 5.0  # cap DSPOT threshold at N x the calibrated level
+
+  # Blended score weights — ratios only; the pipeline divides by their sum
   weights_content: 0.30                  # Half-Space Trees weight
   weights_volume: 0.25                   # Holt-Winters weight
   weights_sequence: 0.25                 # Markov chains weight
   weights_pattern: 0.20                  # CUSUM weight
+  # weights_template_volume: 0.15        # per-template volume sub-signal weight
+  # weights_entity_volume: 0.15          # per-entity volume sub-signal weight
 
+  # Holt-Winters (volume anomaly)
+  # hw_seasonal_period: 1440             # buckets per season (1440 = 1-min buckets over 24h)
+  # hw_alpha: 0.3                        # level smoothing
+  # hw_beta: 0.1                         # trend smoothing
+  # hw_gamma: 0.1                        # seasonal smoothing
+  # hw_n_std: 3.0                        # alert when residual exceeds N standard deviations
+
+  # CUSUM (change-point detection)
+  # cusum_drift: 0.5                     # allowable drift before accumulation
+  # cusum_threshold: 5.0                 # cumulative-sum alert threshold
+  # cusum_ema_alpha: 0.1                 # EMA smoothing for the running baseline
+  # cusum_warmup_buckets: 30             # buckets observed before CUSUM may alert
+
+  # Markov chains (sequence anomaly)
+  # markov_smoothing: 0.000001           # Laplace smoothing for unseen transitions
+  # markov_min_events: 100               # minimum events before a chain may score
+  # markov_max_entities: 1000            # LRU cap on per-entity chains
+
+  # Risk accumulation
+  # risk_half_life_hours: 4              # exponential decay half-life for accumulated risk
+  # risk_threshold: 50.0                 # risk score that triggers an alert
+  # risk_max_entities: 10000             # LRU cap on tracked risk entities
+
+  # Capacity / cadence
+  # max_sources: 256                     # LRU cap on distinct log sources modelled
+  # max_template_hw: 500                 # LRU cap on per-template Holt-Winters models
+  # max_entity_hw: 500                   # LRU cap on per-entity Holt-Winters models
+  # min_events_for_scoring: 50           # warm-up before any score is emitted
+  # score_interval: 1                    # score every Nth event per source (1 = every event)
+  # graph_algo_interval: 500             # run graph-structural algorithms every N events
+  # model_save_interval_seconds: 300     # persist ML model state every N seconds
+
+  # Graph-structural correlation thresholds
+  # graph_structural:
+  #   community_crossing_enabled: true   # flag entities that bridge graph communities
+  #   betweenness_threshold: 0.3         # normalized betweenness above which an entity is "central"
+  #   fan_out_sigma: 3.0                 # alert when fan-out exceeds mean + N sigma
+  #   fan_out_min_floor: 5               # never alert on fan-out below this absolute count
+  #   fan_out_history_size: 20           # rolling window for the fan-out baseline
+
+  # Kill-chain tactic progression
+  # kill_chain:
+  #   enabled: true
+  #   tactic_threshold: 3                # distinct ATT&CK tactics before a kill-chain alert
+  #   window_seconds: 86400              # progression window (24h)
+  #   max_entities: 10000                # LRU cap on tracked kill-chain entities
+
+# ===========================================================================
+# correlation — entity-centric temporal correlation engine
+# ===========================================================================
+# correlation:
+#   window_duration_seconds: 1800        # temporal join window (30 min)
+#   max_events_per_entity: 1000          # ring-buffer cap per entity
+#   max_entities: 10000                  # LRU cap on correlated entities
+#   late_tolerance_seconds: 30           # watermark slack for out-of-order events
+#   rule_dirs:                           # extra correlation-rule directories
+#     - /etc/seerflow/correlation-rules
+
+# ===========================================================================
+# alerting — deduplication, routing, outbound channels, OTLP export
+# ===========================================================================
 alerting:
   dedup_window_seconds: 900              # 15 minutes
+  # dedup_window_overrides:              # per-rule dedup overrides [[rule_id, seconds], ...]
+  #   - ["bruteforce", 300]
+
+  # Outbound webhooks (Slack/Teams/generic JSON)
   # webhooks:
-  #   - url: ${SLACK_WEBHOOK_URL}
+  #   - url: ${SLACK_WEBHOOK_URL}        # secret via env var only
   #     format: slack
   #   - url: ${TEAMS_WEBHOOK_URL}
   #     format: teams
-  # pagerduty_routing_key: ${SEERFLOW_PD_KEY}
 
+  # PagerDuty Events API v2
+  # pagerduty_routing_key: ${PAGERDUTY_ROUTING_KEY}   # secret via env var only
+
+  # Dashboard deep-links embedded in outbound alerts
+  # dashboard_url: https://seerflow.internal.example.com
+
+  # OTLP alert export — emit alerts as OTLP logs to a collector/SIEM
+  # otlp_endpoint: ${SEERFLOW_OTLP_ALERT_ENDPOINT}    # empty disables export
+  # otlp_protocol: grpc                  # grpc | http
+  # otlp_export_interval_seconds: 5
+  # otlp_tls: null                       # null = auto; true/false to force
+  # otlp_tls_ca_file: /etc/seerflow/otlp-ca.pem       # custom CA bundle (PEM)
+  # otlp_mtls_cert_file: /etc/seerflow/otlp-client.pem
+  # otlp_mtls_key_file: /etc/seerflow/otlp-client-key.pem
+
+# ===========================================================================
+# llm — optional LLM backend (alert explanation, NL hunt, rule drafting)
+# ===========================================================================
 # llm:
-#   backend: llamacpp                    # llamacpp | ollama | cloud
-#   model_path: ~/.cache/seerflow/phi-4-mini-Q4_K_M.gguf
+#   backend: ""                          # "" (disabled) | llama_cpp | ollama | cloud
+#   model_path: ~/.cache/seerflow/phi-4-mini-Q4_K_M.gguf  # llama_cpp GGUF model
+#
+#   # Ollama backend
 #   ollama_url: http://localhost:11434
+#   ollama_model: phi4-mini
+#   ollama_timeout_s: 30.0
+#
+#   # Cloud backend (Anthropic / OpenAI)
+#   cloud_provider: ""                   # anthropic | openai
+#   cloud_api_key: ${SEERFLOW_LLM_API_KEY}   # secret via env var only
+#   cloud_model: ""
+#   cloud_base_url: ""
+#   cloud_timeout_s: 30.0
+#
+#   # llama_cpp tuning
+#   n_ctx: 4096
+#   n_threads: null                      # null = auto-detect
+#   n_gpu_layers: 0
+#   max_tokens_default: 256
+#   temperature_default: 0.2
+#   seed: 42
+#
+#   # Alert-explanation cache/limits
+#   explanation_cache_size: 256
+#   explanation_cache_ttl_s: 3600
+#   explanation_max_contributing_events: 8
+#   explanation_max_prompt_chars: 8000
+#   explanation_timeout_s: 12.0
+#
+#   # Natural-language hunt
+#   hunt_cache_size: 256
+#   hunt_cache_ttl_s: 3600
+#   hunt_timeout_s: 12.0
+#   hunt_max_results: 100
+#   hunt_max_query_chars: 512
+#
+#   # Sigma-rule suggestion
+#   rule_suggestion_cache_size: 64
+#   rule_suggestion_cache_ttl_s: 21600   # 6 hours
+#   rule_suggestion_min_tp: 3            # min true positives before suggesting a rule
+#   rule_suggestion_window_days: 0       # 0 = all-time
+#   rule_suggestion_timeout_s: 30.0
 
+# ===========================================================================
+# ueba — user & entity behavior analytics
+# ===========================================================================
+# ueba:
+#   enabled: true
+#   warmup_days: 7                       # baseline learning window
+#   warmup_min_events: 50                # minimum events before scoring an entity
+#   max_entities: 100000                 # LRU cap on profiled entities
+#   ema_alpha: 0.05                      # EMA smoothing for the behavioral baseline
+#   source_ip_cap: 64                    # max distinct source IPs tracked per entity
+#   template_top_k: 32                   # top-K log templates retained per entity
+#   score_threshold: 0.75                # composite score that triggers a UEBA alert
+#   alert_cooldown_seconds: 900          # per-entity alert cooldown
+#   sub_score_weights:                   # must sum to 1.0 +/- 1e-6
+#     time_of_day: 0.25
+#     source_novelty: 0.30
+#     volume: 0.20
+#     pattern_novelty: 0.25
+
+# ===========================================================================
+# threat_intel — STIX/TAXII feeds + IoC bloom-filter matcher
+# ===========================================================================
+# threat_intel:
+#   enabled: false
+#   default_poll_interval_s: 3600        # feed poll cadence when a feed omits its own
+#   request_timeout_s: 30.0
+#   max_indicators_per_feed: 1000000
+#   expired_grace_days: 30               # keep expired indicators this long before pruning
+#   startup_jitter_s: 30                 # randomized delay before the first poll
+#   feeds:
+#     - id: otx
+#       url: https://otx.alienvault.com/taxii
+#       collection_id: user_AlienVault
+#       poll_interval_s: 3600
+#       confidence_floor: 0
+#       enabled: true
+#       allow_insecure: false
+#       allow_private_addresses: false
+#       auth:
+#         kind: api_key                  # api_key | basic
+#         api_key_env: OTX_API_KEY       # env var NAME holding the key (not the key itself)
+#         api_key_header: Authorization
+#         # username_env: TAXII_USER     # for kind: basic
+#         # password_env: TAXII_PASS
+#   matcher:
+#     enabled: false
+#     fpr: 0.001                         # bloom-filter target false-positive rate
+#     min_capacity: 100000
+#     capacity_growth_factor: 1.25
+#     confidence_floor: 0
+#     rebuild_debounce_ms: 200
+#     enabled_types: [ipv4, ipv6, domain, url, md5, sha1, sha256]
+
+# ===========================================================================
+# Top-level scalars
+# ===========================================================================
 dashboard_port: 8080
-health_bind_address: "127.0.0.1"         # address to bind health endpoint; use 0.0.0.0 for container access
-log_level: INFO                          # DEBUG | INFO | WARNING | ERROR
+health_bind_address: "127.0.0.1"         # bind address for the health endpoint; use 0.0.0.0 for container access
+log_level: INFO                          # DEBUG | INFO | WARNING | ERROR | CRITICAL
+# shutdown_timeout_s: 30.0               # graceful-drain budget on SIGTERM (matches k8s terminationGracePeriodSeconds)
+
+# WebSocket dashboard stream tuning (ws_*)
+# ws_max_connections: 20                 # max concurrent dashboard WebSocket clients
+# ws_queue_maxlen: 1000                  # per-connection outbound buffer depth
+# ws_tick_interval_s: 0.01               # event-drain tick interval
+# ws_batch_max_events: 10                # max events flushed per tick
+# ws_status_interval_s: 5.0              # status-frame cadence
+# ws_allowed_origins:                    # explicit Origin allowlist (empty = localhost defaults)
+#   - https://seerflow.internal.example.com
+# ws_filter_min_interval_ms: 100         # min interval between live-filter re-applies
+
+# REST API hardening (api_*)
+# api_rate_limit_enabled: true
+# api_rate_limit_redis_url: ${SEERFLOW_RATELIMIT_REDIS_URL}  # secret via env var; empty = in-memory limiter
+# api_allowed_origins:                   # CORS allowlist (empty = same-origin only)
+#   - https://seerflow.internal.example.com
+# api_list_rate_limit: "60/minute"       # list-endpoint rate limit
+# api_detail_rate_limit: "300/minute"    # detail-endpoint rate limit
+# api_coverage_rate_limit: "10/minute"   # coverage-endpoint rate limit
+# api_trust_proxy_headers: false         # honor X-Forwarded-For (enable only behind a trusted proxy)

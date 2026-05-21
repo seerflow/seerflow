@@ -37,6 +37,12 @@ if TYPE_CHECKING:
 # wrapper clips a second time defensively.
 _AGG_MAX_CONTRIB_IDS = 16
 
+# Allow-list for ``count_alerts_grouped``. The SQL column is resolved
+# through this map's *values* (literal strings defined in-repo), never
+# from caller input — this is what keeps the GROUP BY injection-safe.
+# Keep in sync with the Postgres copy if that file defines its own.
+_GROUP_BY_COLUMNS: dict[str, str] = {"rule_name": "rule_name"}
+
 _log = logging.getLogger(__name__)
 
 
@@ -378,6 +384,30 @@ class _SqliteAlertMixin:
         async with await self._conn.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
         return [(int(b), int(c)) for b, c in rows]
+
+    async def count_alerts_grouped(
+        self,
+        *,
+        alert_type: str,
+        time_range: TimeRange,
+        group_by: str,
+    ) -> dict[str, int]:
+        """See :class:`AlertStore.count_alerts_grouped` Protocol for the contract."""
+        column = _GROUP_BY_COLUMNS.get(group_by)
+        if column is None:
+            raise ValueError(f"unsupported group_by: {group_by!r}")
+        sql = (
+            f"SELECT {column} AS grp, COUNT(*) "  # noqa: S608  # nosec B608
+            "FROM alerts "
+            "WHERE alert_type = ? "
+            "  AND timestamp_ns >= ? "
+            "  AND timestamp_ns <  ? "
+            f"GROUP BY {column}"  # nosec B608
+        )
+        params = (alert_type, time_range.start_ns, time_range.end_ns)
+        async with await self._conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return {str(g): int(c) for g, c in rows}
 
     async def get_feedback_stats(self) -> dict[str, int]:
         """Return feedback counts: tp, fp, total."""

@@ -144,6 +144,53 @@ class TestLimitClosures:
         assert detail_limit() == defaults.api_detail_rate_limit
 
 
+class TestDefaultsLazyInit:
+    """Issue #196: defaults must not construct SeerflowConfig() at import time."""
+
+    def test_importing_limits_does_not_construct_seerflowconfig(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reimporting `seerflow.api.limits` must not call ``SeerflowConfig()``.
+
+        Future validation in ``SeerflowConfig.__init__`` would otherwise raise
+        on ``import seerflow.api.limits`` rather than at first use.
+        """
+        import importlib
+
+        from seerflow import config as _config
+
+        call_count = {"n": 0}
+        original = _config.SeerflowConfig
+
+        def _tracker(*args: object, **kwargs: object) -> _config.SeerflowConfig:
+            call_count["n"] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(_config, "SeerflowConfig", _tracker)
+        monkeypatch.delitem(sys.modules, "seerflow.api.limits", raising=False)
+
+        importlib.import_module("seerflow.api.limits")
+
+        assert call_count["n"] == 0, (
+            "seerflow.api.limits must not construct SeerflowConfig() at import time; "
+            f"got {call_count['n']} call(s)"
+        )
+
+    def test_default_closures_work_without_configure_limiter_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fresh import + no ``configure_limiter`` ⇒ closures still return defaults."""
+        import importlib
+
+        monkeypatch.delitem(sys.modules, "seerflow.api.limits", raising=False)
+        limits = importlib.import_module("seerflow.api.limits")
+
+        defaults = SeerflowConfig()
+        assert limits.list_limit() == defaults.api_list_rate_limit
+        assert limits.detail_limit() == defaults.api_detail_rate_limit
+        assert limits.coverage_limit() == defaults.api_coverage_rate_limit
+
+
 class TestRebindLimiterInternals:
     """S-185: the single helper that touches slowapi private attributes."""
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-import pytest
 from aioresponses import aioresponses
 
 from seerflow.config import (
@@ -28,14 +27,6 @@ if TYPE_CHECKING:
 
     from seerflow.storage.protocols import ModelStore
     from seerflow.threat_intel.consumer import TAXIIFeedConsumer
-
-
-@pytest.fixture(autouse=True)
-def _bypass_dns_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "seerflow.threat_intel.dns._resolve_feed_with_private_ip_guard",
-        lambda _feed_id, _hostname: "1.1.1.1",
-    )
 
 
 _FEED_URL = "https://taxii.example/v2/"
@@ -89,7 +80,6 @@ async def _build_manager_and_consumer(
     return mgr, consumer, storage
 
 
-@pytest.mark.asyncio
 async def test_three_consecutive_401s_open_breaker_then_close_on_probe_success(
     tmp_path: Path,
 ) -> None:
@@ -132,7 +122,6 @@ async def test_three_consecutive_401s_open_breaker_then_close_on_probe_success(
         await storage.close()
 
 
-@pytest.mark.asyncio
 async def test_breaker_reopens_when_half_open_probe_returns_401(
     tmp_path: Path,
 ) -> None:

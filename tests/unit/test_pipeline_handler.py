@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from seerflow.api.ws import ConnectionManager
 from seerflow.detection.ensemble import DetectionEnsemble, DetectionResult
 from seerflow.pipeline.handler import make_handler
 from seerflow.receivers.base import RawEvent
 
 
-@pytest.mark.asyncio
 async def test_handler_broadcasts_event_to_ws_manager() -> None:
     ws_manager = MagicMock(spec=ConnectionManager)
     ws_manager.broadcast_event = MagicMock()
@@ -48,7 +45,6 @@ async def test_handler_broadcasts_event_to_ws_manager() -> None:
     ws_manager.broadcast_alert.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_handler_without_ws_manager_does_not_broadcast() -> None:
     ensemble = MagicMock(spec=DetectionEnsemble)
     ensemble.process_event = MagicMock(
@@ -77,7 +73,6 @@ async def test_handler_without_ws_manager_does_not_broadcast() -> None:
     await handler(raw)  # Must not raise
 
 
-@pytest.mark.asyncio
 async def test_handler_broadcasts_ml_alert_on_anomaly() -> None:
     ws_manager = MagicMock(spec=ConnectionManager)
     ws_manager.broadcast_event = MagicMock()
@@ -113,7 +108,6 @@ async def test_handler_broadcasts_ml_alert_on_anomaly() -> None:
     assert ws_manager.broadcast_alert.call_count >= 1
 
 
-@pytest.mark.asyncio
 async def test_broadcast_event_includes_detection_result_after_process() -> None:
     """Event broadcast must happen AFTER process_event and include the DetectionResult."""
     from seerflow.api.ws import ConnectionManager
@@ -172,7 +166,6 @@ async def test_broadcast_event_includes_detection_result_after_process() -> None
     assert kwargs.get("detection") is detection_result
 
 
-@pytest.mark.asyncio
 async def test_handler_does_not_broadcast_deduped_alert() -> None:
     ws_manager = MagicMock(spec=ConnectionManager)
     ws_manager.broadcast_event = MagicMock()
@@ -208,7 +201,6 @@ async def test_handler_does_not_broadcast_deduped_alert() -> None:
     ws_manager.broadcast_alert.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_handler_survives_broadcast_event_exception() -> None:
     """A raising ws_manager.broadcast_event must not propagate out of the handler."""
     from seerflow.pipeline.handler import make_handler

@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -21,7 +19,6 @@ from seerflow.storage.factory import connect_storage
 from seerflow.threat_intel.matcher import IoCMatcher
 
 
-@pytest.mark.asyncio
 async def test_listener_pushes_match_into_matcher(tmp_path: Path) -> None:
     """Direct listener invocation drives matcher refresh after a manual persist."""
     import msgspec

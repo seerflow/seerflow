@@ -6,8 +6,6 @@ import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from seerflow.config import TAXIIFeedConfig, ThreatIntelConfig
 from seerflow.threat_intel.manager import TAXIIFeedManager
 
@@ -15,21 +13,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.fixture(autouse=True)
-def _bypass_dns_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S-227: ``TAXIIFeedManager.start()`` resolves each feed hostname at
-    socket level to populate the static aiohttp resolver. Tests use stub
-    hostnames (``a`` / ``x``) that don't resolve; substitute a sentinel
-    public IP so the resolver-map builder succeeds without hitting real
-    DNS.
-    """
-    monkeypatch.setattr(
-        "seerflow.threat_intel.dns._resolve_feed_with_private_ip_guard",
-        lambda _feed_id, _hostname: "1.1.1.1",
-    )
-
-
-@pytest.mark.asyncio
 async def test_manager_starts_one_task_per_enabled_feed() -> None:
     cfg = ThreatIntelConfig(
         enabled=True,
@@ -52,7 +35,6 @@ async def test_manager_starts_one_task_per_enabled_feed() -> None:
         await mgr.stop()
 
 
-@pytest.mark.asyncio
 async def test_manager_disabled_is_noop() -> None:
     mgr = TAXIIFeedManager(config=ThreatIntelConfig(enabled=False), model_store=MagicMock())
     failed = await mgr.start()
@@ -61,7 +43,6 @@ async def test_manager_disabled_is_noop() -> None:
     await mgr.stop()
 
 
-@pytest.mark.asyncio
 async def test_manager_stop_cancels_in_flight_tasks() -> None:
     cfg = ThreatIntelConfig(
         enabled=True,
@@ -81,7 +62,6 @@ async def test_manager_stop_cancels_in_flight_tasks() -> None:
 # --- S-227 AC1: TAXIIFeedManager.start() wires StaticResolver -------------
 
 
-@pytest.mark.asyncio
 async def test_start_installs_static_resolver_for_enabled_public_feeds(
     tmp_path: Path,
 ) -> None:
@@ -114,7 +94,6 @@ async def test_start_installs_static_resolver_for_enabled_public_feeds(
         await storage.close()
 
 
-@pytest.mark.asyncio
 async def test_start_uses_default_session_when_all_feeds_allow_private(
     tmp_path: Path,
 ) -> None:
@@ -151,7 +130,6 @@ async def test_start_uses_default_session_when_all_feeds_allow_private(
         await storage.close()
 
 
-@pytest.mark.asyncio
 async def test_register_snapshot_listener_fires_on_consumer_persist(monkeypatch) -> None:
     """Manager fires registered listeners after a successful consumer persist."""
     cfg = ThreatIntelConfig(
@@ -176,7 +154,6 @@ async def test_register_snapshot_listener_fires_on_consumer_persist(monkeypatch)
     assert captured == ["f1"]
 
 
-@pytest.mark.asyncio
 async def test_listener_exception_does_not_break_others(monkeypatch) -> None:
     cfg = ThreatIntelConfig(
         enabled=True,

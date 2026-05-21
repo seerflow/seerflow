@@ -1,5 +1,6 @@
 import type { AlertFilter, AlertType, SeverityBucket } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { SeverityChip } from "@/components/ui/SeverityChip";
 import { cn } from "@/lib/utils";
 
 const SEVS: SeverityBucket[] = ["critical", "high", "medium", "low"];
@@ -23,11 +24,9 @@ export function FilterBar({ filter, sources, tactics, onChange }: Props): JSX.El
   return (
     <div className="flex flex-wrap items-center gap-2 border-b p-2">
       {SEVS.map(s => (
-        <Button key={s} size="sm" variant="outline" aria-pressed={filter.severities.has(s)}
-          className={cn(filter.severities.has(s) && "bg-primary text-primary-foreground")}
-          onClick={() => onChange({ severities: toggle(filter.severities, s) })}>
-          {s[0].toUpperCase() + s.slice(1)}
-        </Button>
+        <SeverityChip key={s} label={s[0].toUpperCase() + s.slice(1)}
+          active={filter.severities.has(s)}
+          onToggle={() => onChange({ severities: toggle(filter.severities, s) })} />
       ))}
       <span className="mx-2 text-muted-foreground">·</span>
       {TYPES.map(t => (

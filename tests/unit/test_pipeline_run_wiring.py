@@ -51,33 +51,47 @@ class TestDeriveLlmHealth:
 
 
 class TestSharedConnectionManager:
-    """One ``ConnectionManager`` shared by handler and FastAPI app."""
+    """One ``ConnectionManager`` shared by the pipeline handler and the
+    FastAPI app.
 
-    def test_make_handler_receives_ws_manager(self) -> None:
+    S-304 changed *how* the shared manager is wired (not the invariant):
+    before S-304 ``create_api_app`` built it internally and
+    ``_run_with_config`` read it back off ``api_app.state.ws_manager``;
+    after S-304 the engine assembly moved into
+    ``pipeline.assembly.assemble_handler`` (the S-302 extraction), so the
+    ``ConnectionManager`` + ``AnomalyTimelineRing`` are built ONCE in
+    ``_run_with_config`` via ``build_ws_manager`` and injected into BOTH
+    ``assemble_handler`` (so the pipeline handler broadcasts) and
+    ``create_api_app`` (so the ``/api/v1/ws`` route shares the same
+    fan-out). The behaviour — one manager, both sides — is preserved; this
+    test pins the new construction strategy so a regression that splits the
+    manager fails here.
+    """
+
+    def test_single_ws_manager_built_and_injected_both_ways(self) -> None:
         import re
 
         from seerflow.pipeline import run as run_mod
 
         src = function_source_text(run_mod._run_with_config)
-        # A single ConnectionManager is built and passed to make_handler.
-        # The construction may carry kwargs (e.g. alert_store=storage); use a
-        # whitespace-tolerant pattern so a future ruff format pass won't
-        # silently break this assertion.
-        # The shared ConnectionManager is built by ``create_api_app`` (via
-        # ``_build_ws_manager``) and read back from ``app.state.ws_manager``;
-        # the same instance is then passed to ``make_handler`` so frames
-        # broadcast inside the pipeline reach the FastAPI WS route.
-        assert "api_app.state.ws_manager" in src, (
-            "expected `ws_manager` to be sourced from `api_app.state.ws_manager`"
+        # Built ONCE via the public factory wrapper, carrying the shared ring.
+        assert re.search(r"ws_manager\s*:\s*ConnectionManager\s*=\s*build_ws_manager\(", src), (
+            "expected the ConnectionManager to be built once via build_ws_manager(...)"
         )
+        # Injected into the detection factory so the pipeline handler
+        # broadcasts (S-304 additive ws_manager kwarg on assemble_handler).
+        assert re.search(
+            r"assemble_handler\(\s*config,\s*storage,\s*ws_manager=ws_manager\s*\)", src
+        ), "expected assemble_handler(config, storage, ws_manager=ws_manager)"
+        # Injected into the FastAPI app so the WS route shares the fan-out.
         assert re.search(r"ws_manager\s*=\s*ws_manager\b", src), (
-            "expected `ws_manager=ws_manager` kwarg in make_handler call"
+            "expected `ws_manager=ws_manager` passed to make_api_app"
         )
-        # And the factory must be called with ``ws_manager=None`` so it
-        # builds the manager via ``_build_ws_manager`` (CSWSH-safe path).
-        assert re.search(r"ws_manager\s*=\s*None\b", src), (
-            "expected `ws_manager=None` in make_api_app call so the factory "
-            "constructs a config-aware ConnectionManager via _build_ws_manager"
+        # The shared AnomalyTimelineRing is reused on app.state so the
+        # /api/v1/anomaly route reads the ring the manager records into.
+        assert "api_app.state.anomaly_timeline_ring = timeline_ring" in src, (
+            "expected the injected manager's timeline ring to be reused on "
+            "api_app.state so the anomaly route and the WS manager share it"
         )
 
 

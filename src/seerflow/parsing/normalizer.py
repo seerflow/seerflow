@@ -21,6 +21,12 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+# Module-level singleton used as the default for ``related_*`` fields when
+# the corresponding entity type is disabled in the extractor. Interned by
+# CPython, but pinning it here keeps the hot path free of per-call literal
+# tuple construction and signals intent to readers.
+_EMPTY_TUPLE: tuple[str, ...] = ()
+
 
 class EventNormalizer:
     """Transforms RawEvent into SeerflowEvent.
@@ -42,6 +48,16 @@ class EventNormalizer:
     ) -> None:
         self._parser = drain_parser or DrainParser()
         self._extractor = entity_extractor or EntityExtractor()
+
+    @property
+    def parser(self) -> DrainParser:
+        """Public, read-only handle on the embedded Drain3 parser (S-081).
+
+        The shutdown drain layer in ``pipeline.run`` persists template state to
+        the model store via ``save_drain_state(parser, store)``; exposing the
+        instance here avoids reaching into ``_parser`` from callers.
+        """
+        return self._parser
 
     def normalize(self, raw: RawEvent) -> SeerflowEvent:
         """Convert a RawEvent to a SeerflowEvent."""
@@ -71,11 +87,17 @@ class EventNormalizer:
         # Template extraction
         template_id, template_str, template_params = self._parser.parse(message)
 
-        # Entity extraction (params-aware tagging).
-        # Tags (param/template/unknown) are computed but only .value is stored
-        # in the event. The correlation layer (S-034) will use the full tagged
-        # representation for entity graph edge weighting.
-        tagged = self._extractor.extract_tagged(message, params=template_params)
+        # Entity extraction — values-only fast path (S-084).
+        # The normalizer never reads the param/template/unknown source tag
+        # produced by ``extract_tagged``; downstream code consumes only the
+        # ``related_*`` value tuples below. ``extract_values`` skips the
+        # per-entity ``TaggedEntity`` dataclass and the trailing
+        # ``tuple(e.value for e in ...)`` comprehension, removing work the
+        # caller immediately discarded (see
+        # ``docs/performance/S-084-profiling-report.md``). Future callers
+        # that need the source tag (e.g. S-034 correlation weighting)
+        # continue to call ``extract_tagged`` directly.
+        values = self._extractor.extract_values(message)
 
         return SeerflowEvent(
             event_id=uuid.uuid4(),
@@ -88,10 +110,10 @@ class EventNormalizer:
             template_id=template_id,
             template_str=template_str,
             template_params=template_params,
-            related_ips=tuple(e.value for e in tagged.get("ip", [])),
-            related_users=tuple(e.value for e in tagged.get("user", [])),
-            related_hosts=tuple(e.value for e in tagged.get("host", [])),
-            related_files=tuple(e.value for e in tagged.get("file", [])),
-            related_domains=tuple(e.value for e in tagged.get("domain", [])),
-            related_processes=tuple(e.value for e in tagged.get("process", [])),
+            related_ips=values.get("ip", _EMPTY_TUPLE),
+            related_users=values.get("user", _EMPTY_TUPLE),
+            related_hosts=values.get("host", _EMPTY_TUPLE),
+            related_files=values.get("file", _EMPTY_TUPLE),
+            related_domains=values.get("domain", _EMPTY_TUPLE),
+            related_processes=values.get("process", _EMPTY_TUPLE),
         )

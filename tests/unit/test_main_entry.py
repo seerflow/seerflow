@@ -146,6 +146,115 @@ class TestMainDispatchRules:
         assert exc.value.code == 2
 
 
+class TestMainConfigErrorHandling:
+    """S-089: ``main()`` turns ``ConfigError`` into a clean stderr message.
+
+    A first-time evaluator who hand-edits ``seerflow.yaml`` and introduces a
+    typo must see ``Error: <message>`` on stderr and a clean exit code 1 —
+    never a raw Python traceback (NFR-005 time-to-value).
+    """
+
+    def test_start_config_error_prints_clean_error_and_exits_1(self, capsys) -> None:
+        """``start`` with an invalid config exits 1 with ``Error: ...`` on stderr."""
+        from seerflow.__main__ import main
+        from seerflow.config import ConfigError
+
+        mock_args = argparse.Namespace(
+            config="seerflow.yaml",
+            command="start",
+            tui=False,
+            alerts_to=None,
+            alerts_format=None,
+        )
+        bad_msg = "storage.backend must be one of {'sqlite','postgresql'}, got 'sqlitez'"
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.config.load_config", side_effect=ConfigError(bad_msg)),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert f"Error: {bad_msg}" in captured.err
+        assert "Traceback" not in captured.err
+        assert "Traceback" not in captured.out
+
+    def test_import_config_error_prints_clean_error_and_exits_1(self, capsys) -> None:
+        """``import`` (which also calls ``load_config``) is handled too."""
+        from seerflow.__main__ import main
+        from seerflow.config import ConfigError
+
+        mock_args = argparse.Namespace(
+            config="seerflow.yaml",
+            command="import",
+            paths=["/tmp/events.jsonl"],
+            db=None,
+        )
+        bad_msg = "Config file not found: seerflow.yaml"
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.config.load_config", side_effect=ConfigError(bad_msg)),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert f"Error: {bad_msg}" in captured.err
+        assert "Traceback" not in captured.err
+
+    def test_non_configerror_still_propagates(self) -> None:
+        """Only ``ConfigError`` is translated; other errors must not be swallowed."""
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(
+            config=None,
+            command="start",
+            tui=False,
+            alerts_to=None,
+            alerts_format=None,
+        )
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.config.load_config", return_value="CFG"),
+            patch("seerflow.__main__._apply_console_overrides", return_value="CFG"),
+            patch("seerflow.__main__._apply_alerts_to", return_value="CFG"),
+            patch(
+                "seerflow.pipeline.run._run_with_config",
+                side_effect=RuntimeError("boom"),
+            ),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            main()
+
+    def test_keyboardinterrupt_still_exits_0(self) -> None:
+        """``KeyboardInterrupt`` handling is unchanged (still a clean exit 0)."""
+        from seerflow.__main__ import main
+
+        mock_args = argparse.Namespace(
+            config=None,
+            command="start",
+            tui=False,
+            alerts_to=None,
+            alerts_format=None,
+        )
+        with (
+            patch("seerflow.__main__.parse_args", return_value=mock_args),
+            patch("seerflow.config.load_config", return_value="CFG"),
+            patch("seerflow.__main__._apply_console_overrides", return_value="CFG"),
+            patch("seerflow.__main__._apply_alerts_to", return_value="CFG"),
+            patch(
+                "seerflow.pipeline.run._run_with_config",
+                side_effect=KeyboardInterrupt,
+            ),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+
+        assert exc.value.code == 0
+
+
 class TestMainDispatchFallback:
     """``main()`` raises ``AssertionError`` when the dispatcher sees an unknown command."""
 

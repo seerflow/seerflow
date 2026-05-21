@@ -31,7 +31,7 @@ export interface SigmaRulesState {
   status: Status;
   selectedRuleId: string | null;
   filter: SigmaRuleFilter;
-  load: () => Promise<void>;
+  load: (signal?: AbortSignal) => Promise<void>;
   setFilter: (patch: Partial<SigmaRuleFilter>) => void;
   select: (ruleId: string | null) => void;
   toggle: (ruleId: string, enabled: boolean) => Promise<void>;
@@ -59,12 +59,24 @@ export const useSigmaRulesStore = create<SigmaRulesState>((set, get) => ({
   selectedRuleId: null,
   filter: INITIAL_FILTER,
 
-  load: async () => {
+  load: async (signal) => {
     set({ status: "loading" });
     try {
-      const resp = await getSigmaRules(buildListParams(get().filter));
+      const resp = await getSigmaRules(buildListParams(get().filter), signal);
       set({ rules: resp.items, total: resp.total, status: "ready" });
-    } catch {
+    } catch (err) {
+      // S-230 / SEE-241: a deliberately aborted request is not a load
+      // failure — leave the status as-is so a rapid filter change does
+      // not flash the error banner.
+      if (
+        err instanceof DOMException &&
+        err.name === "AbortError"
+      ) {
+        return;
+      }
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
       set({ status: "error" });
     }
   },

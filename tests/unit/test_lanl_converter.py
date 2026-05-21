@@ -10,7 +10,7 @@ import re
 
 import pytest
 
-from seerflow.lanl.parser import AuthRecord, FlowRecord, ProcRecord
+from seerflow.lanl.parser import AuthRecord, DnsRecord, FlowRecord, ProcRecord
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -286,6 +286,67 @@ def test_flow_related_ips_contains_src_ip(converter):
     ev = events[0]
     expected_ip = host_to_ip(rec.src_computer)
     assert expected_ip in ev.related_ips
+
+
+# ---------------------------------------------------------------------------
+# DNS record tests (S-315 / FR-081)
+# ---------------------------------------------------------------------------
+
+
+def _dns_record() -> DnsRecord:
+    return DnsRecord(time=110, src_computer="C17693", resolved_computer="C5030")
+
+
+def test_dns_produces_one_event(converter):
+    assert len(converter.convert_dns_record(_dns_record())) == 1
+
+
+def test_dns_produces_ip_view(converter):
+    ev = converter.convert_dns_record(_dns_record())[0]
+    assert len(ev.related_ips) > 0
+    assert ev.related_users == ()
+    assert ev.related_hosts == ()
+
+
+def test_dns_related_ips_contains_resolver_ip(converter):
+    from seerflow.lanl.hostmap import host_to_ip
+
+    rec = _dns_record()
+    ev = converter.convert_dns_record(rec)[0]
+    assert host_to_ip(rec.src_computer) in ev.related_ips
+
+
+def test_dns_message_matches_c2_beacon_regex(converter):
+    ev = converter.convert_dns_record(_dns_record())[0]
+    assert C2_BEACON_RE.search(ev.message), (
+        f"Message {ev.message!r} does not match C2 beacon regex"
+    )
+
+
+def test_dns_source_type_is_syslog(converter):
+    assert converter.convert_dns_record(_dns_record())[0].source_type == "syslog"
+
+
+def test_dns_timestamp_in_nanoseconds(converter):
+    rec = _dns_record()
+    assert converter.convert_dns_record(rec)[0].timestamp_ns == rec.time * 1_000_000_000
+
+
+def test_dns_missing_resolved_marker_kept_verbatim(converter):
+    rec = DnsRecord(time=9, src_computer="C17693", resolved_computer="?")
+    assert "?" in converter.convert_dns_record(rec)[0].message
+
+
+def test_dns_message_parity_with_streaming(converter):
+    """S-315 AC4: converter message byte-identical to streaming._dns_message."""
+    from seerflow.lanl import streaming
+
+    for rec in (
+        DnsRecord(110, "C17693", "C5030"),
+        DnsRecord(2, "C1", "?"),
+        DnsRecord(999999, "C16777215", "C42"),
+    ):
+        assert converter.convert_dns_record(rec)[0].message == streaming._dns_message(rec)
 
 
 # ---------------------------------------------------------------------------

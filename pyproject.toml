@@ -83,6 +83,15 @@ graph-falkordb = ["falkordb>=1.6"]
 # ConfigError with an install hint when the import fails, mirroring the
 # ``postgres`` and ``graph-falkordb`` extra patterns.
 graph-postgres-age = ["asyncpg>=0.30"]
+# S-079: Textual TUI headless dashboard. Optional because the textual
+# dependency tree (~5 MB pure-Python, plus rich) is unnecessary for
+# operators using the React dashboard or for headless agents that never
+# attach a TTY. ``seerflow.tui.launch_tui_with_pipeline`` lazy-imports
+# textual and falls back to the plain pipeline path on ImportError,
+# mirroring the ``llm-cpu`` / ``llm-cloud`` graceful-absence pattern.
+tui = [
+    "textual>=0.80",
+]
 
 [project.urls]
 Homepage = "https://github.com/seerflow/seerflow"
@@ -123,6 +132,18 @@ dev = [
     # S-049b: needed by tests/integration/test_otlp_mtls.py to generate a
     # self-signed CA + server cert + client cert for the gRPC mTLS handshake.
     "cryptography>=44.0",
+    # S-084: performance profiling. py-spy is a sampling CPU profiler that
+    # attaches to a running Python process with near-zero overhead; memray
+    # tracks allocations frame-by-frame. Both are dev-only — they never ship
+    # in the runtime image. py-spy and memray both publish manylinux wheels
+    # for 3.11/3.12/3.13. Drive both via ``scripts/profile_pipeline.py``.
+    "py-spy>=0.4",
+    "memray>=1.13; sys_platform != 'win32'",
+    # S-085: powers the `twine check dist/*` gate in the release workflow,
+    # which applies PyPI's exact long-description validation before upload so
+    # a malformed README fails the release instead of being rejected at the
+    # registry. Dev-only — never ships in the runtime image.
+    "twine>=5.0",
 ]
 
 [tool.ruff]
@@ -197,6 +218,7 @@ markers = [
     "benchmark: performance benchmarks",
     "docker: integration tests requiring Docker daemon",
     "e2e: end-to-end pipeline integration tests",
+    "integration: pipeline-stage / cross-component integration tests",
     "requires_falkordb: integration tests requiring a live FalkorDB instance",
     "requires_postgres_age: integration tests requiring an AGE-enabled PostgreSQL instance",
     "slow: heavyweight benchmarks, run with pytest -m slow",

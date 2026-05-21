@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 
 import aiohttp
-import pytest
 from aioresponses import aioresponses
 
 from seerflow.threat_intel.client import TAXIIClient
@@ -14,7 +13,6 @@ ROOT = "https://taxii.example/taxii2/"
 COLLECTION_OBJECTS = "https://taxii.example/taxii2/api1/collections/abc/objects/"
 
 
-@pytest.mark.asyncio
 async def test_get_objects_yields_indicators_across_pages() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)
@@ -54,7 +52,6 @@ async def test_get_objects_yields_indicators_across_pages() -> None:
             assert cursor == "2026-04-28T00:01:00.000Z"
 
 
-@pytest.mark.asyncio
 async def test_get_objects_sends_added_after_param() -> None:
     captured: dict[str, dict] = {}
 
@@ -86,7 +83,6 @@ async def test_get_objects_sends_added_after_param() -> None:
             assert captured["params"]["added_after"] == "2026-04-01T00:00:00.000Z"
 
 
-@pytest.mark.asyncio
 async def test_get_objects_sets_taxii_accept_header() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(session=session)
@@ -107,7 +103,6 @@ async def test_get_objects_sets_taxii_accept_header() -> None:
             assert captured["headers"].get("Accept") == "application/taxii+json;version=2.1"
 
 
-@pytest.mark.asyncio
 async def test_get_objects_attaches_bearer_auth() -> None:
     async with aiohttp.ClientSession() as session:
         client = TAXIIClient(

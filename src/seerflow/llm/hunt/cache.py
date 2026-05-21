@@ -40,6 +40,8 @@ class HuntCache:
         self._ttl_seconds = int(ttl_seconds)
         self._store: OrderedDict[str, tuple[dict[str, object], float]] = OrderedDict()
         self._lock = asyncio.Lock()
+        # S-082: cumulative LRU+TTL evictions since process start.
+        self._eviction_count = 0
 
     def __len__(self) -> int:
         return len(self._store)
@@ -55,6 +57,7 @@ class HuntCache:
             now = time.monotonic()
             if now - inserted_at > self._ttl_seconds:
                 del self._store[key]
+                self._eviction_count += 1
                 return None
             self._store.move_to_end(key)
             # Defensive deep copy so the caller cannot mutate stored state.
@@ -77,8 +80,17 @@ class HuntCache:
             self._store[key] = (snapshot, now)
             while len(self._store) > self._max_entries:
                 self._store.popitem(last=False)
+                self._eviction_count += 1
 
     async def clear(self) -> None:
         """Remove all entries."""
         async with self._lock:
             self._store.clear()
+
+    def bounds(self) -> dict[str, int]:
+        """Return the S-082 memory-bounds snapshot."""
+        return {
+            "current": len(self._store),
+            "max": self._max_entries,
+            "evictions": self._eviction_count,
+        }

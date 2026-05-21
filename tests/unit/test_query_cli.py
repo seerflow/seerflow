@@ -1096,6 +1096,33 @@ class TestQueryValidation:
         assert "unknown alert type" in captured.err
         await storage.close()
 
+    async def test_invalid_technique_prints_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+        args = argparse.Namespace(
+            last=None,
+            type=None,
+            severity=None,
+            limit=50,
+            json=False,
+            tactic=None,
+            technique="not-a-technique",
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+        assert "invalid technique" in captured.err.lower()
+        assert "not-a-technique" in captured.err
+        assert "No alerts found" not in captured.out
+        await storage.close()
+
     async def test_invalid_severity_prints_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

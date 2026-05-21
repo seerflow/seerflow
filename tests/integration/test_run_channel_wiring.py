@@ -11,7 +11,6 @@ from seerflow.pipeline.run import _build_channel_session_and_router
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_no_channels_no_rules_returns_none_pair() -> None:
     cfg = AlertingConfig()
     session, router = await _build_channel_session_and_router(cfg)
@@ -20,7 +19,6 @@ async def test_no_channels_no_rules_returns_none_pair() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_telegram_triggers_router_construction() -> None:
     cfg = AlertingConfig(
         telegram_targets=(
@@ -38,7 +36,6 @@ async def test_telegram_triggers_router_construction() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_email_only_triggers_router_without_http_session() -> None:
     """Email uses its own SMTP connection; HTTP session is still created
     because the helper allocates one HTTP session for all channel kinds.
@@ -65,7 +62,6 @@ async def test_email_only_triggers_router_without_http_session() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_routing_rules_alone_trigger_router() -> None:
     from seerflow.alerting.router import RoutingRule, RoutingRuleMatch
 
@@ -79,7 +75,6 @@ async def test_routing_rules_alone_trigger_router() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_webhook_adapter_injected_into_router_via_public_api() -> None:
     """When webhooks + channels are both configured, the dispatcher's
     webhook adapters are added to the router via ``register_target``.

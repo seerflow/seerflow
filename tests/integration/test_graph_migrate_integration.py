@@ -74,7 +74,6 @@ def falkordb_container() -> Iterator[_DockerContainerT]:
 
 
 @pytest.mark.requires_falkordb
-@pytest.mark.asyncio
 async def test_migrate_igraph_to_falkordb(
     falkordb_container: _DockerContainerT,
     monkeypatch: pytest.MonkeyPatch,
@@ -149,7 +148,6 @@ def postgres_age_container() -> Iterator[_PostgresContainerT]:
 
 
 @pytest.mark.requires_postgres_age
-@pytest.mark.asyncio
 async def test_migrate_igraph_to_postgres_age(
     postgres_age_container: _PostgresContainerT,
     monkeypatch: pytest.MonkeyPatch,

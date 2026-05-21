@@ -301,3 +301,71 @@ class TestExtractTagged:
         extractor = EntityExtractor()
         result = extractor.extract("Login from 10.0.0.1 by admin")
         assert isinstance(result["ip"][0], str)
+
+
+class TestExtractValues:
+    """S-084: hot-path allocation-free entity extraction.
+
+    ``extract_values`` is a fast-path companion to ``extract_tagged`` used by
+    ``EventNormalizer.normalize``. It skips the ``TaggedEntity`` dataclass
+    wrapper because the normalizer reads only ``.value``. Behaviour-equivalent
+    to ``tuple(e.value for e in extract_tagged(...)[name])`` for every entity
+    type, but allocates ~10x fewer Python objects per event.
+    """
+
+    def test_returns_tuples_of_strings_per_type(self) -> None:
+        """extract_values returns dict[str, tuple[str, ...]] for every enabled type."""
+        extractor = EntityExtractor()
+        result = extractor.extract_values("Failed login for user admin from 10.0.0.1")
+        # every enabled type must appear, even when empty
+        assert set(result.keys()) == {"ip", "user", "host", "file", "domain", "process"}
+        for name, values in result.items():
+            assert isinstance(values, tuple), f"{name} must be a tuple, got {type(values)}"
+            for v in values:
+                assert isinstance(v, str), f"{name} value {v!r} must be a str"
+
+    def test_values_match_extract_tagged_values(self) -> None:
+        """extract_values(msg) returns the same .value sequences as extract_tagged(msg)."""
+        extractor = EntityExtractor()
+        msg = "Failed login for user admin from 10.0.0.1 host=web-01"
+        tagged = extractor.extract_tagged(msg)
+        values = extractor.extract_values(msg)
+        for name in ("ip", "user", "host", "file", "domain", "process"):
+            assert values[name] == tuple(e.value for e in tagged[name])
+
+    def test_values_match_extract_tagged_values_with_params(self) -> None:
+        """With params, .value sequences still match extract_tagged."""
+        extractor = EntityExtractor()
+        msg = "Server 192.168.1.1 login from 10.0.0.1 by admin"
+        tagged = extractor.extract_tagged(msg, params=("10.0.0.1", "admin"))
+        values = extractor.extract_values(msg)
+        for name in ("ip", "user", "host", "file", "domain", "process"):
+            assert values[name] == tuple(e.value for e in tagged[name])
+
+    def test_empty_message_returns_empty_tuples(self) -> None:
+        """An empty message yields a tuple for every type, all empty."""
+        extractor = EntityExtractor()
+        result = extractor.extract_values("")
+        assert set(result.keys()) == {"ip", "user", "host", "file", "domain", "process"}
+        for values in result.values():
+            assert values == ()
+
+    def test_restricted_types_only_emits_enabled(self) -> None:
+        """An EntityExtractor with a restricted type set emits only those types."""
+        extractor = EntityExtractor(enabled_types=frozenset({"ip", "user"}))
+        result = extractor.extract_values("Failed login for user admin from 10.0.0.1")
+        assert set(result.keys()) == {"ip", "user"}
+        assert "10.0.0.1" in result["ip"]
+        assert "admin" in result["user"]
+
+    def test_respects_max_message_len(self) -> None:
+        """extract_values truncates messages identically to extract."""
+        from seerflow.parsing._constants import MAX_MESSAGE_LEN
+
+        extractor = EntityExtractor()
+        # Build a message that contains an IP only *after* MAX_MESSAGE_LEN; it
+        # must be invisible to extract_values, matching extract() semantics.
+        prefix = "x" * (MAX_MESSAGE_LEN + 10)
+        msg = f"{prefix} 10.0.0.1"
+        result = extractor.extract_values(msg)
+        assert result["ip"] == ()

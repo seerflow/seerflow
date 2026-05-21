@@ -44,7 +44,6 @@ def falkordb_container() -> Iterator[_DockerContainer]:
         container.stop()
 
 
-@pytest.mark.asyncio
 async def test_end_to_end_round_trip(falkordb_container: _DockerContainer) -> None:
     host = falkordb_container.get_container_host_ip()
     port = int(falkordb_container.get_exposed_port(6379))
@@ -61,7 +60,6 @@ async def test_end_to_end_round_trip(falkordb_container: _DockerContainer) -> No
         await backend.close()
 
 
-@pytest.mark.asyncio
 async def test_load_export_round_trip(falkordb_container: _DockerContainer) -> None:
     host = falkordb_container.get_container_host_ip()
     port = int(falkordb_container.get_exposed_port(6379))

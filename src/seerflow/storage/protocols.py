@@ -15,7 +15,7 @@ method signatures.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from seerflow.graph.entity_graph import EntityGraph
@@ -108,6 +108,26 @@ class AlertStore(Protocol):  # pragma: no cover
         """Return ``(bucket_start_ns, count)`` pairs grouped by floor-divided
         ``timestamp_ns / bucket_ns``. Buckets with zero matches are omitted —
         the caller is responsible for densifying the grid.
+        """
+        ...
+
+    async def count_alerts_grouped(
+        self,
+        *,
+        alert_type: str,
+        time_range: TimeRange,
+        group_by: Literal["rule_name"],
+    ) -> dict[str, int]:
+        """Return ``{group_value: count}`` over the half-open window
+        ``[start_ns, end_ns)`` filtered by ``alert_type``, pushing the
+        ``GROUP BY`` to SQL.
+
+        ``group_by`` is a typed allow-list — the column is selected from a
+        fixed map, never interpolated from caller input. Groups with zero
+        matches are absent from the dict. Replaces the capped Python scan
+        in the sigma route's ``_alert_counts_24h``; the result set is
+        bounded by group cardinality, not raw alert volume, so there is
+        no truncation ceiling.
         """
         ...
 

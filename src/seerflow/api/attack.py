@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 from seerflow.api.schemas import (
     AttackCoverageCell,
@@ -24,9 +24,36 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from seerflow.models.alert import Alert, CorrelationRule
-    from seerflow.sigma.engine import SigmaEngine
 
 CellKey: TypeAlias = tuple[str, str]  # (tactic_raw, technique_uppercase)
+
+
+class _CompiledRuleLike(Protocol):
+    """Structural shape of a compiled rule consumed by ``collect_sigma_cells``.
+
+    Only the three attributes this module reads are declared, as read-only
+    properties so that both the frozen ``seerflow.sigma.matcher.CompiledRule``
+    dataclass and plain-attribute test stubs satisfy it structurally.
+    """
+
+    @property
+    def rule_name(self) -> str: ...
+    @property
+    def attack_tactics(self) -> tuple[str, ...]: ...
+    @property
+    def attack_techniques(self) -> tuple[str, ...]: ...
+
+
+class _RuleSource(Protocol):
+    """Minimal duck-typed source of compiled rules.
+
+    Deliberately narrow: this is *not* the deferred public
+    ``SigmaEngineProtocol`` mirroring the full engine. It declares only
+    ``iter_compiled_rules`` so the real ``SigmaEngine`` and test stubs both
+    satisfy it structurally and mypy can enforce the contract.
+    """
+
+    def iter_compiled_rules(self) -> Iterable[_CompiledRuleLike]: ...
 
 
 @dataclass(frozen=True)
@@ -68,7 +95,7 @@ def _collect_tag_pairs(
             cells[key] = existing.add(rule_name)
 
 
-def collect_sigma_cells(engine: SigmaEngine | None) -> dict[CellKey, CellData]:
+def collect_sigma_cells(engine: _RuleSource | None) -> dict[CellKey, CellData]:
     """Collect one CellData per (tactic, technique) pair per Sigma rule."""
     cells: dict[CellKey, CellData] = {}
     if engine is None:
