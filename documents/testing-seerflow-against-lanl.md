@@ -15,7 +15,7 @@ catalog of additional tests that build confidence the system really works.
 > **TL;DR**
 > - **Smoke test (no download):** `uv run python -m seerflow validate tests/fixtures/lanl`
 > - **Combined scorecard:** `uv run python -m seerflow benchmark --scorecard`
-> - **Real accuracy:** download the full dataset (`python -m seerflow.lanl.fetch`), then point `validate` at it; use the streaming API for billion-event scale.
+> - **Real accuracy:** request the full dataset from LANL (form-gated — no direct download), decompress to a directory of `*.csv`, then point `validate` at it; use the streaming API for billion-event scale.
 
 ---
 
@@ -183,24 +183,49 @@ absolute SLO.)
 The full dataset is the real benchmark: **~1.6 billion events** across four
 files, sourced from <https://csr.lanl.gov/data/cyber1/>.
 
-### 4.1 Download + verify
+### 4.1 Get the data (form-gated)
+
+> **⚠️ There is no direct download URL.** LANL gates the dataset behind a
+> request form — the page at <https://csr.lanl.gov/data/cyber1/> asks you to
+> submit your email and intended use before access is granted. The
+> `seerflow.lanl.fetch` tool's hardcoded `*.txt.gz` URLs therefore **404**
+> against the public site, and LANL publishes no checksum manifest. `fetch`
+> is only useful if you host your own checksummed internal mirror (see §4.1b).
+
+**Recommended flow — request, decompress, point `validate` at the CSVs:**
+
+1. Submit the form at <https://csr.lanl.gov/data/cyber1/> (email + intended
+   use). LANL grants access to the files.
+2. Download `auth.txt.gz`, `proc.txt.gz`, `flows.txt.gz`, `redteam.txt.gz`
+   (and optionally `dns.txt.gz`).
+3. Decompress into the layout the validator reads (one directory, `*.csv`):
+   ```bash
+   mkdir -p data/lanl
+   for f in auth proc flows redteam; do gunzip -c "$f.txt.gz" > "data/lanl/$f.csv"; done
+   ```
+4. Run directly — no `fetch` step needed (continue to §4.2 / §4.3).
+
+#### 4.1b Optional: `fetch` from an internal mirror
+
+If you host the files on your own server with known checksums, `fetch` will
+download, SHA-256-verify, and unpack them. It needs a `--manifest` with the
+real URLs **and** digests (the pinned `LANL_2015_MANIFEST` carries placeholder
+`"0"*64` digests and dead public URLs):
 
 ```bash
-uv run python -m seerflow.lanl.fetch --dest /data/lanl
+uv run python -m seerflow.lanl.fetch --dest data/lanl --manifest my-manifest.json
 ```
-
-This downloads, SHA-256-verifies, and unpacks `auth.csv`, `proc.csv`,
-`flows.csv`, and `redteam.csv` into the validator's expected layout. It
-supports resumable downloads (HTTP Range).
-
-> **⚠️ Manifest caveat:** the *pinned* manifest in `fetch.py`
-> (`LANL_2015_MANIFEST`) ships with **placeholder digests** (`"0"*64`).
-> For a real run you must supply your own manifest with actual checksums:
-> ```bash
-> uv run python -m seerflow.lanl.fetch --dest /data/lanl --manifest my-manifest.json
-> ```
-> Use `--manifest` for an internal mirror with its own digests. Without a
-> valid manifest the verification step will reject the download.
+```json
+{
+  "base_url": "https://your-mirror.example/lanl/",
+  "members": [
+    {"name":"auth","remote":"https://your-mirror.example/lanl/auth.txt.gz","csv_name":"auth.csv","size":7730000000,"sha256":"<hex>"},
+    {"name":"proc","remote":"https://your-mirror.example/lanl/proc.txt.gz","csv_name":"proc.csv","size":2360000000,"sha256":"<hex>"},
+    {"name":"flows","remote":"https://your-mirror.example/lanl/flows.txt.gz","csv_name":"flows.csv","size":1180000000,"sha256":"<hex>"},
+    {"name":"redteam","remote":"https://your-mirror.example/lanl/redteam.txt.gz","csv_name":"redteam.csv","size":4800,"sha256":"<hex>"}
+  ]
+}
+```
 
 **Expected dataset shape** (uncompressed ≈ 10–15 GB):
 
@@ -214,7 +239,7 @@ supports resumable downloads (HTTP Range).
 ### 4.2 Run accuracy against the full set
 
 ```bash
-uv run python -m seerflow validate /data/lanl --json > lanl-result.json
+uv run python -m seerflow validate data/lanl --json > lanl-result.json
 ```
 
 ⚠️ The default `validate` path (`run_validation`) loads records **in memory**.
@@ -236,7 +261,7 @@ from pathlib import Path
 from seerflow.lanl.streaming import run_streaming_validation
 
 result = run_streaming_validation(
-    Path("/data/lanl"),
+    Path("data/lanl"),
     checkpoint_interval=10_000,   # checkpoint every N events (resumable)
     max_events=1_000_000,         # cap the run; None = whole dataset
 )
