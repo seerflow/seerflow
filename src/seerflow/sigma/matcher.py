@@ -108,6 +108,11 @@ def _extract_attack_tags(
         # Techniques start with "t" followed by digits (e.g. t1033, t1021.001)
         if name.startswith("t") and len(name) > 1 and name[1:2].isdigit():
             techniques.append(name)
+        elif name.startswith("s") and len(name) > 1 and name[1:2].isdigit():
+            # MITRE Software ID (e.g. attack.s0508 = Ngrok). SigmaHQ tags the
+            # tool a rule detects; it is neither a tactic nor a technique, so
+            # skip it silently rather than warn as an unknown tactic.
+            continue
         else:
             # SigmaHQ tags multi-word tactics with hyphens
             # (``command-and-control``); our canonical map keys them with

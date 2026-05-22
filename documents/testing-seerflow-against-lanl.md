@@ -103,12 +103,11 @@ patterns_detected       ['c2-beaconing']
 dataset_dir             tests/fixtures/lanl
 ```
 
-> **Note:** you may see a single `Unknown ATT&CK tactic 's0508' in rule
-> 'Communication To Ngrok Tunneling Service - Linux'` warning. `s0508` is a
-> MITRE *Software* ID (Ngrok) mis-tagged as a tactic in the upstream SigmaHQ
-> rule — benign, not a failure. (Earlier builds emitted ~40 such warnings;
-> valid hyphenated tactic tags like `command-and-control` are now normalized
-> to the canonical form — see §6.)
+> **Note:** the run is now clean of `Unknown ATT&CK tactic` warnings. Earlier
+> builds emitted ~40 of them; valid hyphenated tactic tags
+> (`command-and-control`) are normalized to canonical form, and MITRE Software
+> IDs that SigmaHQ tags on rules (e.g. `attack.s0508` = Ngrok) are recognized
+> and ignored rather than mistaken for unknown tactics.
 
 ### 3.2 Machine-readable output
 
@@ -285,7 +284,7 @@ measures the *engine*, not LANL accuracy.
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| `Unknown ATT&CK tactic 's0508'` (single line) | Benign. `s0508` is a MITRE *Software* ID mis-tagged as a tactic in an upstream SigmaHQ rule — not your data. Seerflow now normalizes valid hyphenated tactic tags (`command-and-control` → `command_and_control`), so only genuinely-unknown tags warn. |
+| `Unknown ATT&CK tactic '...'` warning | Should no longer appear. Hyphenated tactic tags are normalized (`command-and-control` → `command_and_control`) and MITRE Software IDs (`attack.s0508`) are ignored. If you still see one, it's a genuinely unknown/malformed `attack.` tag in a custom rule — check that rule's tags. |
 | `Error: dataset directory not found: ...` (exit 2) | The path isn't a directory. `validate` checks before running. |
 | `DatasetVerificationError` on fetch | Placeholder/wrong manifest digests — supply a valid `--manifest`. |
 | OOM on full dataset with `validate` | Use the streaming path (§4.3), not the in-memory `validate`. |
