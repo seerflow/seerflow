@@ -259,9 +259,12 @@ uv run pytest tests/integration/test_lanl_validation.py -v
 uv run python -m seerflow.lanl.report
 ```
 
-To run against the full downloaded LANL dataset, see the
-**Run on the full LANL dataset** section emitted by
-`python -m seerflow.lanl.report`.
+To run against the **full LANL 2015 dataset**: download it through LANL's
+self-service token gate with `tools/download_lanl.sh --email you@example.com`
+(prompts if you omit the email), then `seerflow validate data/lanl` — use the
+streaming API for the full ~1.6B-event set. Step-by-step walkthrough, dataset
+schema, and additional tests:
+[documents/testing-seerflow-against-lanl.md](documents/testing-seerflow-against-lanl.md).
 
 ## Architecture
 
