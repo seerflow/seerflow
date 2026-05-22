@@ -109,13 +109,18 @@ def _extract_attack_tags(
         if name.startswith("t") and len(name) > 1 and name[1:2].isdigit():
             techniques.append(name)
         else:
-            if not is_valid_tactic(name):
+            # SigmaHQ tags multi-word tactics with hyphens
+            # (``command-and-control``); our canonical map keys them with
+            # underscores. Normalize so valid tactics resolve (and don't
+            # trip the warning) and are stored in canonical form.
+            tactic = name.replace("-", "_")
+            if not is_valid_tactic(tactic):
                 logger.warning(
                     "Unknown ATT&CK tactic '%s' in rule '%s'",
                     name,
                     rule.title or "Untitled",
                 )
-            tactics.append(name)
+            tactics.append(tactic)
     return tuple(tactics), tuple(techniques)
 
 

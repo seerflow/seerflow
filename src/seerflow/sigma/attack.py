@@ -50,11 +50,14 @@ def resolve_tactic(value: str) -> str | None:
 
     Accepts either a canonical tactic name (e.g., ``"persistence"``)
     or a MITRE tactic ID (e.g., ``"TA0003"``). Matching is
-    case-insensitive. Returns ``None`` if the value is neither.
+    case-insensitive and accepts the hyphenated SigmaHQ form
+    (e.g., ``"command-and-control"``). Returns ``None`` if neither.
     """
     if not value:
         return None
-    lowered = value.lower()
+    # SigmaHQ writes multi-word tactics with hyphens; our canonical names
+    # use underscores. Normalize so both input forms resolve.
+    lowered = value.lower().replace("-", "_")
     if lowered in TACTICS:
         return lowered
     if _TACTIC_ID_PATTERN.match(value):

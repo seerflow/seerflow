@@ -59,6 +59,41 @@ class TestCompileRule:
         assert "lateral_movement" in cr.attack_tactics
         assert "t1021.001" in cr.attack_techniques
 
+    def test_compile_normalizes_hyphenated_attack_tactic_tags(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """SigmaHQ tags multi-word tactics with hyphens
+        (``attack.command-and-control``) while our canonical map keys them
+        with underscores. Such tags must normalize to the canonical
+        underscore form and must NOT emit a spurious 'Unknown ATT&CK tactic'
+        warning — they are valid MITRE tactics.
+        """
+        import logging
+
+        rule = SigmaRule.from_yaml("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                sel:
+                    message: test
+                condition: sel
+            level: medium
+            tags:
+                - attack.command-and-control
+                - attack.defense-evasion
+                - attack.initial-access
+        """)
+        seerflow_pipeline().apply(rule)
+        with caplog.at_level(logging.WARNING, logger="seerflow.sigma.matcher"):
+            cr = compile_rule(rule)
+
+        assert "command_and_control" in cr.attack_tactics
+        assert "defense_evasion" in cr.attack_tactics
+        assert "initial_access" in cr.attack_tactics
+        assert "Unknown ATT&CK tactic" not in caplog.text
+
     def test_compile_maps_severity_levels(self) -> None:
         for sigma_level, expected_severity in [
             ("informational", SeverityLevel.INFORMATIONAL),
