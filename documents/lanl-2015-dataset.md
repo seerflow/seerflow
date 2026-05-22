@@ -107,9 +107,12 @@ deterministic epoch before replay (see `REPLAY_EPOCH_NS` in
 
 ## How Seerflow consumes it
 
-- The fetcher (`python -m seerflow.lanl.fetch`) downloads each `*.txt.gz`,
-  SHA-256-verifies it, and unpacks it into the validator's expected layout:
-  `auth.csv`, `proc.csv`, `flows.csv`, `redteam.csv` (and optional `dns.csv`).
+- **Getting the files is form-gated.** LANL provides no direct download URL —
+  request access via the form at <https://csr.lanl.gov/data/cyber1/>, then
+  decompress each `*.txt.gz` into a directory of `auth.csv`, `proc.csv`,
+  `flows.csv`, `redteam.csv` (and optional `dns.csv`). (The bundled
+  `python -m seerflow.lanl.fetch` tool only works against a self-hosted,
+  checksummed mirror — its pinned public URLs 404. See the testing guide §4.1.)
 - The parser (`src/seerflow/lanl/parser.py`) maps each row to the field schema
   above.
 - The harness replays records through the full detection stack and scores
