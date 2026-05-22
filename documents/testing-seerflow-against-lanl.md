@@ -5,6 +5,13 @@ performance against the **LANL 2015 "Comprehensive, Multi-Source
 Cyber-Security Events"** dataset (Los Alamos National Laboratory), plus a
 catalog of additional tests that build confidence the system really works.
 
+> **About the dataset:** the LANL 2015 set is 58 days of de-identified activity
+> from Los Alamos National Laboratory's real enterprise network — ~1.65 billion
+> authentication, process, network-flow, and DNS events. Crucially it ships a
+> red-team **ground-truth** label file, so detection accuracy can actually be
+> scored. Full schema, scale, and field details:
+> [lanl-2015-dataset.md](./lanl-2015-dataset.md).
+
 > **TL;DR**
 > - **Smoke test (no download):** `uv run python -m seerflow validate tests/fixtures/lanl`
 > - **Combined scorecard:** `uv run python -m seerflow benchmark --scorecard`
@@ -96,10 +103,12 @@ patterns_detected       ['c2-beaconing']
 dataset_dir             tests/fixtures/lanl
 ```
 
-> **Note:** you will see a burst of `Unknown ATT&CK tactic '...' in rule '...'`
-> warnings on startup. These are **benign** — bundled Sigma rules carry tactic
-> tags Seerflow's MITRE map doesn't enumerate. They are not failures. Silence
-> them with `2>/dev/null` if they clutter the output.
+> **Note:** you may see a single `Unknown ATT&CK tactic 's0508' in rule
+> 'Communication To Ngrok Tunneling Service - Linux'` warning. `s0508` is a
+> MITRE *Software* ID (Ngrok) mis-tagged as a tactic in the upstream SigmaHQ
+> rule — benign, not a failure. (Earlier builds emitted ~40 such warnings;
+> valid hyphenated tactic tags like `command-and-control` are now normalized
+> to the canonical form — see §6.)
 
 ### 3.2 Machine-readable output
 
@@ -276,7 +285,7 @@ measures the *engine*, not LANL accuracy.
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| `Unknown ATT&CK tactic '...'` spam | Benign Sigma taxonomy warnings. Ignore or `2>/dev/null`. |
+| `Unknown ATT&CK tactic 's0508'` (single line) | Benign. `s0508` is a MITRE *Software* ID mis-tagged as a tactic in an upstream SigmaHQ rule — not your data. Seerflow now normalizes valid hyphenated tactic tags (`command-and-control` → `command_and_control`), so only genuinely-unknown tags warn. |
 | `Error: dataset directory not found: ...` (exit 2) | The path isn't a directory. `validate` checks before running. |
 | `DatasetVerificationError` on fetch | Placeholder/wrong manifest digests — supply a valid `--manifest`. |
 | OOM on full dataset with `validate` | Use the streaming path (§4.3), not the in-memory `validate`. |
