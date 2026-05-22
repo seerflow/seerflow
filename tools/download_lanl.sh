@@ -9,20 +9,18 @@
 # script performs that handshake, downloads the requested members, and
 # decompresses each into <dest>/<name>.csv.
 #
-# The harness reads auth/proc/flows/redteam; it does NOT read dns, so dns is
-# excluded by default. redteam is the ground truth (mandatory); auth carries
-# most of the red-team signal.
+# The harness reads auth/proc/flows/redteam; it does NOT read dns. All five
+# members are downloaded by default — drop dns via --files to save 177 MB.
+# redteam is the ground truth (mandatory); auth carries most of the signal.
 #
 # Usage:
-#   EMAIL="you@example.com" tools/download_lanl.sh
-#   EMAIL=... USAGE="evaluating seerflow" FILES="auth redteam" DEST=data/lanl tools/download_lanl.sh
+#   tools/download_lanl.sh --email you@example.com
+#   tools/download_lanl.sh --email you@example.com --files "auth redteam" --dest data/lanl
+#   tools/download_lanl.sh                 # prompts for the email if not given
+#   tools/download_lanl.sh -h
 #
-# Env vars:
-#   EMAIL  (required)  Address submitted to the LANL fence.
-#   USAGE  (optional)  Intended-use string. Default: a seerflow-eval note.
-#   FILES  (optional)  Space-separated members. Default: "auth proc flows redteam".
-#                      Add "dns" only if you have a downstream use for it.
-#   DEST   (optional)  Output directory. Default: "data/lanl".
+# Flags (override the env var of the same name); see -h for details:
+#   --email <addr>   --usage <text>   --files "<list>"   --dest <dir>
 #
 # Notes:
 #   * The token embeds a timestamp and expires. auth.txt.gz is 7.2 GB and may
@@ -34,21 +32,31 @@
 
 set -euo pipefail
 
+# Defaults (env vars seed them; --flags below override).
+BASE="https://csr.lanl.gov"
+EMAIL="${EMAIL:-}"
+USAGE="${USAGE:-Evaluating Seerflow streaming log-anomaly detection}"
+FILES="${FILES:-auth proc flows dns redteam}"
+DEST="${DEST:-data/lanl}"
+
 usage() {
   cat <<'EOF'
 download_lanl.sh — fetch the LANL 2015 dataset into the layout `seerflow validate` reads.
 
 Usage:
-  EMAIL="you@example.com" tools/download_lanl.sh
-  EMAIL=... USAGE="evaluating seerflow" FILES="auth redteam" DEST=data/lanl tools/download_lanl.sh
+  tools/download_lanl.sh --email you@example.com
+  tools/download_lanl.sh --email you@example.com --files "auth redteam" --dest data/lanl
+  EMAIL=you@example.com tools/download_lanl.sh        # env vars also work
+  tools/download_lanl.sh                              # prompts for the email if unset
   tools/download_lanl.sh -h | --help
 
-Configured via env vars:
-  EMAIL  (required)  Address submitted to the LANL fence.
-  USAGE  (optional)  Intended-use string. Default: a seerflow-eval note.
-  FILES  (optional)  Space-separated members. Default: "auth proc flows redteam".
-                     The harness ignores dns; add it only if you need it.
-  DEST   (optional)  Output directory. Default: "data/lanl".
+Options (flags override env vars of the same name):
+  --email <addr>   Address submitted to the LANL fence. Prompted if unset.
+  --usage <text>   Intended-use string. Default: a seerflow-eval note.
+  --files <list>   Space-separated members. Default: "auth proc flows dns redteam"
+                   (all). The harness ignores dns — drop it to save 177 MB.
+  --dest  <dir>    Output directory. Default: "data/lanl".
+  -h, --help       Show this help and exit.
 
 The dataset sits behind a self-service token gate: this submits email+usage to
 GET /data-fence/token, then downloads /data-fence/<token>/cyber1/<file>.txt.gz
@@ -57,24 +65,34 @@ and decompresses each into <DEST>/<file>.csv. redteam is the ground truth
 EOF
 }
 
-case "${1:-}" in
-  -h | --help) usage; exit 0 ;;
-  "") ;;
-  *)
-    echo "error: unknown argument '$1' (configure via env vars; see -h)" >&2
-    exit 2
-    ;;
-esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --email) EMAIL="${2:-}"; shift 2 || shift ;;
+    --email=*) EMAIL="${1#*=}"; shift ;;
+    --usage) USAGE="${2:-}"; shift 2 || shift ;;
+    --usage=*) USAGE="${1#*=}"; shift ;;
+    --files) FILES="${2:-}"; shift 2 || shift ;;
+    --files=*) FILES="${1#*=}"; shift ;;
+    --dest) DEST="${2:-}"; shift 2 || shift ;;
+    --dest=*) DEST="${1#*=}"; shift ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      echo "error: unknown argument '$1' (see -h)" >&2
+      exit 2
+      ;;
+  esac
+done
 
-BASE="https://csr.lanl.gov"
-EMAIL="${EMAIL:-}"
-USAGE="${USAGE:-Evaluating Seerflow streaming log-anomaly detection}"
-FILES="${FILES:-auth proc flows redteam}"
-DEST="${DEST:-data/lanl}"
-
+# Email is required. Prompt for it interactively when neither --email nor the
+# EMAIL env var supplied one; fail clearly if there's no terminal to ask.
 if [[ -z "$EMAIL" ]]; then
-  echo "error: set EMAIL (e.g. EMAIL=you@example.com $0), or -h for help" >&2
-  exit 2
+  if [[ -t 0 ]]; then
+    read -rp "LANL fence email: " EMAIL || true
+  fi
+  if [[ -z "$EMAIL" ]]; then
+    echo "error: email required — pass --email <addr>, set EMAIL, or run interactively" >&2
+    exit 2
+  fi
 fi
 
 mint_token() {

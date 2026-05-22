@@ -15,7 +15,7 @@ catalog of additional tests that build confidence the system really works.
 > **TL;DR**
 > - **Smoke test (no download):** `uv run python -m seerflow validate tests/fixtures/lanl`
 > - **Combined scorecard:** `uv run python -m seerflow benchmark --scorecard`
-> - **Real accuracy:** download the full dataset via `EMAIL=… tools/download_lanl.sh` (LANL's self-service token gate), then point `validate` at it; use the streaming API for billion-event scale.
+> - **Real accuracy:** download the full dataset via `tools/download_lanl.sh --email you@example.com` (LANL's self-service token gate), then point `validate` at it; use the streaming API for billion-event scale.
 
 ---
 
@@ -198,19 +198,21 @@ reverse-engineered from the page's `fence.js`:
 decompresses to the layout `validate` reads):
 
 ```bash
-tools/download_lanl.sh -h                       # options
-EMAIL="you@example.com" tools/download_lanl.sh   # all 4 members → data/lanl/
-# or pick members / output dir:
-EMAIL=... FILES="auth redteam" DEST=data/lanl tools/download_lanl.sh
+tools/download_lanl.sh -h                                  # options
+tools/download_lanl.sh --email you@example.com             # all members → data/lanl/
+tools/download_lanl.sh                                     # prompts for the email if omitted
+# pick members / output dir (flags or env vars):
+tools/download_lanl.sh --email you@example.com --files "auth redteam" --dest data/lanl
 ```
 
 It prints `[i/N] downloading …` progress per member, skips members already
-present (safe to re-run), and re-mints a fresh token per file.
+present (safe to re-run), and re-mints a fresh token per file. Email can come
+from `--email`, the `EMAIL` env var, or the interactive prompt.
 
-**You do not need all five files.** The harness reads
-`auth/proc/flows/redteam`; it never reads `dns`, so the script skips it by
-default. Only `redteam` (the ground truth, 4.8 KB) is mandatory; `auth`
-(7.2 GB) carries most of the red-team signal; `proc`/`flows` add coverage.
+**It downloads all five members by default** — but the harness never reads
+`dns`, so you can drop it (`--files "auth proc flows redteam"`) to save 177 MB.
+Only `redteam` (the ground truth, 4.8 KB) is mandatory; `auth` (7.2 GB) carries
+most of the red-team signal; `proc`/`flows` add coverage.
 
 | File | Size | Need it? |
 |------|------|----------|
@@ -218,7 +220,7 @@ default. Only `redteam` (the ground truth, 4.8 KB) is mandatory; `auth`
 | `auth` | 7.2 GB | **Essential** for real numbers |
 | `proc` | 2.2 GB | Optional (execution signal) |
 | `flows` | 1.1 GB | Optional (network / c2-beaconing) |
-| `dns` | 177 MB | **Skip** — harness ignores it |
+| `dns` | 177 MB | Downloaded by default but **unused** — harness ignores it; drop via `--files` |
 
 The token embeds a timestamp and expires; the script re-mints one per member
 (a single member that outlives its token 403s mid-stream — re-run, completed
