@@ -198,10 +198,14 @@ reverse-engineered from the page's `fence.js`:
 decompresses to the layout `validate` reads):
 
 ```bash
-EMAIL="you@example.com" tools/download_lanl.sh
+tools/download_lanl.sh -h                       # options
+EMAIL="you@example.com" tools/download_lanl.sh   # all 4 members → data/lanl/
 # or pick members / output dir:
 EMAIL=... FILES="auth redteam" DEST=data/lanl tools/download_lanl.sh
 ```
+
+It prints `[i/N] downloading …` progress per member, skips members already
+present (safe to re-run), and re-mints a fresh token per file.
 
 **You do not need all five files.** The harness reads
 `auth/proc/flows/redteam`; it never reads `dns`, so the script skips it by
