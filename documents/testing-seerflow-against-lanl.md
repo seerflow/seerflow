@@ -15,7 +15,7 @@ catalog of additional tests that build confidence the system really works.
 > **TL;DR**
 > - **Smoke test (no download):** `uv run python -m seerflow validate tests/fixtures/lanl`
 > - **Combined scorecard:** `uv run python -m seerflow benchmark --scorecard`
-> - **Real accuracy:** request the full dataset from LANL (form-gated — no direct download), decompress to a directory of `*.csv`, then point `validate` at it; use the streaming API for billion-event scale.
+> - **Real accuracy:** download the full dataset via `EMAIL=… tools/download_lanl.sh` (LANL's self-service token gate), then point `validate` at it; use the streaming API for billion-event scale.
 
 ---
 
@@ -183,27 +183,52 @@ absolute SLO.)
 The full dataset is the real benchmark: **~1.6 billion events** across four
 files, sourced from <https://csr.lanl.gov/data/cyber1/>.
 
-### 4.1 Get the data (form-gated)
+### 4.1 Get the data (self-service token gate)
 
-> **⚠️ There is no direct download URL.** LANL gates the dataset behind a
-> request form — the page at <https://csr.lanl.gov/data/cyber1/> asks you to
-> submit your email and intended use before access is granted. The
-> `seerflow.lanl.fetch` tool's hardcoded `*.txt.gz` URLs therefore **404**
-> against the public site, and LANL publishes no checksum manifest. `fetch`
-> is only useful if you host your own checksummed internal mirror (see §4.1b).
+LANL puts the files behind a soft "fence", **not** a manual approval and
+**not** a plain `*.txt.gz` link (which is why `seerflow.lanl.fetch`'s
+hardcoded `/data/cyber1/*.txt.gz` URLs return **404**). The real mechanism,
+reverse-engineered from the page's `fence.js`:
 
-**Recommended flow — request, decompress, point `validate` at the CSVs:**
+1. Submit email + intended-use → `GET /data-fence/token?email=…&usage=…`
+   returns a short-lived signed token (`<timestamp>/<sig>`) **immediately**.
+2. Download from `https://csr.lanl.gov/data-fence/<token>/cyber1/<file>.txt.gz`.
 
-1. Submit the form at <https://csr.lanl.gov/data/cyber1/> (email + intended
-   use). LANL grants access to the files.
-2. Download `auth.txt.gz`, `proc.txt.gz`, `flows.txt.gz`, `redteam.txt.gz`
-   (and optionally `dns.txt.gz`).
-3. Decompress into the layout the validator reads (one directory, `*.csv`):
-   ```bash
-   mkdir -p data/lanl
-   for f in auth proc flows redteam; do gunzip -c "$f.txt.gz" > "data/lanl/$f.csv"; done
-   ```
-4. Run directly — no `fetch` step needed (continue to §4.2 / §4.3).
+**Recommended — use the helper script** (does the handshake, downloads, and
+decompresses to the layout `validate` reads):
+
+```bash
+EMAIL="you@example.com" tools/download_lanl.sh
+# or pick members / output dir:
+EMAIL=... FILES="auth redteam" DEST=data/lanl tools/download_lanl.sh
+```
+
+**You do not need all five files.** The harness reads
+`auth/proc/flows/redteam`; it never reads `dns`, so the script skips it by
+default. Only `redteam` (the ground truth, 4.8 KB) is mandatory; `auth`
+(7.2 GB) carries most of the red-team signal; `proc`/`flows` add coverage.
+
+| File | Size | Need it? |
+|------|------|----------|
+| `redteam` | 4.8 KB | **Mandatory** — ground truth |
+| `auth` | 7.2 GB | **Essential** for real numbers |
+| `proc` | 2.2 GB | Optional (execution signal) |
+| `flows` | 1.1 GB | Optional (network / c2-beaconing) |
+| `dns` | 177 MB | **Skip** — harness ignores it |
+
+The token embeds a timestamp and expires; the script re-mints one per member
+(a single member that outlives its token 403s mid-stream — re-run, completed
+members are skipped). Doing it by hand instead:
+
+```bash
+TOKEN=$(curl -sS -G https://csr.lanl.gov/data-fence/token \
+  --data-urlencode "email=you@example.com" --data-urlencode "usage=eval")
+mkdir -p data/lanl
+for f in auth proc flows redteam; do
+  curl -fSL "https://csr.lanl.gov/data-fence/$TOKEN/cyber1/$f.txt.gz" -o "data/lanl/$f.txt.gz"
+  gunzip -kc "data/lanl/$f.txt.gz" > "data/lanl/$f.csv"
+done
+```
 
 #### 4.1b Optional: `fetch` from an internal mirror
 
@@ -380,7 +405,8 @@ real confidence:
 |------|----------|
 | Accuracy harness | `src/seerflow/lanl/validator.py` (`run_validation`, `run_validation_async`) |
 | Streaming harness | `src/seerflow/lanl/streaming.py` (`run_streaming_validation`) |
-| Dataset fetcher | `src/seerflow/lanl/fetch.py` |
+| Download helper (token gate) | `tools/download_lanl.sh` |
+| Dataset fetcher (mirror-only) | `src/seerflow/lanl/fetch.py` |
 | CSV parser | `src/seerflow/lanl/parser.py` |
 | `validate` CLI | `src/seerflow/validate_cmd.py` |
 | `benchmark` / scorecard CLI | `src/seerflow/benchmark_cmd.py`, `src/seerflow/launch/benchmark.py` |
