@@ -1,4 +1,3 @@
-import { cn } from "@/lib/utils";
 import { Stat } from "@/components/ui/primitives";
 
 interface CoverageSummaryProps {
@@ -35,10 +34,10 @@ export function CoverageSummary({
       {stats.map((s, i) => (
         <div
           key={s.label}
-          className={cn("px-[18px] py-[14px]", i < 3 && "border-r")}
+          className="px-[18px] py-[14px]"
           style={{
             background: "var(--surface)",
-            borderColor: "var(--line)",
+            borderRight: i < 3 ? "1px solid var(--line)" : undefined,
           }}
         >
           <Stat label={s.label} value={s.value} />

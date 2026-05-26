@@ -1,4 +1,4 @@
-import type React from "react";
+import type { CSSProperties } from "react";
 
 export type Intensity = "none" | "min" | "low" | "warn" | "crit";
 
@@ -15,7 +15,7 @@ export function intensityLevel(
   return "none";
 }
 
-export const INTENSITY_STYLE: Record<Intensity, React.CSSProperties> = {
+export const INTENSITY_STYLE: Record<Intensity, CSSProperties> = {
   none: {
     background: "var(--surface-2)",
     border: "1px solid var(--line)",
