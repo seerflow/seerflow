@@ -3,36 +3,85 @@ import { render, screen } from "@testing-library/react";
 import { CoverageSummary } from "./CoverageSummary";
 
 describe("CoverageSummary", () => {
-  it("renders coverage counts", () => {
+  it("renders detectedTactics stat", () => {
     render(
       <CoverageSummary
-        totalTechniques={200}
-        coveredCount={45}
-        detectedCount={12}
-        totalRules={60}
-        totalAlerts={150}
-        windowSince="2026-03-16T00:00:00+00:00"
-        windowUntil="2026-04-15T00:00:00+00:00"
+        detectedTactics={7}
+        criticalHeat={2}
+        ruleCoveragePct={74}
+        mlOnlyDetections={11}
       />,
     );
-    expect(screen.getByText(/45/)).toBeInTheDocument();
-    expect(screen.getByText(/200/)).toBeInTheDocument();
-    expect(screen.getByText(/12/)).toBeInTheDocument();
+    expect(screen.getByText(/detected tactics/i)).toBeInTheDocument();
+    expect(screen.getByText("7")).toBeInTheDocument();
   });
 
-  it("renders zero state", () => {
+  it("renders criticalHeat stat", () => {
     render(
       <CoverageSummary
-        totalTechniques={200}
-        coveredCount={0}
-        detectedCount={0}
-        totalRules={0}
-        totalAlerts={0}
-        windowSince="2026-03-16T00:00:00+00:00"
-        windowUntil="2026-04-15T00:00:00+00:00"
+        detectedTactics={7}
+        criticalHeat={2}
+        ruleCoveragePct={74}
+        mlOnlyDetections={11}
       />,
     );
-    const zeros = screen.getAllByText(/0/);
-    expect(zeros.length).toBeGreaterThan(0);
+    expect(screen.getByText(/critical heat/i)).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("renders ruleCoveragePct stat with % suffix", () => {
+    render(
+      <CoverageSummary
+        detectedTactics={7}
+        criticalHeat={2}
+        ruleCoveragePct={74}
+        mlOnlyDetections={11}
+      />,
+    );
+    expect(screen.getByText(/rule coverage/i)).toBeInTheDocument();
+    expect(screen.getByText("74%")).toBeInTheDocument();
+  });
+
+  it("renders mlOnlyDetections stat", () => {
+    render(
+      <CoverageSummary
+        detectedTactics={7}
+        criticalHeat={2}
+        ruleCoveragePct={74}
+        mlOnlyDetections={11}
+      />,
+    );
+    expect(screen.getByText(/ml-only detections/i)).toBeInTheDocument();
+    expect(screen.getByText("11")).toBeInTheDocument();
+  });
+
+  it("renders all 4 stats in a grid container", () => {
+    const { container } = render(
+      <CoverageSummary
+        detectedTactics={7}
+        criticalHeat={2}
+        ruleCoveragePct={74}
+        mlOnlyDetections={11}
+      />,
+    );
+    const summary = container.querySelector('[data-testid="coverage-summary"]');
+    expect(summary).not.toBeNull();
+    // All 4 stat labels present
+    expect(screen.getByText(/detected tactics/i)).toBeInTheDocument();
+    expect(screen.getByText(/critical heat/i)).toBeInTheDocument();
+    expect(screen.getByText(/rule coverage/i)).toBeInTheDocument();
+    expect(screen.getByText(/ml-only detections/i)).toBeInTheDocument();
+  });
+
+  it("renders zero state without errors", () => {
+    render(
+      <CoverageSummary
+        detectedTactics={0}
+        criticalHeat={0}
+        ruleCoveragePct={0}
+        mlOnlyDetections={0}
+      />,
+    );
+    expect(screen.getByText("0%")).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { intensityLevel, INTENSITY_STYLE } from "./intensity";
 
 export interface TechniqueCellProps {
   tactic: string;
@@ -18,12 +19,6 @@ function status(covered: boolean, detected: boolean): "Detected" | "Covered" | "
   return "Gap";
 }
 
-function cellClass(covered: boolean, detected: boolean): string {
-  if (covered && detected) return "cell-detected";
-  if (covered) return "cell-covered";
-  return "cell-gap";
-}
-
 export function TechniqueCell({
   tactic,
   technique,
@@ -36,7 +31,7 @@ export function TechniqueCell({
   onOpen,
 }: TechniqueCellProps) {
   const [hovered, setHovered] = useState(false);
-  const cls = cellClass(covered, detected);
+  const intensity = intensityLevel(covered, detected, ruleCount, alertCount);
   const title = `${technique} — ${name}`;
   const label = `${technique} ${name} — ${status(covered, detected)}, ${ruleCount} rules, ${alertCount} alerts`;
 
@@ -50,11 +45,13 @@ export function TechniqueCell({
       type="button"
       aria-label={label}
       title={title}
+      data-intensity={intensity}
       onClick={fire}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onBlur={() => setHovered(false)}
-      className={`${cls} relative h-6 w-6 cursor-pointer rounded-sm border-0 bg-transparent p-0 m-0 appearance-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
+      style={INTENSITY_STYLE[intensity]}
+      className="relative h-7 w-full cursor-pointer rounded-sm border-0 p-0 m-0 appearance-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       {hovered && (
         <div
