@@ -40,13 +40,13 @@ describe("MiniVolume", () => {
     expect(container.firstChild).toHaveClass("sf-mini-vol");
   });
 
-  it("accepts optional spike threshold prop", () => {
+  it("accepts optional normalColor prop", () => {
     expect(() =>
       render(
         <MiniVolume
           timestamps={[1, 2, 3]}
           values={[10, 200, 5]}
-          spikeThreshold={100}
+          normalColor="var(--accent)"
         />,
       ),
     ).not.toThrow();

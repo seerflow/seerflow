@@ -136,6 +136,10 @@ interface UseStreamingSeriesResult<T> {
  * the buffer.  State holds only the latest snapshot so React can schedule
  * a re-render.
  *
+ * NOTE: `capacity` is read once on mount.  If `options.capacity` changes
+ * between renders the buffer is NOT resized — set a stable value (e.g.
+ * a module constant) to avoid confusion.
+ *
  * @example
  *   const { data, push } = useStreamingSeries({ capacity: 60 })
  *   // on WS message:
