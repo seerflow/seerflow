@@ -155,6 +155,22 @@ export const EntitiesScreen: React.FC = () => {
     navigateToEntity(id);
   }, []);
 
+  const setRange = useEntityStore((s) => s.setRange);
+  const handleTimeWindowChange = useCallback(
+    (window: string) => {
+      // Map graph time-window chip labels to entity store TimelineRange values
+      const MAP: Record<string, import("@/lib/types").TimelineRange> = {
+        "15m": "1h",   // closest store range is 1h (no 15m store range)
+        "1h":  "1h",
+        "24h": "24h",
+        "7d":  "7d",
+      };
+      const range = MAP[window];
+      if (range) void setRange(range);
+    },
+    [setRange],
+  );
+
   return (
     <div
       data-testid="entities-screen"
@@ -166,6 +182,7 @@ export const EntitiesScreen: React.FC = () => {
         selectedUuid={selectedUuid}
         onNodeSelect={handleNodeSelect}
         onNodeDblClick={handleNodeDblClick}
+        onTimeWindowChange={handleTimeWindowChange}
         events={events}
         related={related}
         className="flex-1 min-h-0"

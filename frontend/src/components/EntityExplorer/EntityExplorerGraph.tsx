@@ -45,6 +45,8 @@ export interface EntityExplorerGraphProps {
   selectedUuid: string | null;
   onNodeSelect: (id: string | null) => void;
   onNodeDblClick: (id: string) => void;
+  /** Called when the user changes the time-window chip — parent should call store.setRange */
+  onTimeWindowChange?: (window: string) => void;
   events: EntityEvent[];
   related: EntityRelation[];
   className?: string;
@@ -57,9 +59,12 @@ export const EntityExplorerGraph: React.FC<EntityExplorerGraphProps> = ({
   edges,
   selectedUuid,
   onNodeSelect,
-  // onNodeDblClick is exposed in props for EntitiesScreen to wire double-click
-  // navigation; the canvas fires it via the parent handler, not directly here.
+  // onNodeDblClick wiring: EntityGraphCanvas (S-319) has no onNodeDblClick prop.
+  // Double-click neighborhood navigation is deferred pending a canvas prop addition
+  // in a follow-up story (see deferred_issues in S-322 PR). The prop is kept in the
+  // interface so callers can wire it when the canvas gains support.
   onNodeDblClick: _onNodeDblClick, // eslint-disable-line @typescript-eslint/no-unused-vars
+  onTimeWindowChange,
   events,
   related,
   className,
@@ -215,7 +220,10 @@ export const EntityExplorerGraph: React.FC<EntityExplorerGraphProps> = ({
                   key={w}
                   label={w}
                   active={timeWindow === w}
-                  onClick={() => setTimeWindow(w)}
+                  onClick={() => {
+                    setTimeWindow(w);
+                    onTimeWindowChange?.(w);
+                  }}
                 />
               ))}
             </FilterRow>
@@ -308,9 +316,11 @@ export const EntityExplorerGraph: React.FC<EntityExplorerGraphProps> = ({
         data-testid="graph-right-inspector"
         className="border-l border-line overflow-auto"
       >
+        {/* Pass all nodes (not just visibleNodes) so the inspector keeps showing
+            the selected entity's data even if it gets filtered out by type/risk */}
         <EntityInspector
           selectedUuid={selectedUuid}
-          nodes={visibleNodes}
+          nodes={nodes}
           events={events}
           related={related}
         />
