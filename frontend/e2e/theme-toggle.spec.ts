@@ -9,12 +9,9 @@ test.skip(process.env.RUN_E2E !== "1", "set RUN_E2E=1 to run");
 test.setTimeout(30_000);
 
 test.beforeEach(async ({ page }) => {
-  // Clear localStorage so we start from clean state (dark default)
-  await page.addInitScript(() => {
-    localStorage.removeItem("seerflow-theme");
-    // Also remove old key
-    localStorage.removeItem("seerflow.theme");
-  });
+  // Each test runs in a fresh browser context so localStorage is empty by
+  // default — no explicit cleanup needed. Stubs are registered before goto so
+  // they intercept the initial load.
   await stubRestAlerts(page);
   await stubWebSocket(page);
   await page.goto("/");
