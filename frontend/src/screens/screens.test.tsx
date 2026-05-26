@@ -19,6 +19,12 @@ vi.mock("@/components/DashboardGrid/ResetLayoutButton", () => ({
 vi.mock("@/components/EntityExplorer/EntityDetail", () => ({
   EntityDetail: () => <div data-testid="entity-detail">EntityDetail</div>,
 }));
+// S-322: mock the new EntityExplorerGraph to keep screen smoke test fast
+vi.mock("@/components/EntityExplorer/EntityExplorerGraph", () => ({
+  EntityExplorerGraph: () => (
+    <div data-testid="entity-explorer-graph">EntityExplorerGraph</div>
+  ),
+}));
 vi.mock("@/components/EntityExplorer/EntitySearch", () => ({
   EntitySearch: () => <div data-testid="entity-search">EntitySearch</div>,
 }));
@@ -88,26 +94,16 @@ describe("EventsScreen", () => {
 });
 
 describe("EntitiesScreen", () => {
-  it("mounts and renders EntityDetail", () => {
+  it("mounts and renders EntityExplorerGraph (S-322)", () => {
     render(<EntitiesScreen />);
-    expect(screen.getByTestId("entity-detail")).toBeInTheDocument();
+    expect(screen.getByTestId("entity-explorer-graph")).toBeInTheDocument();
   });
 
-  it("calls restoreFromHash on mount when hash has entity= param", () => {
-    const restoreFromHash = vi.fn().mockResolvedValue(undefined);
-    const clearSelection = vi.fn();
-    // Temporarily inject entity store mock for this test
-    vi.doMock("@/stores/entity", () => ({
-      useEntityStore: (sel: (s: { restoreFromHash: typeof restoreFromHash; clearSelection: typeof clearSelection }) => unknown) =>
-        sel({ restoreFromHash, clearSelection }),
-    }));
-
+  it("mounts without throwing when hash has entity= param", () => {
     window.history.replaceState(null, "", "/#entity=11111111-2222-3333-4444-555555555555");
-    // The existing mock EntityDetail renders — we just check mounts cleanly
     render(<EntitiesScreen />);
-    expect(screen.getByTestId("entity-detail")).toBeInTheDocument();
+    expect(screen.getByTestId("entity-explorer-graph")).toBeInTheDocument();
     window.history.replaceState(null, "", "/");
-    vi.doUnmock("@/stores/entity");
   });
 });
 
