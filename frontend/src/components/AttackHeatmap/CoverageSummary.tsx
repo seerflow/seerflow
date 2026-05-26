@@ -1,58 +1,49 @@
+import { cn } from "@/lib/utils";
+import { Stat } from "@/components/ui/primitives";
+
 interface CoverageSummaryProps {
-  totalTechniques: number;
-  coveredCount: number;
-  detectedCount: number;
-  totalRules: number;
-  totalAlerts: number;
-  windowSince: string;
-  windowUntil: string;
+  detectedTactics: number;
+  criticalHeat: number;
+  ruleCoveragePct: number;
+  mlOnlyDetections: number;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+interface StatEntry {
+  label: string;
+  value: string;
 }
 
 export function CoverageSummary({
-  totalTechniques,
-  coveredCount,
-  detectedCount,
-  totalRules,
-  totalAlerts,
-  windowSince,
-  windowUntil,
+  detectedTactics,
+  criticalHeat,
+  ruleCoveragePct,
+  mlOnlyDetections,
 }: CoverageSummaryProps) {
-  const pct =
-    totalTechniques > 0
-      ? Math.round((coveredCount / totalTechniques) * 100)
-      : 0;
+  const stats: StatEntry[] = [
+    { label: "detected tactics", value: String(detectedTactics) },
+    { label: "critical heat", value: String(criticalHeat) },
+    { label: "rule coverage", value: `${ruleCoveragePct}%` },
+    { label: "ml-only detections", value: String(mlOnlyDetections) },
+  ];
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-6 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-      <div>
-        <span className="font-semibold">{coveredCount}</span>
-        <span className="text-zinc-500">
-          /{totalTechniques} techniques covered ({pct}%)
-        </span>
-      </div>
-      <div>
-        <span className="font-semibold">{detectedCount}</span>
-        <span className="text-zinc-500"> detected (alerts fired)</span>
-      </div>
-      <div>
-        <span className="font-semibold">{totalRules}</span>
-        <span className="text-zinc-500"> rule mappings</span>
-      </div>
-      <div>
-        <span className="font-semibold">{totalAlerts}</span>
-        <span className="text-zinc-500"> alerts in window</span>
-      </div>
-      <div className="ml-auto text-zinc-400">
-        {formatDate(windowSince)} — {formatDate(windowUntil)}
-      </div>
+    <div
+      data-testid="coverage-summary"
+      className="grid grid-cols-4 mt-7"
+      style={{ border: "1px solid var(--line)" }}
+    >
+      {stats.map((s, i) => (
+        <div
+          key={s.label}
+          className={cn("px-[18px] py-[14px]", i < 3 && "border-r")}
+          style={{
+            background: "var(--surface)",
+            borderColor: "var(--line)",
+          }}
+        >
+          <Stat label={s.label} value={s.value} />
+        </div>
+      ))}
     </div>
   );
 }

@@ -97,6 +97,35 @@ describe("AttackHeatmap", () => {
     expect(outer.className).toMatch(/\bmin-h-0\b/);
     expect(outer.className).not.toMatch(/min-h-\[/);
   });
+
+  // ── New header band tests (RED until Task 8 impl) ──
+
+  it("renders 'Coverage heatmap' heading when data loaded", () => {
+    mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
+    render(<AttackHeatmap />);
+    expect(screen.getByText("Coverage heatmap")).toBeInTheDocument();
+  });
+
+  it("renders intensity legend with 5 swatches when data loaded", () => {
+    mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
+    const { container } = render(<AttackHeatmap />);
+    const swatches = container.querySelectorAll("[data-intensity-swatch]");
+    expect(swatches).toHaveLength(5);
+  });
+
+  it("renders tactic count in subtitle when data loaded", () => {
+    mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
+    render(<AttackHeatmap />);
+    // Catalog has 14 tactics; use regex to stay robust
+    expect(screen.getByText(/\d+ tactics/)).toBeInTheDocument();
+  });
+
+  it("renders sigma rule count in subtitle", () => {
+    mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
+    render(<AttackHeatmap />);
+    // mockCoverageData has total_rules_with_attack_tags: 2
+    expect(screen.getByText(/2 sigma rules/)).toBeInTheDocument();
+  });
 });
 
 describe("AttackHeatmap click-to-drill", () => {
