@@ -50,7 +50,9 @@ describe("App shell", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
     localStorage.clear();
+    // Clean up both old (data-theme) and new (.sf-light) theme mechanisms.
     document.documentElement.removeAttribute("data-theme");
+    document.documentElement.classList.remove("sf-light");
     // Zustand stores are module-level singletons; reset each test so the
     // layout-grid + theme start from defaults.
     useThemeStore.setState({ theme: "light" });
@@ -66,11 +68,14 @@ describe("App shell", () => {
   });
 
   it("swaps the wordmark when the theme flips", () => {
+    // Start in light (beforeEach seeds theme="light")
+    document.documentElement.classList.add("sf-light");
     render(<App />);
     const lightSrc = (
       screen.getByRole("img", { name: /seerflow/i }) as HTMLImageElement
     ).src;
-    fireEvent.click(screen.getByRole("button", { name: /toggle theme/i }));
+    // Click "Dark" button in the ThemeToggle pill
+    fireEvent.click(screen.getByTitle("Dark"));
     const darkSrc = (
       screen.getByRole("img", { name: /seerflow/i }) as HTMLImageElement
     ).src;
@@ -82,13 +87,16 @@ describe("App shell", () => {
     expect(container.querySelector("main")).toBeInTheDocument();
   });
 
-  it("theme toggle button flips data-theme", () => {
+  it("ThemeToggle dark/light buttons flip .sf-light class on <html>", () => {
+    // Start in light (beforeEach seeds theme="light")
+    document.documentElement.classList.add("sf-light");
     render(<App />);
-    const btn = screen.getByRole("button", { name: /toggle theme/i });
-    fireEvent.click(btn);
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    fireEvent.click(btn);
-    expect(document.documentElement.dataset.theme).toBe("light");
+    // light → dark: sf-light removed
+    fireEvent.click(screen.getByTitle("Dark"));
+    expect(document.documentElement.classList.contains("sf-light")).toBe(false);
+    // dark → light: sf-light added
+    fireEvent.click(screen.getByTitle("Light"));
+    expect(document.documentElement.classList.contains("sf-light")).toBe(true);
   });
 
   it("mounts AnomalyTimeline alongside AlertFeed", async () => {
@@ -102,6 +110,7 @@ describe("DisconnectedBanner dashboard mount", () => {
     vi.useFakeTimers();
     vi.stubGlobal("WebSocket", NoopWS as unknown as typeof WebSocket);
     localStorage.clear();
+    document.documentElement.classList.remove("sf-light");
     window.history.replaceState(null, "", "/");
     useThemeStore.setState({ theme: "light" });
     useEntityStore.setState(useEntityStore.getInitialState());

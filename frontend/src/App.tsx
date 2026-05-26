@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Moon, Sun, Shield, BookOpen } from "lucide-react";
+import { Shield, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useThemeStore } from "@/stores/theme";
+import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import wordmarkLight from "@/assets/wordmark-light.svg";
 import wordmarkDark from "@/assets/wordmark-dark.svg";
 import { EntitySearch } from "@/components/EntityExplorer/EntitySearch";
@@ -19,8 +20,6 @@ import { Toaster } from "@/components/ui/sonner";
 
 export default function App() {
   const theme = useThemeStore((s) => s.theme);
-  const toggle = useThemeStore((s) => s.toggle);
-  const Icon = theme === "dark" ? Sun : Moon;
   const wordmark = theme === "dark" ? wordmarkDark : wordmarkLight;
 
   const [hash, setHash] = useState(() => window.location.hash);
@@ -69,9 +68,7 @@ export default function App() {
           <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" title="ATT&CK coverage — MITRE technique heatmap" onClick={() => { window.location.hash = "coverage"; }}>
             <Shield className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" aria-label="Toggle theme" title="Toggle theme" onClick={toggle}>
-            <Icon className="h-5 w-5" />
-          </Button>
+          <ThemeToggle />
         </header>
         <DisconnectedBanner />
         <div className="flex-1 min-h-0">
