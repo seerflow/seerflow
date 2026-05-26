@@ -79,15 +79,12 @@ export const AppShell: React.FC = () => {
     setRouteMatch(match);
 
     // If the legacy hash format resolves to a new route, normalise it so
-    // future navigations use the canonical form (avoids double-normalise loop
-    // because we only rewrite if the hash actually differs).
+    // future navigations use the canonical form. Only rewrite non-empty hashes
+    // (avoids double-normalise loop on empty / root load).
     const canonical = serializeHash(match);
-    const current = window.location.hash || "#";
-    if (current !== canonical && current !== "#" + canonical.slice(1)) {
-      // Only normalise non-empty legacy hashes (coverage, sigma-rules, entity=)
-      if (current !== "#" && current !== "") {
-        window.history.replaceState(null, "", canonical);
-      }
+    const current = window.location.hash;
+    if (current && current !== canonical) {
+      window.history.replaceState(null, "", canonical);
     }
   }, []);
 

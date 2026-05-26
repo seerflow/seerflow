@@ -97,6 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeRoute, onNavigate }) => 
                     key={route}
                     data-testid={`nav-item-${route}`}
                     data-active={isActive ? "true" : undefined}
+                    aria-current={isActive ? "page" : undefined}
                     role="button"
                     tabIndex={0}
                     onClick={() => onNavigate(route)}

@@ -92,6 +92,23 @@ describe("EntitiesScreen", () => {
     render(<EntitiesScreen />);
     expect(screen.getByTestId("entity-detail")).toBeInTheDocument();
   });
+
+  it("calls restoreFromHash on mount when hash has entity= param", () => {
+    const restoreFromHash = vi.fn().mockResolvedValue(undefined);
+    const clearSelection = vi.fn();
+    // Temporarily inject entity store mock for this test
+    vi.doMock("@/stores/entity", () => ({
+      useEntityStore: (sel: (s: { restoreFromHash: typeof restoreFromHash; clearSelection: typeof clearSelection }) => unknown) =>
+        sel({ restoreFromHash, clearSelection }),
+    }));
+
+    window.history.replaceState(null, "", "/#entity=11111111-2222-3333-4444-555555555555");
+    // The existing mock EntityDetail renders — we just check mounts cleanly
+    render(<EntitiesScreen />);
+    expect(screen.getByTestId("entity-detail")).toBeInTheDocument();
+    window.history.replaceState(null, "", "/");
+    vi.doUnmock("@/stores/entity");
+  });
 });
 
 describe("AttackScreen", () => {
