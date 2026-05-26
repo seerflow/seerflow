@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { useThemeStore } from "@/stores/theme";
 
 export interface ThemeToggleProps {
@@ -7,22 +7,14 @@ export interface ThemeToggleProps {
 
 /**
  * Dark/light theme toggle pill.
- * Syncs with the global seerflow-theme event so multiple instances stay consistent.
+ * Derives state directly from the zustand theme store (single source of truth).
+ * The store dispatches `seerflow-theme` events and manages localStorage —
+ * no additional local state or event listener needed here.
  * Uses the .sf-light class on <html> (dark default per brand guidelines §3.3).
  */
 export const ThemeToggle: React.FC<ThemeToggleProps> = ({ size = "sm" }) => {
   const { theme, toggle } = useThemeStore();
-  const [light, setLight] = useState(theme === "light");
-
-  useEffect(() => {
-    setLight(theme === "light");
-  }, [theme]);
-
-  useEffect(() => {
-    const sync = () => setLight(document.documentElement.classList.contains("sf-light"));
-    window.addEventListener("seerflow-theme", sync);
-    return () => window.removeEventListener("seerflow-theme", sync);
-  }, []);
+  const light = theme === "light";
 
   const dim =
     size === "sm"
@@ -48,6 +40,8 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({ size = "sm" }) => {
       <button
         onClick={() => switchTo(false)}
         title="Dark"
+        aria-label="Switch to dark theme"
+        aria-pressed={!light}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -84,6 +78,8 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({ size = "sm" }) => {
       <button
         onClick={() => switchTo(true)}
         title="Light"
+        aria-label="Switch to light theme"
+        aria-pressed={light}
         style={{
           display: "inline-flex",
           alignItems: "center",

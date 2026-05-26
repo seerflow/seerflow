@@ -20,7 +20,6 @@ import { Toaster } from "@/components/ui/sonner";
 
 export default function App() {
   const theme = useThemeStore((s) => s.theme);
-  const toggle = useThemeStore((s) => s.toggle);
   const wordmark = theme === "dark" ? wordmarkDark : wordmarkLight;
 
   const [hash, setHash] = useState(() => window.location.hash);
@@ -69,14 +68,6 @@ export default function App() {
           <Button variant="ghost" size="icon" aria-label="ATT&CK coverage" title="ATT&CK coverage — MITRE technique heatmap" onClick={() => { window.location.hash = "coverage"; }}>
             <Shield className="h-5 w-5" />
           </Button>
-          {/* Legacy toggle (aria-label for tests); new ThemeToggle pill adds Dark/Light buttons */}
-          <button
-            type="button"
-            aria-label="Toggle theme"
-            title="Toggle theme (legacy)"
-            onClick={toggle}
-            style={{ display: "none" }}
-          />
           <ThemeToggle />
         </header>
         <DisconnectedBanner />
