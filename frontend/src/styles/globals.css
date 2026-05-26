@@ -2,98 +2,214 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Seerflow design system — dark-first OKLCH palette.
+   Dark is :root default; .sf-light on <html> is the light override.
+   Based on docs/new_image/tokens.css (canonical).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 @layer base {
   :root {
-    /* Seerflow primary tokens (story-required) */
-    --bg: 0 0% 100%;
-    --fg: 222.2 84% 4.9%;
-    --muted: 210 40% 96.1%;
-    --accent: 210 40% 96.1%;
+    /* ── Ink palette ─────────────────────────────────────────────────────── */
+    --bg:         oklch(0.145 0.012 250);
+    --surface:    oklch(0.175 0.012 250);
+    --surface-2:  oklch(0.205 0.014 250);
+    --surface-3:  oklch(0.245 0.014 250);
+    --line:       oklch(0.275 0.012 250);
+    --line-2:     oklch(0.345 0.012 250);
+    --text:       oklch(0.965 0.005 250);
+    --text-2:     oklch(0.795 0.008 250);
+    --text-3:     oklch(0.620 0.010 250);
+    --mute:       oklch(0.500 0.010 250);
 
-    /* shadcn/ui compatibility tokens (HSL, no space-or-commas for bg/text utilities) */
-    --background: var(--bg);
-    --foreground: var(--fg);
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    /* ── Signature accent — Seerflow indigo (#5154b4) ────────────────────── */
+    --accent:     oklch(0.745 0.130 283);
+    --accent-2:   oklch(0.620 0.140 283);
+    --accent-ink: oklch(0.16  0.05  283);
 
-    /* Anomaly timeline chart (S-059) */
-    --color-chart-score: #3b82f6;
-    --color-chart-threshold: #ef4444;
-    --color-chart-alert: #f59e0b;
+    /* ── Semantic ────────────────────────────────────────────────────────── */
+    --warn:       oklch(0.815 0.155 80);
+    --crit:       oklch(0.725 0.195 25);
+    --info:       oklch(0.795 0.115 235);
+
+    /* ── Type ────────────────────────────────────────────────────────────── */
+    --font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    --font-mono:    'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+    /* ── Geometry ────────────────────────────────────────────────────────── */
+    --r-sm: 4px;
+    --r-md: 6px;
+    --r-lg: 10px;
+    --r-xl: 16px;
+
+    /* ── Density ─────────────────────────────────────────────────────────── */
+    --row: 36px;
+
+    /* ── shadcn compatibility bridge ─────────────────────────────────────── */
+    /* Map shadcn token names onto the new design tokens so components/ui/*   */
+    /* (Radix + CVA) restyle for free without touching their class strings.   */
+    --background:          var(--bg);
+    --foreground:          var(--text);
+    --card:                var(--surface);
+    --card-foreground:     var(--text);
+    --popover:             var(--surface-2);
+    --popover-foreground:  var(--text);
+    --primary:             var(--accent);
+    --primary-foreground:  var(--accent-ink);
+    --secondary:           var(--surface-2);
+    --secondary-foreground: var(--text-2);
+    --muted:               var(--surface-2);
+    --muted-foreground:    var(--text-3);
+    /* COLLISION RESOLVED: shadcn --accent = subtle hover surface.            */
+    /* Brand --accent = signature indigo. Reserve --accent for brand;         */
+    /* aliased shadcn hover surface uses --ui-accent → --surface-2.          */
+    --ui-accent:           var(--surface-2);
+    --ui-accent-foreground: var(--text-2);
+    --destructive:         var(--crit);
+    --destructive-foreground: var(--text);
+    --border:              var(--line);
+    --input:               var(--line);
+    --ring:                var(--accent);
+    --radius:              0.5rem;
+
+    /* ── Anomaly timeline chart ──────────────────────────────────────────── */
+    --color-chart-score:     var(--info);
+    --color-chart-threshold: var(--crit);
+    --color-chart-alert:     var(--warn);
+
+    color-scheme: dark;
+  }
+
+  /* ── Light flavor — .sf-light on <html> ───────────────────────────────── */
+  .sf-light, html.sf-light {
+    --bg:         oklch(0.985 0.003 95);
+    --surface:    oklch(0.965 0.004 95);
+    --surface-2:  oklch(0.935 0.005 95);
+    --surface-3:  oklch(0.905 0.006 95);
+    --line:       oklch(0.895 0.006 95);
+    --line-2:     oklch(0.815 0.008 95);
+    --text:       oklch(0.205 0.014 250);
+    --text-2:     oklch(0.405 0.012 250);
+    --text-3:     oklch(0.555 0.010 250);
+    --mute:       oklch(0.640 0.008 250);
+
+    --accent:     oklch(0.480 0.180 283);
+    --accent-2:   oklch(0.395 0.180 283);
+    --accent-ink: oklch(0.985 0.003 95);
+
+    --warn:       oklch(0.605 0.165 65);
+    --crit:       oklch(0.555 0.215 26);
+    --info:       oklch(0.555 0.150 235);
 
     color-scheme: light;
   }
 
-  [data-theme="dark"] {
-    /* Matches the dark wordmark background (#0e1c29). */
-    --bg: 209 49% 11%;
-    --fg: 210 40% 98%;
-    --muted: 209 35% 18%;
-    --accent: 209 35% 18%;
-
-    --background: var(--bg);
-    --foreground: var(--fg);
-    --card: 209 49% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 209 49% 11%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-
-    /* Anomaly timeline chart (S-059) */
-    --color-chart-score: #60a5fa;
-    --color-chart-threshold: #f87171;
-    --color-chart-alert: #fbbf24;
-
-    color-scheme: dark;
-  }
-}
-
-@layer base {
-  html,
-  body,
-  #root {
+  /* ── Root layout ─────────────────────────────────────────────────────── */
+  html, body, #root {
     height: 100%;
   }
 
   body {
-    @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-feature-settings: "ss01", "ss03", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Selection highlight ─────────────────────────────────────────────── */
+  ::selection {
+    background: color-mix(in oklch, var(--accent) 35%, transparent);
+    color: var(--text);
   }
 }
 
-/* ATT&CK heatmap cell states */
+/* ═══════════════════════════════════════════════════════════════════════════
+   Design-system utilities
+   ═══════════════════════════════════════════════════════════════════════════ */
 @layer utilities {
+  /* ── Mono + tabular helpers ──────────────────────────────────────────── */
+  .sf-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "zero", "ss01";
+  }
+
+  .sf-tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Hairline border helpers ─────────────────────────────────────────── */
+  .sf-hr  { border-color: var(--line); }
+  .sf-hr2 { border-color: var(--line-2); }
+
+  /* ── Type scale ──────────────────────────────────────────────────────── */
+  .text-display-xl {
+    font-size: 72px;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    font-family: var(--font-display);
+  }
+
+  .text-display {
+    font-size: 48px;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    font-family: var(--font-display);
+  }
+
+  .text-heading {
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    font-family: var(--font-display);
+  }
+
+  .text-lede {
+    font-size: 20px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    line-height: 1.4;
+    font-family: var(--font-display);
+  }
+
+  .text-body {
+    font-size: 15px;
+    font-weight: 400;
+    line-height: 1.5;
+    font-family: var(--font-display);
+  }
+
+  .text-mono-meta {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+    font-feature-settings: "zero", "ss01";
+  }
+
+  .text-mono-code {
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.5;
+    font-family: var(--font-mono);
+    font-feature-settings: "zero", "ss01";
+  }
+
+  /* ── ATT&CK heatmap cell states (token-based, no dark: prefix) ───────── */
   .cell-detected {
-    @apply bg-blue-600 dark:bg-blue-500;
+    background: color-mix(in oklch, var(--accent) 85%, transparent);
+    color: var(--accent-ink);
   }
+
   .cell-covered {
-    @apply bg-blue-200 dark:bg-blue-800;
+    background: color-mix(in oklch, var(--accent) 30%, var(--surface-2));
   }
+
   .cell-gap {
-    @apply bg-zinc-100 dark:bg-zinc-800;
+    background: var(--surface-2);
   }
 }

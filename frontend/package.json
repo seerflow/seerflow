@@ -17,6 +17,8 @@
     "e2e": "if [ \"$RUN_E2E\" = \"1\" ]; then playwright test; else echo 'E2E skipped (set RUN_E2E=1)'; fi"
   },
   "dependencies": {
+    "@fontsource/geist-mono": "^5.2.8",
+    "@fontsource/geist-sans": "^5.2.5",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dialog": "^1.1.15",
