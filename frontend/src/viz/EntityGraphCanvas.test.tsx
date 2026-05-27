@@ -19,7 +19,6 @@ const mockEleSelect = vi.fn();
 const mockDollar = vi.fn(() => ({ unselect: mockUnselect }));
 const mockGetElementById = vi.fn(() => ({ select: mockEleSelect, length: 1 }));
 const mockZoom = vi.fn((arg?: unknown) => (arg === undefined ? 2 : undefined));
-const mockCenter = vi.fn();
 
 const mockCyInstance = {
   destroy: mockDestroy,
@@ -32,7 +31,6 @@ const mockCyInstance = {
   $: mockDollar,
   getElementById: mockGetElementById,
   zoom: mockZoom,
-  center: mockCenter,
   id: "root",
 };
 
