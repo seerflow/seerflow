@@ -47,10 +47,11 @@ test("topbar shows ⌘K hint", async ({ page }) => {
   await expect(page.getByText("⌘K")).toBeVisible();
 });
 
-test("default load shows overview screen (DashboardGrid present)", async ({ page }) => {
+test("default load shows overview screen (S-320 2-column layout)", async ({ page }) => {
   await page.goto("/");
-  // DashboardGrid is on the overview screen; it renders drag handles for widgets
-  await expect(page.getByRole("button", { name: /add widget/i })).toBeVisible();
+  // S-320: Overview replaced DashboardGrid with 2-column KPI layout.
+  // Wait for WS to open (pipelineOnline=true) so skeleton exits.
+  await expect(page.getByTestId("overview-screen")).toBeVisible({ timeout: 10_000 });
 });
 
 test("clicking Alerts nav → hash changes to #/alerts and alerts screen shown", async ({
@@ -159,7 +160,7 @@ test("theme toggle switches dark→light and persists", async ({ page }) => {
   expect(hasSfLight).toBe(true);
 });
 
-test("clicking Overview nav from Alerts → returns to DashboardGrid", async ({
+test("clicking Overview nav from Alerts → returns to Overview screen (S-320)", async ({
   page,
 }) => {
   await page.goto("/#/alerts");
@@ -168,5 +169,6 @@ test("clicking Overview nav from Alerts → returns to DashboardGrid", async ({
 
   await page.getByTestId("nav-item-overview").click();
   await expect(page).toHaveURL(/#\/overview/);
-  await expect(page.getByRole("button", { name: /add widget/i })).toBeVisible();
+  // S-320: Overview is now the 2-column KPI layout, not DashboardGrid
+  await expect(page.getByTestId("overview-screen")).toBeVisible({ timeout: 10_000 });
 });

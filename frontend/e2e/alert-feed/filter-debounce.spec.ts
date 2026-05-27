@@ -20,7 +20,7 @@ test("Critical chip filters rows and sends one filter frame after debounce", asy
   const ws = await stubWebSocket(page);
 
   await page.clock.install();
-  await page.goto("/");
+  await page.goto("/#/alerts");
 
   await expect(page.getByRole("button", { name: /^alert / })).toHaveCount(5);
 

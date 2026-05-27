@@ -1,3 +1,9 @@
+// QUARANTINED by S-320: DashboardGrid was removed from the overview route.
+// These tests navigate to "/" expecting DashboardGrid but S-320 replaced
+// the overview with a 2-column KPI layout. A future story should either
+// restore DashboardGrid on a dedicated route or delete these tests.
+// See: feat/S-320-overview-screen
+//
 // AC: S-062C widget-grid smoke. Gated with RUN_E2E=1 (matches
 // e2e/alert-feed/disconnect-banner.spec.ts pattern). Exercises the
 // widget grid end-to-end: add, remove, reset, empty-state, persistence.
@@ -21,7 +27,7 @@
 // matching keyboard-Enter activation semantics.
 
 import { expect, test } from "@playwright/test";
-import { stubRestAlerts, stubWebSocket } from "./fixtures/stubs";
+import { stubRestAlerts, stubWebSocket } from "../fixtures/stubs";
 
 test.skip(process.env.RUN_E2E !== "1", "set RUN_E2E=1 to run");
 

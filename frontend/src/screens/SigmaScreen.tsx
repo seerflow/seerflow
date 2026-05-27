@@ -113,6 +113,11 @@ export const SigmaScreen: React.FC = () => {
         data-testid="sigma-left-panel"
         style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--line)" }}
       >
+        {/* Screen heading */}
+        <div className="px-3 pt-3 pb-2 border-b border-line">
+          <h1 className="text-sm font-semibold text-text sf-mono">Sigma rules</h1>
+        </div>
+
         {/* Search + New */}
         <div className="flex items-center gap-2 p-3 border-b border-line">
           <input
