@@ -12,6 +12,7 @@ import React, { useMemo } from "react";
 
 import { useAlertStore } from "@/stores/alerts";
 import { useStatusStore } from "@/stores/status";
+import { selectActiveEntities, selectMeanLatencyMs } from "@/lib/liveStats";
 
 import { KpiStrip } from "@/components/Overview/KpiStrip";
 import { SeverityChartPanel } from "@/components/Overview/SeverityChartPanel";
@@ -98,6 +99,8 @@ export const OverviewScreen: React.FC = () => {
   const alerts = useAlertStore((s) => s.alerts);
   const pipelineOnline = useStatusStore((s) => s.pipelineOnline);
   const evPerSec = useStatusStore((s) => s.evPerSec);
+  const liveActiveEntities = useStatusStore((s) => s.activeEntities);
+  const liveMeanLatencyMs = useStatusStore((s) => s.meanLatencyMs);
 
   // Show skeleton while the WS has not yet opened and no cached alerts exist.
   // `pipelineOnline` is set true by the status store on the first WS open event
@@ -111,9 +114,11 @@ export const OverviewScreen: React.FC = () => {
     ? DEMO_KPI
     : {
         eventsPerSec: evPerSec,
-        activeEntities: 0,
+        // Live store metrics with demo fallback until the backend feeds them
+        // (S-328 AC1 / AC5).
+        activeEntities: selectActiveEntities(liveActiveEntities),
         openAlerts: alerts.length,
-        meanLatencyMs: 0,
+        meanLatencyMs: selectMeanLatencyMs(liveMeanLatencyMs),
       };
 
   if (isLoading) {

@@ -3,6 +3,7 @@ import { SeerMark } from "@/components/brand/SeerMark";
 import { ROUTE_REGISTRY, type RouteName, type NavGroup } from "@/lib/routes";
 import { useAlertStore } from "@/stores/alerts";
 import { useStatusStore } from "@/stores/status";
+import { selectSidebarHealth } from "@/lib/liveStats";
 
 const APP_VERSION = "0.5.0";
 
@@ -21,6 +22,9 @@ const NAV_GROUPS: NavGroup[] = ["Monitor", "Investigate", "Configure"];
 export const Sidebar: React.FC<SidebarProps> = ({ activeRoute, onNavigate }) => {
   const alertCount = useAlertStore((s) => s.alerts.length);
   const { pipelineOnline, uptimeLabel, evPerSec } = useStatusStore();
+  // S-328 AC2/AC5: read live uptime / ev-s from the store, degrading to demo
+  // numbers when no live source has populated them yet.
+  const health = selectSidebarHealth({ uptimeLabel, evPerSec });
 
   return (
     <div
@@ -189,6 +193,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeRoute, onNavigate }) => 
           </span>
         </div>
         <div
+          data-testid="sidebar-health"
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: 10.5,
@@ -196,9 +201,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeRoute, onNavigate }) => 
             marginTop: 4,
           }}
         >
-          {pipelineOnline
-            ? `uptime ${uptimeLabel} · ${evPerSec.toLocaleString()} ev/s`
-            : "—"}
+          {`uptime ${health.uptimeLabel} · ${health.evPerSec.toLocaleString()} ev/s`}
         </div>
       </div>
     </div>
