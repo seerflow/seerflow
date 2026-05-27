@@ -3,7 +3,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEventStore, selectPausedCount } from "@/stores/events";
 import { EventRow } from "./EventRow";
 import { PauseControl } from "./PauseControl";
-import { EventFilterBar } from "./EventFilterBar";
 import { EventTableHeader } from "./EventTableHeader";
 import { MiniVolumeStrip } from "./MiniVolumeStrip";
 import { api, ApiError } from "@/lib/api";
@@ -75,7 +74,6 @@ export function EventStream({
 }: Props = {}): JSX.Element {
   const filter = useEventStore((s) => s.filter);
   const paused = useEventStore((s) => s.paused);
-  const knownSources = useEventStore((s) => s.knownSources);
   const events = useEventStore((s) => s.events);
   const visible = useMemo<LiveEvent[]>(() => {
     if (filter.sources.size === 0 && filter.minSeverity === 0 && filter.templateIds.size === 0) {
@@ -89,7 +87,7 @@ export function EventStream({
     });
   }, [events, filter]);
   const bufferedCount = useEventStore(selectPausedCount);
-  const { backfill, pause, resume, setFilter } = useEventStore.getState();
+  const { backfill, pause, resume } = useEventStore.getState();
   // Uncontrolled expanded ID for rows not wired to parent inspector
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [virtualizerReady, setVirtualizerReady] = useState(false);
@@ -186,11 +184,6 @@ export function EventStream({
 
   useEffect(() => { rv.measure(); }, [effectiveSelectedId, rv]);
 
-  const knownSourcesList = useMemo(
-    () => [...knownSources].sort().slice(0, 50),
-    [knownSources],
-  );
-
   const togglePause = useCallback((): void => {
     if (paused) resume(); else pause();
   }, [paused, pause, resume]);
@@ -232,14 +225,16 @@ export function EventStream({
   const volValues = volArrays.values[0] ?? [];
 
   return (
-    <section className="flex flex-col h-full min-h-0 rounded border bg-card">
+    // S-335: flush full-bleed flex column — the column chrome (borderRight,
+    // overflow) is supplied by EventsScreen; no card wrapper here.
+    <section className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Toolbar */}
       <header
         style={{
           display: "flex",
           alignItems: "center",
           gap: 12,
-          padding: "8px 24px",
+          padding: "11px 24px",
           borderBottom: "1px solid var(--line)",
           flexShrink: 0,
         }}
@@ -393,9 +388,6 @@ export function EventStream({
         critCount={critCount}
         warnCount={warnCount}
       />
-
-      {/* Filter bar */}
-      <EventFilterBar filter={filter} knownSources={knownSourcesList} onChange={setFilter} />
 
       {/* Table header */}
       <EventTableHeader />
