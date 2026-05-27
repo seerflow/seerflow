@@ -16,6 +16,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityExplorerGraph } from "@/components/EntityExplorer/EntityExplorerGraph";
 import { useEntityStore } from "@/stores/entity";
 import { hashHasEntity } from "@/lib/hash";
+import { selectFocalEntityStats, type FocalEntityStats } from "@/lib/liveStats";
 import type { GraphEntity, GraphRelation } from "@/viz/entityGraphAdapter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -23,8 +24,9 @@ import type { GraphEntity, GraphRelation } from "@/viz/entityGraphAdapter";
 /**
  * Build graph nodes from focal entity + related neighbours.
  * EntityRelation doesn't carry risk_score / event_count / alert_count — use
- * defaults (0.0 / 0 / 0) for related nodes. The focal entity uses the values
- * available in the store's searchResults / recent, if found.
+ * defaults (0.0 / 0 / 0) for related nodes. The focal entity's stats are
+ * computed from the store's timeline data (S-328) and passed in via
+ * `focalStats`; its label uses search / recent cache when available.
  */
 function buildGraphNodes(
   selectedUuid: string | null,
@@ -33,6 +35,7 @@ function buildGraphNodes(
   related: import("@/lib/types").EntityRelation[],
   searchResults: import("@/lib/types").EntitySearchResult[],
   recent: import("@/lib/types").EntitySearchResult[],
+  focalStats: FocalEntityStats,
 ): GraphEntity[] {
   const nodes: GraphEntity[] = [];
 
@@ -46,9 +49,9 @@ function buildGraphNodes(
       entity_uuid: selectedUuid,
       entity_type: selectedType ?? cached?.entity_type ?? "host",
       entity_value: selectedValue ?? cached?.entity_value ?? selectedUuid.slice(0, 8),
-      risk_score: 0.0,
-      event_count: 0,
-      alert_count: 0,
+      risk_score: focalStats.risk,
+      event_count: focalStats.eventCount,
+      alert_count: focalStats.alertCount,
     });
   }
 
@@ -98,6 +101,8 @@ export const EntitiesScreen: React.FC = () => {
   const selectedValue = useEntityStore((s) => s.selectedEntityValue);
   const related       = useEntityStore((s) => s.related);
   const events        = useEntityStore((s) => s.events);
+  const total         = useEntityStore((s) => s.total);
+  const riskHistory   = useEntityStore((s) => s.riskHistory);
   const searchResults = useEntityStore((s) => s.searchResults);
   const recent        = useEntityStore((s) => s.recent);
 
@@ -124,6 +129,14 @@ export const EntitiesScreen: React.FC = () => {
   }, [restoreFromHash, clearSelection]);
 
   // ── Derived graph data ────────────────────────────────────────────────
+  // Focal-entity inspector stats computed from the store timeline (S-328 AC3).
+  // `total` / `riskHistory` may be absent on the very first render or under a
+  // lean test mock — guard with safe defaults so demo mode is unaffected.
+  const focalStats = useMemo(
+    () => selectFocalEntityStats(events, total ?? 0, riskHistory ?? []),
+    [events, total, riskHistory],
+  );
+
   const graphNodes = useMemo(
     () =>
       buildGraphNodes(
@@ -133,8 +146,9 @@ export const EntitiesScreen: React.FC = () => {
         related,
         searchResults,
         recent,
+        focalStats,
       ),
-    [selectedUuid, selectedType, selectedValue, related, searchResults, recent],
+    [selectedUuid, selectedType, selectedValue, related, searchResults, recent, focalStats],
   );
 
   const graphEdges = useMemo(

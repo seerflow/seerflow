@@ -45,6 +45,9 @@ const DETAIL: AlertDetail = {
 
 // ── API mock ──────────────────────────────────────────────────────────────────
 let _resolveDetail: ((d: AlertDetail) => void) | null = null;
+// S-328: explain-endpoint behaviour, swappable per test.
+let _explainMode: "absent" | "narrative" = "absent";
+const EXPLAIN_NARRATIVE = "LLM narrative: lateral movement via stolen creds.";
 
 vi.mock("@/lib/api", () => {
   class FactoryApiError extends Error {
@@ -59,6 +62,12 @@ vi.mock("@/lib/api", () => {
   return {
     api: {
       get: vi.fn(async (path: string) => {
+        if (path.includes("/explain")) {
+          if (_explainMode === "narrative") {
+            return { narrative: EXPLAIN_NARRATIVE };
+          }
+          throw new FactoryApiError(404, "not found");
+        }
         if (path.includes("/feedback")) {
           return { items: [], total: 0, page: 1, limit: 10, has_next: false };
         }
@@ -84,6 +93,7 @@ import { AlertDetailScreen } from "@/screens/AlertDetailScreen";
 describe("AlertDetailScreen (S-321)", () => {
   beforeEach(() => {
     _resolveDetail = null;
+    _explainMode = "absent";
     window.history.replaceState(null, "", "/#/alerts/alert-abc-123");
     useAlertStore.getState().backfill([ALERT]);
   });
@@ -182,6 +192,35 @@ describe("AlertDetailScreen (S-321)", () => {
     if (toggle) {
       expect(toggle).toBeChecked();
     }
+  });
+
+  // ── S-328 AC4: LLM-explain wiring ────────────────────────────────────────
+  it("renders the LLM narrative when the explain endpoint resolves", async () => {
+    _explainMode = "narrative";
+    render(<AlertDetailScreen />);
+    await act(async () => {
+      _resolveDetail?.(DETAIL);
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(
+      screen.getByText(/lateral movement via stolen creds/i),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the demo narrative without error when explain is absent", async () => {
+    _explainMode = "absent";
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<AlertDetailScreen />);
+    await act(async () => {
+      _resolveDetail?.(DETAIL);
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    // Demo narrative = the alert/detail message (existing behaviour preserved).
+    expect(
+      screen.getByText(/LSASS memory access detected/i),
+    ).toBeInTheDocument();
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });
 

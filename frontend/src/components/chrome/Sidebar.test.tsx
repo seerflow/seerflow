@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Sidebar } from "./Sidebar";
 import { useAlertStore } from "@/stores/alerts";
 import { useStatusStore } from "@/stores/status";
+import { DEMO_UPTIME_LABEL, DEMO_EVENTS_PER_SEC } from "@/lib/liveStats";
 
 describe("Sidebar", () => {
   beforeEach(() => {
@@ -102,6 +103,22 @@ describe("Sidebar", () => {
     useStatusStore.setState({ pipelineOnline: false, uptimeLabel: "—", evPerSec: 0 });
     render(<Sidebar activeRoute="overview" onNavigate={vi.fn()} />);
     expect(screen.getByText(/pipeline offline/i)).toBeInTheDocument();
+  });
+
+  it("footer health reads live uptime / ev-s from the store (S-328)", () => {
+    useStatusStore.setState({ pipelineOnline: true, uptimeLabel: "9d 2h", evPerSec: 9001 });
+    render(<Sidebar activeRoute="overview" onNavigate={vi.fn()} />);
+    const health = screen.getByTestId("sidebar-health");
+    expect(health).toHaveTextContent("9d 2h");
+    expect(health).toHaveTextContent("9,001");
+  });
+
+  it("footer health falls back to demo numbers when no live source connected (S-328 AC2/AC5)", () => {
+    useStatusStore.setState({ pipelineOnline: false, uptimeLabel: "—", evPerSec: 0 });
+    render(<Sidebar activeRoute="overview" onNavigate={vi.fn()} />);
+    const health = screen.getByTestId("sidebar-health");
+    expect(health).toHaveTextContent(DEMO_UPTIME_LABEL);
+    expect(health).toHaveTextContent(DEMO_EVENTS_PER_SEC.toLocaleString());
   });
 
   it("clicking a nav item calls onNavigate with the route", () => {

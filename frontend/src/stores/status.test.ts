@@ -11,6 +11,8 @@ describe("useStatusStore", () => {
       pipelineOnline: false,
       uptimeLabel: "—",
       evPerSec: 0,
+      activeEntities: 0,
+      meanLatencyMs: 0,
     });
     useStatusStore.getState()._resubscribe();
   });
@@ -24,6 +26,19 @@ describe("useStatusStore", () => {
     expect(state.pipelineOnline).toBe(false);
     expect(state.evPerSec).toBe(0);
     expect(state.uptimeLabel).toBe("—");
+  });
+
+  it("starts with activeEntities=0 and meanLatencyMs=0 (S-328)", () => {
+    const state = useStatusStore.getState();
+    expect(state.activeEntities).toBe(0);
+    expect(state.meanLatencyMs).toBe(0);
+  });
+
+  it("holds activeEntities / meanLatencyMs through setState (S-328)", () => {
+    useStatusStore.setState({ activeEntities: 4_812, meanLatencyMs: 54 });
+    const state = useStatusStore.getState();
+    expect(state.activeEntities).toBe(4_812);
+    expect(state.meanLatencyMs).toBe(54);
   });
 
   it("sets pipelineOnline=true on __status open event", () => {

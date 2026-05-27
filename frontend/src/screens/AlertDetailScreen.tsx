@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { parseHash } from "@/lib/routes";
 import { useAlertStore } from "@/stores/alerts";
 import { api, ApiError } from "@/lib/api";
+import { fetchAlertExplanation } from "@/lib/liveStats";
 import { AlertDetailSchema } from "@/lib/schemas";
 import { severityBucket, SEVERITY_LABEL } from "@/lib/severity";
 import { formatRelative } from "@/lib/relativeTime";
@@ -131,6 +132,8 @@ export const AlertDetailScreen: React.FC = () => {
   const [detail, setDetail] = useState<AlertDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [acknowledged, setAcknowledged] = useState(false);
+  // S-328 AC4: LLM-explain narrative; null until/unless the endpoint responds.
+  const [llmNarrative, setLlmNarrative] = useState<string | null>(null);
 
   // Fetch the full detail (which also contains the base alert fields).
   // If the alert isn't in the store yet (e.g., direct URL navigation), the
@@ -162,6 +165,19 @@ export const AlertDetailScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
+  }, [alertId]);
+
+  // S-328 AC4: pull the LLM explanation from the dedicated endpoint when
+  // available. On any failure (route absent, error, abort) the helper returns
+  // null — no throw, no console error — and the demo narrative is used instead.
+  useEffect(() => {
+    if (!alertId) return;
+    const ctrl = new AbortController();
+    setLlmNarrative(null);
+    void fetchAlertExplanation(alertId, ctrl.signal).then((text) => {
+      if (!ctrl.signal.aborted && text) setLlmNarrative(text);
+    });
+    return () => ctrl.abort();
   }, [alertId]);
 
   // Use store alert (from backfill or warm-up) or fall back to detail payload.
@@ -331,7 +347,11 @@ export const AlertDetailScreen: React.FC = () => {
         {/* AI Explanation */}
         <SideBlock title="AI Explanation">
           <AiExplanation
-            narrative={loadingDetail ? "" : (detail?.message ?? alert.message)}
+            narrative={
+              loadingDetail
+                ? ""
+                : (llmNarrative ?? detail?.message ?? alert.message)
+            }
             provenance={alert.mitre_techniques}
             loading={loadingDetail}
           />

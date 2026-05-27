@@ -7,6 +7,10 @@ export interface StatusState {
   uptimeLabel: string;
   /** Events per second as last reported, 0 when unknown */
   evPerSec: number;
+  /** Distinct active entities as last reported, 0 when unknown (S-328) */
+  activeEntities: number;
+  /** Mean ingest latency in ms as last reported, 0 when unknown (S-328) */
+  meanLatencyMs: number;
   /**
    * Re-register the wsBus subscription.
    * Called automatically at module init and after test bus resets.
@@ -32,11 +36,17 @@ function handleStatus(msg: { type: "__status"; status: string }): void {
  * uptimeLabel and evPerSec are held at their last known values when
  * disconnected (no reset on close), so the UI shows stale-but-stable numbers
  * rather than flashing "—" on brief reconnects.
+ *
+ * activeEntities and meanLatencyMs (S-328) default to 0 until a live pipeline
+ * metrics frame populates them; consumers fall back to demo values via the
+ * `liveStats` selectors meanwhile.
  */
 export const useStatusStore = create<StatusState>()(() => ({
   pipelineOnline: false,
   uptimeLabel: "—",
   evPerSec: 0,
+  activeEntities: 0,
+  meanLatencyMs: 0,
   _resubscribe: () => on("__status", handleStatus),
 }));
 

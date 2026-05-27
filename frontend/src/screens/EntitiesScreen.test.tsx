@@ -57,15 +57,49 @@ const STORE = {
   searchResults: [],
   recent: [],
 };
+
+// Mutable holder so individual tests can swap the mocked store snapshot.
+let currentStore: Record<string, unknown> = STORE;
 vi.mock("@/stores/entity", () => ({
-  useEntityStore: (sel: (s: typeof STORE) => unknown) => sel(STORE),
+  useEntityStore: (sel: (s: Record<string, unknown>) => unknown) => sel(currentStore),
 }));
 
 import { EntitiesScreen } from "./EntitiesScreen";
 
+describe("EntitiesScreen focal stats (S-328)", () => {
+  beforeEach(() => {
+    lastProps = null;
+    currentStore = STORE;
+  });
+
+  it("passes computed risk / event-count / alert-count for the focal node", () => {
+    currentStore = {
+      ...STORE,
+      events: [
+        { event_id: "ev1", timestamp_ns: 0n, source_type: "s", severity_id: 2, message: "m", related_ips: [], related_users: [], related_hosts: [], related_domains: [] },
+        { event_id: "ev2", timestamp_ns: 0n, source_type: "s", severity_id: 5, message: "m", related_ips: [], related_users: [], related_hosts: [], related_domains: [] },
+      ],
+      total: 1_204,
+      riskHistory: [
+        { bucket_start_ns: "0", points: 0, alert_count: 3, top_rule_name: "" },
+        { bucket_start_ns: "0", points: 0, alert_count: 1, top_rule_name: "" },
+      ],
+    };
+
+    render(<EntitiesScreen />);
+    expect(lastProps).not.toBeNull();
+    const focal = lastProps!.nodes.find((n) => n.entity_uuid === "focal");
+    expect(focal).toBeDefined();
+    expect(focal!.event_count).toBe(1_204);
+    expect(focal!.alert_count).toBe(4);
+    expect(focal!.risk_score).toBeCloseTo(5 / 6, 5);
+  });
+});
+
 describe("EntitiesScreen drill (S-326)", () => {
   beforeEach(() => {
     lastProps = null;
+    currentStore = STORE;
   });
 
   it("passes the full graph (focal + related) by default, drill inactive", () => {
