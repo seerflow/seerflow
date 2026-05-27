@@ -29,6 +29,8 @@ export interface EntityGraphCanvasProps {
   /** Auto-fit the viewport when nodes/edges change */
   fitOnChange?: boolean;
   onNodeSelect?: (id: string | null) => void;
+  /** Fired on node double-tap — used to drill into the node's neighborhood */
+  onNodeDblClick?: (id: string) => void;
   /** UUID of the node that should carry the selection ring; null/absent clears it */
   selectedUuid?: string | null;
   className?: string;
@@ -56,6 +58,7 @@ export function EntityGraphCanvas({
   layout = "Force",
   fitOnChange = false,
   onNodeSelect,
+  onNodeDblClick,
   selectedUuid,
   className,
   width = 760,
@@ -111,6 +114,10 @@ export function EntityGraphCanvas({
       // Node select handler
       cy.on("tap", "node", (evt: { target: { id: () => string } }) => {
         onNodeSelect?.(evt.target.id());
+      });
+      // Node double-click → neighborhood drill (S-326)
+      cy.on("dbltap", "node", (evt: { target: { id: () => string } }) => {
+        onNodeDblClick?.(evt.target.id());
       });
       cy.on("tap", (evt: { target: unknown }) => {
         // Background tap: target is the cy core itself

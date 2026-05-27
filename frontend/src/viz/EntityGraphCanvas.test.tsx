@@ -153,4 +153,18 @@ describe("EntityGraphCanvas", () => {
     expect(mockDollar).toHaveBeenCalledWith(":selected");
     expect(mockUnselect).toHaveBeenCalled();
   });
+
+  // ── Double-click drill (S-326 AC2) ─────────────────────────────────────
+  it("fires onNodeDblClick with the node id on dbltap", async () => {
+    const onNodeDblClick = vi.fn();
+    render(
+      <EntityGraphCanvas nodes={makeNodes()} edges={makeEdges()} onNodeDblClick={onNodeDblClick} />,
+    );
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalledOnce(), { timeout: 2000 });
+    const call = mockOn.mock.calls.find((c) => c[0] === "dbltap" && c[1] === "node");
+    expect(call).toBeDefined();
+    const handler = call![2] as (e: { target: { id: () => string } }) => void;
+    handler({ target: { id: () => "n2" } });
+    expect(onNodeDblClick).toHaveBeenCalledWith("n2");
+  });
 });
