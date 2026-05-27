@@ -3,7 +3,7 @@
  * Each screen must mount without throwing. Real components are mocked to
  * avoid pulling in their full dependency trees.
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 // ── Mock heavy components ────────────────────────────────────────────────────
@@ -45,6 +45,29 @@ vi.mock("react-grid-layout", () => ({
 vi.mock("react-grid-layout/css/styles.css", () => ({}));
 vi.mock("react-resizable/css/styles.css", () => ({}));
 
+// S-321: mock AlertFeed so AlertsScreen renders without WS/API deps
+vi.mock("@/components/AlertFeed/AlertFeed", () => ({
+  AlertFeed: () => <div data-testid="alert-feed">AlertFeed</div>,
+}));
+
+// S-321: mock api so AlertDetailScreen renders without network.
+// Rejects immediately for nonexistent IDs so the not-found state appears.
+vi.mock("@/lib/api", () => {
+  class SmokeApiError extends Error {
+    status: number;
+    constructor(s: number, m: string) { super(m); this.status = s; }
+  }
+  return {
+    api: {
+      get: vi.fn(async (path: string) => {
+        if (path.includes("smoke-id-no-alert")) throw new SmokeApiError(404, "not found");
+        return new Promise(() => {});  // other paths hang (AlertFeed warm-up etc.)
+      }),
+    },
+    ApiError: SmokeApiError,
+  };
+});
+
 import { OverviewScreen } from "./OverviewScreen";
 import { AlertsScreen } from "./AlertsScreen";
 import { AlertDetailScreen } from "./AlertDetailScreen";
@@ -65,18 +88,22 @@ describe("OverviewScreen", () => {
 });
 
 describe("AlertsScreen", () => {
-  it("renders ScreenStub with label Alerts", () => {
+  it("mounts and renders AlertFeed (S-321)", () => {
     render(<AlertsScreen />);
-    expect(screen.getByText("Alerts")).toBeInTheDocument();
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument();
+    expect(screen.getByTestId("alerts-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-feed")).toBeInTheDocument();
   });
 });
 
 describe("AlertDetailScreen", () => {
-  it("renders ScreenStub with label Alert detail", () => {
+  it("renders not-found when no alert in store (S-321)", async () => {
+    window.history.replaceState(null, "", "/#/alerts/smoke-id-no-alert");
     render(<AlertDetailScreen />);
-    expect(screen.getByText("Alert detail")).toBeInTheDocument();
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument();
+    // API rejects with 404 → loading resolves → not-found renders
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.getByText(/alert not found/i)).toBeInTheDocument();
   });
 });
 
