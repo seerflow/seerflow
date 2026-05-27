@@ -59,11 +59,16 @@ test("direct navigation to #/alerts/:id renders alert detail screen", async ({ p
   await expect(page.getByTestId("alert-detail-screen")).toBeVisible();
 });
 
-test("alert detail shows rule name in heading", async ({ page }) => {
+test("alert detail shows the tactic-chain heading (S-337 reconcile)", async ({ page }) => {
   await page.goto(`/#/alerts/${FIRST_ALERT.alert_id}`);
-  await expect(
-    page.getByRole("heading", { name: /Suspicious PowerShell/i }),
-  ).toBeVisible();
+  // FIRST_ALERT.mitre_tactics = ["execution"] → humanized "Execution" heading.
+  await expect(page.getByRole("heading")).toBeVisible();
+  await expect(page.getByRole("heading")).toContainText(/Execution/i);
+});
+
+test("alert detail shows rule name in the header meta row", async ({ page }) => {
+  await page.goto(`/#/alerts/${FIRST_ALERT.alert_id}`);
+  await expect(page.getByText(/Suspicious PowerShell/i)).toBeVisible();
 });
 
 test("alert detail renders severity badge", async ({ page }) => {
@@ -79,6 +84,9 @@ test("alert detail renders kill-chain timeline list", async ({ page }) => {
 
 test("kill-chain shows all 7 stage labels", async ({ page }) => {
   await page.goto(`/#/alerts/${FIRST_ALERT.alert_id}`);
+  // Scope to the kill-chain list — "Execution" also appears in the tactic-chain
+  // heading and the MITRE rail, so a global getByText would be ambiguous.
+  const killChain = page.getByRole("list", { name: /kill.chain/i });
   const stages = [
     "Reconnaissance",
     "Resource Development",
@@ -89,7 +97,7 @@ test("kill-chain shows all 7 stage labels", async ({ page }) => {
     "Impact",
   ];
   for (const label of stages) {
-    await expect(page.getByText(label)).toBeVisible();
+    await expect(killChain.getByText(label)).toBeVisible();
   }
 });
 

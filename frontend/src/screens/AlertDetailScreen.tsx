@@ -6,25 +6,20 @@ import { fetchAlertExplanation } from "@/lib/liveStats";
 import { AlertDetailSchema } from "@/lib/schemas";
 import { severityBucket, SEVERITY_LABEL } from "@/lib/severity";
 import { formatRelative } from "@/lib/relativeTime";
-import { SFBadge } from "@/components/ui/primitives/Badge";
 import { SideBlock } from "@/components/ui/primitives/SideBlock";
-import { RiskBar } from "@/components/ui/primitives/RiskBar";
-import { MonoLabel } from "@/components/ui/primitives/MonoLabel";
 import { EntityGlyph } from "@/components/ui/primitives/EntityGlyph";
 import { Button } from "@/components/ui/button";
 import { KillChain, KILL_CHAIN_STAGES } from "@/components/AlertDetail/KillChain";
 import { AiExplanation } from "@/components/AlertDetail/AiExplanation";
-import { cn } from "@/lib/utils";
-import type { Alert, AlertDetail } from "@/lib/types";
+import type { Alert, AlertDetail, SeverityBucket } from "@/lib/types";
 import type { EntityType } from "@/components/ui/primitives/EntityGlyph";
-import type { SFBadgeVariant } from "@/components/ui/primitives/Badge";
 
-// ── Severity → SFBadge variant map ───────────────────────────────────────────
-const SEVERITY_BADGE: Record<string, SFBadgeVariant> = {
-  critical: "crit",
-  high: "warn",
-  medium: "accent",
-  low: "mute",
+// ── Severity bucket → semantic token (crit/warn/accent/mute) ──────────────────
+const BUCKET_TOKEN: Record<SeverityBucket, string> = {
+  critical: "--crit",
+  high: "--warn",
+  medium: "--accent",
+  low: "--mute",
 };
 
 // ── Kill-chain active stage derivation ───────────────────────────────────────
@@ -43,6 +38,22 @@ function deriveKillChainActiveIdx(mitreTactics: string[]): number | undefined {
   return lastMatch;
 }
 
+// ── Tactic-chain title ────────────────────────────────────────────────────────
+const TA_ID_TO_LABEL: Record<string, string> = Object.fromEntries(
+  KILL_CHAIN_STAGES.map((s) => [s.taId.toUpperCase(), s.label]),
+);
+
+/** Humanize a tactic token: known `TA00xx` → stage label; otherwise title-case. */
+function humanizeTactic(raw: string): string {
+  const byId = TA_ID_TO_LABEL[raw.toUpperCase()];
+  if (byId) return byId;
+  return raw
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\w/, (c) => c.toUpperCase());
+}
+
 // ── Entity type normalizer ────────────────────────────────────────────────────
 const ENTITY_GLYPH_TYPES: Set<EntityType> = new Set(["user", "host", "ip", "service", "process"]);
 
@@ -52,13 +63,31 @@ function toGlyphType(entityType: string | null): EntityType {
 }
 
 // ── Correlated events list ────────────────────────────────────────────────────
-interface CorrelatedEventsProps {
-  events: Array<{ event_id: string; timestamp_ns: bigint; message: string }>;
+interface CorrelatedEvent {
+  event_id: string;
+  timestamp_ns: bigint;
+  message: string;
 }
 
+interface CorrelatedEventsProps {
+  events: CorrelatedEvent[];
+}
+
+/** HH:MM:SS.mmm from nanosecond epoch. */
+function formatClock(ns: bigint): string {
+  return new Date(Number(ns / 1_000_000n)).toISOString().slice(11, 23);
+}
+
+/**
+ * Correlated-events panel — header (count + auto-scroll toggle) + a
+ * `90px 50px 200px 1fr` grid (ts · level · entity-path · message) per the
+ * mockup. Fixture events carry only ts/message, so the level column renders
+ * `INFO` and rows stay untinted; crit/warn tinting kicks in when richer event
+ * data lands. Auto-scroll keeps the latest row in view.
+ */
 function CorrelatedEvents({ events }: CorrelatedEventsProps): JSX.Element {
   const [autoScroll, setAutoScroll] = useState(true);
-  const listRef = useRef<HTMLUListElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (autoScroll && listRef.current) {
@@ -66,17 +95,14 @@ function CorrelatedEvents({ events }: CorrelatedEventsProps): JSX.Element {
     }
   }, [events, autoScroll]);
 
-  if (events.length === 0) {
-    return (
-      <p className="text-xs text-text-3 italic px-1">No correlated events.</p>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <MonoLabel className="text-[10px]">Correlated events ({events.length})</MonoLabel>
-        <label className="flex items-center gap-1 text-[10px] text-text-3 cursor-pointer">
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-4 border-b border-line px-7 py-3">
+        <span className="text-[12.5px] font-medium text-text">Correlated events</span>
+        <span className="sf-mono text-[11px] text-text-3">{events.length}</span>
+        <span className="flex-1" />
+        <label className="flex cursor-pointer items-center gap-1 sf-mono text-[11px] text-text-3">
           <input
             type="checkbox"
             aria-label="auto-scroll"
@@ -84,29 +110,33 @@ function CorrelatedEvents({ events }: CorrelatedEventsProps): JSX.Element {
             onChange={(e) => setAutoScroll(e.target.checked)}
             className="h-3 w-3"
           />
-          auto-scroll
+          auto-scroll {autoScroll ? "⏸" : "▶"}
         </label>
       </div>
-      <ul
-        ref={listRef}
-        className="max-h-40 overflow-y-auto flex flex-col gap-px border border-line"
-        aria-label="correlated events"
-      >
-        {events.map((ev) => {
-          const ts = new Date(
-            Number(ev.timestamp_ns / 1_000_000n),
-          ).toISOString().slice(11, 23);
-          return (
-            <li
+
+      {/* Rows */}
+      {events.length === 0 ? (
+        <p className="px-7 py-3 text-xs italic text-text-3">No correlated events.</p>
+      ) : (
+        <div
+          ref={listRef}
+          aria-label="correlated events"
+          className="flex-1 overflow-y-auto sf-mono text-[11.5px] text-text-2"
+        >
+          {events.map((ev, i) => (
+            <div
               key={ev.event_id}
-              className="flex items-baseline gap-2 px-2 py-1 hover:bg-surface-2"
+              className="grid items-center gap-3 border-b border-line px-7 py-2 last:border-b-0"
+              style={{ gridTemplateColumns: "90px 50px 200px 1fr" }}
             >
-              <span className="sf-mono text-[10px] text-text-3 flex-shrink-0">{ts}</span>
-              <span className="text-xs text-text-2 truncate">{ev.message}</span>
-            </li>
-          );
-        })}
-      </ul>
+              <span className="sf-tnum text-text-3">{formatClock(ev.timestamp_ns)}</span>
+              <span className="text-text-3">INFO</span>
+              <span className="text-accent truncate">{`event ${i + 1}`}</span>
+              <span className="truncate text-text-2">{ev.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -114,15 +144,18 @@ function CorrelatedEvents({ events }: CorrelatedEventsProps): JSX.Element {
 // ── Main AlertDetailScreen ────────────────────────────────────────────────────
 
 /**
- * Alert detail screen — S-321.
+ * Alert detail screen — S-321 (kill-chain + AI), S-328 (live LLM-explain),
+ * S-337 (reconciled to the `DashAlertDetail` mockup).
  *
  * Reads the alert ID from the URL hash (#/alerts/:id), looks up the alert in
  * the store (populated by AlertFeed warm-up), or fetches the detail directly
- * if navigating straight to the route. Renders:
- *   - Header: severity badge, score, tactic count, first-seen, action buttons
- *   - KillChain timeline (7 stages)
- *   - Correlated events list with auto-scroll toggle
- *   - Right rail: Entities, MITRE ATT&CK, AI Explanation SideBlocks
+ * on direct navigation. Layout: a flush `1fr / 360px` grid filling the
+ * viewport —
+ *   - Header: sev·score badge, kill_chain·N-tactics + first-seen meta,
+ *     Acknowledge / Run-playbook actions, tactic-chain title, entity summary.
+ *   - Kill-chain timeline section.
+ *   - Correlated-events grid.
+ *   - Right rail: Entities (risk bars), MITRE ATT&CK rows, AI Explanation.
  */
 export const AlertDetailScreen: React.FC = () => {
   const alertId = parseHash(window.location.hash).id ?? null;
@@ -196,7 +229,7 @@ export const AlertDetailScreen: React.FC = () => {
     return (
       <div
         data-testid="alert-detail-not-found"
-        className="flex flex-col items-center justify-center h-full gap-4"
+        className="flex h-full flex-col items-center justify-center gap-4"
       >
         <p className="text-text-3">Alert not found.</p>
         <Button variant="outline" size="sm" onClick={handleBack}>
@@ -210,7 +243,7 @@ export const AlertDetailScreen: React.FC = () => {
     return (
       <div
         data-testid="alert-detail-screen"
-        className="flex flex-col items-center justify-center h-full gap-4"
+        className="flex h-full flex-col items-center justify-center gap-4"
       >
         <p className="text-text-3">Loading…</p>
       </div>
@@ -222,7 +255,7 @@ export const AlertDetailScreen: React.FC = () => {
     return (
       <div
         data-testid="alert-detail-not-found"
-        className="flex flex-col items-center justify-center h-full gap-4"
+        className="flex h-full flex-col items-center justify-center gap-4"
       >
         <p className="text-text-3">Alert not found.</p>
         <Button variant="outline" size="sm" onClick={handleBack}>
@@ -234,7 +267,7 @@ export const AlertDetailScreen: React.FC = () => {
 
   // ── Derived values ────────────────────────────────────────────────────────
   const bucket = severityBucket(alert.severity);
-  const badgeVariant = SEVERITY_BADGE[bucket] ?? "mute";
+  const bucketColor = `var(${BUCKET_TOKEN[bucket]})`;
   const firstSeen = formatRelative(alert.timestamp_ns);
   const tacticCount = alert.mitre_tactics.length;
   const killChainActiveIdx = deriveKillChainActiveIdx(alert.mitre_tactics);
@@ -242,39 +275,50 @@ export const AlertDetailScreen: React.FC = () => {
     relativeTime: idx === killChainActiveIdx ? firstSeen : undefined,
   }));
 
+  // Tactic-chain title: humanized tactics joined by arrows, last stage tinted.
+  // Falls back to the rule name when no tactics are mapped.
+  const tacticChain = alert.mitre_tactics.map(humanizeTactic);
   const correlated = detail?.contributing_events ?? [];
 
   return (
     <div
       data-testid="alert-detail-screen"
-      className="flex h-full min-h-0 overflow-hidden"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 360px",
+        height: "100%",
+        overflow: "hidden",
+      }}
     >
-      {/* ── Main content ────────────────────────────────────────────────── */}
-      <div className="flex flex-1 flex-col min-w-0 overflow-y-auto">
-
+      {/* ── Main column ─────────────────────────────────────────────────── */}
+      <div className="flex min-w-0 flex-col overflow-hidden">
         {/* Header */}
-        <header className="flex items-start gap-3 border-b border-line px-4 py-3">
-          <div className="flex flex-col gap-2 flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <SFBadge variant={badgeVariant}>{SEVERITY_LABEL[bucket]}</SFBadge>
-              <span className="sf-mono text-xs text-text-3">
-                score {alert.risk_score.toFixed(2)}
-              </span>
-              {tacticCount > 0 && (
-                <span className="sf-mono text-[10px] text-text-3">
-                  {tacticCount} tactic{tacticCount !== 1 ? "s" : ""}
-                </span>
-              )}
-              <span className="sf-mono text-[10px] text-text-3">
-                {firstSeen}
-              </span>
-            </div>
-            <h1 className="text-base font-semibold text-text truncate">
-              {alert.rule_name}
-            </h1>
-            <p className="text-xs text-text-3 italic">Kill-chain progression</p>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+        <header className="border-b border-line px-7 pb-[22px] pt-5">
+          <div className="mb-3 flex flex-wrap items-center gap-2.5">
+            {/* sev · score badge */}
+            <span
+              className="sf-mono inline-flex items-center gap-1.5 border px-2 py-[3px] text-[11px] tracking-[0.08em]"
+              style={{
+                color: bucketColor,
+                borderColor: `color-mix(in oklch, ${bucketColor} 35%, transparent)`,
+                background: `color-mix(in oklch, ${bucketColor} 12%, transparent)`,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5"
+                style={{ background: bucketColor }}
+              />
+              {SEVERITY_LABEL[bucket].toUpperCase()} · {alert.risk_score.toFixed(2)}
+            </span>
+            <span className="sf-mono text-[11px] text-text-3">
+              kill_chain · {tacticCount} tactic{tacticCount !== 1 ? "s" : ""}
+            </span>
+            <span className="sf-mono truncate text-[11px] text-text-3" title={alert.rule_name}>
+              · {alert.rule_name}
+            </span>
+            <span className="sf-mono text-[11px] text-text-3">· first seen {firstSeen}</span>
+            <span className="flex-1" />
             <Button
               size="sm"
               variant={acknowledged ? "default" : "outline"}
@@ -283,77 +327,119 @@ export const AlertDetailScreen: React.FC = () => {
             >
               {acknowledged ? "Acknowledged" : "Acknowledge"}
             </Button>
-            <Button size="sm" variant="outline" aria-label="run playbook">
-              Run playbook
+            <Button size="sm" aria-label="run playbook">
+              Run playbook ↗
             </Button>
+          </div>
+
+          {/* Tactic-chain title */}
+          <h1
+            className="text-[22px] font-semibold leading-[1.1] tracking-[-0.02em] text-text"
+            style={{ overflow: "hidden", textOverflow: "ellipsis" }}
+          >
+            {tacticChain.length > 0
+              ? tacticChain.map((t, i) => (
+                  <React.Fragment key={`${t}-${i}`}>
+                    {i > 0 && <span className="text-text-3">{" → "}</span>}
+                    <span style={i === tacticChain.length - 1 ? { color: bucketColor } : undefined}>
+                      {t}
+                    </span>
+                  </React.Fragment>
+                ))
+              : alert.rule_name}
+          </h1>
+
+          {/* Entity summary */}
+          <div className="sf-mono mt-1.5 text-xs text-text-3">
+            entity ={" "}
+            <span className="text-accent">{alert.entity_value ?? "—"}</span> · {correlated.length}{" "}
+            events
+            {alert.mitre_techniques.length > 0 && (
+              <> · {alert.mitre_techniques.length} technique{alert.mitre_techniques.length !== 1 ? "s" : ""}</>
+            )}
           </div>
         </header>
 
-        {/* Kill-chain + correlated events */}
-        <div className="flex flex-col gap-4 px-4 py-4">
+        {/* Kill-chain timeline */}
+        <section className="border-b border-line px-7 py-6">
+          <div className="sf-mono mb-4 text-[10px] uppercase tracking-[0.12em] text-text-3">
+            kill chain
+          </div>
           <KillChain activeIdx={killChainActiveIdx} stages={killChainStages} />
-          <CorrelatedEvents events={correlated} />
-        </div>
+        </section>
+
+        {/* Correlated events */}
+        <CorrelatedEvents events={correlated} />
       </div>
 
       {/* ── Right rail ──────────────────────────────────────────────────── */}
       <aside
-        className={cn(
-          "w-[300px] shrink-0 border-l border-line flex flex-col overflow-y-auto",
-          "bg-surface",
-        )}
+        className="flex flex-col overflow-y-auto border-l border-line bg-bg"
         aria-label="alert detail right rail"
       >
         {/* Entities */}
         <SideBlock title="Entities">
           {alert.entity_type && alert.entity_value ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <EntityGlyph type={toGlyphType(alert.entity_type)} size={20} />
-                <span className="sf-mono text-xs truncate">{alert.entity_value}</span>
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center gap-2.5">
+                <EntityGlyph type={toGlyphType(alert.entity_type)} />
+                <div className="min-w-0 flex-1">
+                  <div className="sf-mono truncate text-xs text-accent">{alert.entity_value}</div>
+                  <div className="mt-1 h-0.5 w-full bg-surface-2">
+                    <div
+                      className="h-full"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, alert.risk_score * 100))}%`,
+                        background: bucketColor,
+                      }}
+                    />
+                  </div>
+                </div>
+                <span className="sf-mono sf-tnum text-[11px] text-text-2">
+                  {alert.risk_score.toFixed(2)}
+                </span>
               </div>
-              <RiskBar value={alert.risk_score} />
-              <span className="sf-mono text-[10px] text-text-3">
-                risk {(alert.risk_score * 100).toFixed(0)}%
-              </span>
             </div>
           ) : (
-            <span className="text-xs text-text-3 italic">No entities.</span>
+            <span className="text-xs italic text-text-3">No entities.</span>
           )}
         </SideBlock>
 
         {/* MITRE ATT&CK */}
         <SideBlock title="MITRE ATT&CK">
           {alert.mitre_techniques.length > 0 ? (
-            <div className="flex flex-wrap gap-1">
-              {alert.mitre_techniques.map((t) => (
-                <span
-                  key={t}
-                  className={cn(
-                    "sf-mono border border-line px-[5px] py-[1px] text-[10px] leading-none",
-                    "text-info bg-[color-mix(in_oklch,var(--info)_8%,transparent)]",
-                    "border-[color-mix(in_oklch,var(--info)_30%,transparent)]",
-                  )}
-                >
-                  {t}
-                </span>
-              ))}
+            <div className="flex flex-col gap-1.5">
+              {alert.mitre_techniques.map((t, i) => {
+                const tactic = alert.mitre_tactics[i]
+                  ? humanizeTactic(alert.mitre_tactics[i]).toLowerCase()
+                  : "";
+                return (
+                  <div
+                    key={t}
+                    className="flex items-baseline gap-2 border border-line bg-surface px-2 py-1.5"
+                  >
+                    <span className="sf-mono text-[10.5px] tracking-[0.04em] text-accent">{t}</span>
+                    {tactic && (
+                      <span className="sf-mono ml-auto text-[9.5px] uppercase tracking-[0.06em] text-text-3">
+                        {tactic}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
-            <span className="text-xs text-text-3 italic">No techniques mapped.</span>
+            <span className="text-xs italic text-text-3">No techniques mapped.</span>
           )}
         </SideBlock>
 
         {/* AI Explanation */}
         <SideBlock title="AI Explanation">
           <AiExplanation
-            narrative={
-              loadingDetail
-                ? ""
-                : (llmNarrative ?? detail?.message ?? alert.message)
-            }
+            narrative={loadingDetail ? "" : (llmNarrative ?? detail?.message ?? alert.message)}
             provenance={alert.mitre_techniques}
             loading={loadingDetail}
+            generatedBy="sf-llm · explain"
           />
         </SideBlock>
       </aside>

@@ -8,21 +8,18 @@ export type { KillChainStageDefinition } from "./killChainStages";
 export type KillChainStageState = "done" | "active" | "imminent" | "pending";
 
 export interface KillChainStageData {
+  /** Relative time for the stage, e.g. "−12m" / "5m ago". */
   relativeTime?: string;
+  /** Per-stage detail sub-label, e.g. "ssh_brute_force". */
+  label?: string;
 }
 
-const STATE_CLASSES: Record<KillChainStageState, string> = {
-  done:     "border-info  text-info   bg-[color-mix(in_oklch,var(--info)_8%,transparent)]",
-  active:   "border-crit  text-crit   bg-[color-mix(in_oklch,var(--crit)_12%,transparent)]",
-  imminent: "border-warn  text-warn   bg-[color-mix(in_oklch,var(--warn)_8%,transparent)]",
-  pending:  "border-line  text-text-3 bg-surface-2",
-};
-
-const DOT_CLASSES: Record<KillChainStageState, string> = {
-  done:     "bg-info",
-  active:   "bg-crit",
-  imminent: "bg-warn",
-  pending:  "bg-surface-2 border border-line",
+/** State → top rule-bar + sub-label color (mockup `DashAlertDetail` KillChain). */
+const STATE_COLOR: Record<KillChainStageState, string> = {
+  done:     "var(--text-2)",
+  active:   "var(--crit)",
+  imminent: "var(--warn)",
+  pending:  "var(--text-3)",
 };
 
 function stateFor(idx: number, activeIdx: number | undefined): KillChainStageState {
@@ -40,74 +37,79 @@ export interface KillChainProps {
    * Omit to render all stages as pending.
    */
   activeIdx?: number;
-  /** Per-stage runtime data (relativeTime, etc.). Length may be < 7. */
+  /** Per-stage runtime data (relativeTime, label, …). Length may be < 7. */
   stages: KillChainStageData[];
   className?: string;
 }
 
 /**
- * Kill-chain timeline — 7 MITRE ATT&CK stages with done/active/imminent/pending states.
- * Vertical layout; sharp geometry (no rounded corners per §3.7).
+ * Kill-chain timeline — 7 MITRE ATT&CK stages with done/active/imminent/pending
+ * states, laid out as a horizontal grid to match the `DashAlertDetail` mockup:
+ * each cell shows a state-colored top rule, the tac-id + relative-time row, the
+ * stage name, and an optional detail sub-label. Sharp geometry (no radius).
+ *
+ * The `list` / `listitem` roles, `aria-label="kill chain"`, the
+ * `kc-stage-{state}` testids and `aria-current="step"` on the active stage are
+ * part of the screen + e2e contract and are preserved across the restyle.
  */
 export const KillChain: React.FC<KillChainProps> = ({ activeIdx, stages, className }) => (
   <ol
     role="list"
     aria-label="kill chain"
-    className={cn("flex flex-col gap-0", className)}
+    className={cn("gap-0", className)}
+    style={{
+      display: "grid",
+      gridTemplateColumns: `repeat(${KILL_CHAIN_STAGES.length}, 1fr)`,
+    }}
   >
     {KILL_CHAIN_STAGES.map((def, idx) => {
       const state = stateFor(idx, activeIdx);
       const stageData = stages[idx];
-      const isLast = idx === KILL_CHAIN_STAGES.length - 1;
+      const color = STATE_COLOR[state];
 
       return (
         <li
           key={def.taId}
           data-testid={`kc-stage-${state}`}
           aria-current={state === "active" ? "step" : undefined}
-          className="relative flex items-start gap-3 pb-0"
+          className="relative pr-2"
         >
-          {/* Connector line */}
-          {!isLast && (
-            <div
-              aria-hidden="true"
-              className={cn(
-                "absolute left-[7px] top-4 w-px",
-                state === "done" ? "bg-info h-full" : "bg-line h-full",
-              )}
-              style={{ height: "calc(100% + 8px)" }}
-            />
-          )}
-
-          {/* Stage dot */}
+          {/* Top state rule */}
           <div
             aria-hidden="true"
-            className={cn(
-              "relative z-10 mt-1 flex-shrink-0 rounded-full",
-              "w-[15px] h-[15px]",
-              DOT_CLASSES[state],
-            )}
+            className="mb-3"
+            style={{
+              height: 3,
+              background: state === "pending" ? "var(--surface-2)" : color,
+            }}
           />
 
-          {/* Stage label card */}
+          {/* tac-id + relative-time */}
+          <div className="flex items-baseline justify-between">
+            <span className="sf-mono text-[10px] text-text-3 tracking-[0.06em]">{def.taId}</span>
+            {stageData?.relativeTime && (
+              <span className="sf-mono sf-tnum text-[10px] text-text-3">
+                {stageData.relativeTime}
+              </span>
+            )}
+          </div>
+
+          {/* Stage name */}
           <div
             className={cn(
-              "mb-2 flex-1 border px-3 py-2",
-              STATE_CLASSES[state],
+              "mt-1.5 text-xs font-semibold tracking-[-0.01em]",
+              state === "pending" ? "text-text-3" : "text-text",
             )}
           >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="sf-mono text-[10px] opacity-70">{def.taId}</span>
-                <span className="text-xs font-medium">{def.label}</span>
-              </div>
-              {stageData?.relativeTime && (
-                <span className="sf-mono text-[10px] opacity-70 flex-shrink-0">
-                  {stageData.relativeTime}
-                </span>
-              )}
-            </div>
+            {def.label}
           </div>
+
+          {/* Optional detail sub-label */}
+          {stageData?.label && (
+            <div className="sf-mono text-[11px] mt-1" style={{ color }}>
+              {stageData.label}
+            </div>
+          )}
         </li>
       );
     })}
