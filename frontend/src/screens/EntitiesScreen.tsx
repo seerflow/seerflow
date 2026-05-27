@@ -7,15 +7,15 @@
  * Wires the entity store to the EntityExplorerGraph component:
  * - nodes  = focal entity + related entities (mapped to GraphEntity)
  * - edges  = related entities mapped to GraphRelation pairs
- * - selected node → store.selectEntity + navigateToEntity
- * - double-click node → navigateToEntity
+ * - selected node → store.selectEntity (lifts selection into the inspector)
+ * - double-click node → drill into the node's depth-1 neighborhood (S-326)
  * - hash restore on mount/hashchange (preserves pre-S-322 route behaviour)
  */
 
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityExplorerGraph } from "@/components/EntityExplorer/EntityExplorerGraph";
 import { useEntityStore } from "@/stores/entity";
-import { hashHasEntity, navigateToEntity } from "@/lib/hash";
+import { hashHasEntity } from "@/lib/hash";
 import type { GraphEntity, GraphRelation } from "@/viz/entityGraphAdapter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -101,6 +101,9 @@ export const EntitiesScreen: React.FC = () => {
   const searchResults = useEntityStore((s) => s.searchResults);
   const recent        = useEntityStore((s) => s.recent);
 
+  // ── Drill state (ephemeral view state, not the store) ──────────────────
+  const [drillUuid, setDrillUuid] = useState<string | null>(null);
+
   // ── Hash routing (preserves pre-S-322 behaviour) ──────────────────────
   useEffect(() => {
     const h = window.location.hash;
@@ -139,6 +142,25 @@ export const EntitiesScreen: React.FC = () => {
     [selectedUuid, related],
   );
 
+  // ── Drill: filter to drilled node + depth-1 neighbours (S-326) ─────────
+  const displayNodes = useMemo(() => {
+    if (!drillUuid) return graphNodes;
+    const keep = new Set<string>([drillUuid]);
+    for (const e of graphEdges) {
+      if (e.source_uuid === drillUuid) keep.add(e.target_uuid);
+      if (e.target_uuid === drillUuid) keep.add(e.source_uuid);
+    }
+    return graphNodes.filter((n) => keep.has(n.entity_uuid));
+  }, [drillUuid, graphNodes, graphEdges]);
+
+  const displayEdges = useMemo(() => {
+    if (!drillUuid) return graphEdges;
+    const ids = new Set(displayNodes.map((n) => n.entity_uuid));
+    return graphEdges.filter(
+      (e) => ids.has(e.source_uuid) && ids.has(e.target_uuid),
+    );
+  }, [drillUuid, graphEdges, displayNodes]);
+
   // ── Handlers ─────────────────────────────────────────────────────────
   const handleNodeSelect = useCallback(
     (id: string | null) => {
@@ -152,8 +174,10 @@ export const EntitiesScreen: React.FC = () => {
   );
 
   const handleNodeDblClick = useCallback((id: string) => {
-    navigateToEntity(id);
+    setDrillUuid(id);
   }, []);
+
+  const handleClearDrill = useCallback(() => setDrillUuid(null), []);
 
   const setRange = useEntityStore((s) => s.setRange);
   const handleTimeWindowChange = useCallback(
@@ -177,12 +201,14 @@ export const EntitiesScreen: React.FC = () => {
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}
     >
       <EntityExplorerGraph
-        nodes={graphNodes}
-        edges={graphEdges}
+        nodes={displayNodes}
+        edges={displayEdges}
         selectedUuid={selectedUuid}
         onNodeSelect={handleNodeSelect}
         onNodeDblClick={handleNodeDblClick}
         onTimeWindowChange={handleTimeWindowChange}
+        drillActive={drillUuid !== null}
+        onClearDrill={handleClearDrill}
         events={events}
         related={related}
         className="flex-1 min-h-0"

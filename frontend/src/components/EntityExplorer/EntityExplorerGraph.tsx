@@ -7,7 +7,7 @@
  * Right: EntityInspector (selected entity stats, linked alerts, recent events)
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   SideBlock,
   FilterChip,
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/primitives";
 import type { LegendItemData } from "@/components/ui/primitives";
 import { EntityGraphCanvas } from "@/viz/EntityGraphCanvas";
-import type { GraphLayout } from "@/viz/EntityGraphCanvas";
+import type { EntityGraphCanvasHandle, GraphLayout } from "@/viz/EntityGraphCanvas";
 import type { GraphEntity, GraphRelation } from "@/viz/entityGraphAdapter";
 import type { EntityEvent, EntityRelation } from "@/lib/types";
 import { EntityInspector } from "./EntityInspector";
@@ -47,6 +47,10 @@ export interface EntityExplorerGraphProps {
   onNodeDblClick: (id: string) => void;
   /** Called when the user changes the time-window chip — parent should call store.setRange */
   onTimeWindowChange?: (window: string) => void;
+  /** True when the graph is drilled into a node's neighborhood (S-326) */
+  drillActive?: boolean;
+  /** Restores the full graph from a drilled neighborhood view (S-326) */
+  onClearDrill?: () => void;
   events: EntityEvent[];
   related: EntityRelation[];
   className?: string;
@@ -59,16 +63,15 @@ export const EntityExplorerGraph: React.FC<EntityExplorerGraphProps> = ({
   edges,
   selectedUuid,
   onNodeSelect,
-  // onNodeDblClick wiring: EntityGraphCanvas (S-319) has no onNodeDblClick prop.
-  // Double-click neighborhood navigation is deferred pending a canvas prop addition
-  // in a follow-up story (see deferred_issues in S-322 PR). The prop is kept in the
-  // interface so callers can wire it when the canvas gains support.
-  onNodeDblClick: _onNodeDblClick, // eslint-disable-line @typescript-eslint/no-unused-vars
+  onNodeDblClick,
   onTimeWindowChange,
+  drillActive,
+  onClearDrill,
   events,
   related,
   className,
 }) => {
+  const canvasRef = useRef<EntityGraphCanvasHandle>(null);
   // ── Filter state ──
   const [activeTypes, setActiveTypes] = useState<Set<KnownType>>(
     new Set(ENTITY_TYPES),
@@ -278,27 +281,49 @@ export const EntityExplorerGraph: React.FC<EntityExplorerGraphProps> = ({
         {/* Canvas — absolute fill so Cytoscape has a concrete pixel size */}
         <div className="absolute inset-0">
           <EntityGraphCanvas
+            ref={canvasRef}
             nodes={visibleNodes}
             edges={visibleEdges}
             layout={layout}
             fitOnChange
+            selectedUuid={selectedUuid}
             onNodeSelect={onNodeSelect}
+            onNodeDblClick={onNodeDblClick}
             className="w-full h-full"
           />
         </div>
 
         {/* Zoom/fit toolbar (top-left overlay) */}
         <div className="absolute top-3.5 left-3.5 flex gap-1.5 z-10">
-          {(["fit", "+", "−", "⤢"] as const).map((label) => (
+          {(
+            [
+              { label: "fit", aria: "Fit graph", fn: () => canvasRef.current?.fit() },
+              { label: "+", aria: "Zoom in", fn: () => canvasRef.current?.zoomIn() },
+              { label: "−", aria: "Zoom out", fn: () => canvasRef.current?.zoomOut() },
+              { label: "⤢", aria: "Fullscreen", fn: () => canvasRef.current?.fullscreen() },
+            ] as const
+          ).map(({ label, aria, fn }) => (
             <button
               key={label}
-              aria-label={label === "fit" ? "Fit graph" : label === "+" ? "Zoom in" : label === "−" ? "Zoom out" : "Fullscreen"}
+              aria-label={aria}
+              onClick={fn}
               className="w-7 h-7 bg-surface border border-line text-text-2 text-[12px] cursor-pointer hover:border-line-2 hover:text-text transition-colors flex items-center justify-center"
             >
               {label}
             </button>
           ))}
         </div>
+
+        {/* Clear-drill affordance (shown only while drilled) */}
+        {drillActive && (
+          <button
+            data-testid="graph-clear-drill"
+            onClick={onClearDrill}
+            className="absolute top-3.5 left-36 z-10 px-2.5 h-7 bg-surface border border-line text-text-2 text-[11px] cursor-pointer hover:border-line-2 hover:text-text transition-colors flex items-center gap-1"
+          >
+            ← Clear drill
+          </button>
+        )}
 
         {/* Node/edge/depth counter (bottom-left overlay) */}
         <div

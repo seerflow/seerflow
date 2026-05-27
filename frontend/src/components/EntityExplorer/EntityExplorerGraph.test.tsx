@@ -5,31 +5,56 @@
  */
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type React from "react";
 import type { GraphEntity, GraphRelation } from "@/viz/entityGraphAdapter";
 import type { EntityEvent, EntityRelation } from "@/lib/types";
 
 // ── Mock Cytoscape canvas (heavy, async, DOM) ──────────────────────────────
-vi.mock("@/viz/EntityGraphCanvas", () => ({
-  EntityGraphCanvas: ({
-    nodes,
-    edges,
-    layout,
-    onNodeSelect,
-  }: {
-    nodes: GraphEntity[];
-    edges: GraphRelation[];
-    layout?: string;
-    onNodeSelect?: (id: string | null) => void;
-  }) => (
-    <div
-      data-testid="entity-graph-canvas"
-      data-layout={layout ?? "Force"}
-      data-nodes={nodes.length}
-      data-edges={edges.length}
-      onClick={() => onNodeSelect?.(nodes[0]?.entity_uuid ?? null)}
-    />
-  ),
-}));
+const mockZoomIn = vi.fn();
+const mockZoomOut = vi.fn();
+const mockFit = vi.fn();
+const mockFullscreen = vi.fn();
+vi.mock("@/viz/EntityGraphCanvas", async () => {
+  const { forwardRef, useImperativeHandle } = await import("react");
+  return {
+    EntityGraphCanvas: forwardRef(function MockCanvas(
+      {
+        nodes,
+        edges,
+        layout,
+        selectedUuid,
+        onNodeSelect,
+        onNodeDblClick,
+      }: {
+        nodes: GraphEntity[];
+        edges: GraphRelation[];
+        layout?: string;
+        selectedUuid?: string | null;
+        onNodeSelect?: (id: string | null) => void;
+        onNodeDblClick?: (id: string) => void;
+      },
+      ref: React.Ref<unknown>,
+    ) {
+      useImperativeHandle(ref, () => ({
+        zoomIn: mockZoomIn,
+        zoomOut: mockZoomOut,
+        fit: mockFit,
+        fullscreen: mockFullscreen,
+      }));
+      return (
+        <div
+          data-testid="entity-graph-canvas"
+          data-layout={layout ?? "Force"}
+          data-nodes={nodes.length}
+          data-edges={edges.length}
+          data-selected={selectedUuid ?? ""}
+          onClick={() => onNodeSelect?.(nodes[0]?.entity_uuid ?? null)}
+          onDoubleClick={() => onNodeDblClick?.(nodes[0]?.entity_uuid ?? "")}
+        />
+      );
+    }),
+  };
+});
 
 import { EntityExplorerGraph } from "./EntityExplorerGraph";
 import { EntityInspector } from "./EntityInspector";
@@ -192,6 +217,58 @@ describe("EntityExplorerGraph", () => {
     render(<EntityExplorerGraph {...defaultProps} onNodeSelect={onNodeSelect} />);
     fireEvent.click(screen.getByTestId("entity-graph-canvas"));
     expect(onNodeSelect).toHaveBeenCalledWith("aaaa-bbbb");
+  });
+
+  // ── S-326: selection ring, toolbar wiring, drill affordance ─────────────
+  it("passes selectedUuid through to the canvas", () => {
+    render(<EntityExplorerGraph {...defaultProps} selectedUuid="cccc-dddd" />);
+    expect(screen.getByTestId("entity-graph-canvas")).toHaveAttribute(
+      "data-selected",
+      "cccc-dddd",
+    );
+  });
+
+  it("wires the fit toolbar button to the canvas handle", () => {
+    render(<EntityExplorerGraph {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /fit graph/i }));
+    expect(mockFit).toHaveBeenCalled();
+  });
+
+  it("wires zoom-in and zoom-out toolbar buttons", () => {
+    render(<EntityExplorerGraph {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /zoom in/i }));
+    fireEvent.click(screen.getByRole("button", { name: /zoom out/i }));
+    expect(mockZoomIn).toHaveBeenCalled();
+    expect(mockZoomOut).toHaveBeenCalled();
+  });
+
+  it("wires the fullscreen toolbar button", () => {
+    render(<EntityExplorerGraph {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /fullscreen/i }));
+    expect(mockFullscreen).toHaveBeenCalled();
+  });
+
+  it("forwards double-click to onNodeDblClick", () => {
+    const onNodeDblClick = vi.fn();
+    render(<EntityExplorerGraph {...defaultProps} onNodeDblClick={onNodeDblClick} />);
+    fireEvent.doubleClick(screen.getByTestId("entity-graph-canvas"));
+    expect(onNodeDblClick).toHaveBeenCalledWith("aaaa-bbbb");
+  });
+
+  it("renders clear-drill affordance only when drillActive is true", () => {
+    const { rerender } = render(
+      <EntityExplorerGraph {...defaultProps} drillActive={false} />,
+    );
+    expect(screen.queryByTestId("graph-clear-drill")).not.toBeInTheDocument();
+    rerender(<EntityExplorerGraph {...defaultProps} drillActive onClearDrill={vi.fn()} />);
+    expect(screen.getByTestId("graph-clear-drill")).toBeInTheDocument();
+  });
+
+  it("calls onClearDrill when clear-drill is clicked", () => {
+    const onClearDrill = vi.fn();
+    render(<EntityExplorerGraph {...defaultProps} drillActive onClearDrill={onClearDrill} />);
+    fireEvent.click(screen.getByTestId("graph-clear-drill"));
+    expect(onClearDrill).toHaveBeenCalled();
   });
 });
 
