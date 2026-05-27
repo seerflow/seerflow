@@ -14,6 +14,7 @@ import type { SigmaRuleSummary } from "@/lib/types";
 import { FilterChip, FilterRow } from "@/components/ui/primitives/FilterChip";
 import { RuleTable } from "@/components/SigmaRules/RuleTable";
 import { RuleDetailPanel } from "@/components/SigmaRules/RuleDetailPanel";
+import { UploadRuleDialog } from "@/components/SigmaRules/UploadRuleDialog";
 
 type ChipId = "all" | "enabled" | "disabled" | "high-precision" | "noisy";
 
@@ -67,6 +68,8 @@ export const SigmaScreen: React.FC = () => {
 
   const [chip, setChip] = useState<ChipId>("all");
   const [search, setSearch] = useState("");
+  // S-327 (AC2): "+ New" opens the blank-YAML rule editor (UploadRuleDialog).
+  const [newOpen, setNewOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initial load with abort on unmount.
@@ -128,6 +131,7 @@ export const SigmaScreen: React.FC = () => {
             className="flex-1 bg-transparent sf-mono text-sm text-text placeholder:text-text-3 outline-none"
           />
           <button
+            onClick={() => setNewOpen(true)}
             className="sf-mono text-xs text-accent border border-[color-mix(in_oklch,var(--accent)_35%,transparent)] px-2 py-1 leading-none whitespace-nowrap hover:bg-[color-mix(in_oklch,var(--accent)_8%,transparent)] transition-colors"
             aria-label="New rule"
           >
@@ -184,6 +188,18 @@ export const SigmaScreen: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* S-327 (AC2): blank-rule editor — opens on "+ New". After a save the
+          list reloads and the freshly-created rule is auto-selected. */}
+      <UploadRuleDialog
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        onSaved={(ruleId) => {
+          void load();
+          select(ruleId);
+          setNewOpen(false);
+        }}
+      />
     </div>
   );
 };
