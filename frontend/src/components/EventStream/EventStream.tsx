@@ -4,6 +4,8 @@ import { useEventStore, selectPausedCount } from "@/stores/events";
 import { EventRow } from "./EventRow";
 import { PauseControl } from "./PauseControl";
 import { EventFilterBar } from "./EventFilterBar";
+import { EventTableHeader } from "./EventTableHeader";
+import { MiniVolumeStrip } from "./MiniVolumeStrip";
 import { api, ApiError } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import { LiveEventSchema } from "@/lib/schemas";
@@ -11,6 +13,7 @@ import { createFilterSlot } from "@/lib/wsFilter";
 import * as wsBus from "@/lib/wsBus";
 import { useWsSend } from "@/components/WsProvider";
 import { useDebouncedWsSend } from "@/hooks/useDebouncedWsSend";
+import { useStreamingSeries } from "@/viz/useStreamingSeries";
 import type { LiveEvent, EventFilter, WsStatus } from "@/lib/types";
 import { isLiveEvent } from "@/lib/types";
 
@@ -28,13 +31,17 @@ function intentFromFilter(f: EventFilter): Parameters<typeof eventsSlot.set>[0] 
   };
 }
 
-export function EventStream(): JSX.Element {
+interface Props {
+  /** Controlled selected event ID — from parent EventsScreen (optional). */
+  selectedId?: string | null;
+  /** Callback when user selects/deselects a row (optional). */
+  onSelectId?: (id: string | null) => void;
+}
+
+export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element {
   const filter = useEventStore((s) => s.filter);
   const paused = useEventStore((s) => s.paused);
   const knownSources = useEventStore((s) => s.knownSources);
-  // Subscribe to raw events ref + filter; memoize the filtered slice locally so
-  // unrelated store updates (paused, dropped counters) don't cascade into a
-  // re-filter of the entire ring buffer.
   const events = useEventStore((s) => s.events);
   const visible = useMemo<LiveEvent[]>(() => {
     if (filter.sources.size === 0 && filter.minSeverity === 0 && filter.templateIds.size === 0) {
@@ -49,33 +56,56 @@ export function EventStream(): JSX.Element {
   }, [events, filter]);
   const bufferedCount = useEventStore(selectPausedCount);
   const { backfill, pause, resume, setFilter } = useEventStore.getState();
+  // Uncontrolled expanded ID for rows not wired to parent inspector
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [virtualizerReady, setVirtualizerReady] = useState(false);
   const [status, setStatus] = useState<WsStatus>("connecting");
   const send = useWsSend();
 
-  // wsBus subscriptions (S-062 Phase A): EventStream is the sole ingestor of
-  // LiveEvent frames into useEventStore. AlertFeed used to fan-out here as a
-  // transitional double-write; that path has been removed in this task to
-  // prevent duplicate rows.
+  // Volume ring buffer — 60 seconds at 1s resolution
+  const volSeries = useStreamingSeries<[number, number, number]>({ capacity: 60 });
+  // Per-second bucket counters (reset each second)
+  const bucketRef = useRef({ total: 0, crit: 0, warn: 0 });
+  const [critCount, setCritCount] = useState(0);
+  const [warnCount, setWarnCount] = useState(0);
+
+  // wsBus subscriptions
   useEffect(() => {
     const offs = [
       wsBus.on("event", (m) => {
-        // m.data was pre-validated + bigint-converted by useWebSocket.
         useEventStore.getState().ingest([m.data]);
+        // Count into current bucket
+        bucketRef.current.total++;
+        if (m.data.severity_id >= 6) bucketRef.current.crit++;
+        else if (m.data.severity_id >= 4) bucketRef.current.warn++;
       }),
       wsBus.on("batch", (m) => {
-        // Heterogeneous envelope — only ingest LiveEvent-shaped batches.
-        // S-208: isLiveEvent replaces the `"event_id" in first` stringly-typed check.
         const first = m.events[0];
         if (isLiveEvent(first)) {
           useEventStore.getState().ingest(m.events);
+          for (const e of m.events) {
+            bucketRef.current.total++;
+            if (e.severity_id >= 6) bucketRef.current.crit++;
+            else if (e.severity_id >= 4) bucketRef.current.warn++;
+          }
         }
       }),
       wsBus.on("__status", (m) => setStatus(m.status)),
     ];
     return () => { for (const off of offs) off(); };
   }, []);
+
+  // 1-second interval to flush the bucket into the ring buffer
+  useEffect(() => {
+    const id = setInterval(() => {
+      const { total, crit, warn } = bucketRef.current;
+      bucketRef.current = { total: 0, crit: 0, warn: 0 };
+      volSeries.push(Date.now() / 1000, [total, crit, warn]);
+      setCritCount((prev) => prev + crit);
+      setWarnCount((prev) => prev + warn);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [volSeries]);
 
   // REST warm-up
   useEffect(() => {
@@ -86,8 +116,7 @@ export function EventStream(): JSX.Element {
     return () => { cancelled = true; };
   }, [backfill]);
 
-  // Push WS filter intent on filter change (debounce 150 ms). S-208: shared
-  // hook. Clear on unmount stays in the separate effect below.
+  // Push WS filter intent on filter change (debounce 150 ms)
   const debouncedSend = useDebouncedWsSend(send, 150);
   useEffect(() => {
     const merged = eventsSlot.set(intentFromFilter(filter));
@@ -96,16 +125,17 @@ export function EventStream(): JSX.Element {
 
   useEffect(() => () => {
     eventsSlot.clear();
-    // No CustomEvent dispatch — AlertFeed no longer listens for the legacy
-    // "seerflow:wsfilter-changed" hop; filter merging happens via useWsSend().
   }, []);
 
-  // Virtualizer — keep estimateSize closure fresh by re-creating it whenever
-  // expandedId changes. useVirtualizer rebinds internally on instance change.
+  // Virtualizer
   const parentRef = useRef<HTMLDivElement>(null);
+
+  // Effective selected ID: controlled when parent passes selectedId, else use internal expandedId
+  const effectiveSelectedId = selectedId !== undefined ? selectedId : expandedId;
+
   const estimateSize = useCallback(
-    (i: number): number => (visible[i]?.event_id === expandedId ? 220 : 28),
-    [visible, expandedId],
+    (i: number): number => (visible[i]?.event_id === effectiveSelectedId ? 220 : 28),
+    [visible, effectiveSelectedId],
   );
   const rv = useVirtualizer({
     count: visible.length,
@@ -114,17 +144,13 @@ export function EventStream(): JSX.Element {
     overscan: 8,
   });
 
-  // Once parent is measured, virtualizer becomes the source of truth. Until
-  // then we render an empty placeholder rather than dumping the full list.
   useEffect(() => {
     if (parentRef.current && parentRef.current.clientHeight > 0) {
       setVirtualizerReady(true);
     }
   }, [visible.length]);
 
-  // Re-measure on row expansion in a layout effect so estimateSize sees the new
-  // expandedId before the virtualizer reads it.
-  useEffect(() => { rv.measure(); }, [expandedId, rv]);
+  useEffect(() => { rv.measure(); }, [effectiveSelectedId, rv]);
 
   const knownSourcesList = useMemo(
     () => [...knownSources].sort().slice(0, 50),
@@ -136,46 +162,165 @@ export function EventStream(): JSX.Element {
   }, [paused, pause, resume]);
 
   const toggleRow = useCallback((id: string): void => {
-    setExpandedId((cur) => (cur === id ? null : id));
-  }, []);
+    if (onSelectId) {
+      // Controlled mode: toggle via parent callback
+      const next = effectiveSelectedId === id ? null : id;
+      onSelectId(next);
+    } else {
+      // Uncontrolled mode
+      setExpandedId((cur) => (cur === id ? null : id));
+    }
+  }, [onSelectId, effectiveSelectedId]);
 
-  // True when @tanstack/react-virtual has produced items. In jsdom (no layout)
-  // and on the very first paint in production this is empty; we then fall back
-  // to a plain list. The virtualizerReady flag stops the fallback from running
-  // in production once the parent has measured even a single time.
   const virtualItems = rv.getVirtualItems();
   const useFallback = !virtualizerReady || virtualItems.length === 0;
 
+  // Query field state (local, not sent to server in this iteration)
+  const [query, setQuery] = useState("");
+
+  const volArrays = volSeries.data;
+  const volTimestamps = volArrays.timestamps;
+  const volValues = volArrays.values[0] ?? [];
+
   return (
     <section className="flex flex-col h-full min-h-0 rounded border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">Live Event Stream</h2>
+      {/* Toolbar */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "8px 24px",
+          borderBottom: "1px solid var(--line)",
+          flexShrink: 0,
+        }}
+      >
+        {/* Live dot + label */}
+        <div
+          data-testid="live-label"
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+        >
           <span
             aria-label={`WebSocket status: ${status}`}
-            className={`inline-block h-2 w-2 rounded-full ${status === "open" ? "bg-emerald-500" : status === "connecting" ? "bg-amber-500" : "bg-red-500"}`}
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background:
+                status === "open"
+                  ? "var(--accent)"
+                  : status === "connecting"
+                  ? "var(--warn)"
+                  : "var(--crit)",
+              animation: status === "open" ? "pulse 2s infinite" : undefined,
+            }}
           />
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--text-3)",
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+            }}
+          >
+            live
+          </span>
         </div>
+
+        {/* Query field */}
+        <div
+          data-testid="query-field"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flex: 1,
+            gap: 8,
+            border: "1px solid var(--line)",
+            borderRadius: 4,
+            padding: "4px 10px",
+            background: "var(--surface-2)",
+          }}
+        >
+          <input
+            type="text"
+            placeholder="filter events…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--text)",
+            }}
+          />
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              color: "var(--text-3)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            jq · sigma · sql
+          </span>
+        </div>
+
+        {/* Pause */}
         <PauseControl paused={paused} bufferedCount={bufferedCount} onToggle={togglePause} />
+
+        {/* Export */}
+        <button
+          aria-label="Export events"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--text-2)",
+            background: "transparent",
+            border: "1px solid var(--line)",
+            borderRadius: 4,
+            padding: "4px 10px",
+            cursor: "pointer",
+          }}
+        >
+          Export
+        </button>
       </header>
+
+      {/* MiniVolume strip */}
+      <MiniVolumeStrip
+        timestamps={volTimestamps}
+        values={volValues}
+        critCount={critCount}
+        warnCount={warnCount}
+      />
+
+      {/* Filter bar */}
       <EventFilterBar filter={filter} knownSources={knownSourcesList} onChange={setFilter} />
-      {/* Disconnected banner now lives at the dashboard header via <DisconnectedBanner />. */}
+
+      {/* Table header */}
+      <EventTableHeader />
+
+      {/* Event list */}
       <div ref={parentRef} className="flex-1 overflow-y-auto">
         {visible.length === 0 ? (
           <div className="p-6 text-center text-xs text-muted-foreground">No events yet — waiting for the pipeline to send some.</div>
         ) : useFallback ? (
-          // Pre-measurement (or jsdom). Render the first MAX_FALLBACK rows so
-          // tests + a11y work and we don't dump 1000 unvirtualized rows on first
-          // paint. The virtualizer takes over the moment parent dimensions land.
           <div>
             {visible.slice(0, MAX_FALLBACK_ROWS).map((e) => (
-              <EventRow key={e.event_id} event={e} expanded={expandedId === e.event_id} onToggle={toggleRow} />
+              <EventRow
+                key={e.event_id}
+                event={e}
+                expanded={effectiveSelectedId === e.event_id}
+                onToggle={toggleRow}
+              />
             ))}
           </div>
         ) : (
-          // jsdom has no layout engine, so @tanstack/react-virtual never
-          // produces items in unit tests — useFallback stays true and this
-          // branch is unreachable. Covered by Playwright E2E in a real browser.
           /* v8 ignore start */
           <div style={{ height: rv.getTotalSize(), position: "relative" }}>
             {virtualItems.map((vi) => {
@@ -187,7 +332,11 @@ export function EventStream(): JSX.Element {
                   ref={rv.measureElement}
                   data-index={vi.index}
                 >
-                  <EventRow event={e} expanded={expandedId === e.event_id} onToggle={toggleRow} />
+                  <EventRow
+                    event={e}
+                    expanded={effectiveSelectedId === e.event_id}
+                    onToggle={toggleRow}
+                  />
                 </div>
               );
             })}
