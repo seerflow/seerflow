@@ -11,7 +11,7 @@
  * Re-styles on seerflow-theme event via resolveTokens.
  */
 
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { GraphEntity, GraphRelation } from "./entityGraphAdapter";
 import { storeRelationsToCyElements, riskToColor } from "./entityGraphAdapter";
 import { resolveTokens, subscribeToThemeChanges } from "@/lib/theme/resolveTokens";
@@ -21,6 +21,14 @@ import { resolveTokens, subscribeToThemeChanges } from "@/lib/theme/resolveToken
 // --------------------------------------------------------------------------
 
 export type GraphLayout = "Force" | "Radial" | "Hierarchy";
+
+/** Imperative controls exposed via ref for the zoom/fit toolbar (S-326). */
+export interface EntityGraphCanvasHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fit: () => void;
+  fullscreen: () => void;
+}
 
 export interface EntityGraphCanvasProps {
   nodes: GraphEntity[];
@@ -52,18 +60,24 @@ const LAYOUT_NAMES: Record<GraphLayout, string> = {
 // Component
 // --------------------------------------------------------------------------
 
-export function EntityGraphCanvas({
-  nodes,
-  edges,
-  layout = "Force",
-  fitOnChange = false,
-  onNodeSelect,
-  onNodeDblClick,
-  selectedUuid,
-  className,
-  width = 760,
-  height = 580,
-}: EntityGraphCanvasProps) {
+export const EntityGraphCanvas = forwardRef<
+  EntityGraphCanvasHandle,
+  EntityGraphCanvasProps
+>(function EntityGraphCanvas(
+  {
+    nodes,
+    edges,
+    layout = "Force",
+    fitOnChange = false,
+    onNodeSelect,
+    onNodeDblClick,
+    selectedUuid,
+    className,
+    width = 760,
+    height = 580,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   // cy is typed as `unknown` here to avoid importing cytoscape at module scope
   // (we want the lazy-import to drive actual bundling)
@@ -199,6 +213,34 @@ export function EntityGraphCanvas({
     // Depend on `nodes` too so the ring re-applies after elements are re-added.
   }, [selectedUuid, nodes]);
 
+  // ── Imperative zoom/fit/fullscreen controls (S-326) ──────────────────────
+  const ZOOM_STEP = 1.25;
+  useImperativeHandle(
+    ref,
+    (): EntityGraphCanvasHandle => ({
+      zoomIn: () => {
+        const cy = cyRef.current as { zoom: (o?: { level: number }) => number } | null;
+        if (!cy) return;
+        const current = cy.zoom();
+        cy.zoom({ level: current * ZOOM_STEP });
+      },
+      zoomOut: () => {
+        const cy = cyRef.current as { zoom: (o?: { level: number }) => number } | null;
+        if (!cy) return;
+        const current = cy.zoom();
+        cy.zoom({ level: current / ZOOM_STEP });
+      },
+      fit: () => (cyRef.current as { fit?: () => void } | null)?.fit?.(),
+      fullscreen: () => {
+        const el = containerRef.current as
+          | (HTMLDivElement & { requestFullscreen?: () => Promise<void> })
+          | null;
+        void el?.requestFullscreen?.();
+      },
+    }),
+    [],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -206,7 +248,7 @@ export function EntityGraphCanvas({
       style={{ width, height, position: "relative" }}
     />
   );
-}
+});
 
 // --------------------------------------------------------------------------
 // Style builder — maps ThemeTokens to Cytoscape style array
