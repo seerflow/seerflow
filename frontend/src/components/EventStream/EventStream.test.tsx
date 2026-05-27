@@ -85,11 +85,18 @@ describe("EventStream", () => {
     await waitFor(() => expect(screen.getByText("m3")).toBeInTheDocument());
   });
 
-  it("source chip click triggers wsFilter intent + local re-filter", async () => {
+  it("store filter change re-filters the visible stream (no UI filter bar — S-335)", async () => {
+    // The legacy source-chip / min-severity bar was removed in S-335; the store
+    // filter machinery stays and still drives the locally-visible subset. Drive
+    // the filter via the store and assert the non-matching row drops out.
     renderWithProvider();
     act(() => useEventStore.getState().ingest([ev(1, { source_type: "auth" }), ev(2, { source_type: "syslog" })]));
     await waitFor(() => expect(screen.getByText("m1")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "auth" }));
+    act(() => {
+      useEventStore.setState({
+        filter: { sources: new Set(["auth"]), minSeverity: 0, templateIds: new Set() },
+      });
+    });
     await waitFor(() => expect(screen.queryByText("m2")).not.toBeInTheDocument());
     expect(screen.getByText("m1")).toBeInTheDocument();
   });
@@ -196,16 +203,31 @@ describe("EventStream", () => {
     expect(screen.queryByText(/disconnected/i)).not.toBeInTheDocument();
   });
 
-  it("outer section uses h-full min-h-0 (grid cell fill) without legacy min-h-[320px] or h-[420px]", async () => {
+  it("outer section is a flush flex column (h-full min-h-0) with NO card chrome — S-335", async () => {
     const { container } = renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     const section = container.querySelector("section");
     expect(section).not.toBeNull();
     const cls = section!.className;
+    expect(cls).toContain("flex");
+    expect(cls).toContain("flex-col");
     expect(cls).toContain("h-full");
     expect(cls).toContain("min-h-0");
     expect(cls).not.toContain("min-h-[320px]");
     expect(cls).not.toContain("h-[420px]");
+    // S-335: flush full-bleed — no card wrapper (rounded / border / bg-card).
+    expect(cls).not.toContain("rounded");
+    expect(cls).not.toContain("border");
+    expect(cls).not.toContain("bg-card");
+  });
+
+  it("does NOT render the legacy source / min-severity filter bar — S-335", async () => {
+    renderWithProvider();
+    await waitFor(() => expect(screen.getByTestId("query-field")).toBeInTheDocument());
+    // The filter bar's controls are gone; only the query field expresses filtering now.
+    expect(screen.queryByLabelText(/min severity/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/template id/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^sources:$/)).not.toBeInTheDocument();
   });
 
   // ── S-331: single controlled query field in the toolbar ──────────────────
