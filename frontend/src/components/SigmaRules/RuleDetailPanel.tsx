@@ -34,11 +34,33 @@ interface Props {
   onClose: () => void;
 }
 
+// S-327 (AC4): a "Test on history" run summarises how often the rule has
+// fired against recorded event history. With no dedicated backend endpoint
+// today, we derive the count client-side from the already-loaded 24h
+// timeline buckets and the rule's lifetime match count. `hits24h` is null
+// when the timeline never resolved (e.g. endpoint 404/error) so the UI can
+// show a graceful "no recent history" fallback.
+interface TestResult {
+  hits24h: number | null;
+  lifetime: number;
+}
+
+function sumBucketCounts(timeline: SigmaRuleTimelineResponse | null): number | null {
+  if (!timeline) return null;
+  return timeline.buckets.reduce((acc, b) => acc + b.count, 0);
+}
+
 export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
   const [rule, setRule] = useState<SigmaRuleDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<SigmaRuleTimelineResponse | null>(null);
   const [toggling, setToggling] = useState(false);
+  // S-327 (AC3): YAML edit mode. `editing` flips the Monaco editor out of
+  // read-only; `draft` holds the unsaved edit buffer (Cancel discards it).
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  // S-327 (AC4): result of the most recent "Test on history" run.
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   // S-230 / SEE-241: one AbortController shared by both fetches (rule
   // detail + 24h timeline). A fast ruleId switch runs this effect's
@@ -55,6 +77,10 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
     setRule(null);
     setError(null);
     setTimeline(null);
+    // S-327: a rule switch discards any in-progress edit / test result.
+    setEditing(false);
+    setDraft("");
+    setTestResult(null);
     void getSigmaRule(ruleId, controller.signal)
       .then(setRule)
       .catch((e: unknown) => {
@@ -112,6 +138,26 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
     }
   }
 
+  // S-327 (AC3): enter edit mode, seeding the draft from the saved YAML.
+  function startEditing() {
+    if (!rule) return;
+    setDraft(rule.yaml_source);
+    setEditing(true);
+  }
+
+  // S-327 (AC3): leave edit mode, discarding the draft.
+  function cancelEditing() {
+    setEditing(false);
+    setDraft("");
+  }
+
+  // S-327 (AC4): client-side "test against history" — count firings in the
+  // loaded 24h timeline and surface them alongside the lifetime match count.
+  function runTest() {
+    if (!rule) return;
+    setTestResult({ hits24h: sumBucketCounts(timeline), lifetime: rule.match_count_lifetime });
+  }
+
   return (
     <aside
       className="flex flex-col h-full border-l overflow-hidden"
@@ -145,13 +191,47 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
           >
             {rule.enabled ? "Disable" : "Enable"}
           </button>
-          <button className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors">
-            Edit YAML
-          </button>
-          <button className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors">
+          {editing ? (
+            <button
+              onClick={cancelEditing}
+              className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors"
+            >
+              Cancel
+            </button>
+          ) : (
+            <button
+              onClick={startEditing}
+              className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors"
+            >
+              Edit YAML
+            </button>
+          )}
+          <button
+            onClick={runTest}
+            className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors"
+          >
             Test on history
           </button>
         </div>
+
+        {/* S-327 (AC4): test-on-history result summary */}
+        {testResult && (
+          <div
+            data-testid="sigma-test-result"
+            className="mt-2 sf-mono text-[11px] text-text-2"
+          >
+            {testResult.hits24h === null ? (
+              <span>
+                No recent history — {testResult.lifetime} lifetime matches
+              </span>
+            ) : (
+              <span>
+                {testResult.hits24h} hits in the last 24h · {testResult.lifetime}{" "}
+                lifetime matches
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Scrollable content */}
@@ -221,11 +301,12 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
           </div>
         )}
 
-        {/* Monaco YAML view */}
+        {/* Monaco YAML view — editable when AC3 edit mode is active */}
         <div className="rounded border border-line">
           <MonacoYamlEditor
-            value={rule.yaml_source}
-            readOnly
+            value={editing ? draft : rule.yaml_source}
+            onChange={setDraft}
+            readOnly={!editing}
             height="320px"
           />
         </div>

@@ -105,6 +105,24 @@ vi.mock("@/components/SigmaRules/RuleDetailPanel", () => ({
   ),
 }));
 
+// S-327 (AC2): the "+ New" button opens the blank-YAML upload dialog (edit
+// mode). Mock it so we can assert its `open` prop without rendering Monaco.
+vi.mock("@/components/SigmaRules/UploadRuleDialog", () => ({
+  UploadRuleDialog: ({
+    open,
+    onClose,
+  }: {
+    open: boolean;
+    onClose: () => void;
+    onSaved: (id: string) => void;
+  }) =>
+    open ? (
+      <div data-testid="upload-dialog">
+        <button onClick={onClose}>Close dialog</button>
+      </div>
+    ) : null,
+}));
+
 import { SigmaScreen } from "./SigmaScreen";
 
 describe("SigmaScreen (S-324)", () => {
@@ -238,5 +256,26 @@ describe("SigmaScreen (S-324)", () => {
     act(() => { vi.advanceTimersByTime(300); });
     expect(mockSetFilter).toHaveBeenCalledWith({ search: "test" });
     vi.useRealTimers();
+  });
+
+  // ── S-327 (AC2): "+ New" opens the blank rule editor ──────────────────────
+  it("upload dialog is closed by default", () => {
+    render(<SigmaScreen />);
+    expect(screen.queryByTestId("upload-dialog")).not.toBeInTheDocument();
+  });
+
+  it("'+ New' opens the blank rule editor dialog", async () => {
+    const user = userEvent.setup();
+    render(<SigmaScreen />);
+    await user.click(screen.getByRole("button", { name: /new rule/i }));
+    expect(screen.getByTestId("upload-dialog")).toBeInTheDocument();
+  });
+
+  it("closing the upload dialog hides it again", async () => {
+    const user = userEvent.setup();
+    render(<SigmaScreen />);
+    await user.click(screen.getByRole("button", { name: /new rule/i }));
+    await user.click(screen.getByRole("button", { name: /close dialog/i }));
+    expect(screen.queryByTestId("upload-dialog")).not.toBeInTheDocument();
   });
 });

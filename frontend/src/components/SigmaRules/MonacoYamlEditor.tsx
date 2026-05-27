@@ -14,12 +14,28 @@ import { lazy, Suspense } from "react";
 import type { ComponentType } from "react";
 import { loader } from "@monaco-editor/react";
 
+import { SEERFLOW_MONACO_THEME, buildMonacoTheme } from "./monacoTheme";
+
+// S-327 (AC1): the @monaco-editor/react lifecycle hooks receive the live
+// `monaco` namespace. We only touch `editor.defineTheme` / `editor.setTheme`,
+// so a structural type keeps this wrapper free of a hard monaco-editor type
+// import (the heavy module stays in the lazy chunk).
+interface MonacoNamespace {
+  editor: {
+    defineTheme: (name: string, data: unknown) => void;
+    setTheme: (name: string) => void;
+  };
+}
+
 interface MonacoEditorProps {
   height?: string | number;
   defaultLanguage?: string;
   value?: string;
   onChange?: (value: string | undefined) => void;
   options?: Record<string, unknown>;
+  theme?: string;
+  beforeMount?: (monaco: MonacoNamespace) => void;
+  onMount?: (editor: unknown, monaco: MonacoNamespace) => void;
 }
 
 const Editor = lazy(async () => {
@@ -60,6 +76,13 @@ export function MonacoYamlEditor({
         height={height}
         defaultLanguage="yaml"
         value={value}
+        theme={SEERFLOW_MONACO_THEME}
+        beforeMount={(monaco: MonacoNamespace) =>
+          monaco.editor.defineTheme(SEERFLOW_MONACO_THEME, buildMonacoTheme())
+        }
+        onMount={(_editor: unknown, monaco: MonacoNamespace) =>
+          monaco.editor.setTheme(SEERFLOW_MONACO_THEME)
+        }
         onChange={(v: string | undefined) => onChange?.(v ?? "")}
         options={{
           readOnly,
