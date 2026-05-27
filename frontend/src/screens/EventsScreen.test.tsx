@@ -143,4 +143,106 @@ describe("EventsScreen", () => {
     await waitFor(() => expect(screen.getByTestId("query-field")).toBeInTheDocument());
     expect(screen.getByText(/jq · sigma · sql/i)).toBeInTheDocument();
   });
+
+  // ── S-329: query execution + count persistence ───────────────────────────
+
+  it("renders a screen-level query field", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("event-query-field")).toBeInTheDocument());
+  });
+
+  it("shows crit/warn counts from the full event set when no query", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("events-screen")).toBeInTheDocument());
+    act(() =>
+      useEventStore.getState().ingest([
+        ev(1, { severity_id: 6, severity_text: "FATAL", message: "alpha crit" }),
+        ev(2, { severity_id: 4, severity_text: "ERROR", message: "beta warn" }),
+        ev(3, { severity_id: 2, severity_text: "INFO", message: "gamma info" }),
+      ]),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("events-crit-count")).toHaveTextContent("1"),
+    );
+    expect(screen.getByTestId("events-warn-count")).toHaveTextContent("1");
+  });
+
+  it("filters the matched rows when a query is entered", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("events-screen")).toBeInTheDocument());
+    act(() =>
+      useEventStore.getState().ingest([
+        ev(1, { severity_id: 6, severity_text: "FATAL", message: "alpha disk failure" }),
+        ev(2, { severity_id: 4, severity_text: "ERROR", message: "beta auth denied" }),
+      ]),
+    );
+    await waitFor(() => expect(screen.getByTestId("event-match-count")).toBeInTheDocument());
+
+    const input = screen.getByTestId("event-query-field") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "severity_text: error" } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("event-match-count")).toHaveTextContent("1"),
+    );
+    // Counts recompute over the filtered set: only the ERROR (warn) survives.
+    expect(screen.getByTestId("events-crit-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("events-warn-count")).toHaveTextContent("1");
+  });
+
+  it("shows an empty-match message when a query matches nothing", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("events-screen")).toBeInTheDocument());
+    act(() => useEventStore.getState().ingest([ev(1, { message: "alpha" })]));
+    await waitFor(() => expect(screen.getByTestId("event-match-count")).toBeInTheDocument());
+
+    const input = screen.getByTestId("event-query-field") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "zzznotpresent" } });
+
+    await waitFor(() =>
+      expect(screen.getByText(/no events match the current query/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("event-match-count")).toHaveTextContent("0");
+  });
+
+  it("selects a matched row in the filtered results region", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("events-screen")).toBeInTheDocument());
+    act(() =>
+      useEventStore.getState().ingest([
+        ev(1, { severity_id: 5, severity_text: "CRITICAL", message: "selectable hit foo" }),
+      ]),
+    );
+    await waitFor(() => expect(screen.getByTestId("event-match-count")).toBeInTheDocument());
+
+    const input = screen.getByTestId("event-query-field") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "foo" } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("matched-results")).toBeInTheDocument(),
+    );
+    const rows = screen.getAllByRole("button", { name: /event row/i });
+    fireEvent.click(rows[0]);
+    await waitFor(() =>
+      expect(screen.getByTestId("inspector-severity")).toHaveTextContent("CRITICAL"),
+    );
+  });
+
+  it("shows a non-blocking validity hint for an invalid query (all events kept)", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("events-screen")).toBeInTheDocument());
+    act(() =>
+      useEventStore.getState().ingest([
+        ev(1, { severity_id: 6, message: "alpha" }),
+        ev(2, { severity_id: 4, message: "beta" }),
+      ]),
+    );
+    await waitFor(() => expect(screen.getByTestId("event-match-count")).toBeInTheDocument());
+
+    const input = screen.getByTestId("event-query-field") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "nope: value" } });
+
+    await waitFor(() => expect(screen.getByTestId("query-hint")).toBeInTheDocument());
+    // Invalid query is non-blocking — all events remain matched.
+    expect(screen.getByTestId("event-match-count")).toHaveTextContent("2");
+  });
 });
