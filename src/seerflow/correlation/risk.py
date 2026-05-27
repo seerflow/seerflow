@@ -5,6 +5,10 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +35,7 @@ class RiskRegister:
     """
 
     __slots__ = (
+        "_clock_ns",
         "_entries",
         "_eviction_count",
         "_half_life_ns",
@@ -48,12 +53,21 @@ class RiskRegister:
         threshold: float,
         max_entities: int = 10_000,
         max_entries_per_entity: int = 500,
+        *,
+        clock_ns: Callable[[], int] = time.time_ns,
     ) -> None:
         self._half_life_ns = half_life_ns
         self._lambda = math.log(2) / half_life_ns
         self._threshold = threshold
         self._max_entities = max_entities
         self._max_entries_per_entity = max_entries_per_entity
+        # S-334: the "now" used to compute exponential decay age is
+        # dependency-injected (defaults to wall-clock ``time.time_ns``). The
+        # LANL determinism harness injects a frozen replay-epoch clock so the
+        # decayed score is a pure function of the rebased entry timestamps —
+        # invariant to real wall-clock drift on a slow CI runner. Production
+        # keeps the default, so live behaviour is byte-identical.
+        self._clock_ns = clock_ns
         self._entries: dict[str, list[RiskEntry]] = {}
         # S-082: cumulative LRU evictions since process start.
         self._eviction_count = 0
@@ -81,7 +95,7 @@ class RiskRegister:
         entries = self._entries.get(entity_id)
         if not entries:
             return 0.0
-        now = time.time_ns()
+        now = self._clock_ns()
         total = 0.0
         for entry in entries:
             age_ns = now - entry.timestamp_ns
