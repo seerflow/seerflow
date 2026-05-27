@@ -3,7 +3,6 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { api } from "@/lib/api";
 import { useDrilldownStore } from "@/stores/drilldown";
 import { useAlertStore } from "@/stores/alerts";
-import { useLayoutStore } from "@/stores/layout";
 import { severityIcon } from "@/lib/severityIcon";
 import { formatRelative } from "@/lib/relativeTime";
 import type { Alert } from "@/lib/types";
@@ -52,7 +51,6 @@ function cacheKey(tactic: string, technique: string, since: string, until: strin
 export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelProps) {
   const openCell = useDrilldownStore((s) => s.openCell);
   const close = useDrilldownStore((s) => s.close);
-  const alertFeedMounted = useLayoutStore((s) => s.widgets.includes("alertFeed"));
 
   const [state, setState] = useState<FetchState>(INITIAL);
   const cacheRef = useRef<Map<string, Alert[]>>(new Map());
@@ -186,39 +184,32 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
                 <p className="text-xs italic text-zinc-500">No alerts in window.</p>
               )}
               {!state.loading && !state.error && state.alerts.length > 0 && (
-                <>
-                  {!alertFeedMounted && (
-                    <p className="mb-2 text-[11px] italic text-amber-600 dark:text-amber-400">
-                      Add the Alert Feed widget to inspect details.
-                    </p>
-                  )}
-                  <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                    {state.alerts.map((a) => {
-                      const ico = severityIcon(a.severity);
-                      return (
-                        <li key={a.alert_id}>
-                          <button
-                            type="button"
-                            onClick={() => handleSelect(a.alert_id)}
-                            className="flex w-full items-start gap-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
-                            aria-label={`Open alert ${a.alert_id} — ${a.message || a.rule_name}`}
-                          >
-                            <span aria-hidden className="text-base leading-tight">
-                              {ico.emoji}
+                <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                  {state.alerts.map((a) => {
+                    const ico = severityIcon(a.severity);
+                    return (
+                      <li key={a.alert_id}>
+                        <button
+                          type="button"
+                          onClick={() => handleSelect(a.alert_id)}
+                          className="flex w-full items-start gap-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
+                          aria-label={`Open alert ${a.alert_id} — ${a.message || a.rule_name}`}
+                        >
+                          <span aria-hidden className="text-base leading-tight">
+                            {ico.emoji}
+                          </span>
+                          <span className="flex-1 text-xs">
+                            <span className="block font-medium">{a.message || a.rule_name}</span>
+                            <span className="text-zinc-500">
+                              {a.entity_value ? `${a.entity_type ?? "entity"}:${a.entity_value} · ` : ""}
+                              {formatRelative(a.timestamp_ns)}
                             </span>
-                            <span className="flex-1 text-xs">
-                              <span className="block font-medium">{a.message || a.rule_name}</span>
-                              <span className="text-zinc-500">
-                                {a.entity_value ? `${a.entity_type ?? "entity"}:${a.entity_value} · ` : ""}
-                                {formatRelative(a.timestamp_ns)}
-                              </span>
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </section>
           </>
