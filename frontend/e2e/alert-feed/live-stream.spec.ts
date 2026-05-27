@@ -12,7 +12,7 @@ test("WS push prepends new row and re-counts critical badge", async ({ page }) =
   await stubRestAlerts(page);
   const ws = await stubWebSocket(page);
 
-  await page.goto("/");
+  await page.goto("/#/alerts");
 
   const rows = page.getByRole("button", { name: /^alert / });
   await expect(rows).toHaveCount(5);

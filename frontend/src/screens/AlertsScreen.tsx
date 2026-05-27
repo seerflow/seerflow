@@ -1,24 +1,20 @@
-import React, { useCallback } from "react";
+import React from "react";
 import { AlertFeed } from "@/components/AlertFeed/AlertFeed";
-import { useAlertStore } from "@/stores/alerts";
 
 /**
  * Alerts list screen — S-321 redesign.
  *
- * Renders the live AlertFeed full-screen. Alert row clicks navigate to
- * #/alerts/:id (the AlertDetailScreen) in addition to opening the legacy
- * inline panel.
+ * Renders the live AlertFeed full-screen with its built-in inline detail
+ * panel. AlertFeed manages WS subscription, backfill, filtering, and the
+ * inline AlertDetailPanel (with feedback buttons) on row click.
  *
- * The AlertFeed already manages its own WS subscription, backfill, filtering,
- * and sidebar detail panel. We overlay navigation: when a row is clicked we
- * push `#/alerts/:id` to the hash so the shell renders AlertDetailScreen.
+ * Direct navigation to a specific alert (#/alerts/:id) is handled by
+ * AlertDetailScreen, which the shell routes to when an id is present in the
+ * hash. This screen intentionally keeps row clicks within the #/alerts view
+ * so the inline panel (feedback, MITRE, contributing events) remains
+ * accessible without a full-page navigation.
  */
 export const AlertsScreen: React.FC = () => {
-  const selectAlert = useCallback((id: string) => {
-    useAlertStore.getState().selectAlert(id);
-    window.location.hash = `#/alerts/${id}`;
-  }, []);
-
   return (
     <div
       data-testid="alerts-screen"
@@ -30,31 +26,7 @@ export const AlertsScreen: React.FC = () => {
         padding: "12px",
       }}
     >
-      <AlertFeedWithNav onSelectAlert={selectAlert} />
+      <AlertFeed />
     </div>
   );
 };
-
-/**
- * Thin wrapper that intercepts AlertFeed's internal onSelectAlert to also
- * push the hash route. We can't patch AlertFeed directly (guardrail), so we
- * observe selectAlert from the store after mount and patch the hash.
- */
-function AlertFeedWithNav({ onSelectAlert }: { onSelectAlert: (id: string) => void }): JSX.Element {
-  // Monkey-patch the store's selectAlert with our nav-aware version for this
-  // screen mount. The store is module-singleton so we restore on unmount.
-  const originalSelectAlert = useAlertStore.getState().selectAlert;
-
-  React.useEffect(() => {
-    const patchedSelectAlert = (id: string): void => {
-      onSelectAlert(id);
-    };
-    useAlertStore.setState({ selectAlert: patchedSelectAlert });
-    return () => {
-      useAlertStore.setState({ selectAlert: originalSelectAlert });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onSelectAlert]);
-
-  return <AlertFeed />;
-}

@@ -13,7 +13,7 @@ test("warm-up REST populates five rows with severity counts", async ({ page }) =
   await stubRestAlerts(page);
   await stubWebSocket(page);
 
-  await page.goto("/");
+  await page.goto("/#/alerts");
 
   const rows = page.getByRole("button", { name: /^alert / });
   await expect(rows).toHaveCount(5);

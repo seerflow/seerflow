@@ -26,7 +26,7 @@ test("TP click POSTs feedback:tp and fills button (204 path)", async ({ page }) 
     }
   });
 
-  await page.goto("/");
+  await page.goto("/#/alerts");
   const rows = page.getByRole("button", { name: /^alert / });
   await rows.first().click();
 
@@ -48,7 +48,7 @@ test("500 response rolls TP button back to neutral", async ({ page }) => {
   await stubRestAlerts(page);
   await stubWebSocket(page);
 
-  await page.goto("/");
+  await page.goto("/#/alerts");
   const rows = page.getByRole("button", { name: /^alert / });
   await rows.first().click();
 

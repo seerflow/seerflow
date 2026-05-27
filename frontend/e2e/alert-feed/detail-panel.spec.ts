@@ -11,7 +11,7 @@ test("row click opens detail panel with events, MITRE chips, risk score", async 
   await stubRestAlerts(page);
   await stubWebSocket(page);
 
-  await page.goto("/");
+  await page.goto("/#/alerts");
 
   const rows = page.getByRole("button", { name: /^alert / });
   await expect(rows).toHaveCount(5);

@@ -21,7 +21,7 @@ test("disconnect banner appears 3s after WS close and hides on reconnect", async
   await stubRestAlerts(page);
   const ws = await stubWebSocket(page);
 
-  await page.goto("/");
+  await page.goto("/#/alerts");
 
   await expect(page.getByRole("button", { name: /^alert / })).toHaveCount(5);
 
