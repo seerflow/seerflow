@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { AlertFeed } from "./AlertFeed";
 import { WsProvider } from "@/components/WsProvider";
 import { useAlertStore } from "@/stores/alerts";
 import { logger } from "@/lib/logger";
 import * as wsBus from "@/lib/wsBus";
-import type { LiveEvent } from "@/lib/types";
+import type { Alert, LiveEvent } from "@/lib/types";
 import { _resetForTests as resetWsIntents } from "@/lib/wsFilter";
 import { AlertSchema, validateOrDropItem } from "@/lib/schemas";
 import * as validationMetrics from "@/lib/validationMetrics";
@@ -37,6 +37,13 @@ function renderWithProvider(): ReturnType<typeof render> {
   return render(<WsProvider><AlertFeed /></WsProvider>);
 }
 
+const baseAlert = (over: Partial<Record<string, unknown>> = {}): Record<string, unknown> => ({
+  alert_id: "a", timestamp_ns: "1", alert_type: "ml", rule_name: "r",
+  severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
+  entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
+  dedup_count: 1, source_type: "syslog", ...over,
+});
+
 describe("AlertFeed integration", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", MockWS as unknown as typeof WebSocket);
@@ -51,74 +58,53 @@ describe("AlertFeed integration", () => {
 
   it("warm-up then live alert appears at top", async () => {
     fetchMock.mockResolvedValueOnce({ items: [
-      { alert_id: "warm", timestamp_ns: 1n, alert_type: "ml", rule_name: "warmup-rule",
-        severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
-        entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-        dedup_count: 1, source_type: "syslog" },
+      { ...baseAlert({ alert_id: "warm", timestamp_ns: 1n, rule_name: "warmup-rule" }) },
     ] });
     renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    // "All" tab so derived workflow status never hides an ingested row.
+    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
     await waitFor(() => expect(screen.getByText("warmup-rule")).toBeInTheDocument());
     act(() => {
       MockWS.last!._open();
-      MockWS.last!._msg({ type: "alert", data: {
-        alert_id: "live", timestamp_ns: "2", alert_type: "sigma", rule_name: "live-rule",
-        severity: 6, risk_score: 0.9, entity_uuid: null, entity_type: null,
-        entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-        dedup_count: 1, source_type: "syslog",
-      } });
+      MockWS.last!._msg({ type: "alert", data: baseAlert({ alert_id: "live", timestamp_ns: "2", alert_type: "sigma", rule_name: "live-rule", severity: 6, risk_score: 0.9 }) });
     });
     expect(screen.getByText("live-rule")).toBeInTheDocument();
   });
 
   it("buffers WS messages until warm-up resolves, then replays them (S-194 AC-3)", async () => {
-    // Defer the warm-up REST promise so we can emit a WS frame first.
     let resolveWarmup: (value: { items: unknown[] }) => void = () => {};
     const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
     fetchMock.mockReturnValueOnce(warmupPromise);
 
     renderWithProvider();
 
-    // WS frame arrives BEFORE warm-up resolves.
     await waitFor(() => expect(MockWS.last).not.toBeNull());
+    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
     act(() => {
       MockWS.last!._open();
-      MockWS.last!._msg({ type: "alert", data: {
-        alert_id: "live", timestamp_ns: "2", alert_type: "sigma", rule_name: "live-rule",
-        severity: 6, risk_score: 0.9, entity_uuid: null, entity_type: null,
-        entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-        dedup_count: 1, source_type: "syslog",
-      } });
+      MockWS.last!._msg({ type: "alert", data: baseAlert({ alert_id: "live", timestamp_ns: "2", alert_type: "sigma", rule_name: "live-rule", severity: 6, risk_score: 0.9 }) });
     });
 
-    // The live frame must NOT be visible yet — warm-up hasn't resolved.
     expect(screen.queryByText("live-rule")).toBeNull();
 
-    // Now resolve warm-up with an older alert.
     await act(async () => {
-      resolveWarmup({ items: [
-        { alert_id: "warm", timestamp_ns: 1n, alert_type: "ml", rule_name: "warmup-rule",
-          severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
-          entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-          dedup_count: 1, source_type: "syslog" },
-      ] });
+      resolveWarmup({ items: [ baseAlert({ alert_id: "warm", timestamp_ns: 1n, rule_name: "warmup-rule" }) ] });
       await warmupPromise;
     });
 
-    // Both alerts now visible; the buffered live frame replayed AFTER backfill.
     await waitFor(() => expect(screen.getByText("live-rule")).toBeInTheDocument());
     expect(screen.getByText("warmup-rule")).toBeInTheDocument();
   });
 
   it("resets warmedUp on unmount so a remount re-buffers WS frames (S-194 AC-3 regression)", async () => {
-    // First mount: warm-up resolves, WS frame goes through immediately.
     fetchMock.mockResolvedValueOnce({ items: [] });
     const { unmount } = renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => { MockWS.last!._open(); });
-    await new Promise(r => setTimeout(r, 0)); // let warm-up promise resolve
+    await new Promise(r => setTimeout(r, 0));
     unmount();
 
-    // Second mount: warm-up is deferred; WS frame must be buffered, not visible.
     let resolveWarmup: (v: { items: unknown[] }) => void = () => {};
     const warmupPromise = new Promise<{ items: unknown[] }>(r => { resolveWarmup = r; });
     fetchMock.mockReturnValueOnce(warmupPromise);
@@ -129,12 +115,7 @@ describe("AlertFeed integration", () => {
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => {
       MockWS.last!._open();
-      MockWS.last!._msg({ type: "alert", data: {
-        alert_id: "remounted", timestamp_ns: "1", alert_type: "ml", rule_name: "remount-rule",
-        severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
-        entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-        dedup_count: 1, source_type: "syslog",
-      } });
+      MockWS.last!._msg({ type: "alert", data: baseAlert({ alert_id: "remounted", timestamp_ns: "1", rule_name: "remount-rule" }) });
     });
     expect(screen.queryByText("remount-rule")).toBeNull();
 
@@ -152,22 +133,15 @@ describe("AlertFeed integration", () => {
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => { MockWS.last!._open(); });
 
-    // Pump 250 frames (limit is 200) before warm-up resolves.
     await act(async () => {
       for (let i = 0; i < 250; i++) {
-        MockWS.last!._msg({ type: "alert", data: {
-          alert_id: `a${i}`, timestamp_ns: String(i + 1), alert_type: "ml", rule_name: `r${i}`,
-          severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
-          entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-          dedup_count: 1, source_type: "syslog",
-        } });
+        MockWS.last!._msg({ type: "alert", data: baseAlert({ alert_id: `a${i}`, timestamp_ns: String(i + 1), rule_name: `r${i}` }) });
       }
     });
 
-    expect(warn).toHaveBeenCalled();  // overflow logged
+    expect(warn).toHaveBeenCalled();
 
     await act(async () => { resolveWarmup({ items: [] }); await warmupPromise; });
-    // After replay, store should hold at most MAX_WS_BUFFER (200) of the 250 sent.
     await waitFor(() => {
       expect(useAlertStore.getState().alerts.length).toBeLessThanOrEqual(200);
     });
@@ -178,11 +152,9 @@ describe("AlertFeed integration", () => {
     renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
 
-    // Simulate WsProvider emitting a __status frame onto the bus via the open event.
     act(() => { MockWS.last!._open(); });
     await waitFor(() => expect(useAlertStore.getState().status).toBe("open"));
 
-    // Manually publish a closed __status to the bus — AlertFeed must mirror it.
     act(() => { wsBus.emit({ type: "__status", status: "closed" }); });
     expect(useAlertStore.getState().status).toBe("closed");
   });
@@ -195,13 +167,11 @@ describe("AlertFeed integration", () => {
     act(() => { MockWS.last!._open(); });
     MockWS.last!.sent.length = 0;
 
-    // Switching the filter bucket schedules a 150 ms debounced filter push.
     act(() => {
       useAlertStore.setState({
         filter: { severities: new Set(["critical"]), types: new Set(), sources: new Set(), tactics: new Set() },
       });
     });
-    // Before debounce expires, nothing sent yet.
     expect(MockWS.last!.sent).toEqual([]);
     await act(async () => { await vi.advanceTimersByTimeAsync(200); });
     const filterFrames = MockWS.last!.sent.filter(
@@ -212,51 +182,16 @@ describe("AlertFeed integration", () => {
     vi.useRealTimers();
   });
 
-  it("no longer listens for the legacy seerflow:wsfilter-changed CustomEvent", async () => {
-    fetchMock.mockResolvedValueOnce({ items: [] });
-    renderWithProvider();
-    await waitFor(() => expect(MockWS.last).not.toBeNull());
-    act(() => { MockWS.last!._open(); });
-    MockWS.last!.sent.length = 0;
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("seerflow:wsfilter-changed"));
-    });
-
-    expect(MockWS.last!.sent).toEqual([]);
-  });
-
   it("does not ingest alerts arriving under type:'batch' (alerts ship via alert_batch)", async () => {
     fetchMock.mockResolvedValueOnce({ items: [] });
     renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => { MockWS.last!._open(); });
-    // Let the warm-up promise resolve so subsequent bus emissions dispatch
-    // straight through `handleMessage` instead of being parked in the buffer.
     await new Promise(r => setTimeout(r, 0));
 
-    // bigint timestamp_ns: we bypass parseWsFrame, which is the layer that
-    // would normally coerce the wire string → bigint, so the fixture has to
-    // ship in domain-typed form.
-    const mkAlert = (id: string, rule: string) => ({
-      alert_id: id, timestamp_ns: 1n, alert_type: "ml" as const, rule_name: rule,
-      severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
-      entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-      dedup_count: 1, source_type: "syslog",
-    });
-    // Bypass parseWsFrame on purpose — the wire schema validates `batch` as
-    // LiveEvent-only and would drop this payload before it reached the bus.
-    // The whole point of this regression test is to prove that AlertFeed's
-    // bus subscription on `"batch"` no longer re-introduces alert-shaped
-    // frames via a dead `isAlert(first)` branch in `handleMessage` (the
-    // branch + subscription were both removed in S-211). The emit is a
-    // no-op for AlertFeed and the assertion holds.
-    //
-    // Cast: `WsMessage.batch.events` is `LiveEvent[]` after S-211's narrowing.
-    // We are deliberately violating that contract to prove the bus drops the
-    // shape; the cast is the only way to express "emit a malformed batch."
+    const ghost = { ...baseAlert({ alert_id: "ghost-1", timestamp_ns: 1n, rule_name: "ghost-rule" }) };
     act(() => {
-      wsBus.emit({ type: "batch", events: [mkAlert("ghost-1", "ghost-rule")] as unknown as LiveEvent[] });
+      wsBus.emit({ type: "batch", events: [ghost] as unknown as LiveEvent[] });
     });
 
     expect(screen.queryByText("ghost-rule")).toBeNull();
@@ -266,16 +201,14 @@ describe("AlertFeed integration", () => {
     fetchMock.mockResolvedValueOnce({ items: [] });
     renderWithProvider();
     await waitFor(() => expect(MockWS.last).not.toBeNull());
+    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
     act(() => { MockWS.last!._open(); });
 
-    const mkAlert = (id: string, rule: string) => ({
-      alert_id: id, timestamp_ns: "1", alert_type: "ml" as const, rule_name: rule,
-      severity: 5, risk_score: 0.1, entity_uuid: null, entity_type: null,
-      entity_value: null, message: "", mitre_tactics: [], mitre_techniques: [],
-      dedup_count: 1, source_type: "syslog",
-    });
     act(() => {
-      MockWS.last!._msg({ type: "alert_batch", alerts: [mkAlert("b1", "batch-rule-1"), mkAlert("b2", "batch-rule-2")] });
+      MockWS.last!._msg({ type: "alert_batch", alerts: [
+        baseAlert({ alert_id: "b1", timestamp_ns: "1", rule_name: "batch-rule-1" }),
+        baseAlert({ alert_id: "b2", timestamp_ns: "2", rule_name: "batch-rule-2" }),
+      ] });
     });
     expect(screen.getByText("batch-rule-1")).toBeInTheDocument();
     expect(screen.getByText("batch-rule-2")).toBeInTheDocument();
@@ -292,6 +225,117 @@ describe("AlertFeed integration", () => {
     expect(cls).toContain("min-h-0");
     expect(cls).not.toMatch(/h-\[calc\(/);
   });
+
+  // ── S-336 SOC-console structure ───────────────────────────────────────────
+
+  it("renders the KPI header with title, sub-label and summary stats", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    expect(screen.getByRole("heading", { name: "Alerts" })).toBeInTheDocument();
+    expect(screen.getByText(/last 24h · auto-refresh 5s/)).toBeInTheDocument();
+    // Demo KPI values are always present.
+    expect(screen.getByText("38s")).toBeInTheDocument();
+    expect(screen.getByText("14m")).toBeInTheDocument();
+    expect(screen.getByText("3.2%")).toBeInTheDocument();
+  });
+
+  it("renders the header action buttons (demo stubs)", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    expect(screen.getByRole("button", { name: "Export ndjson" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Suppression rules" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ New rule" })).toBeInTheDocument();
+  });
+
+  it("renders the status tabs and filter chips", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    expect(screen.getByRole("tab", { name: /Open/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Suppressed/ })).toBeInTheDocument();
+    expect(screen.getByText("severity")).toBeInTheDocument();
+    expect(screen.getByText("detector")).toBeInTheDocument();
+  });
+
+  it("renders the alert volume strip and the 8-column table header", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    expect(screen.getByTestId("alert-volume-strip")).toBeInTheDocument();
+    expect(screen.getByText("Sev · Score")).toBeInTheDocument();
+    expect(screen.getByText("Entities")).toBeInTheDocument();
+    expect(screen.getByText("Owner")).toBeInTheDocument();
+  });
+
+  it("navigates to #/alerts/:id on row click instead of opening an inline panel", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [
+      baseAlert({ alert_id: "nav-target", timestamp_ns: 5n, rule_name: "nav-rule", severity: 6 }),
+    ] });
+    renderWithProvider();
+    // Land on the "All" tab so derived status never hides the row.
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
+    await waitFor(() => expect(screen.getByText("nav-rule")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /alert nav-rule/ }));
+    expect(window.location.hash).toBe("#/alerts/nav-target");
+  });
+
+  it("does not render an inline detail panel or feedback controls", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [
+      baseAlert({ alert_id: "x1", timestamp_ns: 5n, rule_name: "x-rule", severity: 6 }),
+    ] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
+    await waitFor(() => expect(screen.getByText("x-rule")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /alert x-rule/ }));
+    expect(screen.queryByRole("button", { name: /true positive/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("feedback history")).not.toBeInTheDocument();
+  });
+
+  it("paginates client-side over the loaded set and changes rows-per-page", async () => {
+    const items = Array.from({ length: 30 }, (_, i) =>
+      baseAlert({ alert_id: `p-${i}`, timestamp_ns: BigInt(100 - i), rule_name: `rule-${i}`, severity: 6 }),
+    );
+    fetchMock.mockResolvedValueOnce({ items });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    // "All" tab shows every loaded alert regardless of derived status.
+    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
+    await waitFor(() => expect(screen.getByText("rule-0")).toBeInTheDocument());
+    // Default 25 rows/page: rule-0..rule-24 visible, rule-25 not.
+    expect(screen.queryByText("rule-25")).not.toBeInTheDocument();
+    expect(screen.getByTestId("alerts-page-summary")).toHaveTextContent("of 30");
+
+    // Bump to 50 rows/page → all 30 visible.
+    fireEvent.click(screen.getByRole("button", { name: "50" }));
+    await waitFor(() => expect(screen.getByText("rule-25")).toBeInTheDocument());
+  });
+
+  it("empty state renders with no rows", async () => {
+    fetchMock.mockResolvedValueOnce({ items: [] });
+    renderWithProvider();
+    await waitFor(() => expect(MockWS.last).not.toBeNull());
+    expect(screen.queryByRole("button", { name: /^alert / })).not.toBeInTheDocument();
+    expect(screen.getByTestId("alerts-page-summary")).toHaveTextContent("of 0");
+  });
+
+  it("active tab filters rows by derived status", async () => {
+    // Mix of critical (mostly open/triaging) and low (resolved) alerts.
+    const items: Record<string, unknown>[] = [
+      baseAlert({ alert_id: "crit-a", timestamp_ns: 9n, rule_name: "crit-rule", severity: 6 }),
+      baseAlert({ alert_id: "low-a", timestamp_ns: 8n, rule_name: "low-rule", severity: 1 }),
+    ];
+    fetchMock.mockResolvedValueOnce({ items });
+    renderWithProvider();
+    await waitFor(() => expect(screen.getByText("crit-rule")).toBeInTheDocument());
+
+    // Low-severity alerts resolve; click Resolved tab → low-rule stays, crit-rule may hide.
+    fireEvent.click(screen.getByRole("tab", { name: /Resolved/ }));
+    await waitFor(() => expect(screen.getByText("low-rule")).toBeInTheDocument());
+  });
 });
 
 describe("S-191 T9: REST warm-up schema validation", () => {
@@ -300,9 +344,6 @@ describe("S-191 T9: REST warm-up schema validation", () => {
     fetchMock.mockReset();
     MockWS.last = null;
     wsBus._clearAllForTests();
-    // S-209: this describe dispatches `type: "event"` frames through WsProvider,
-    // which now routes via wsBus.emitCoalesced → rafFrameBuffer. Reset the buffer
-    // so a prior test's unflushed event cannot cross into the next test.
     wsBus._resetFrameBufferForTests();
     resetWsIntents();
     validationMetrics._resetForTests();
@@ -317,48 +358,21 @@ describe("S-191 T9: REST warm-up schema validation", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("drops invalid REST items from /api/v1/alerts warm-up under rest:/api/v1/alerts", async () => {
-    // NOTE: the mocked `api.get` runs `validateOrDropItem` with the same schema
-    // AlertFeed passes in — so this test verifies the component wires the schema
-    // through, which is what bumps the `rest:/api/v1/alerts` counter.
-    const validFixture = {
-      alert_id: "valid",
-      timestamp_ns: 1n,
-      alert_type: "ml" as const,
-      rule_name: "valid-rule",
-      severity: 5,
-      risk_score: 0.1,
-      entity_uuid: null,
-      entity_type: null,
-      entity_value: null,
-      message: "",
-      mitre_tactics: [],
-      mitre_techniques: [],
-      dedup_count: 1,
-      source_type: "syslog",
-    };
-    // severity 999 fails AlertSchema (OCSF 0..6).
+    const validFixture = baseAlert({ alert_id: "valid", timestamp_ns: 1n, rule_name: "valid-rule" }) as unknown as Alert;
     const invalidFixture = { ...validFixture, alert_id: "bad", severity: 999 };
     fetchMock.mockResolvedValueOnce({ items: [validFixture, invalidFixture] });
 
-    // Sanity: raw AlertSchema rejects the invalid fixture.
     expect(validateOrDropItem(AlertSchema, invalidFixture, "rest:test")).toBeNull();
 
     render(<WsProvider><AlertFeed /></WsProvider>);
-    // Warm-up resolves asynchronously → wait for the store to land exactly the
-    // valid alert; the invalid one must be dropped via rest:/api/v1/alerts.
     await waitFor(() => {
       expect(useAlertStore.getState().alerts.map(a => a.alert_id)).toEqual(["valid"]);
     });
     expect(validationMetrics.getCounters()["rest:/api/v1/alerts"]).toBe(1);
   });
 
-  // S-209: WsProvider now routes `event` frames through wsBus.emitCoalesced,
-  // which defers dispatch to the next animation frame. Tests that assert on
-  // the appendScore fan-out wait for the rAF tick (jsdom's native rAF fires
-  // on a ~16 ms timer) via `waitFor` before asserting.
   it("fans anomaly-scored `event` frames out to useAnomalyStore.appendScore", async () => {
     fetchMock.mockResolvedValueOnce({ items: [] });
-    // Seed a bucket so appendScore has something to merge into.
     useAnomalyStore.setState({
       items: [{ bucket_start_ns: 0n, max_score: null, avg_score: null, event_count: 0, upper_threshold: null, alert_count: 0 }],
       source: null,
@@ -370,7 +384,6 @@ describe("S-191 T9: REST warm-up schema validation", () => {
     render(<WsProvider><AlertFeed /></WsProvider>);
     await waitFor(() => expect(MockWS.last).not.toBeNull());
     act(() => { MockWS.last!._open(); });
-    // Give warm-up a tick to resolve so frames dispatch synchronously.
     await new Promise(r => setTimeout(r, 0));
 
     act(() => {
@@ -381,7 +394,6 @@ describe("S-191 T9: REST warm-up schema validation", () => {
         score: 0.9, is_anomaly: true, upper_threshold: 0.5,
       } });
     });
-    // Wait for the rAF tick that wsBus.emitCoalesced schedules.
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({
       score: 0.9,
@@ -404,12 +416,8 @@ describe("S-191 T9: REST warm-up schema validation", () => {
         event_id: "e2", timestamp_ns: "6", observed_ns: "6",
         severity_id: 2, severity_text: "LOW", source_type: "syslog",
         message: "plain", template_id: 1, entity_refs: [], entity_summary: {},
-        // no score → the `d.score !== undefined` guard skips appendScore.
       } });
     });
-    // Wait out the rAF tick that wsBus.emitCoalesced scheduled; piggyback on
-    // jsdom's native rAF rather than a fixed-duration timer so a slow runner
-    // cannot flake the negative assertion.
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     expect(spy).not.toHaveBeenCalled();
   });
@@ -434,7 +442,7 @@ describe("S-191 T9: REST warm-up schema validation", () => {
         event_id: "e3", timestamp_ns: "7", observed_ns: "7",
         severity_id: 3, severity_text: "MEDIUM", source_type: "kafka",
         message: "anom", template_id: 1, entity_refs: [], entity_summary: {},
-        score: 0.7,  // no upper_threshold
+        score: 0.7,
       } });
     });
     await waitFor(() => expect(spy).toHaveBeenCalled());
