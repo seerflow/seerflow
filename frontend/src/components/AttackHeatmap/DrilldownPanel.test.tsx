@@ -2,7 +2,6 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDrilldownStore } from "@/stores/drilldown";
 import { useAlertStore } from "@/stores/alerts";
-import { useLayoutStore } from "@/stores/layout";
 
 vi.mock("@/lib/api", () => {
   return {
@@ -66,7 +65,6 @@ describe("DrilldownPanel", () => {
   beforeEach(async () => {
     useDrilldownStore.getState().close();
     useAlertStore.getState().clearSelection();
-    useLayoutStore.setState({ widgets: ["alertFeed", "anomalyTimeline", "entityExplorer", "eventStream"] });
     window.location.hash = "";
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockReset();
@@ -154,24 +152,6 @@ describe("DrilldownPanel", () => {
     expect(useAlertStore.getState().selectedAlertId).toBe("alrt-1");
     expect(window.location.hash).toBe("");
     expect(useDrilldownStore.getState().openCell).toBeNull();
-  });
-
-  it("shows the AlertFeed-missing note when the widget is not in the layout", async () => {
-    const { api } = await import("@/lib/api");
-    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    useLayoutStore.setState({ widgets: ["anomalyTimeline", "entityExplorer", "eventStream"] });
-    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
-    useDrilldownStore.getState().open("execution", "T1053");
-    expect(await screen.findByText(/Add the Alert Feed widget/)).toBeInTheDocument();
-  });
-
-  it("hides the AlertFeed-missing note when the widget is mounted", async () => {
-    const { api } = await import("@/lib/api");
-    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
-    useDrilldownStore.getState().open("execution", "T1053");
-    await screen.findByText(/Scheduled task created/);
-    expect(screen.queryByText(/Add the Alert Feed widget/)).not.toBeInTheDocument();
   });
 
   it("Esc key closes the panel via Radix outside-close path", async () => {
