@@ -36,9 +36,43 @@ interface Props {
   selectedId?: string | null;
   /** Callback when user selects/deselects a row (optional). */
   onSelectId?: (id: string | null) => void;
+  /**
+   * Controlled query value (S-331). When `onQueryChange` is supplied the
+   * toolbar field is driven by the parent (single source of truth); otherwise
+   * the field keeps its own local state (standalone / legacy behavior).
+   */
+  query?: string;
+  /** Callback when the toolbar query field changes (S-331, controlled mode). */
+  onQueryChange?: (q: string) => void;
+  /** Number of events matching the active query — shown in the toolbar. */
+  matchCount?: number;
+  /** Crit count over the matched set (parent-supplied, controlled mode). */
+  critCount?: number;
+  /** Warn count over the matched set (parent-supplied, controlled mode). */
+  warnCount?: number;
+  /** Whether the active query parsed/validated cleanly. */
+  queryValid?: boolean;
+  /** Non-blocking validity hint to show when `queryValid` is false. */
+  queryHint?: string;
+  /** True once the query narrows the set — render `filteredEvents` not live. */
+  queryActive?: boolean;
+  /** The matched subset to render when `queryActive` (controlled mode). */
+  filteredEvents?: LiveEvent[];
 }
 
-export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element {
+export function EventStream({
+  selectedId,
+  onSelectId,
+  query: queryProp,
+  onQueryChange,
+  matchCount,
+  critCount: critProp,
+  warnCount: warnProp,
+  queryValid = true,
+  queryHint,
+  queryActive = false,
+  filteredEvents,
+}: Props = {}): JSX.Element {
   const filter = useEventStore((s) => s.filter);
   const paused = useEventStore((s) => s.paused);
   const knownSources = useEventStore((s) => s.knownSources);
@@ -175,8 +209,23 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
   const virtualItems = rv.getVirtualItems();
   const useFallback = !virtualizerReady || virtualItems.length === 0;
 
-  // Query field state (local, not sent to server in this iteration)
-  const [query, setQuery] = useState("");
+  // Toolbar query field. Controlled by the parent (single source of truth, S-331)
+  // when `onQueryChange` is supplied; otherwise locally stateful (standalone).
+  const controlled = onQueryChange !== undefined;
+  const [localQuery, setLocalQuery] = useState("");
+  const query = controlled ? (queryProp ?? "") : localQuery;
+  const handleQueryChange = useCallback(
+    (value: string): void => {
+      if (onQueryChange) onQueryChange(value);
+      else setLocalQuery(value);
+    },
+    [onQueryChange],
+  );
+
+  // Crit / warn shown in the toolbar: parent-supplied (matched set) when
+  // controlled, else the live-derived running counters.
+  const shownCrit = controlled && critProp !== undefined ? critProp : critCount;
+  const shownWarn = controlled && warnProp !== undefined ? warnProp : warnCount;
 
   const volArrays = volSeries.data;
   const volTimestamps = volArrays.timestamps;
@@ -229,7 +278,7 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
           </span>
         </div>
 
-        {/* Query field */}
+        {/* Query field — single source of truth (S-331) */}
         <div
           data-testid="query-field"
           style={{
@@ -237,17 +286,18 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
             alignItems: "center",
             flex: 1,
             gap: 8,
-            border: "1px solid var(--line)",
+            border: `1px solid ${queryValid ? "var(--line)" : "var(--warn)"}`,
             borderRadius: 4,
             padding: "4px 10px",
             background: "var(--surface-2)",
           }}
         >
           <input
+            data-testid="event-query-field"
             type="text"
-            placeholder="filter events…"
+            placeholder="query events… (jq · sigma · sql)"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => handleQueryChange(e.target.value)}
             style={{
               flex: 1,
               background: "transparent",
@@ -258,6 +308,19 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
               color: "var(--text)",
             }}
           />
+          {matchCount !== undefined && (
+            <span
+              data-testid="event-match-count"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "var(--text-3)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {matchCount} matched
+            </span>
+          )}
           <span
             style={{
               fontFamily: "var(--font-mono)",
@@ -269,6 +332,16 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
             jq · sigma · sql
           </span>
         </div>
+
+        {/* Crit / warn summary over the visible (matched) set */}
+        <span style={{ display: "flex", gap: 12, fontFamily: "var(--font-mono)", fontSize: 11 }}>
+          <span data-testid="events-crit-count" style={{ color: "var(--crit)" }}>
+            {shownCrit} crit
+          </span>
+          <span data-testid="events-warn-count" style={{ color: "var(--warn)" }}>
+            {shownWarn} warn
+          </span>
+        </span>
 
         {/* Pause */}
         <PauseControl paused={paused} bufferedCount={bufferedCount} onToggle={togglePause} />
@@ -291,6 +364,28 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
         </button>
       </header>
 
+      {/* Non-blocking validity hint for an invalid query (S-331) */}
+      {!queryValid && queryHint && (
+        <div
+          style={{
+            padding: "4px 24px",
+            borderBottom: "1px solid var(--line)",
+            flexShrink: 0,
+          }}
+        >
+          <span
+            data-testid="query-hint"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              color: "var(--warn)",
+            }}
+          >
+            {queryHint} — showing all events
+          </span>
+        </div>
+      )}
+
       {/* MiniVolume strip */}
       <MiniVolumeStrip
         timestamps={volTimestamps}
@@ -305,7 +400,27 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
       {/* Table header */}
       <EventTableHeader />
 
-      {/* Event list */}
+      {/* When a query narrows the set (S-331) render the matched subset; the
+          live virtualized stream is reserved for the unfiltered view. */}
+      {queryActive ? (
+        <div className="flex-1 overflow-y-auto" data-testid="matched-results">
+          {(filteredEvents ?? []).length === 0 ? (
+            <div className="p-6 text-center text-xs text-muted-foreground">
+              No events match the current query.
+            </div>
+          ) : (
+            (filteredEvents ?? []).map((e) => (
+              <EventRow
+                key={e.event_id}
+                event={e}
+                expanded={effectiveSelectedId === e.event_id}
+                onToggle={toggleRow}
+              />
+            ))
+          )}
+        </div>
+      ) : (
+      /* Event list */
       <div ref={parentRef} className="flex-1 overflow-y-auto">
         {visible.length === 0 ? (
           <div className="p-6 text-center text-xs text-muted-foreground">No events yet — waiting for the pipeline to send some.</div>
@@ -344,6 +459,7 @@ export function EventStream({ selectedId, onSelectId }: Props = {}): JSX.Element
           /* v8 ignore stop */
         )}
       </div>
+      )}
     </section>
   );
 }

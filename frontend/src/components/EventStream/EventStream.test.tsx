@@ -207,6 +207,100 @@ describe("EventStream", () => {
     expect(cls).not.toContain("min-h-[320px]");
     expect(cls).not.toContain("h-[420px]");
   });
+
+  // ── S-331: single controlled query field in the toolbar ──────────────────
+
+  it("uncontrolled query field keeps the jq · sigma · sql hint + placeholder", async () => {
+    renderWithProvider();
+    await waitFor(() => expect(screen.getByTestId("query-field")).toBeInTheDocument());
+    expect(screen.getByText(/jq · sigma · sql/i)).toBeInTheDocument();
+    const input = screen.getByTestId("event-query-field") as HTMLInputElement;
+    expect(input.placeholder).toMatch(/query events/i);
+  });
+
+  it("controlled query field reflects the query prop and fires onQueryChange", async () => {
+    const onQueryChange = vi.fn();
+    render(
+      <WsProvider>
+        <EventStream query="auth denied" onQueryChange={onQueryChange} />
+      </WsProvider>,
+    );
+    const input = await waitFor(
+      () => screen.getByTestId("event-query-field") as HTMLInputElement,
+    );
+    expect(input.value).toBe("auth denied");
+    fireEvent.change(input, { target: { value: "disk" } });
+    expect(onQueryChange).toHaveBeenCalledWith("disk");
+  });
+
+  it("renders the matched subset (matched-results) when queryActive", async () => {
+    render(
+      <WsProvider>
+        <EventStream
+          query="m1"
+          onQueryChange={vi.fn()}
+          queryActive
+          filteredEvents={[ev(1)]}
+          matchCount={1}
+        />
+      </WsProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("matched-results")).toBeInTheDocument());
+    expect(screen.getByText("m1")).toBeInTheDocument();
+    expect(screen.getByTestId("event-match-count")).toHaveTextContent("1");
+  });
+
+  it("shows the empty-match message when queryActive with no filtered events", async () => {
+    render(
+      <WsProvider>
+        <EventStream
+          query="zzz"
+          onQueryChange={vi.fn()}
+          queryActive
+          filteredEvents={[]}
+          matchCount={0}
+        />
+      </WsProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/no events match the current query/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("event-match-count")).toHaveTextContent("0");
+  });
+
+  it("renders the non-blocking validity hint when queryValid is false", async () => {
+    render(
+      <WsProvider>
+        <EventStream
+          query="nope: value"
+          onQueryChange={vi.fn()}
+          queryValid={false}
+          queryHint="Unknown field: nope"
+        />
+      </WsProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("query-hint")).toBeInTheDocument());
+    expect(screen.getByTestId("query-hint")).toHaveTextContent(/unknown field: nope/i);
+  });
+
+  it("surfaces parent-supplied crit/warn counts in the toolbar when controlled", async () => {
+    render(
+      <WsProvider>
+        <EventStream
+          query="error"
+          onQueryChange={vi.fn()}
+          queryActive
+          filteredEvents={[ev(1, { severity_id: 4 })]}
+          matchCount={1}
+          critCount={0}
+          warnCount={1}
+        />
+      </WsProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("events-crit-count")).toBeInTheDocument());
+    expect(screen.getByTestId("events-crit-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("events-warn-count")).toHaveTextContent("1");
+  });
 });
 
 describe("S-191 T10: REST warm-up schema validation", () => {

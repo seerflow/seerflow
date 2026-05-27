@@ -151,6 +151,36 @@ describe("EventsScreen", () => {
     await waitFor(() => expect(screen.getByTestId("event-query-field")).toBeInTheDocument());
   });
 
+  // ── S-331: a single consolidated query field (no duplicate bar) ───────────
+
+  it("presents exactly ONE query input (S-331 consolidation)", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("event-query-field")).toBeInTheDocument());
+    // The two S-329 fields are now one: a single event-query-field, living in
+    // the EventStream toolbar (also the e2e-asserted query-field wrapper).
+    expect(screen.getAllByTestId("event-query-field")).toHaveLength(1);
+    expect(screen.getAllByTestId("query-field")).toHaveLength(1);
+  });
+
+  it("typing in the single toolbar field filters the live stream", async () => {
+    renderScreen();
+    await waitFor(() => expect(screen.getByTestId("events-screen")).toBeInTheDocument());
+    act(() =>
+      useEventStore.getState().ingest([
+        ev(1, { message: "alpha disk failure" }),
+        ev(2, { message: "beta auth denied" }),
+      ]),
+    );
+    await waitFor(() => expect(screen.getByText("alpha disk failure")).toBeInTheDocument());
+
+    const input = screen.getByTestId("event-query-field") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "disk" } });
+
+    await waitFor(() => expect(screen.getByTestId("matched-results")).toBeInTheDocument());
+    expect(screen.getByText("alpha disk failure")).toBeInTheDocument();
+    expect(screen.queryByText("beta auth denied")).not.toBeInTheDocument();
+  });
+
   it("shows crit/warn counts from the full event set when no query", async () => {
     renderScreen();
     await waitFor(() => expect(screen.getByTestId("events-screen")).toBeInTheDocument());
