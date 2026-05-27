@@ -20,6 +20,19 @@ describe("AlertsTabs", () => {
     expect(screen.getByRole("tab", { name: /Open/ })).toHaveAttribute("aria-selected", "false");
   });
 
+  it("renders the active-tab accent underline (not clobbered by a border reset)", () => {
+    render(<AlertsTabs active="open" counts={counts} onSelect={() => {}} />);
+    const active = screen.getByRole("tab", { name: /Open/ });
+    const inactive = screen.getByRole("tab", { name: /Resolved/ });
+    // The 2px accent bottom border is the active affordance. The other three
+    // edges are reset with explicit `borderTop/Left/Right: none` rather than a
+    // trailing `border: none` shorthand, which would clobber the bottom edge.
+    expect(active.style.borderBottom).toBe("2px solid var(--accent)");
+    expect(inactive.style.borderBottom).toBe("2px solid transparent");
+    // No `border` shorthand is set (would have reset the bottom edge).
+    expect(active.style.border).toBe("");
+  });
+
   it("fires onSelect with the tab key", () => {
     const onSelect = vi.fn();
     render(<AlertsTabs active="open" counts={counts} onSelect={onSelect} />);

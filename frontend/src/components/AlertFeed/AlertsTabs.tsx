@@ -39,11 +39,15 @@ export function AlertsTabs({ active, counts, onSelect }: Props): JSX.Element {
               padding: "11px 14px",
               cursor: "pointer",
               color: isActive ? "var(--text)" : "var(--text-2)",
+              // Reset top/left/right borders first, then declare the bottom edge
+              // last so the active underline (2px accent) is the single source
+              // of truth — a trailing `border: none` would otherwise clobber it.
+              background: "transparent",
+              borderTop: "none",
+              borderLeft: "none",
+              borderRight: "none",
               borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
               marginBottom: -1,
-              background: "transparent",
-              border: "none",
-              borderBottomStyle: "solid",
               fontFamily: "var(--font-display)",
             }}
           >
