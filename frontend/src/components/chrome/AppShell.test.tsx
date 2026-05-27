@@ -35,6 +35,9 @@ vi.mock("@/components/AttackHeatmap/AttackHeatmap", () => ({
 vi.mock("@/components/SigmaRules/SigmaRulesPage", () => ({
   SigmaRulesPage: () => <div data-testid="sigma-rules-page">SigmaRulesPage</div>,
 }));
+vi.mock("@/screens/SigmaScreen", () => ({
+  SigmaScreen: () => <div data-testid="sigma-screen">SigmaScreen</div>,
+}));
 vi.mock("@/components/EventStream/EventStream", () => ({
   EventStream: () => <div data-testid="event-stream">EventStream</div>,
 }));
@@ -127,7 +130,7 @@ describe("AppShell", () => {
     window.history.replaceState(null, "", "/#sigma-rules");
     render(<AppShell />);
     act(() => { window.dispatchEvent(new HashChangeEvent("hashchange")); });
-    expect(screen.getByTestId("sigma-rules-page")).toBeInTheDocument();
+    expect(screen.getByTestId("sigma-screen")).toBeInTheDocument();
   });
 
   it("ThemeToggle dark/light buttons flip .sf-light class", () => {
