@@ -53,13 +53,14 @@ test("default load shows overview screen (DashboardGrid present)", async ({ page
   await expect(page.getByRole("button", { name: /add widget/i })).toBeVisible();
 });
 
-test("clicking Alerts nav → hash changes to #/alerts and coming soon shown", async ({
+test("clicking Alerts nav → hash changes to #/alerts and alerts screen shown", async ({
   page,
 }) => {
   await page.goto("/");
   await page.getByTestId("nav-item-alerts").click();
   await expect(page).toHaveURL(/#\/alerts/);
-  await expect(page.getByText(/coming soon/i)).toBeVisible();
+  // S-321: AlertsScreen replaced the ScreenStub — alert feed is now rendered
+  await expect(page.getByTestId("alerts-screen")).toBeVisible();
 });
 
 test("clicking Settings nav → hash changes to #/settings and coming soon shown", async ({
@@ -162,7 +163,8 @@ test("clicking Overview nav from Alerts → returns to DashboardGrid", async ({
   page,
 }) => {
   await page.goto("/#/alerts");
-  await expect(page.getByText(/coming soon/i)).toBeVisible();
+  // S-321: AlertsScreen now shows real alerts list (not ScreenStub)
+  await expect(page.getByTestId("alerts-screen")).toBeVisible();
 
   await page.getByTestId("nav-item-overview").click();
   await expect(page).toHaveURL(/#\/overview/);

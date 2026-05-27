@@ -54,6 +54,12 @@ vi.mock("react-grid-layout", () => ({
 vi.mock("react-grid-layout/css/styles.css", () => ({}));
 vi.mock("react-resizable/css/styles.css", () => ({}));
 
+// S-321: AlertsScreen now renders AlertFeed (not ScreenStub); mock it here so
+// the AppShell route test doesn't pull in WS/API deps beyond what's stubbed.
+vi.mock("@/components/AlertFeed/AlertFeed", () => ({
+  AlertFeed: () => <div data-testid="alert-feed-mock">AlertFeed</div>,
+}));
+
 class NoopWS {
   readyState = 0;
   onopen: (() => void) | null = null;
@@ -108,14 +114,13 @@ describe("AppShell", () => {
     expect(screen.getByTestId("dashboard-grid")).toBeInTheDocument();
   });
 
-  it("hash #/alerts renders AlertsScreen stub", () => {
+  it("hash #/alerts renders AlertsScreen (S-321: real feed, not ScreenStub)", () => {
     window.history.replaceState(null, "", "/#/alerts");
     render(<AppShell />);
     act(() => { window.dispatchEvent(new HashChangeEvent("hashchange")); });
-    // "Alerts" text appears in sidebar nav + ScreenStub; use coming-soon to confirm screen rendered
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument();
-    // ScreenStub renders "under construction" text
-    expect(screen.getByText(/under construction/i)).toBeInTheDocument();
+    // S-321: AlertsScreen replaced the ScreenStub — mock AlertFeed renders
+    expect(screen.getByTestId("alerts-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-feed-mock")).toBeInTheDocument();
   });
 
   it("legacy hash #coverage renders AttackScreen", () => {
