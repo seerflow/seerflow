@@ -27,9 +27,12 @@ async def test_run_validation_invokes_assemble_handler() -> None:
 
     called: dict[str, bool] = {}
 
-    async def spy(config, storage, *, capture_sink=None):
+    async def spy(config, storage, **kwargs):
+        # Forward all keyword args (capture_sink, ws_manager, and the S-334
+        # ``clock_ns`` replay-clock injection) so the spied run is wired
+        # identically to the real harness.
         called["hit"] = True
-        return await real_assemble(config, storage, capture_sink=capture_sink)
+        return await real_assemble(config, storage, **kwargs)
 
     with patch("seerflow.pipeline.assembly.assemble_handler", side_effect=spy):
         result = await validator.run_validation_async(FIXTURES_DIR)

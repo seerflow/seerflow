@@ -156,3 +156,42 @@ class TestRiskRegister:
         entries = reg.get_entries("entity-a")
         assert len(entries) == 1
         assert entries[0].mitre_tactics == ("credential-access",)
+
+
+class TestRiskRegisterInjectedClock:
+    """S-334: decay clock is dependency-injected, not read from wall-clock.
+
+    Pinning ``clock_ns`` makes exponential decay a pure function of the
+    injected epoch, so accumulated risk is invariant to real wall-clock
+    drift between scoring calls.
+    """
+
+    def test_get_risk_uses_injected_clock(self) -> None:
+        epoch = 1_767_225_600_000_000_000
+        half_life = 4 * 3600 * 1_000_000_000
+        reg = RiskRegister(
+            half_life_ns=half_life,
+            threshold=100.0,
+            clock_ns=lambda: epoch,
+        )
+        # Entry exactly one half-life old relative to the injected epoch:
+        # decayed contribution is half the raw points.
+        reg.add_risk("e", _make_entry(risk_points=10.0, timestamp_ns=epoch - half_life))
+        assert reg.get_risk("e") == pytest.approx(5.0, rel=1e-9)
+
+    def test_risk_invariant_to_real_wallclock(self, monkeypatch) -> None:
+        epoch = 1_767_225_600_000_000_000
+        half_life = 4 * 3600 * 1_000_000_000
+        import seerflow.correlation.risk as risk_mod
+
+        # Drift the module wall-clock far forward; the injected clock must
+        # keep the decayed score pinned.
+        monkeypatch.setattr(risk_mod.time, "time_ns", lambda: epoch + 10 * 86400 * 10**9)
+        reg = RiskRegister(half_life_ns=half_life, threshold=100.0, clock_ns=lambda: epoch)
+        reg.add_risk("e", _make_entry(risk_points=10.0, timestamp_ns=epoch - half_life))
+        assert reg.get_risk("e") == pytest.approx(5.0, rel=1e-9)
+
+    def test_default_clock_is_wallclock(self) -> None:
+        reg = RiskRegister(half_life_ns=4 * 3600 * 1_000_000_000, threshold=100.0)
+        reg.add_risk("e", _make_entry(risk_points=10.0, timestamp_ns=time.time_ns()))
+        assert reg.get_risk("e") == pytest.approx(10.0, rel=1e-3)
