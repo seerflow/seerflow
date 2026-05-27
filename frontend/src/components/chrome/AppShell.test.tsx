@@ -1,6 +1,5 @@
 import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { ReactNode } from "react";
 import { AppShell } from "./AppShell";
 import { useThemeStore } from "@/stores/theme";
 import { useAlertStore } from "@/stores/alerts";
@@ -14,21 +13,6 @@ vi.mock("@/lib/api", () => ({
 }));
 
 // Heavy component mocks
-vi.mock("@/components/DashboardGrid/DashboardGrid", () => ({
-  DashboardGrid: () => <div data-testid="dashboard-grid">DashboardGrid</div>,
-}));
-vi.mock("@/components/DashboardGrid/AddWidgetMenu", () => ({
-  AddWidgetMenu: () => null,
-}));
-vi.mock("@/components/DashboardGrid/ResetLayoutButton", () => ({
-  ResetLayoutButton: () => null,
-}));
-vi.mock("@/components/EntityExplorer/EntityDetail", () => ({
-  EntityDetail: () => <div data-testid="entity-detail">EntityDetail</div>,
-}));
-vi.mock("@/components/EntityExplorer/EntitySearch", () => ({
-  EntitySearch: () => <div data-testid="entity-search">EntitySearch</div>,
-}));
 vi.mock("@/components/AttackHeatmap/AttackHeatmap", () => ({
   AttackHeatmap: () => <div data-testid="attack-heatmap">AttackHeatmap</div>,
 }));
@@ -45,18 +29,6 @@ vi.mock("@/components/EventStream/EventStream", () => ({
 vi.mock("@/screens/OverviewScreen", () => ({
   OverviewScreen: () => <div data-testid="overview-screen">OverviewScreen</div>,
 }));
-vi.mock("react-grid-layout", () => ({
-  Responsive: ({ children }: { children: ReactNode }) => (
-    <div data-testid="rgl">{children}</div>
-  ),
-  WidthProvider:
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (Cmp: any) =>
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (props: any) => <Cmp {...props} width={1200} />,
-}));
-vi.mock("react-grid-layout/css/styles.css", () => ({}));
-vi.mock("react-resizable/css/styles.css", () => ({}));
 
 // S-321: AlertsScreen now renders AlertFeed (not ScreenStub); mock it here so
 // the AppShell route test doesn't pull in WS/API deps beyond what's stubbed.
