@@ -56,7 +56,31 @@ vi.mock("@/stores/sigmaRules", () => ({
 vi.mock("@/components/EventStream/EventStream", () => ({
   EventStream: () => <div data-testid="event-stream">EventStream</div>,
 }));
-// Grid layout mocks (needed by OverviewScreen → DashboardGrid)
+// S-320: Mock Overview sub-components to avoid uPlot/canvas heavy deps
+vi.mock("@/components/Overview/KpiStrip", () => ({
+  KpiStrip: () => <div data-testid="kpi-strip">KpiStrip</div>,
+}));
+vi.mock("@/components/Overview/SeverityChartPanel", () => ({
+  SeverityChartPanel: () => (
+    <div data-testid="severity-chart-panel">SeverityChartPanel</div>
+  ),
+}));
+vi.mock("@/components/Overview/RecentAlertsList", () => ({
+  RecentAlertsList: () => (
+    <div data-testid="recent-alerts-list">RecentAlertsList</div>
+  ),
+}));
+vi.mock("@/components/Overview/TopRiskEntities", () => ({
+  TopRiskEntities: () => (
+    <div data-testid="top-risk-entities">TopRiskEntities</div>
+  ),
+}));
+vi.mock("@/components/Overview/OverviewSkeleton", () => ({
+  OverviewSkeleton: () => (
+    <div data-testid="overview-skeleton">OverviewSkeleton</div>
+  ),
+}));
+// Grid layout mocks (kept for any residual dep chain)
 vi.mock("react-grid-layout", () => ({
   Responsive: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="rgl">{children}</div>
@@ -94,6 +118,8 @@ vi.mock("@/lib/api", () => {
 });
 
 import { OverviewScreen } from "./OverviewScreen";
+import { useAlertStore } from "@/stores/alerts";
+import { useStatusStore } from "@/stores/status";
 import { AlertsScreen } from "./AlertsScreen";
 import { AlertDetailScreen } from "./AlertDetailScreen";
 import { EventsScreen } from "./EventsScreen";
@@ -106,9 +132,32 @@ import { ModelsScreen } from "./ModelsScreen";
 import { SettingsScreen } from "./SettingsScreen";
 
 describe("OverviewScreen", () => {
-  it("mounts and renders DashboardGrid", () => {
+  it("shows skeleton when pipeline offline and no alerts (default store)", () => {
+    useAlertStore.setState({ alerts: [] });
+    useStatusStore.setState({ pipelineOnline: false });
     render(<OverviewScreen />);
-    expect(screen.getByTestId("dashboard-grid")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-skeleton")).toBeInTheDocument();
+  });
+
+  it("renders overview layout when pipeline is online", () => {
+    useAlertStore.setState({ alerts: [] });
+    useStatusStore.setState({ pipelineOnline: true });
+    render(<OverviewScreen />);
+    expect(screen.getByTestId("overview-screen")).toBeInTheDocument();
+  });
+
+  it("renders KPI strip when overview is active", () => {
+    useAlertStore.setState({ alerts: [] });
+    useStatusStore.setState({ pipelineOnline: true });
+    render(<OverviewScreen />);
+    expect(screen.getByTestId("kpi-strip")).toBeInTheDocument();
+  });
+
+  it("renders top risk entities panel when overview is active", () => {
+    useAlertStore.setState({ alerts: [] });
+    useStatusStore.setState({ pipelineOnline: true });
+    render(<OverviewScreen />);
+    expect(screen.getByTestId("top-risk-entities")).toBeInTheDocument();
   });
 });
 

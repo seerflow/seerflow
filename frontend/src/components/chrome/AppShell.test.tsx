@@ -41,6 +41,10 @@ vi.mock("@/screens/SigmaScreen", () => ({
 vi.mock("@/components/EventStream/EventStream", () => ({
   EventStream: () => <div data-testid="event-stream">EventStream</div>,
 }));
+// S-320: Mock OverviewScreen to avoid heavy Overview sub-component deps
+vi.mock("@/screens/OverviewScreen", () => ({
+  OverviewScreen: () => <div data-testid="overview-screen">OverviewScreen</div>,
+}));
 vi.mock("react-grid-layout", () => ({
   Responsive: ({ children }: { children: ReactNode }) => (
     <div data-testid="rgl">{children}</div>
@@ -102,16 +106,16 @@ describe("AppShell", () => {
     expect(screen.getByText("⌘K")).toBeInTheDocument();
   });
 
-  it("default hash (empty) renders OverviewScreen / DashboardGrid", () => {
+  it("default hash (empty) renders OverviewScreen", () => {
     render(<AppShell />);
-    expect(screen.getByTestId("dashboard-grid")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-screen")).toBeInTheDocument();
   });
 
-  it("hash #/overview renders DashboardGrid", () => {
+  it("hash #/overview renders OverviewScreen", () => {
     window.history.replaceState(null, "", "/#/overview");
     render(<AppShell />);
     act(() => { window.dispatchEvent(new HashChangeEvent("hashchange")); });
-    expect(screen.getByTestId("dashboard-grid")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-screen")).toBeInTheDocument();
   });
 
   it("hash #/alerts renders AlertsScreen (S-321: real feed, not ScreenStub)", () => {
