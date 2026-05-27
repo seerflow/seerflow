@@ -34,6 +34,25 @@ vi.mock("@/components/AttackHeatmap/AttackHeatmap", () => ({
 vi.mock("@/components/SigmaRules/SigmaRulesPage", () => ({
   SigmaRulesPage: () => <div data-testid="sigma-rules-page">SigmaRulesPage</div>,
 }));
+vi.mock("@/components/SigmaRules/RuleTable", () => ({
+  RuleTable: () => <div data-testid="rule-table" />,
+}));
+vi.mock("@/components/SigmaRules/RuleDetailPanel", () => ({
+  RuleDetailPanel: () => <div data-testid="rule-detail-panel" />,
+}));
+vi.mock("@/stores/sigmaRules", () => ({
+  useSigmaRulesStore: (sel: (s: unknown) => unknown) =>
+    sel({
+      rules: [],
+      status: "ready",
+      total: 0,
+      selectedRuleId: null,
+      load: () => Promise.resolve(),
+      setFilter: () => {},
+      select: () => {},
+      toggle: () => Promise.resolve(),
+    }),
+}));
 vi.mock("@/components/EventStream/EventStream", () => ({
   EventStream: () => <div data-testid="event-stream">EventStream</div>,
 }));
@@ -115,9 +134,11 @@ describe("AttackScreen", () => {
 });
 
 describe("SigmaScreen", () => {
-  it("mounts and renders SigmaRulesPage", () => {
+  it("mounts and renders the sigma screen layout", () => {
     render(<SigmaScreen />);
-    expect(screen.getByTestId("sigma-rules-page")).toBeInTheDocument();
+    expect(screen.getByTestId("sigma-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("sigma-left-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("sigma-right-panel")).toBeInTheDocument();
   });
 });
 

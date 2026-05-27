@@ -1,13 +1,16 @@
 import React from "react";
-import { ScreenStub } from "./ScreenStub";
 
 /**
- * Sigma rule detail screen — stub.
- * NOTE: This file exists as a seam for S-324 but is NOT currently wired in
- * AppShell. The AppShell routes both #/sigma and #/sigma/:id to SigmaScreen
- * (which handles selection internally). S-324 will wire this file and replace
- * SigmaScreen's internal sub-route handling.
+ * Sigma rule detail screen — S-324 seam.
+ * Currently the AppShell routes both #/sigma and #/sigma/:id to SigmaScreen
+ * (which handles selection internally via the split-panel layout).
+ * S-324: this file exists as a future seam for deep-linked detail routes.
  */
 export const SigmaDetailScreen: React.FC = () => {
-  return <ScreenStub label="Sigma rule detail" />;
+  return (
+    <div
+      data-testid="sigma-detail-screen"
+      style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}
+    />
+  );
 };
