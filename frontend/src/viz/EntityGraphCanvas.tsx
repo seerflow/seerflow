@@ -29,6 +29,8 @@ export interface EntityGraphCanvasProps {
   /** Auto-fit the viewport when nodes/edges change */
   fitOnChange?: boolean;
   onNodeSelect?: (id: string | null) => void;
+  /** UUID of the node that should carry the selection ring; null/absent clears it */
+  selectedUuid?: string | null;
   className?: string;
   width?: number;
   height?: number;
@@ -54,6 +56,7 @@ export function EntityGraphCanvas({
   layout = "Force",
   fitOnChange = false,
   onNodeSelect,
+  selectedUuid,
   className,
   width = 760,
   height = 580,
@@ -173,6 +176,21 @@ export function EntityGraphCanvas({
       .layout({ name: LAYOUT_NAMES[layout] })
       .run();
   }, [layout]);
+
+  // ── Selection ring (S-326) ───────────────────────────────────────────────
+  useEffect(() => {
+    const cy = cyRef.current as {
+      $: (sel: string) => { unselect: () => void };
+      getElementById: (id: string) => { select: () => void; length: number };
+    } | null;
+    if (!cy) return;
+    cy.$(":selected").unselect();
+    if (selectedUuid) {
+      const ele = cy.getElementById(selectedUuid);
+      if (ele.length > 0) ele.select();
+    }
+    // Depend on `nodes` too so the ring re-applies after elements are re-added.
+  }, [selectedUuid, nodes]);
 
   return (
     <div

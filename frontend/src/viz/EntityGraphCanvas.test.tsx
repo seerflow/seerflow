@@ -13,6 +13,12 @@ const mockRemove = vi.fn();
 const mockElements = vi.fn(() => ({ remove: mockRemove }));
 const mockOn = vi.fn();
 const mockStyle = vi.fn(() => ({ update: vi.fn() }));
+const mockUnselect = vi.fn();
+const mockEleSelect = vi.fn();
+const mockDollar = vi.fn(() => ({ unselect: mockUnselect }));
+const mockGetElementById = vi.fn(() => ({ select: mockEleSelect, length: 1 }));
+const mockZoom = vi.fn((arg?: unknown) => (arg === undefined ? 2 : undefined));
+const mockCenter = vi.fn();
 
 const mockCyInstance = {
   destroy: mockDestroy,
@@ -22,6 +28,10 @@ const mockCyInstance = {
   elements: mockElements,
   on: mockOn,
   style: mockStyle,
+  $: mockDollar,
+  getElementById: mockGetElementById,
+  zoom: mockZoom,
+  center: mockCenter,
   id: "root",
 };
 
@@ -119,5 +129,28 @@ describe("EntityGraphCanvas", () => {
       rerender(<EntityGraphCanvas nodes={makeNodes()} edges={makeEdges()} fitOnChange />);
     });
     expect(mockFit).toHaveBeenCalled();
+  });
+
+  // ── Selection ring (S-326 AC1) ─────────────────────────────────────────
+  it("applies selection to the matching node when selectedUuid is set", async () => {
+    const { rerender } = render(<EntityGraphCanvas nodes={makeNodes()} edges={makeEdges()} />);
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalledOnce(), { timeout: 2000 });
+    await act(async () => {
+      rerender(<EntityGraphCanvas nodes={makeNodes()} edges={makeEdges()} selectedUuid="n2" />);
+    });
+    expect(mockGetElementById).toHaveBeenCalledWith("n2");
+    expect(mockEleSelect).toHaveBeenCalled();
+  });
+
+  it("clears prior selection before selecting (and when selectedUuid is null)", async () => {
+    const { rerender } = render(
+      <EntityGraphCanvas nodes={makeNodes()} edges={makeEdges()} selectedUuid="n1" />,
+    );
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalledOnce(), { timeout: 2000 });
+    await act(async () => {
+      rerender(<EntityGraphCanvas nodes={makeNodes()} edges={makeEdges()} selectedUuid={null} />);
+    });
+    expect(mockDollar).toHaveBeenCalledWith(":selected");
+    expect(mockUnselect).toHaveBeenCalled();
   });
 });
