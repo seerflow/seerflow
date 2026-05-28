@@ -364,7 +364,7 @@ real confidence:
 3. **Streaming memory test.** Run `run_streaming_validation` with
    `max_events` at 10k / 100k / 1M and record peak RSS at each. Peak memory
    should stay **flat** — if it grows with `max_events`, the bounded-memory
-   guarantee is broken.
+   guarantee is broken. **Implemented as `tests/integration/test_lanl_streaming_bounded_memory.py` (S-347).**
 
 4. **Checkpoint/resume test.** Kill a streaming run mid-way, restart it, and
    confirm the final metrics match an uninterrupted run — proves resumability.
