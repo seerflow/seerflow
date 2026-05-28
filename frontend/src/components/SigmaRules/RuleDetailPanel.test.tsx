@@ -217,6 +217,33 @@ describe("RuleDetailPanel", () => {
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("auto-focuses the panel on rule selection so Escape closes without a prior tab-in (S-342)", async () => {
+    mockedGet.mockResolvedValueOnce({
+      rule_id: "r1",
+      title: "T",
+      description: "",
+      severity: 3,
+      logsource_key: ["", "linux", ""],
+      attack_tactics: [],
+      attack_techniques: [],
+      enabled: true,
+      source: "bundled",
+      yaml_source: "",
+      match_count_lifetime: 0,
+      last_fired_ns: null,
+      alert_count_24h: 0,
+    });
+    const onClose = vi.fn();
+    render(<RuleDetailPanel ruleId="r1" onClose={onClose} />);
+    const panel = await screen.findByTestId("rule-detail-panel-inner");
+    // S-342: the panel focuses itself when the rule loads — no manual
+    // `panel.focus()` here (that is exactly the bug being fixed).
+    await waitFor(() => expect(document.activeElement).toBe(panel));
+    const user = userEvent.setup();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalled();
+  });
 });
 
 // ── S-327: Edit YAML (AC3) + Test on history (AC4) ──────────────────────────
