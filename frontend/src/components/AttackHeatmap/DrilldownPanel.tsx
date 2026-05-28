@@ -8,6 +8,47 @@ import { formatRelative } from "@/lib/relativeTime";
 import type { Alert } from "@/lib/types";
 import type { MergedTactic } from "./types";
 
+/**
+ * S-346 — tiny local row component so the hover background can come from a
+ * brand token (`var(--surface-2)`) rather than the dark-mode-broken
+ * `hover:bg-zinc-50 dark:hover:bg-zinc-900/40` Tailwind pair. Inline-style
+ * hover is awkward but matches the S-345 `TechniqueCell` pattern; kept local
+ * to avoid scope balloon.
+ */
+function AlertRow({
+  alert,
+  onSelect,
+}: {
+  alert: Alert;
+  onSelect: (id: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const ico = severityIcon(alert.severity);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(alert.alert_id)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onBlur={() => setHovered(false)}
+      className="flex w-full items-start gap-2 py-2 text-left"
+      style={{ background: hovered ? "var(--surface-2)" : "transparent" }}
+      aria-label={`Open alert ${alert.alert_id} — ${alert.message || alert.rule_name}`}
+    >
+      <span aria-hidden className="text-base leading-tight">
+        {ico.emoji}
+      </span>
+      <span className="flex-1 text-xs">
+        <span className="block font-medium">{alert.message || alert.rule_name}</span>
+        <span style={{ color: "var(--text-3)" }}>
+          {alert.entity_value ? `${alert.entity_type ?? "entity"}:${alert.entity_value} · ` : ""}
+          {formatRelative(alert.timestamp_ns)}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
@@ -135,10 +176,10 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
               <SheetDescription className="sr-only">
                 Coverage details for this MITRE ATT&CK technique, including loaded rules and recent matching alerts.
               </SheetDescription>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs" style={{ color: "var(--text-3)" }}>
                 {cell.tac.name} · <span data-status>{statusLabel(cell.tech.covered, cell.tech.detected)}</span>
               </p>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs" style={{ color: "var(--text-3)" }}>
                 {cell.tech.ruleCount} rules · {cell.tech.alertCount} alerts (
                 {fmtDate(win.since)} → {fmtDate(win.until)})
               </p>
@@ -147,7 +188,7 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
             <section className="mt-4">
               <h3 className="mb-2 text-sm font-semibold">Rules</h3>
               {cell.tech.ruleNames.length === 0 ? (
-                <p className="text-xs italic text-zinc-500">
+                <p className="text-xs italic" style={{ color: "var(--text-3)" }}>
                   No rules cover this technique.
                 </p>
               ) : (
@@ -163,13 +204,25 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
               <h3 className="mb-2 text-sm font-semibold">Recent alerts</h3>
               {state.loading && (
                 <div role="status" className="space-y-2">
-                  <div className="h-6 w-full animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-                  <div className="h-6 w-5/6 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-                  <div className="h-6 w-3/4 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+                  <div
+                    className="h-6 w-full animate-pulse rounded"
+                    style={{ background: "var(--surface-2)" }}
+                  />
+                  <div
+                    className="h-6 w-5/6 animate-pulse rounded"
+                    style={{ background: "var(--surface-2)" }}
+                  />
+                  <div
+                    className="h-6 w-3/4 animate-pulse rounded"
+                    style={{ background: "var(--surface-2)" }}
+                  />
                 </div>
               )}
               {state.error && !state.loading && (
                 <div className="space-y-2">
+                  {/* S-346: text-red-500 left intentional — bright semantic error
+                      colour reads correctly in both themes; sweep covers only the
+                      zinc/white/black/hex palette per AC1. */}
                   <p className="text-xs text-red-500">{state.error}</p>
                   <button
                     type="button"
@@ -181,34 +234,20 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
                 </div>
               )}
               {!state.loading && !state.error && state.alerts.length === 0 && (
-                <p className="text-xs italic text-zinc-500">No alerts in window.</p>
+                <p className="text-xs italic" style={{ color: "var(--text-3)" }}>
+                  No alerts in window.
+                </p>
               )}
               {!state.loading && !state.error && state.alerts.length > 0 && (
-                <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                  {state.alerts.map((a) => {
-                    const ico = severityIcon(a.severity);
-                    return (
-                      <li key={a.alert_id}>
-                        <button
-                          type="button"
-                          onClick={() => handleSelect(a.alert_id)}
-                          className="flex w-full items-start gap-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
-                          aria-label={`Open alert ${a.alert_id} — ${a.message || a.rule_name}`}
-                        >
-                          <span aria-hidden className="text-base leading-tight">
-                            {ico.emoji}
-                          </span>
-                          <span className="flex-1 text-xs">
-                            <span className="block font-medium">{a.message || a.rule_name}</span>
-                            <span className="text-zinc-500">
-                              {a.entity_value ? `${a.entity_type ?? "entity"}:${a.entity_value} · ` : ""}
-                              {formatRelative(a.timestamp_ns)}
-                            </span>
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
+                <ul
+                  className="divide-y"
+                  style={{ borderColor: "var(--line)" }}
+                >
+                  {state.alerts.map((a) => (
+                    <li key={a.alert_id}>
+                      <AlertRow alert={a} onSelect={handleSelect} />
+                    </li>
+                  ))}
                 </ul>
               )}
             </section>
