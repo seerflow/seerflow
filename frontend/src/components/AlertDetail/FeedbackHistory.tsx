@@ -3,9 +3,14 @@ import { cn } from "@/lib/utils";
 
 interface Props { items: FeedbackEvent[] }
 
+// S-349: the `emerald-100/800` (tp) and `amber-100/800` (fp) badges were fixed
+// light-palette literals with no dark-theme variant — they read muddy on the
+// dark `--bg`. Migrated to brand semantic tokens: `info` (--info) for the
+// true-positive badge and `warn` (--warn) for the false-positive badge, both of
+// which flip between the dark `:root` and `.sf-light` themes.
 const BADGE_CLASS: Record<"tp" | "fp", string> = {
-  tp: "bg-emerald-100 text-emerald-800 border-emerald-300",
-  fp: "bg-amber-100 text-amber-800 border-amber-300",
+  tp: "bg-info/15 text-info border-info/40",
+  fp: "bg-warn/15 text-warn border-warn/40",
 };
 
 function formatRelative(ns: bigint): string {

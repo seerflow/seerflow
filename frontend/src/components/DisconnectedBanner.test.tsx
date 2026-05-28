@@ -68,4 +68,14 @@ describe("DisconnectedBanner (wsBus)", () => {
     act(() => { vi.advanceTimersByTime(10); });
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
+
+  it("uses the --warn brand token, not a fixed amber-* palette literal (S-349)", () => {
+    render(<DisconnectedBanner debounceMs={10} />);
+    act(() => { emitStatus("closed"); });
+    act(() => { vi.advanceTimersByTime(10); });
+    const banner = screen.getByRole("status");
+    expect(banner.className).toContain("bg-warn/10");
+    expect(banner.className).toContain("text-warn");
+    expect(banner.className).not.toMatch(/amber-\d+/);
+  });
 });

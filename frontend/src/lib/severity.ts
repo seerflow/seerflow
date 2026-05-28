@@ -12,10 +12,16 @@ export function severityBucket(id: number): SeverityBucket {
   return "low";
 }
 
+// S-349: bright Tailwind palette literals (red/orange/yellow) migrated to the
+// brand semantic tokens (`crit` → --crit, `warn` → --warn) so the badge hues
+// flip correctly between the dark `:root` and `.sf-light` themes. `high` and
+// `medium` share the single `warn` hue; the fill opacity (/15 vs /10) keeps the
+// two bands visually distinct. `low` keeps the neutral `slate-500` grey — it is
+// theme-stable (no brand variant needed) and intentionally the muted band.
 export const SEVERITY_CLASS: Record<SeverityBucket, string> = {
-  critical: "bg-red-600/15 text-red-600 border-red-600/40",
-  high:     "bg-orange-500/15 text-orange-500 border-orange-500/40",
-  medium:   "bg-yellow-500/15 text-yellow-600 border-yellow-500/40",
+  critical: "bg-crit/15 text-crit border-crit/40",
+  high:     "bg-warn/15 text-warn border-warn/40",
+  medium:   "bg-warn/10 text-warn border-warn/30",
   low:      "bg-slate-500/15 text-slate-500 border-slate-500/40",
 };
 

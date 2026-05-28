@@ -63,6 +63,14 @@ describe("AttackHeatmap", () => {
     expect(screen.getByText(/network/i)).toBeInTheDocument();
   });
 
+  it("error state uses the --crit brand token, not text-red-500 (S-349)", () => {
+    mockStore({ data: null, loading: false, error: "network", fetch: mockFetch });
+    render(<AttackHeatmap />);
+    const el = screen.getByText(/network/i);
+    expect(el.className).toContain("text-crit");
+    expect(el.className).not.toMatch(/text-red-\d+/);
+  });
+
   it("renders all 14 tactic columns when data loaded", () => {
     mockStore({ data: mockCoverageData, loading: false, error: null, fetch: mockFetch });
     render(<AttackHeatmap />);

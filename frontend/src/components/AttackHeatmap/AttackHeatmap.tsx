@@ -80,11 +80,11 @@ export function AttackHeatmap() {
   }
 
   if (error) {
-    // S-346: text-red-500 left intentional — bright semantic error colour reads
-    // correctly on both --bg (dark) and --bg (light) surfaces. The S-346 sweep
-    // targets only the zinc/white/black/hex palette per AC1.
+    // S-349: the fixed red error colour (deferred from S-346 AC1) was migrated
+    // to the `crit` brand token (--crit), which flips between the dark `:root`
+    // and `.sf-light` themes instead of staying a fixed Tailwind red.
     return (
-      <div className="flex h-full min-h-0 items-center justify-center text-red-500">
+      <div className="flex h-full min-h-0 items-center justify-center text-crit">
         {error}
       </div>
     );
