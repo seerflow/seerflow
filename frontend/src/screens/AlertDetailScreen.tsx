@@ -11,6 +11,7 @@ import { EntityGlyph } from "@/components/ui/primitives/EntityGlyph";
 import { Button } from "@/components/ui/button";
 import { KillChain, KILL_CHAIN_STAGES } from "@/components/AlertDetail/KillChain";
 import { AiExplanation } from "@/components/AlertDetail/AiExplanation";
+import { FeedbackPanel } from "@/components/AlertDetail/FeedbackPanel";
 import { getTechnique } from "@/lib/mitreTechniques";
 import type { Alert, AlertDetail, CorrelatedEvent, SeverityBucket } from "@/lib/types";
 import type { EntityType } from "@/components/ui/primitives/EntityGlyph";
@@ -420,6 +421,13 @@ export const AlertDetailScreen: React.FC = () => {
         className="flex flex-col overflow-y-auto border-l border-line bg-bg"
         aria-label="alert detail right rail"
       >
+        {/* Verdict (S-339): TP/FP feedback + recent history, mounted above
+            Entities so the analyst's decision-of-record stays in thumb-reach
+            of the Acknowledge header action. */}
+        <SideBlock title="Verdict">
+          <FeedbackPanel alertId={alert.alert_id} />
+        </SideBlock>
+
         {/* Entities */}
         <SideBlock title="Entities">
           {alert.entity_type && alert.entity_value ? (
