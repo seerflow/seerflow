@@ -392,13 +392,21 @@ class WriteBuffer:
 class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
     """SQLite storage backend implementing LogStore.write_events."""
 
-    __slots__ = ("_closed", "_conn", "_entity_graph", "_write_buffer")
+    __slots__ = ("_closed", "_conn", "_entity_graph", "_write_buffer", "_write_lock")
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
         self._write_buffer: WriteBuffer | None = None
         self._closed = False
         self._entity_graph: EntityGraph | None = None
+        # S-340: every write transaction (event batches, alerts, templates,
+        # model state, edges, feedback) runs on this single shared connection.
+        # aiosqlite has no nested-transaction support, so two coroutines issuing
+        # statements + commit concurrently corrupt each other's transaction
+        # ("cannot commit transaction - SQL statements in progress"), dropping a
+        # write. Serialize all write transactions behind one lock so commits can
+        # never interleave. Reads stay lock-free (WAL allows concurrent reads).
+        self._write_lock = asyncio.Lock()
 
     @classmethod
     async def connect(cls, config: StorageConfig) -> SqliteBackend:
@@ -469,13 +477,14 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
             )
             for t in templates
         ]
-        try:
-            await self._conn.executemany(_UPSERT_TEMPLATE_SQL, rows)
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("write_templates failed — %d templates not committed", len(rows))
-            raise
+        async with self._write_lock:
+            try:
+                await self._conn.executemany(_UPSERT_TEMPLATE_SQL, rows)
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("write_templates failed — %d templates not committed", len(rows))
+                raise
 
     async def get_templates(self, limit: int = 1000) -> list[TemplateInfo]:
         """Query templates sorted by event_count descending."""
@@ -502,16 +511,17 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
             raise ValueError(msg)
         if min_count == 0:
             return 0
-        try:
-            async with await self._conn.execute(
-                "DELETE FROM templates WHERE event_count < ?", [min_count]
-            ) as cursor:
-                removed = cursor.rowcount
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("prune_templates failed (min_count=%d)", min_count)
-            raise
+        async with self._write_lock:
+            try:
+                async with await self._conn.execute(
+                    "DELETE FROM templates WHERE event_count < ?", [min_count]
+                ) as cursor:
+                    removed = cursor.rowcount
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("prune_templates failed (min_count=%d)", min_count)
+                raise
         return int(removed)
 
     async def reset_templates(self) -> int:
@@ -521,14 +531,15 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
         tree is **not** affected — operators wanting a full reset should
         also delete the ``drain3:global`` ``model_state`` row.
         """
-        try:
-            async with await self._conn.execute("DELETE FROM templates") as cursor:
-                removed = cursor.rowcount
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("reset_templates failed")
-            raise
+        async with self._write_lock:
+            try:
+                async with await self._conn.execute("DELETE FROM templates") as cursor:
+                    removed = cursor.rowcount
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("reset_templates failed")
+                raise
         return int(removed)
 
     async def query_events(self, filters: EventQuery) -> Page[SeerflowEvent]:
@@ -632,13 +643,14 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
         """Persist serialized model state (upsert by key)."""
         _validate_state_key(key)
         updated_at = time.time_ns()
-        try:
-            await self._conn.execute(_SAVE_STATE_SQL, [key, data, updated_at])
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("save_state failed for key %s", key)
-            raise
+        async with self._write_lock:
+            try:
+                await self._conn.execute(_SAVE_STATE_SQL, [key, data, updated_at])
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("save_state failed for key %s", key)
+                raise
 
     async def load_state(self, key: str) -> bytes | None:
         """Load serialized model state, or None if not found."""
@@ -650,13 +662,14 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
     async def delete_state(self, key: str) -> None:
         """Delete serialized model state for ``key`` (no-op if absent)."""
         _validate_state_key(key)
-        try:
-            await self._conn.execute(_DELETE_STATE_SQL, [key])
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("delete_state failed for key %s", key)
-            raise
+        async with self._write_lock:
+            try:
+                await self._conn.execute(_DELETE_STATE_SQL, [key])
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("delete_state failed for key %s", key)
+                raise
 
     async def write_edge(
         self,
@@ -666,11 +679,12 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
         timestamp_ns: int,
     ) -> None:
         """Upsert a graph edge. Updates last_seen and increments event_count on conflict."""
-        await self._conn.execute(
-            _UPSERT_EDGE_SQL,
-            (source_id, target_id, rel_type, timestamp_ns, timestamp_ns),
-        )
-        await self._conn.commit()
+        async with self._write_lock:
+            await self._conn.execute(
+                _UPSERT_EDGE_SQL,
+                (source_id, target_id, rel_type, timestamp_ns, timestamp_ns),
+            )
+            await self._conn.commit()
 
     async def load_edges(
         self,
@@ -712,15 +726,16 @@ class SqliteBackend(_SqliteAlertMixin, _SqliteSigmaStateMixin):
                 (entity_uuid, event_id_str, event.timestamp_ns)
                 for entity_uuid in event.entity_refs
             )
-        try:
-            await self._conn.executemany(_INSERT_EVENT_SQL, event_rows)
-            if entity_rows:
-                await self._conn.executemany(_INSERT_ENTITY_EVENT_SQL, entity_rows)
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("SQLite batch write failed — %d events not committed", len(events))
-            raise
+        async with self._write_lock:
+            try:
+                await self._conn.executemany(_INSERT_EVENT_SQL, event_rows)
+                if entity_rows:
+                    await self._conn.executemany(_INSERT_ENTITY_EVENT_SQL, entity_rows)
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("SQLite batch write failed — %d events not committed", len(events))
+                raise
 
 
 # ---------------------------------------------------------------------------
