@@ -455,13 +455,17 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
           overflow: "hidden",
         }}
       >
-        {/* YAML pane with sticky header (AC6) */}
+        {/* YAML pane with sticky header (AC6) — S-344: stretch to fill the
+            grid row instead of capping Monaco at 360px. */}
         <div
           style={{
-            position: "relative",
-            overflow: "auto",
+            display: "grid",
+            gridTemplateColumns: "1fr",
+            gridTemplateRows: "auto 1fr",
             background: "var(--surface)",
             borderBottom: "1px solid var(--line)",
+            overflow: "hidden",
+            minHeight: 0,
           }}
         >
           <div
@@ -472,10 +476,7 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
               justifyContent: "space-between",
               padding: "8px 16px",
               borderBottom: "1px solid var(--line)",
-              position: "sticky",
-              top: 0,
               background: "var(--surface)",
-              zIndex: 1,
             }}
           >
             <span
@@ -520,12 +521,15 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
             </span>
           </div>
 
-          <MonacoYamlEditor
-            value={yamlValue}
-            onChange={setDraft}
-            readOnly={!editing}
-            height="360px"
-          />
+          {/* Monaco fills the remaining 1fr row of the YAML grid (S-344). */}
+          <div style={{ minHeight: 0, overflow: "hidden" }}>
+            <MonacoYamlEditor
+              value={yamlValue}
+              onChange={setDraft}
+              readOnly={!editing}
+              height="100%"
+            />
+          </div>
 
           {/* ATT&CK techniques list (kept below the editor as supplementary
               context — the mockup focuses on a single technique up-top but

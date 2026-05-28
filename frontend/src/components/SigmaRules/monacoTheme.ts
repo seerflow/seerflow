@@ -65,8 +65,8 @@ function readCssVar(name: string): string | null {
  * for token foregrounds — feeding it `oklch(...)` / `rgb(...)` / named colors
  * throws `Illegal value for token color: ...` from `setTheme`, which then
  * unmounts the whole React tree (blank screen). The seerflow brand tokens are
- * OKLCH, so the live computed CSS-var values are NOT Monaco-safe; the value is
- * only usable when it happens to be a hex literal.
+ * OKLCH, so the live computed CSS-var values are NOT Monaco-safe out of the
+ * box; we either pass them straight through (already-hex) or convert them.
  */
 const HEX_RE = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
@@ -75,19 +75,83 @@ function isMonacoHex(v: string): boolean {
 }
 
 /**
+ * Convert an `oklch(L C h)` string to a 6-digit sRGB hex.
+ *
+ * Implements the standard OKLCH → OKLab → linear-sRGB → gamma-encoded sRGB
+ * pipeline (Björn Ottosson, https://bottosson.github.io/posts/oklab/). Returns
+ * `null` on parse failure so the caller can fall back to a hard-coded hex.
+ *
+ * Why this exists: S-343 hex-only fallback worked but the `FALLBACKS` constants
+ * did not match the seerflow brand OKLCH palette (e.g. `--accent` is violet
+ * `oklch(0.745 0.130 283)` but the fallback was indigo `#7c9ef8`). The YAML
+ * editor rendered in the wrong palette. Converting the live brand value keeps
+ * Monaco visually consistent with the rest of the (OKLCH) app.
+ */
+export function oklchToHex(value: string): string | null {
+  const m = value.trim().match(
+    /^oklch\(\s*([0-9]*\.?[0-9]+%?)\s+([0-9]*\.?[0-9]+%?)\s+([0-9]*\.?[0-9]+)\s*\)$/i,
+  );
+  if (!m) return null;
+
+  const parsePct = (s: string, fullScale: number): number =>
+    s.endsWith("%") ? (parseFloat(s) / 100) * fullScale : parseFloat(s);
+
+  const L = parsePct(m[1], 1); // L expressed as 0..1 or 0..100%
+  const C = parsePct(m[2], 0.4); // C: 0..0.4 or 0..100% (100% == 0.4)
+  const h = (parseFloat(m[3]) * Math.PI) / 180;
+
+  const a = C * Math.cos(h);
+  const b = C * Math.sin(h);
+
+  // OKLab → linear sRGB.
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+
+  const lRaw = l_ * l_ * l_;
+  const mRaw = m_ * m_ * m_;
+  const sRaw = s_ * s_ * s_;
+
+  const rLin = 4.0767416621 * lRaw - 3.3077115913 * mRaw + 0.2309699292 * sRaw;
+  const gLin = -1.2684380046 * lRaw + 2.6097574011 * mRaw - 0.3413193965 * sRaw;
+  const bLin = -0.0041960863 * lRaw - 0.7034186147 * mRaw + 1.707614701 * sRaw;
+
+  // Gamma-encode (sRGB transfer).
+  const enc = (v: number): number =>
+    v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+  const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+  const toByte = (v: number): number => Math.round(clamp01(enc(v)) * 255);
+
+  const R = toByte(rLin);
+  const G = toByte(gLin);
+  const B = toByte(bLin);
+
+  const hex2 = (n: number): string => n.toString(16).padStart(2, "0");
+  return `#${hex2(R)}${hex2(G)}${hex2(B)}`;
+}
+
+/**
  * Resolves the seerflow design token map for Monaco.
  *
- * Prefers the live CSS custom-property value ONLY when it is a Monaco-safe
- * hex literal; otherwise falls back to the hard-coded hex constants in
- * `FALLBACKS`. This covers (a) SSR / test environments with no CSS, (b) the
- * brand-default OKLCH values which Monaco rejects, and (c) any future
- * `rgb()` / named color drift that would also crash Monaco.
+ * Resolution order per token:
+ * 1. Live CSS-var value if it's already a Monaco-safe hex literal.
+ * 2. Live CSS-var value if it's `oklch(...)` — convert to hex via
+ *    {@link oklchToHex} so Monaco gets the live brand colour exactly.
+ * 3. The hard-coded hex constant in `FALLBACKS` (SSR / jsdom / unparseable).
  */
 export function resolveTokens(): SeerflowTokenMap {
   const result = {} as SeerflowTokenMap;
   for (const key of Object.keys(FALLBACKS) as Array<keyof SeerflowTokenMap>) {
     const cssVal = readCssVar(CSS_VAR_MAP[key]);
-    result[key] = cssVal && isMonacoHex(cssVal) ? cssVal : FALLBACKS[key];
+    let resolved: string | null = null;
+    if (cssVal) {
+      if (isMonacoHex(cssVal)) {
+        resolved = cssVal;
+      } else if (cssVal.toLowerCase().startsWith("oklch(")) {
+        resolved = oklchToHex(cssVal);
+      }
+    }
+    result[key] = resolved ?? FALLBACKS[key];
   }
   return result;
 }
