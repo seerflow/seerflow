@@ -126,6 +126,24 @@ describe("AttackHeatmap", () => {
     // mockCoverageData has total_rules_with_attack_tags: 2
     expect(screen.getByText(/2 sigma rules/)).toBeInTheDocument();
   });
+
+  // ── S-346 brand-token migrations ──
+
+  it("S-346 loading container uses brand --text-3 token (not text-zinc-500)", () => {
+    mockStore({ data: null, loading: true, error: null, fetch: mockFetch });
+    const { container } = render(<AttackHeatmap />);
+    const outer = container.firstElementChild as HTMLElement;
+    expect(outer.style.color).toBe("var(--text-3)");
+    expect(outer.className).not.toMatch(/text-zinc-\d+/);
+  });
+
+  it("S-346 'no coverage data' container uses brand --text-3 token", () => {
+    mockStore({ data: null, loading: false, error: null, fetch: mockFetch });
+    const { container } = render(<AttackHeatmap />);
+    const outer = container.firstElementChild as HTMLElement;
+    expect(outer.style.color).toBe("var(--text-3)");
+    expect(outer.className).not.toMatch(/text-zinc-\d+/);
+  });
 });
 
 describe("AttackHeatmap click-to-drill", () => {

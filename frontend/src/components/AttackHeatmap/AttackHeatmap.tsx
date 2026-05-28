@@ -70,13 +70,19 @@ export function AttackHeatmap() {
 
   if (loading) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center text-zinc-500">
+      <div
+        className="flex h-full min-h-0 items-center justify-center"
+        style={{ color: "var(--text-3)" }}
+      >
         Loading coverage data…
       </div>
     );
   }
 
   if (error) {
+    // S-346: text-red-500 left intentional — bright semantic error colour reads
+    // correctly on both --bg (dark) and --bg (light) surfaces. The S-346 sweep
+    // targets only the zinc/white/black/hex palette per AC1.
     return (
       <div className="flex h-full min-h-0 items-center justify-center text-red-500">
         {error}
@@ -86,7 +92,10 @@ export function AttackHeatmap() {
 
   if (!data) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center text-zinc-500">
+      <div
+        className="flex h-full min-h-0 items-center justify-center"
+        style={{ color: "var(--text-3)" }}
+      >
         No coverage data available.
       </div>
     );
