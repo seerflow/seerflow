@@ -69,8 +69,63 @@ class EventResponse(BaseModel):
         )
 
 
+def entity_path_for(event: SeerflowEvent) -> dict[str, str | None]:
+    """Derive a ``{src, dst}`` entity-path hop from a SeerflowEvent (S-338).
+
+    Precedence: ``related_users`` → ``related_hosts`` → ``related_ips``. The
+    first non-empty category wins; ``src`` takes the first value and
+    ``dst`` takes the second when present, otherwise ``None``. Returns
+    ``{src: None, dst: None}`` when the event carries no related entities
+    so the caller can decide whether to omit the field upstream.
+
+    This intentionally mirrors the ``_entity_summary`` precedence used by
+    the WebSocket emitter (``src/seerflow/api/ws.py``) so the detail rail
+    and the live event stream agree on which entity gets surfaced.
+    """
+    for values in (event.related_users, event.related_hosts, event.related_ips):
+        if values:
+            src = values[0]
+            dst = values[1] if len(values) > 1 else None
+            return {"src": src, "dst": dst}
+    return {"src": None, "dst": None}
+
+
+class ContributingEventResponse(BaseModel):
+    """One row in the alert-detail "correlated events" grid (S-338).
+
+    Hydrated server-side from the matching ``SeerflowEvent`` records pointed
+    at by ``Alert.contributing_events``. The frontend uses ``severity_text``
+    to drive row tinting and ``entity_path`` for the `src → dst` column.
+    """
+
+    event_id: str
+    timestamp_ns: int
+    message: str
+    severity_text: str
+    entity_path: dict[str, str | None] = Field(default_factory=dict)
+
+    @field_serializer("timestamp_ns", when_used="json")
+    def _serialize_timestamp_ns(self, v: int) -> str:
+        """Render as JSON string for JS bigint safety (S-194 pattern)."""
+        return str(v)
+
+    @classmethod
+    def from_event(cls, event: SeerflowEvent) -> ContributingEventResponse:
+        return cls(
+            event_id=str(event.event_id),
+            timestamp_ns=event.timestamp_ns,
+            message=event.message,
+            severity_text=event.severity_id.text,
+            entity_path=entity_path_for(event),
+        )
+
+
 class AlertResponse(BaseModel):
-    """JSON representation of an Alert."""
+    """JSON representation of an Alert.
+
+    ``contributing_events`` is populated only by the alert-detail endpoint
+    (S-338) — the list / WS payload omits it.
+    """
 
     alert_id: str
     timestamp_ns: int
@@ -87,6 +142,10 @@ class AlertResponse(BaseModel):
     feedback_note: str = ""
     mitre_tactics: list[str] = Field(default_factory=list)
     mitre_techniques: list[str] = Field(default_factory=list)
+    # S-338: only the alert-detail endpoint hydrates this — the list / WS
+    # paths leave it unset. ``None`` (= JSON omission) keeps every other
+    # endpoint payload byte-identical.
+    contributing_events: list[ContributingEventResponse] | None = None
 
     @field_serializer("timestamp_ns", when_used="json")
     def _serialize_timestamp_ns(self, v: int) -> str:
@@ -100,8 +159,17 @@ class AlertResponse(BaseModel):
         return str(v)
 
     @classmethod
-    def from_alert(cls, alert: Alert) -> AlertResponse:
-        """Convert a msgspec Alert to a Pydantic response model."""
+    def from_alert(
+        cls,
+        alert: Alert,
+        *,
+        contributing_events: list[ContributingEventResponse] | None = None,
+    ) -> AlertResponse:
+        """Convert a msgspec Alert to a Pydantic response model.
+
+        ``contributing_events`` is optional — pass it only from the
+        alert-detail endpoint after hydrating the matching SeerflowEvents.
+        """
         return cls(
             alert_id=alert.alert_id,
             timestamp_ns=alert.timestamp_ns,
@@ -118,6 +186,7 @@ class AlertResponse(BaseModel):
             feedback_note=alert.feedback_note,
             mitre_tactics=list(alert.mitre_tactics),
             mitre_techniques=list(alert.mitre_techniques),
+            contributing_events=contributing_events,
         )
 
 
