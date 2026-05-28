@@ -102,15 +102,16 @@ async function walk(dir: string, out: string[] = []): Promise<string[]> {
   return out;
 }
 
-function isAllowed(file: string, line: string, re: RegExp): boolean {
+function isAllowed(file: string, line: string): boolean {
+  // A line is allowed iff at least one ALLOWLIST entry both matches the file
+  // path AND its `pattern` matches the line. The active rule that flagged the
+  // line is irrelevant — the allowlist is line-pattern-anchored, so a
+  // `bg-zinc-200` introduced in `monacoTheme.ts` (whose allowlist pattern is
+  // the hex regex) would NOT be allowed: the hex regex won't match
+  // `bg-zinc-200`.
   const posix = file.split(path.sep).join("/");
   for (const entry of ALLOWLIST) {
     if (!posix.endsWith(entry.pathSuffix)) continue;
-    if (entry.pattern.source !== re.source) {
-      // Only allow the exact (anchor) regex the entry whitelists, otherwise
-      // a `bg-zinc-200` introduced in monacoTheme.ts would silently pass.
-      if (!entry.pattern.test(line)) continue;
-    }
     if (entry.pattern.test(line)) return true;
   }
   return false;
@@ -145,7 +146,7 @@ async function scan(): Promise<Violation[]> {
       for (const rule of rules) {
         if (isTest && rule.name !== "hex-literal") continue;
         if (!rule.re.test(line)) continue;
-        if (isAllowed(file, line, rule.re)) continue;
+        if (isAllowed(file, line)) continue;
         out.push({
           file: path.relative(SRC_ROOT, file),
           line: i + 1,
