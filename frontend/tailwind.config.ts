@@ -29,6 +29,7 @@ export default {
         "accent-2":   "var(--accent-2)",
         "accent-ink": "var(--accent-ink)",
         warn:         "var(--warn)",
+        "warn-2":     "var(--warn-2)",
         crit:         "var(--crit)",
         info:         "var(--info)",
         /* ── shadcn compat — ui-accent = hover surface (≠ brand indigo) ── */
