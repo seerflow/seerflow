@@ -80,6 +80,27 @@ describe("KillChain", () => {
     const listItems = screen.getAllByRole("listitem");
     expect(listItems.length).toBe(7);
   });
+
+  it("lays the stages out in a horizontal grid (mockup fidelity)", () => {
+    render(<KillChain activeIdx={2} stages={[]} />);
+    const list = screen.getByRole("list", { name: /kill chain/i });
+    expect(list).toHaveStyle({ display: "grid" });
+  });
+
+  it("renders the per-stage sub-label when provided", () => {
+    const stages = [
+      { label: "sshd accept" },
+      { label: "ssh_brute_force" },
+      {},
+      {},
+      {},
+      {},
+      {},
+    ];
+    render(<KillChain activeIdx={1} stages={stages} />);
+    expect(screen.getByText("sshd accept")).toBeInTheDocument();
+    expect(screen.getByText("ssh_brute_force")).toBeInTheDocument();
+  });
 });
 
 describe("KillChainStageState", () => {
