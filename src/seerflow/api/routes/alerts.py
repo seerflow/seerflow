@@ -8,7 +8,7 @@ POST /api/v1/alerts/{id}/feedback -- TP/FP feedback
 from __future__ import annotations
 
 import logging
-from typing import Annotated, get_args
+from typing import TYPE_CHECKING, Annotated, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 
@@ -25,6 +25,9 @@ from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
 from seerflow.models.query import AlertQuery, EventQuery, TimeRange
 from seerflow.sigma.attack import is_valid_technique, resolve_tactic
+
+if TYPE_CHECKING:
+    import uuid
 
 _log = logging.getLogger("seerflow")
 
@@ -47,21 +50,21 @@ _DETAIL_CONTRIBUTING_EVENT_CAP = 16
 async def _hydrate_contributing_events(
     storage: StorageDeps,
     alert_id: str,
-    contributing: tuple,  # type: ignore[type-arg]  # tuple[uuid.UUID, ...]
+    contributing: tuple[uuid.UUID, ...],
     entity_uuid: str,
     alert_ts_ns: int,
 ) -> list[ContributingEventResponse] | None:
     """Look up the events referenced by ``alert.contributing_events`` and
     convert them to ``ContributingEventResponse`` rows (S-338).
 
-    Returns ``None`` when the alert references no events; an empty list is
-    also possible when the lookup window misses the referenced events (e.g.
-    they aged out of hot storage). Either way the route omits the field
-    from the response payload.
+    Returns ``None`` when the alert references no events OR when the lookup
+    window misses every referenced event (e.g. they aged out of hot
+    storage). Either condition causes the route to omit the field from the
+    response payload, which the dashboard tolerates.
     """
     if not contributing:
         return None
-    wanted = {eid for eid in contributing}
+    wanted = set(contributing)
     time_range = TimeRange(
         start_ns=max(0, alert_ts_ns - _DETAIL_EVENT_LOOKBACK_NS),
         end_ns=alert_ts_ns + _DETAIL_EVENT_LOOKBACK_NS,
