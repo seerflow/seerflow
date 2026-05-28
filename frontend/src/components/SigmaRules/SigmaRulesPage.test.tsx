@@ -66,7 +66,11 @@ describe("SigmaRulesPage", () => {
       limit: 100,
     });
     render(<SigmaRulesPage />);
-    await waitFor(() => expect(screen.getByText("Page Test Rule")).toBeInTheDocument());
+    // S-341: RuleRow renders `rule_id` (mono) as the primary label — the
+    // legacy `<table>` title cell is gone. Assert by rule_id testid so the
+    // unrouted SigmaRulesPage smoke test still exercises the load → render
+    // path end-to-end.
+    await waitFor(() => expect(screen.getByTestId("sigma-rule-row-r1")).toBeInTheDocument());
     expect(screen.getByText(/1 rules loaded/)).toBeInTheDocument();
   });
 

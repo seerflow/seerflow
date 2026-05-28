@@ -1,20 +1,32 @@
-// S-151: Side panel showing full rule details (Monaco YAML viewer + ATT&CK).
-// S-154 (T8): mounts a 24h hourly-firing sparkline next to the 24h alert metric.
-// S-324: Restyled — SFBadge for technique, 6-up Stat row, BarHistogram hit trend,
-//        action buttons (Disable / Edit YAML / Test on history), OKLCH Monaco theme.
+// S-151 / S-324 / S-327 / S-341: Sigma rule detail panel.
+//
+// S-341 reconciles the panel chrome to
+// `docs/new_image/Dashboard - Sigma Rules.html`:
+//   AC5 — single inline header row: rule_id (mono 20px) + technique badge +
+//         tactic + spacer + Disable / Edit YAML / Test on history.
+//   AC5 — 6-stat row (hits 24h · precision · false pos · last fired · author
+//         · updated) with mockup mono-uppercase labels.
+//   AC6 — sticky YAML header above the Monaco editor (`${rule_id}.yml` +
+//         `N lines · Copy YAML`) — copy uses `navigator.clipboard.writeText`.
+//   AC7 — `Hits · last 24h` + peak label + BarHistogram driven by the
+//         already-loaded 24h timeline buckets.
+//
+// S-327 functional bits preserved verbatim:
+//   AC1 — OKLCH Monaco theme wiring (via `MonacoYamlEditor`).
+//   AC3 — Edit YAML toggle with local draft + Cancel.
+//   AC4 — Test on history → 24h hit count + lifetime matches.
+//   Abort-on-rule-switch (S-230) for both detail + timeline fetches.
+//
+// The visible Close button is dropped per the mockup; Escape closes the panel.
 import { useEffect, useState } from "react";
 
 import { getSigmaRule, getSigmaRuleTimeline, toggleSigmaRule } from "@/lib/sigmaRulesApi";
 import type { SigmaRuleDetail, SigmaRuleTimelineResponse } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { SFBadge } from "@/components/ui/primitives/Badge";
-import { Stat } from "@/components/ui/primitives/Stat";
 import { BarHistogram } from "@/viz/BarHistogram";
 import type { BarHistogramDataPoint } from "@/viz/BarHistogram";
 
 import { MonacoYamlEditor } from "./MonacoYamlEditor";
-import { RuleSparkline } from "./RuleSparkline";
-import { severityLabel } from "./severity";
 
 // MITRE technique IDs follow T#### or T####.### (sub-technique). Reject
 // anything else to prevent ``javascript:`` URI injection through the
@@ -37,9 +49,7 @@ interface Props {
 // S-327 (AC4): a "Test on history" run summarises how often the rule has
 // fired against recorded event history. With no dedicated backend endpoint
 // today, we derive the count client-side from the already-loaded 24h
-// timeline buckets and the rule's lifetime match count. `hits24h` is null
-// when the timeline never resolved (e.g. endpoint 404/error) so the UI can
-// show a graceful "no recent history" fallback.
+// timeline buckets and the rule's lifetime match count.
 interface TestResult {
   hits24h: number | null;
   lifetime: number;
@@ -48,6 +58,38 @@ interface TestResult {
 function sumBucketCounts(timeline: SigmaRuleTimelineResponse | null): number | null {
   if (!timeline) return null;
   return timeline.buckets.reduce((acc, b) => acc + b.count, 0);
+}
+
+// S-341 AC7: derive the peak bucket label ("peak N / hr at HH:MM") from the
+// 24h timeline. Returns null when the timeline is empty.
+function peakLabel(timeline: SigmaRuleTimelineResponse | null): string | null {
+  if (!timeline || timeline.buckets.length === 0) return null;
+  let bestIdx = 0;
+  let best = -1;
+  for (let i = 0; i < timeline.buckets.length; i++) {
+    if (timeline.buckets[i].count > best) {
+      best = timeline.buckets[i].count;
+      bestIdx = i;
+    }
+  }
+  if (best <= 0) return null;
+  const tsMs = Number(timeline.buckets[bestIdx].bucket_start_ns) / 1e6;
+  const d = new Date(tsMs);
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `peak ${best} / hr at ${hh}:${mm}`;
+}
+
+// S-341 AC6: best-effort clipboard copy; never throws. A rejection (browser
+// permission denial, missing API) is silently swallowed.
+function copyToClipboard(text: string): void {
+  try {
+    const clip = navigator.clipboard;
+    if (!clip) return;
+    void clip.writeText(text).catch(() => {});
+  } catch {
+    // ignore
+  }
 }
 
 export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
@@ -71,7 +113,7 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
   // (a deliberate cancel is not an error). The timeline stays an
   // independent request so a slow/erroring timeline cannot block the
   // YAML view; its failures (AbortError included) fall back to "no
-  // sparkline rendered".
+  // trend rendered".
   useEffect(() => {
     const controller = new AbortController();
     setRule(null);
@@ -91,15 +133,26 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
     void getSigmaRuleTimeline(ruleId, controller.signal)
       .then(setTimeline)
       .catch(() => {
-        // Silent: the metric row still shows the count without the
-        // chart; an aborted timeline is silenced here too.
+        // Silent: an aborted or failed timeline simply hides the trend.
       });
     return () => controller.abort();
   }, [ruleId]);
 
+  // S-341: Escape replaces the dropped Close button.
+  function handleKeyDown(e: React.KeyboardEvent): void {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
+  }
+
   if (error) {
     return (
-      <aside className="w-full h-full border-l p-4 text-sm text-destructive">
+      <aside
+        className="w-full h-full border-l p-4 text-sm text-destructive"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+      >
         Failed to load rule: {error}
         <div className="mt-3">
           <Button size="sm" variant="ghost" onClick={onClose}>
@@ -112,7 +165,11 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
 
   if (!rule) {
     return (
-      <aside className="w-full h-full border-l p-4 text-sm text-muted-foreground">
+      <aside
+        className="w-full h-full border-l p-4 text-sm text-muted-foreground"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+      >
         Loading rule…
       </aside>
     );
@@ -123,8 +180,38 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
     ? timeline.buckets.map((b) => ({ t: Number(b.bucket_start_ns), v: b.count }))
     : [];
 
-  // First ATT&CK technique for badge (primary).
+  // First ATT&CK technique + tactic for header.
   const primaryTechnique = rule.attack_techniques[0] ?? null;
+  const primaryTactic = rule.attack_tactics[0] ?? null;
+
+  // Source YAML (live draft when editing, persisted source otherwise).
+  const yamlValue = editing ? draft : rule.yaml_source;
+  const lineCount = yamlValue.split("\n").length;
+  const filename = `${rule.rule_id}.yml`;
+
+  // 6-stat values. `false_pos`, `author`, `updated` aren't in the wire model
+  // today — we render `—` for those (the mockup labels still anchor the layout).
+  const stats: Array<[string, string]> = [
+    ["hits 24h", rule.alert_count_24h.toLocaleString()],
+    [
+      "precision",
+      rule.match_count_lifetime > 0
+        ? Math.max(
+            0,
+            Math.min(1, 1 - rule.alert_count_24h / rule.match_count_lifetime),
+          ).toFixed(2)
+        : "—",
+    ],
+    ["false pos", "—"],
+    [
+      "last fired",
+      rule.last_fired_ns
+        ? new Date(Number(rule.last_fired_ns) / 1e6).toLocaleDateString()
+        : "—",
+    ],
+    ["author", rule.source ?? "—"],
+    ["updated", "—"],
+  ];
 
   // Optimistic disable toggle handler.
   async function handleDisable() {
@@ -160,65 +247,161 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
 
   return (
     <aside
-      className="flex flex-col h-full border-l overflow-hidden"
       data-testid="rule-detail-panel-inner"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+      className="flex flex-col h-full border-l overflow-hidden"
+      style={{ outline: "none" }}
     >
-      {/* Header */}
-      <div className="shrink-0 px-4 pt-4 pb-3 border-b border-line">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <h2 className="text-sm font-semibold text-text leading-tight">{rule.title}</h2>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close detail panel" className="shrink-0">
-            Close
-          </Button>
-        </div>
-
-        {/* Rule ID + technique badge row */}
-        <div className="flex items-center gap-2 mb-2">
-          <span className="sf-mono text-[11px] text-text-3">{rule.rule_id}</span>
-          {primaryTechnique && (
-            <SFBadge variant="accent">
-              {primaryTechnique.toUpperCase()}
-            </SFBadge>
+      {/* S-341 AC5: inline header row */}
+      <div
+        data-testid="rule-detail-panel-header"
+        style={{
+          padding: "20px 28px 18px",
+          borderBottom: "1px solid var(--line)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+          <span
+            className="sf-mono"
+            style={{
+              fontSize: 20,
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+              color: "var(--text)",
+            }}
+          >
+            {rule.rule_id}
+          </span>
+          {primaryTechnique && (() => {
+            const href = attackUrl(primaryTechnique);
+            const label = primaryTechnique.toUpperCase();
+            const badge = (
+              <span
+                className="sf-mono"
+                style={{
+                  fontSize: 11,
+                  color: "var(--accent)",
+                  border:
+                    "1px solid color-mix(in oklch, var(--accent) 30%, transparent)",
+                  padding: "1px 6px",
+                }}
+              >
+                {label}
+              </span>
+            );
+            return href ? (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: "none" }}
+                aria-label={`MITRE ATT&CK technique ${label}`}
+              >
+                {badge}
+              </a>
+            ) : (
+              badge
+            );
+          })()}
+          {primaryTactic && (
+            <span
+              className="sf-mono"
+              style={{ fontSize: 11, color: "var(--text-3)" }}
+            >
+              {primaryTactic}
+            </span>
           )}
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-2">
+          <span style={{ flex: 1 }} />
           <button
             onClick={() => void handleDisable()}
             disabled={toggling}
-            className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors disabled:opacity-50"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--line-2)",
+              color: "var(--text-2)",
+              padding: "5px 10px",
+              fontSize: 11.5,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
           >
             {rule.enabled ? "Disable" : "Enable"}
           </button>
           {editing ? (
             <button
               onClick={cancelEditing}
-              className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--line-2)",
+                color: "var(--text)",
+                padding: "5px 10px",
+                fontSize: 11.5,
+                fontFamily: "inherit",
+                cursor: "pointer",
+              }}
             >
               Cancel
             </button>
           ) : (
             <button
               onClick={startEditing}
-              className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--line-2)",
+                color: "var(--text)",
+                padding: "5px 10px",
+                fontSize: 11.5,
+                fontFamily: "inherit",
+                cursor: "pointer",
+              }}
             >
               Edit YAML
             </button>
           )}
           <button
             onClick={runTest}
-            className="sf-mono text-[11px] border border-line text-text-2 px-2 py-1 leading-none hover:border-line-2 transition-colors"
+            data-variant="accent-fill"
+            style={{
+              background: "var(--accent)",
+              border: 0,
+              color: "var(--accent-ink)",
+              padding: "5px 10px",
+              fontSize: 11.5,
+              fontFamily: "inherit",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
           >
             Test on history
           </button>
         </div>
 
+        {/* Description */}
+        {rule.description && (
+          <div
+            style={{
+              fontSize: 13.5,
+              color: "var(--text-2)",
+              marginTop: 8,
+              maxWidth: 640,
+              lineHeight: 1.5,
+            }}
+          >
+            {rule.description}
+          </div>
+        )}
+
         {/* S-327 (AC4): test-on-history result summary */}
         {testResult && (
           <div
             data-testid="sigma-test-result"
-            className="mt-2 sf-mono text-[11px] text-text-2"
+            style={{
+              marginTop: 8,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--text-2)",
+            }}
           >
             {testResult.hits24h === null ? (
               <span>
@@ -232,85 +415,198 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
             )}
           </div>
         )}
+
+        {/* S-341 AC5: 6-stat row */}
+        <div
+          data-testid="rule-detail-stats"
+          style={{ display: "flex", gap: 28, marginTop: 18, flexWrap: "wrap" }}
+        >
+          {stats.map(([k, v]) => (
+            <div key={k}>
+              <div
+                className="sf-mono"
+                style={{
+                  fontSize: 9.5,
+                  color: "var(--text-3)",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {k}
+              </div>
+              <div
+                className="sf-mono sf-tnum"
+                style={{ fontSize: 13, color: "var(--text)", marginTop: 3 }}
+              >
+                {v}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* 6-up Stat row */}
-        <div className="grid grid-cols-3 gap-3">
-          <Stat label="Severity" value={severityLabel(rule.severity)} />
-          <Stat label="24h alerts" value={rule.alert_count_24h} />
-          <Stat label="Lifetime" value={rule.match_count_lifetime} />
-          <Stat label="Logsource" value={rule.logsource_key.filter(Boolean).join("/") || "—"} />
-          <Stat label="Source" value={rule.source} />
-          <Stat
-            label="Last fired"
-            value={rule.last_fired_ns ? new Date(Number(rule.last_fired_ns) / 1e6).toLocaleDateString() : "Never"}
-          />
-        </div>
+      {/* YAML + hit-trend */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr",
+          gridTemplateRows: "1fr auto",
+          flex: 1,
+          overflow: "hidden",
+        }}
+      >
+        {/* YAML pane with sticky header (AC6) */}
+        <div
+          style={{
+            position: "relative",
+            overflow: "auto",
+            background: "var(--surface)",
+            borderBottom: "1px solid var(--line)",
+          }}
+        >
+          <div
+            data-testid="sigma-yaml-header"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "8px 16px",
+              borderBottom: "1px solid var(--line)",
+              position: "sticky",
+              top: 0,
+              background: "var(--surface)",
+              zIndex: 1,
+            }}
+          >
+            <span
+              className="sf-mono"
+              style={{
+                fontSize: 10.5,
+                color: "var(--text-3)",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              {filename}
+            </span>
+            <span
+              className="sf-mono"
+              style={{
+                fontSize: 10.5,
+                color: "var(--text-3)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span>{lineCount} lines</span>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                aria-label="Copy YAML"
+                onClick={() => copyToClipboard(yamlValue)}
+                style={{
+                  background: "transparent",
+                  border: 0,
+                  color: "var(--text-3)",
+                  fontFamily: "inherit",
+                  fontSize: 10.5,
+                  padding: 0,
+                  cursor: "pointer",
+                }}
+              >
+                copy ⏤
+              </button>
+            </span>
+          </div>
 
-        {/* 24h sparkline + hit-trend histogram */}
-        <div>
-          <div className="sf-mono text-[10px] text-text-3 uppercase tracking-[0.1em] mb-1">
-            Hit trend (24h)
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="sf-tnum text-sm text-text-2">{rule.alert_count_24h}</span>
-            {timeline ? (
-              <span className="text-muted-foreground" data-testid="rule-sparkline">
-                <RuleSparkline buckets={timeline.buckets} />
-              </span>
-            ) : null}
-          </div>
-          {histData.length > 0 && (
-            <BarHistogram
-              data={histData}
-              height={56}
-              className="mt-2"
-              showTooltip
-            />
+          <MonacoYamlEditor
+            value={yamlValue}
+            onChange={setDraft}
+            readOnly={!editing}
+            height="360px"
+          />
+
+          {/* ATT&CK techniques list (kept below the editor as supplementary
+              context — the mockup focuses on a single technique up-top but
+              dropping the full list would lose information for chained
+              techniques). */}
+          {rule.attack_techniques.length > 1 && (
+            <AttackTechniqueList techniques={rule.attack_techniques} />
           )}
         </div>
 
-        {/* Description */}
-        {rule.description && (
-          <p className="text-xs text-text-2 leading-relaxed">{rule.description}</p>
-        )}
-
-        {/* ATT&CK techniques */}
-        {rule.attack_techniques.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {rule.attack_techniques.map((t) => {
-              const url = attackUrl(t);
-              return url ? (
-                <a
-                  key={t}
-                  className="text-xs underline text-accent"
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {t.toUpperCase()}
-                </a>
-              ) : (
-                <span key={t} className="text-xs text-muted-foreground">
-                  {t.toUpperCase()}
-                </span>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Monaco YAML view — editable when AC3 edit mode is active */}
-        <div className="rounded border border-line">
-          <MonacoYamlEditor
-            value={editing ? draft : rule.yaml_source}
-            onChange={setDraft}
-            readOnly={!editing}
-            height="320px"
-          />
-        </div>
+        {/* S-341 AC7: hit trend */}
+        <HitTrend data={histData} peak={peakLabel(timeline)} />
       </div>
     </aside>
+  );
+}
+
+function AttackTechniqueList({ techniques }: { techniques: string[] }): JSX.Element {
+  return (
+    <div style={{ padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {techniques.map((t) => {
+        const url = attackUrl(t);
+        return url ? (
+          <a
+            key={t}
+            className="text-xs underline text-accent"
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t.toUpperCase()}
+          </a>
+        ) : (
+          <span key={t} className="text-xs text-muted-foreground">
+            {t.toUpperCase()}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function HitTrend({
+  data,
+  peak,
+}: {
+  data: BarHistogramDataPoint[];
+  peak: string | null;
+}): JSX.Element {
+  return (
+    <div
+      data-testid="sigma-hit-trend"
+      style={{ padding: "14px 28px 16px" }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Hits · last 24h</span>
+        <span
+          data-testid="sigma-hit-trend-peak"
+          className="sf-mono"
+          style={{ fontSize: 11, color: "var(--text-3)" }}
+        >
+          {peak ?? "no recent hits"}
+        </span>
+      </div>
+      {data.length > 0 ? (
+        <BarHistogram data={data} height={64} showTooltip />
+      ) : (
+        <div
+          className="sf-mono"
+          style={{ fontSize: 11, color: "var(--text-3)" }}
+        >
+          no timeline available
+        </div>
+      )}
+    </div>
   );
 }

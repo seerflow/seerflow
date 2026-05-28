@@ -1,12 +1,17 @@
 /**
- * S-324: Sigma rules screen — 460px / 1fr split layout.
+ * S-324 / S-341: Sigma rules screen — 460px / 1fr split layout.
  *
- * Left panel: search + "+ New" + FilterChip row + RuleTable.
- * Right panel: RuleDetailPanel when rule selected, placeholder otherwise.
+ * S-341 reconciles the chrome to `docs/new_image/Dashboard - Sigma Rules.html`:
+ *   - drops the in-panel `<h1>` (AC1)
+ *   - search bar wrapped in a `var(--surface)` box with a magnifier-icon
+ *     prefix and placeholder `Filter N rules…` (AC2)
+ *   - `+ New` button is accent-fill (AC2)
+ *   - chip label tweak `High-precision` → `High precision` (AC3)
+ *   - selected rule highlight is now driven by `selectedRuleId` propagation
+ *     into `RuleTable` (AC4)
  *
- * Client-side chip filtering (All/Enabled/Disabled/High-precision/Noisy)
- * is applied on top of the store's rule list. The store handles server-side
- * text search via setFilter({ search }) with debounce.
+ * S-327 functional bits preserved: debounced server-side search, client-side
+ * chip filter, `+ New` opens the blank-rule editor (UploadRuleDialog).
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useSigmaRulesStore } from "@/stores/sigmaRules";
@@ -48,7 +53,8 @@ function chipLabel(chip: ChipId, rules: SigmaRuleSummary[], total: number): stri
     case "disabled":
       return `Disabled ${rules.filter((r) => !r.enabled).length}`;
     case "high-precision":
-      return `High-precision ${rules.filter((r) => r.match_count_lifetime >= 10 && r.alert_count_24h > 0).length}`;
+      // S-341 AC3: label has no hyphen ("High precision").
+      return `High precision ${rules.filter((r) => r.match_count_lifetime >= 10 && r.alert_count_24h > 0).length}`;
     case "noisy":
       return `Noisy ${rules.filter((r) => r.match_count_lifetime > 0 && r.alert_count_24h / r.match_count_lifetime > 0.5).length}`;
   }
@@ -114,33 +120,84 @@ export const SigmaScreen: React.FC = () => {
       {/* Left panel */}
       <div
         data-testid="sigma-left-panel"
-        style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--line)" }}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRight: "1px solid var(--line)",
+        }}
       >
-        {/* Screen heading */}
-        <div className="px-3 pt-3 pb-2 border-b border-line">
-          <h1 className="text-sm font-semibold text-text sf-mono">Sigma rules</h1>
-        </div>
-
-        {/* Search + New */}
-        <div className="flex items-center gap-2 p-3 border-b border-line">
-          <input
-            aria-label="Search rules"
-            placeholder="Search rules…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 bg-transparent sf-mono text-sm text-text placeholder:text-text-3 outline-none"
-          />
+        {/* S-341 AC2: Search + accent-fill "+ New" — no in-panel heading. */}
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--line)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flex: 1,
+              background: "var(--surface)",
+              border: "1px solid var(--line)",
+              padding: "5px 10px",
+            }}
+          >
+            <svg
+              data-testid="sigma-search-icon"
+              width="11"
+              height="11"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              style={{ color: "var(--text-3)" }}
+              aria-hidden="true"
+            >
+              <circle cx="6" cy="6" r="4.5" />
+              <path d="M10 10l3 3" />
+            </svg>
+            <input
+              aria-label="Search rules"
+              placeholder={`Filter ${total} rules…`}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 bg-transparent sf-mono text-sm text-text placeholder:text-text-3 outline-none"
+              style={{ background: "transparent", border: 0, width: "100%" }}
+            />
+          </div>
           <button
             onClick={() => setNewOpen(true)}
-            className="sf-mono text-xs text-accent border border-[color-mix(in_oklch,var(--accent)_35%,transparent)] px-2 py-1 leading-none whitespace-nowrap hover:bg-[color-mix(in_oklch,var(--accent)_8%,transparent)] transition-colors"
+            data-variant="accent-fill"
             aria-label="New rule"
+            style={{
+              background: "var(--accent)",
+              border: 0,
+              color: "var(--accent-ink)",
+              padding: "5px 10px",
+              fontSize: 11.5,
+              fontWeight: 600,
+              fontFamily: "inherit",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
           >
             + New
           </button>
         </div>
 
         {/* Filter chips */}
-        <div className="p-2 border-b border-line">
+        <div
+          style={{
+            padding: "10px 18px",
+            borderBottom: "1px solid var(--line)",
+          }}
+        >
           <FilterRow>
             {CHIP_ORDER.map((c) => (
               <FilterChip
@@ -165,6 +222,7 @@ export const SigmaScreen: React.FC = () => {
           ) : (
             <RuleTable
               rules={filteredRules}
+              selectedRuleId={selectedId}
               onSelect={(id) => select(id)}
               onToggle={(id, enabled) => void toggle(id, enabled)}
             />
