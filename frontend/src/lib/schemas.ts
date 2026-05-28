@@ -80,6 +80,13 @@ export const AlertSchema = v.object({
   feedback: v.nullish(v.picklist(["", "tp", "fp"] as const)),
 });
 
+// S-338: optional structured src/dst hop derived server-side from
+// `event.related_users` / `related_hosts` / `related_ips`.
+const EntityPathSchema = v.object({
+  src: v.optional(v.nullable(BoundedString(256))),
+  dst: v.optional(v.nullable(BoundedString(256))),
+});
+
 export const AlertDetailSchema = v.object({
   ...AlertSchema.entries,
   contributing_events: v.optional(v.pipe(
@@ -87,6 +94,11 @@ export const AlertDetailSchema = v.object({
       event_id: SafeId,
       timestamp_ns: BigintNsSchema,
       message: BoundedString(MAX_MESSAGE_BYTES),
+      // S-338: optional enrichment so the detail grid can render the
+      // mockup's level + entity-path columns. Older payloads omit both
+      // fields and the UI falls back to a tasteful placeholder.
+      severity_text: v.optional(BoundedString(16)),
+      entity_path: v.optional(EntityPathSchema),
     })),
     v.maxLength(50),
   )),

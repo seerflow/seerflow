@@ -11,7 +11,8 @@ import { EntityGlyph } from "@/components/ui/primitives/EntityGlyph";
 import { Button } from "@/components/ui/button";
 import { KillChain, KILL_CHAIN_STAGES } from "@/components/AlertDetail/KillChain";
 import { AiExplanation } from "@/components/AlertDetail/AiExplanation";
-import type { Alert, AlertDetail, SeverityBucket } from "@/lib/types";
+import { getTechnique } from "@/lib/mitreTechniques";
+import type { Alert, AlertDetail, CorrelatedEvent, SeverityBucket } from "@/lib/types";
 import type { EntityType } from "@/components/ui/primitives/EntityGlyph";
 
 // ── Severity bucket → semantic token (crit/warn/accent/mute) ──────────────────
@@ -63,12 +64,6 @@ function toGlyphType(entityType: string | null): EntityType {
 }
 
 // ── Correlated events list ────────────────────────────────────────────────────
-interface CorrelatedEvent {
-  event_id: string;
-  timestamp_ns: bigint;
-  message: string;
-}
-
 interface CorrelatedEventsProps {
   events: CorrelatedEvent[];
 }
@@ -78,12 +73,49 @@ function formatClock(ns: bigint): string {
   return new Date(Number(ns / 1_000_000n)).toISOString().slice(11, 23);
 }
 
+// ── S-338: severity_text → row tint bucket ───────────────────────────────────
+type LevelBucket = "crit" | "warn" | null;
+
+/**
+ * Map an event's free-form `severity_text` (OCSF / OTel / vendor labels) to
+ * the two tint buckets the mockup uses. Unknown / missing severities fall
+ * through to `null` (no tint), matching the mockup's untinted INFO/DEBUG rows.
+ */
+function severityToTint(severity?: string): LevelBucket {
+  if (!severity) return null;
+  const s = severity.toUpperCase();
+  if (s === "CRITICAL" || s === "FATAL" || s === "ERROR") return "crit";
+  if (s === "WARN" || s === "WARNING") return "warn";
+  return null;
+}
+
+/**
+ * Render an entity-path hop as `src → dst`. Missing src/dst fall back to
+ * a typography-soft dash; both missing → `null` so the caller can render
+ * a placeholder.
+ */
+function EntityPathCell({ path }: { path: CorrelatedEvent["entity_path"] }): JSX.Element {
+  const src = path?.src ?? null;
+  const dst = path?.dst ?? null;
+  if (!src && !dst) {
+    return <span className="truncate text-text-3">—</span>;
+  }
+  return (
+    <span className="flex min-w-0 items-baseline gap-1 truncate">
+      <span className="truncate text-accent">{src ?? "—"}</span>
+      <span className="text-text-3">→</span>
+      <span className="truncate text-accent">{dst ?? "—"}</span>
+    </span>
+  );
+}
+
 /**
  * Correlated-events panel — header (count + auto-scroll toggle) + a
  * `90px 50px 200px 1fr` grid (ts · level · entity-path · message) per the
- * mockup. Fixture events carry only ts/message, so the level column renders
- * `INFO` and rows stay untinted; crit/warn tinting kicks in when richer event
- * data lands. Auto-scroll keeps the latest row in view.
+ * mockup. S-338: backend now hydrates `severity_text` + `entity_path` so the
+ * level column shows the real label and rows tint when `severity_text`
+ * resolves to `crit` / `warn`. Older payloads (no enrichment) fall back to a
+ * tasteful dash placeholder. Auto-scroll keeps the latest row in view.
  */
 function CorrelatedEvents({ events }: CorrelatedEventsProps): JSX.Element {
   const [autoScroll, setAutoScroll] = useState(true);
@@ -123,18 +155,29 @@ function CorrelatedEvents({ events }: CorrelatedEventsProps): JSX.Element {
           aria-label="correlated events"
           className="flex-1 overflow-y-auto sf-mono text-[11.5px] text-text-2"
         >
-          {events.map((ev, i) => (
-            <div
-              key={ev.event_id}
-              className="grid items-center gap-3 border-b border-line px-7 py-2 last:border-b-0"
-              style={{ gridTemplateColumns: "90px 50px 200px 1fr" }}
-            >
-              <span className="sf-tnum text-text-3">{formatClock(ev.timestamp_ns)}</span>
-              <span className="text-text-3">INFO</span>
-              <span className="text-accent truncate">{`event ${i + 1}`}</span>
-              <span className="truncate text-text-2">{ev.message}</span>
-            </div>
-          ))}
+          {events.map((ev) => {
+            const tint = severityToTint(ev.severity_text);
+            const tintToken = tint === "crit" ? "--crit" : tint === "warn" ? "--warn" : null;
+            const tintStyle = tintToken
+              ? { background: `color-mix(in oklch, var(${tintToken}) 8%, transparent)` }
+              : undefined;
+            const level = ev.severity_text?.toUpperCase() ?? "—";
+            const levelClass =
+              tint === "crit" ? "text-crit" : tint === "warn" ? "text-warn" : "text-text-3";
+            return (
+              <div
+                key={ev.event_id}
+                data-tint={tint ?? undefined}
+                className="grid items-center gap-3 border-b border-line px-7 py-2 last:border-b-0"
+                style={{ gridTemplateColumns: "90px 50px 200px 1fr", ...tintStyle }}
+              >
+                <span className="sf-tnum text-text-3">{formatClock(ev.timestamp_ns)}</span>
+                <span className={levelClass}>{level}</span>
+                <EntityPathCell path={ev.entity_path} />
+                <span className="truncate text-text-2">{ev.message}</span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -410,18 +453,34 @@ export const AlertDetailScreen: React.FC = () => {
           {alert.mitre_techniques.length > 0 ? (
             <div className="flex flex-col gap-1.5">
               {alert.mitre_techniques.map((t, i) => {
-                const tactic = alert.mitre_tactics[i]
-                  ? humanizeTactic(alert.mitre_tactics[i]).toLowerCase()
-                  : "";
+                // S-338: prefer the catalogue tactic (per-technique) over the
+                // alert-level mitre_tactics positional fallback, which assumes
+                // a 1:1 ordering that doesn't always hold.
+                const catalogued = getTechnique(t);
+                const tactic = (
+                  catalogued?.tactic ??
+                  (alert.mitre_tactics[i]
+                    ? humanizeTactic(alert.mitre_tactics[i]).toLowerCase()
+                    : "")
+                ).replace(/[-_]/g, " ");
                 return (
                   <div
                     key={t}
-                    className="flex items-baseline gap-2 border border-line bg-surface px-2 py-1.5"
+                    className="flex flex-col gap-0.5 border border-line bg-surface px-2 py-1.5"
                   >
-                    <span className="sf-mono text-[10.5px] tracking-[0.04em] text-accent">{t}</span>
-                    {tactic && (
-                      <span className="sf-mono ml-auto text-[9.5px] uppercase tracking-[0.06em] text-text-3">
-                        {tactic}
+                    <div className="flex items-baseline gap-2">
+                      <span className="sf-mono text-[10.5px] tracking-[0.04em] text-accent">
+                        {t}
+                      </span>
+                      {tactic && (
+                        <span className="sf-mono ml-auto text-[9.5px] uppercase tracking-[0.06em] text-text-3">
+                          {tactic}
+                        </span>
+                      )}
+                    </div>
+                    {catalogued?.name && (
+                      <span className="text-[11px] leading-snug text-text-2">
+                        {catalogued.name}
                       </span>
                     )}
                   </div>

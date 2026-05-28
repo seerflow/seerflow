@@ -34,11 +34,22 @@ const DETAIL: AlertDetail = {
       event_id: "ev-1",
       timestamp_ns: BigInt("1699999990000000000"),
       message: "lsass.exe memory read by mimikatz.exe",
+      severity_text: "CRITICAL",
+      entity_path: { src: "svc-attacker", dst: "ws-attack-01" },
     },
     {
       event_id: "ev-2",
       timestamp_ns: BigInt("1699999995000000000"),
       message: "Suspicious process access to sensitive registry key",
+      severity_text: "WARN",
+      entity_path: { src: "ws-attack-01", dst: null },
+    },
+    // S-338: legacy-shape event (no enrichment) — must render tasteful
+    // placeholders (`—`) without crashing and not tint the row.
+    {
+      event_id: "ev-3",
+      timestamp_ns: BigInt("1699999996000000000"),
+      message: "Unrelated context event with no enrichment",
     },
   ],
 };
@@ -185,6 +196,28 @@ describe("AlertDetailScreen (S-321)", () => {
     expect(screen.getByText("T1550.002")).toBeInTheDocument();
   });
 
+  // ── S-338 AC1: MITRE technique-name catalogue ────────────────────────────
+  it("renders the MITRE technique name beside the id (S-338 AC1)", () => {
+    render(<AlertDetailScreen />);
+    // T1003.001 → "OS Credential Dumping: LSASS Memory" (from mitreTechniques).
+    expect(
+      screen.getByText(/OS Credential Dumping: LSASS Memory/i),
+    ).toBeInTheDocument();
+    // T1550.002 → "Use Alternate Authentication Material: Pass the Hash".
+    expect(screen.getByText(/Pass the Hash/i)).toBeInTheDocument();
+  });
+
+  it("falls back to the bare id when the technique is not in the catalogue (S-338 AC1)", () => {
+    const unknownAlert: Alert = { ...ALERT, mitre_techniques: ["T9999.999"] };
+    useAlertStore.getState().backfill([unknownAlert]);
+    render(<AlertDetailScreen />);
+    expect(screen.getByText("T9999.999")).toBeInTheDocument();
+    // No catalogue entry → no name span underneath; spot-check that no
+    // bogus stringified `null` / `undefined` leaked into the DOM.
+    expect(screen.queryByText(/null/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
+  });
+
   // ── S-337 mockup fidelity ────────────────────────────────────────────────
   it("uses a 1fr/360px grid filling the viewport (flush layout)", () => {
     render(<AlertDetailScreen />);
@@ -220,6 +253,63 @@ describe("AlertDetailScreen (S-321)", () => {
     const btn = screen.getByRole("button", { name: /acknowledge/i });
     await userEvent.click(btn);
     expect(screen.getByRole("button", { name: /acknowledged/i })).toBeInTheDocument();
+  });
+
+  // ── S-338 AC2 + AC3: correlated-events enrichment & row tint ───────────
+  it("renders severity_text in the level column instead of the INFO placeholder (S-338 AC2)", async () => {
+    render(<AlertDetailScreen />);
+    await act(async () => {
+      _resolveDetail?.(DETAIL);
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    // The mockup-tinted CRITICAL row carries the real severity label.
+    expect(screen.getByText("CRITICAL")).toBeInTheDocument();
+    expect(screen.getByText("WARN")).toBeInTheDocument();
+    // No `INFO`/`event N` placeholders survive (the S-337 caveat).
+    expect(screen.queryByText(/^INFO$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^event 1$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^event 2$/)).not.toBeInTheDocument();
+  });
+
+  it("renders entity_path as `src → dst` for correlated events (S-338 AC2)", async () => {
+    render(<AlertDetailScreen />);
+    await act(async () => {
+      _resolveDetail?.(DETAIL);
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    // ev-1: src=svc-attacker, dst=ws-attack-01 → both appear in the same row.
+    expect(screen.getByText("svc-attacker")).toBeInTheDocument();
+    // Multiple ws-attack-01 (also entity_value) — at least one is the entity-path cell.
+    expect(screen.getAllByText("ws-attack-01").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders tasteful `—` placeholder when entity_path is missing (S-338 AC2)", async () => {
+    render(<AlertDetailScreen />);
+    await act(async () => {
+      _resolveDetail?.(DETAIL);
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    // ev-3 has no enrichment → both level and entity-path render `—`.
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThan(0);
+  });
+
+  it("tints the row crit/warn based on severity_text (S-338 AC3)", async () => {
+    render(<AlertDetailScreen />);
+    await act(async () => {
+      _resolveDetail?.(DETAIL);
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    const grid = screen.getByLabelText("correlated events");
+    // 3 fixture rows: ev-1 crit, ev-2 warn, ev-3 untinted.
+    const tintedCrit = grid.querySelectorAll('[data-tint="crit"]');
+    const tintedWarn = grid.querySelectorAll('[data-tint="warn"]');
+    expect(tintedCrit.length).toBe(1);
+    expect(tintedWarn.length).toBe(1);
+    // Untinted rows expose no data-tint attribute.
+    const untinted = grid.querySelectorAll("div[style*='gridTemplateColumns'], div[style*='grid-template-columns']");
+    // Sanity that the grid still has 3 rows (1 crit + 1 warn + 1 untinted).
+    expect(untinted.length).toBeGreaterThanOrEqual(3);
   });
 
   it("auto-scroll checkbox is rendered after events load", async () => {

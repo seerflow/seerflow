@@ -21,8 +21,25 @@ export interface Alert {
   feedback?: Feedback | null;
 }
 
+/**
+ * One row in the alert-detail "correlated events" grid. The backend hydrates
+ * the optional enrichment fields (`severity_text`, `entity_path`) from the
+ * matching log events (see `src/seerflow/api/routes/alerts.py`). Older
+ * payloads predating S-338 omit these fields — the UI must tolerate their
+ * absence and render a tasteful placeholder.
+ */
+export interface CorrelatedEvent {
+  event_id: string;
+  timestamp_ns: bigint;
+  message: string;
+  /** Event severity label (e.g. "INFO", "WARN", "ERROR", "CRITICAL"). */
+  severity_text?: string;
+  /** Entity flow derived from the underlying log event (S-338). */
+  entity_path?: { src?: string | null; dst?: string | null };
+}
+
 export interface AlertDetail extends Alert {
-  contributing_events?: Array<{ event_id: string; timestamp_ns: bigint; message: string }>;
+  contributing_events?: CorrelatedEvent[];
 }
 
 export interface AlertFilter {
