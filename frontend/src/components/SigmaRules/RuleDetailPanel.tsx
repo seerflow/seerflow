@@ -18,7 +18,7 @@
 //   Abort-on-rule-switch (S-230) for both detail + timeline fetches.
 //
 // The visible Close button is dropped per the mockup; Escape closes the panel.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getSigmaRule, getSigmaRuleTimeline, toggleSigmaRule } from "@/lib/sigmaRulesApi";
 import type { SigmaRuleDetail, SigmaRuleTimelineResponse } from "@/lib/types";
@@ -103,6 +103,10 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
   const [draft, setDraft] = useState("");
   // S-327 (AC4): result of the most recent "Test on history" run.
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  // S-342: auto-focus the panel on rule selection. The root <aside> is
+  // tabIndex=-1 and owns the Escape→onClose handler; without programmatic
+  // focus, Escape only worked after the user manually tabbed in.
+  const panelRef = useRef<HTMLElement | null>(null);
 
   // S-230 / SEE-241: one AbortController shared by both fetches (rule
   // detail + 24h timeline). A fast ruleId switch runs this effect's
@@ -138,6 +142,16 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
     return () => controller.abort();
   }, [ruleId]);
 
+  // S-342: focus the panel whenever the selected rule changes and once the
+  // loaded panel mounts (the loading/error asides swap the focused element,
+  // so we re-focus when `rule`/`error` resolves too) — Escape then closes it
+  // immediately, without requiring a prior tab-in. The aside is tabIndex=-1,
+  // so this is a programmatic-only focus that does not add a tab stop.
+  const loaded = rule !== null;
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, [ruleId, loaded, error]);
+
   // S-341: Escape replaces the dropped Close button.
   function handleKeyDown(e: React.KeyboardEvent): void {
     if (e.key === "Escape") {
@@ -149,6 +163,7 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
   if (error) {
     return (
       <aside
+        ref={panelRef}
         className="w-full h-full border-l p-4 text-sm text-destructive"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
@@ -166,6 +181,7 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
   if (!rule) {
     return (
       <aside
+        ref={panelRef}
         className="w-full h-full border-l p-4 text-sm text-muted-foreground"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
@@ -247,6 +263,7 @@ export function RuleDetailPanel({ ruleId, onClose }: Props): JSX.Element {
 
   return (
     <aside
+      ref={panelRef}
       data-testid="rule-detail-panel-inner"
       tabIndex={-1}
       onKeyDown={handleKeyDown}
