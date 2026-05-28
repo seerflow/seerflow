@@ -170,6 +170,22 @@ describe("TechniqueCell", () => {
     expect(screen.queryByText(/sigma_rule_a/)).not.toBeInTheDocument();
   });
 
+  it("S-345 tooltip uses brand design tokens — readable in both themes", () => {
+    render(<TechniqueCell {...baseProps} />);
+    fireEvent.mouseEnter(screen.getByRole("button"));
+    const tooltip = screen.getByRole("tooltip");
+    // Inline-styled with brand tokens so the colours switch with the theme
+    // automatically. The previous `bg-white dark:bg-zinc-900` had no explicit
+    // text colour, so dark mode rendered default black-on-near-black text.
+    expect(tooltip.style.background).toBe("var(--surface)");
+    expect(tooltip.style.color).toBe("var(--text)");
+    expect(tooltip.style.border).toMatch(/var\(--line\)/);
+    // Regression: the old hardcoded zinc/Tailwind classes must NOT be back.
+    expect(tooltip.className).not.toMatch(
+      /\b(bg-white|bg-zinc-\d+|text-zinc-(?!500\b)\d+|border-zinc-\d+|dark:)/,
+    );
+  });
+
   it("uses design-token focus ring (no hardcoded outline color)", () => {
     render(
       <TechniqueCell

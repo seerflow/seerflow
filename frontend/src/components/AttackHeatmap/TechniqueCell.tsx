@@ -54,12 +54,21 @@ export function TechniqueCell({
       className="relative h-7 w-full cursor-pointer rounded-sm border-0 p-0 m-0 appearance-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       {hovered && (
+        // S-345 — use the brand design tokens so the tooltip is readable in
+        // both dark and light themes automatically. The previous Tailwind
+        // `bg-white dark:bg-zinc-900` had no explicit text colour, so dark
+        // mode rendered default (black) text on a near-black background.
         <div
           role="tooltip"
-          className="absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-md border border-zinc-200 bg-white p-3 text-xs text-left shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          className="absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-md p-3 text-xs text-left shadow-lg"
+          style={{
+            background: "var(--surface)",
+            color: "var(--text)",
+            border: "1px solid var(--line)",
+          }}
         >
           <p className="mb-1 font-semibold">{title}</p>
-          <hr className="mb-1 border-zinc-200 dark:border-zinc-700" />
+          <hr className="mb-1" style={{ borderColor: "var(--line)" }} />
           {covered ? (
             <>
               <p>Rules: {ruleCount}</p>
@@ -71,7 +80,9 @@ export function TechniqueCell({
               <p className="mt-1">Alerts (window): {alertCount}</p>
             </>
           ) : (
-            <p className="italic text-zinc-500">No rules loaded for this technique.</p>
+            <p className="italic" style={{ color: "var(--text-3)" }}>
+              No rules loaded for this technique.
+            </p>
           )}
         </div>
       )}
