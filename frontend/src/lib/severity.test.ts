@@ -33,9 +33,12 @@ describe("SEVERITY_CLASS brand-token palette (S-349)", () => {
     expect(SEVERITY_CLASS.high).not.toMatch(/orange-\d+/);
   });
 
-  it("medium uses the --warn brand token, not a yellow-* palette literal", () => {
-    expect(SEVERITY_CLASS.medium).toContain("text-warn");
-    expect(SEVERITY_CLASS.medium).toContain("bg-warn");
+  it("medium uses the dedicated --warn-2 brand token (S-350), not bare --warn or a yellow-* literal", () => {
+    expect(SEVERITY_CLASS.medium).toContain("text-warn-2");
+    expect(SEVERITY_CLASS.medium).toContain("bg-warn-2");
+    // distinct from the `high` band: must NOT use the bare `warn` token
+    expect(SEVERITY_CLASS.medium).not.toMatch(/\bbg-warn\//);
+    expect(SEVERITY_CLASS.medium).not.toMatch(/\btext-warn\b(?!-)/);
     expect(SEVERITY_CLASS.medium).not.toMatch(/yellow-\d+/);
   });
 
