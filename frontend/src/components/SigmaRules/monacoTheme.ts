@@ -61,15 +61,33 @@ function readCssVar(name: string): string | null {
 }
 
 /**
- * Resolves the seerflow design token map from CSS custom properties.
- * Falls back to hard-coded hex values when CSS vars are unavailable
- * (SSR, test environments, before CSS loads).
+ * Monaco's theme parser only accepts hex colors (`#rgb`, `#rrggbb`, `#rrggbbaa`)
+ * for token foregrounds — feeding it `oklch(...)` / `rgb(...)` / named colors
+ * throws `Illegal value for token color: ...` from `setTheme`, which then
+ * unmounts the whole React tree (blank screen). The seerflow brand tokens are
+ * OKLCH, so the live computed CSS-var values are NOT Monaco-safe; the value is
+ * only usable when it happens to be a hex literal.
+ */
+const HEX_RE = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+function isMonacoHex(v: string): boolean {
+  return HEX_RE.test(v);
+}
+
+/**
+ * Resolves the seerflow design token map for Monaco.
+ *
+ * Prefers the live CSS custom-property value ONLY when it is a Monaco-safe
+ * hex literal; otherwise falls back to the hard-coded hex constants in
+ * `FALLBACKS`. This covers (a) SSR / test environments with no CSS, (b) the
+ * brand-default OKLCH values which Monaco rejects, and (c) any future
+ * `rgb()` / named color drift that would also crash Monaco.
  */
 export function resolveTokens(): SeerflowTokenMap {
   const result = {} as SeerflowTokenMap;
   for (const key of Object.keys(FALLBACKS) as Array<keyof SeerflowTokenMap>) {
     const cssVal = readCssVar(CSS_VAR_MAP[key]);
-    result[key] = cssVal ?? FALLBACKS[key];
+    result[key] = cssVal && isMonacoHex(cssVal) ? cssVal : FALLBACKS[key];
   }
   return result;
 }

@@ -1,8 +1,11 @@
 /**
  * S-324: monacoTheme utility tests.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { resolveTokens, buildMonacoTheme, SEERFLOW_MONACO_THEME } from "./monacoTheme";
+
+const HEX_RE = /^#?(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+const HEX_WITH_ALPHA_RE = /^#?(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 describe("resolveTokens", () => {
   it("returns an object with all expected keys", () => {
@@ -69,5 +72,88 @@ describe("SEERFLOW_MONACO_THEME", () => {
   it("is a non-empty string", () => {
     expect(typeof SEERFLOW_MONACO_THEME).toBe("string");
     expect(SEERFLOW_MONACO_THEME.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * S-343 regression — Monaco's theme parser only accepts hex colors. The brand
+ * tokens are OKLCH, so the live computed CSS-var values are NOT Monaco-safe;
+ * feeding `oklch(...)` to `defineTheme`/`setTheme` throws "Illegal value for
+ * token color" and unmounts the React tree (blank screen). `resolveTokens` must
+ * fall back to the hex constants whenever the CSS var is not a hex literal.
+ */
+describe("resolveTokens — Monaco-hex safety (S-343)", () => {
+  const origGCS = window.getComputedStyle;
+  afterEach(() => {
+    window.getComputedStyle = origGCS;
+  });
+
+  it("falls back to hex constants when CSS vars return OKLCH (brand default)", () => {
+    window.getComputedStyle = vi.fn(
+      () =>
+        ({
+          getPropertyValue: () => "oklch(.965 .005 250)",
+        }) as unknown as CSSStyleDeclaration,
+    );
+    const tokens = resolveTokens();
+    for (const [, val] of Object.entries(tokens)) {
+      expect(val).toMatch(HEX_RE);
+    }
+  });
+
+  it("falls back to hex constants when CSS vars return rgb(...)", () => {
+    window.getComputedStyle = vi.fn(
+      () =>
+        ({
+          getPropertyValue: () => "rgb(125, 158, 248)",
+        }) as unknown as CSSStyleDeclaration,
+    );
+    const tokens = resolveTokens();
+    for (const [, val] of Object.entries(tokens)) {
+      expect(val).toMatch(HEX_RE);
+    }
+  });
+
+  it("accepts a hex CSS-var value (passes through unchanged)", () => {
+    window.getComputedStyle = vi.fn(
+      () =>
+        ({
+          getPropertyValue: (n: string) => (n === "--accent" ? "#abcdef" : ""),
+        }) as unknown as CSSStyleDeclaration,
+    );
+    const tokens = resolveTokens();
+    expect(tokens.accent).toBe("#abcdef");
+  });
+});
+
+describe("buildMonacoTheme — produced colors are all Monaco-safe hex (S-343)", () => {
+  const origGCS = window.getComputedStyle;
+  beforeEach(() => {
+    // Worst-case env: every CSS var is OKLCH (live browser w/ brand tokens).
+    window.getComputedStyle = vi.fn(
+      () =>
+        ({
+          getPropertyValue: () => "oklch(.965 .005 250)",
+        }) as unknown as CSSStyleDeclaration,
+    );
+  });
+  afterEach(() => {
+    window.getComputedStyle = origGCS;
+  });
+
+  it("every rule.foreground is a hex literal Monaco accepts", () => {
+    const theme = buildMonacoTheme();
+    for (const r of theme.rules) {
+      if (r.foreground !== undefined) {
+        expect(r.foreground).toMatch(HEX_WITH_ALPHA_RE);
+      }
+    }
+  });
+
+  it("every theme color is a hex literal (with optional alpha suffix)", () => {
+    const theme = buildMonacoTheme();
+    for (const [, v] of Object.entries(theme.colors)) {
+      expect(v).toMatch(HEX_WITH_ALPHA_RE);
+    }
   });
 });
