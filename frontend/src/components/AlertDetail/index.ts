@@ -3,3 +3,5 @@ export type { KillChainProps, KillChainStageState, KillChainStageDefinition, Kil
 
 export { AiExplanation } from "./AiExplanation";
 export type { AiExplanationProps } from "./AiExplanation";
+
+export { FeedbackHistory } from "./FeedbackHistory";

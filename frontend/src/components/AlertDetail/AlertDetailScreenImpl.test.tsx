@@ -352,6 +352,30 @@ describe("AlertDetailScreen (S-321)", () => {
     expect(errSpy).not.toHaveBeenCalled();
     errSpy.mockRestore();
   });
+
+  // ── S-339: feedback Verdict block ───────────────────────────────────────
+  it("renders the Verdict SideBlock with TP and FP buttons (S-339 AC1)", () => {
+    render(<AlertDetailScreen />);
+    // SideBlock title is uppercased via CSS but the underlying text is "Verdict".
+    expect(screen.getByText(/verdict/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /true positive/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /false positive/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("Verdict block sits above Entities in the right rail (S-339)", () => {
+    render(<AlertDetailScreen />);
+    const verdict = screen.getByText(/verdict/i);
+    const entities = screen.getAllByText(/entities/i)[0];
+    // Both are in the right-rail aside; Verdict must appear before Entities.
+    expect(
+      verdict.compareDocumentPosition(entities) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
 });
 
 // ── Verify createAlertStore is a valid export (smoke) ─────────────────────────
