@@ -66,20 +66,6 @@ def test_build_events_is_deterministic_for_same_seed() -> None:
     assert [e.data for e in a] == [e.data for e in b]
 
 
-@pytest.mark.skip(
-    reason=(
-        "S-348 quarantine: timing-dependent flake on CI under load. The pipeline "
-        "runs but storage writes don't always flush before stored_count is read, "
-        "so the assertion `stored >= 100` intermittently sees 0 even though the "
-        "pipeline completed correctly. Observed on multiple dev merge commits "
-        "(#324, #325, #327) and on PRs #328 (cleared on rerun #2) and #330 "
-        "(failed 3x consecutively, blocking the parallel-stories wave). Re-enable "
-        "after the run_pipeline helper grows an explicit flush/wait before "
-        "returning stored_count, or after the pipeline-profile script switches "
-        "to a deterministic in-memory storage path for this assertion. Tracking "
-        "row: documents/linear-pending-issues.md S-348."
-    ),
-)
 def test_run_pipeline_returns_elapsed_and_stored_count(tmp_path: Path) -> None:
     """run_pipeline returns (elapsed_seconds, stored_count) and stores all events."""
     module = _load_module()

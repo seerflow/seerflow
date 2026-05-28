@@ -315,8 +315,20 @@ async def _init_schema(conn: aiosqlite.Connection) -> None:
 class WriteBuffer:
     """Async event buffer with size-threshold and periodic flush.
 
-    The lock protects only the buffer drain — the flush callback runs
-    outside the lock so ``append()`` is never blocked by a DB write.
+    The lock serializes the *entire* flush — both draining the buffer and
+    awaiting the flush callback (the DB commit). This makes ``flush()`` a
+    true durability barrier: when it returns, every event it (or a
+    concurrent flusher) drained has been committed by the callback.
+
+    S-348: an earlier version released the lock before awaiting the
+    callback, so ``append()`` was never blocked by a DB write. That created
+    a race — the periodic background task could drain the buffer and park
+    mid-commit, while an explicit ``flush()`` acquired the lock, saw an
+    *empty* buffer, and returned before the in-flight commit landed. A
+    follow-up ``query_events`` then read a stale (often zero) count. Holding
+    the lock across the callback closes the race; ``append()`` only contends
+    for the lock on a size-threshold flush (rare with ``max_size=1000``), so
+    the common append path stays fast.
 
     NOTE: ``append()`` assumes a single writer coroutine. If multiple
     coroutines call ``append()`` concurrently, the buffer may briefly
@@ -358,13 +370,19 @@ class WriteBuffer:
             await self.flush()
 
     async def flush(self) -> None:
-        """Drain the buffer and invoke the flush callback."""
+        """Drain the buffer and await the flush callback under the lock.
+
+        S-348: the callback (DB commit) is awaited while still holding the
+        lock so a concurrent ``flush()`` cannot return before an in-flight
+        commit has landed. ``flush()`` is therefore a true durability
+        barrier — callers (and the periodic task) serialize on commits.
+        """
         async with self._lock:
             if not self._buffer:
                 return
             batch = list(self._buffer)
             self._buffer.clear()
-        await self._callback(batch)
+            await self._callback(batch)
 
     async def close(self) -> None:
         """Cancel periodic task (if running) and flush remaining events."""
