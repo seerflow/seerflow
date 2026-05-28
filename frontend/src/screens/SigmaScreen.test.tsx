@@ -81,8 +81,17 @@ vi.mock("@/stores/sigmaRules", () => ({
 
 // ── Heavy component mocks ────────────────────────────────────────────────────
 vi.mock("@/components/SigmaRules/RuleTable", () => ({
-  RuleTable: ({ rules, onSelect }: { rules: SigmaRuleSummary[]; onSelect: (id: string) => void }) => (
+  RuleTable: ({
+    rules,
+    onSelect,
+    selectedRuleId,
+  }: {
+    rules: SigmaRuleSummary[];
+    onSelect: (id: string) => void;
+    selectedRuleId?: string | null;
+  }) => (
     <div data-testid="rule-table">
+      <span data-testid="rule-table-selected-id">{selectedRuleId ?? ""}</span>
       {rules.map((r) => (
         <div
           key={r.rule_id}
@@ -167,7 +176,7 @@ describe("SigmaScreen (S-324)", () => {
     expect(screen.getByRole("button", { name: /^All/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Enabled/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Disabled/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^High-precision/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^High precision/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Noisy/ })).toBeInTheDocument();
   });
 
@@ -277,5 +286,49 @@ describe("SigmaScreen (S-324)", () => {
     await user.click(screen.getByRole("button", { name: /new rule/i }));
     await user.click(screen.getByRole("button", { name: /close dialog/i }));
     expect(screen.queryByTestId("upload-dialog")).not.toBeInTheDocument();
+  });
+
+  // ── S-341 AC1/AC2/AC3: mockup chrome ───────────────────────────────────────
+  it("S-341 AC1: drops the in-panel '<h1>Sigma rules</h1>' heading", () => {
+    render(<SigmaScreen />);
+    // The breadcrumb chrome owns the title now — no in-panel heading.
+    expect(
+      screen.queryByRole("heading", { name: /^sigma rules$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("S-341 AC2: search bar shows a magnifier-icon prefix and 'Filter N rules…' placeholder", () => {
+    render(<SigmaScreen />);
+    expect(screen.getByTestId("sigma-search-icon")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: /search rules/i });
+    expect(input).toHaveAttribute(
+      "placeholder",
+      `Filter ${mockTotal} rules…`,
+    );
+  });
+
+  it("S-341 AC2: '+ New' button is accent-fill", () => {
+    render(<SigmaScreen />);
+    const btn = screen.getByRole("button", { name: /new rule/i });
+    // Accent-fill style → background var(--accent), color var(--accent-ink), weight 600.
+    expect(btn).toHaveAttribute("data-variant", "accent-fill");
+  });
+
+  it("S-341 AC3: 'High precision' chip label has no hyphen", () => {
+    render(<SigmaScreen />);
+    expect(
+      screen.getByRole("button", { name: /^High precision/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^High-precision/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("S-341 AC4: passes selectedId to RuleTable as selectedRuleId", () => {
+    mockSelectedId = "rule-1";
+    render(<SigmaScreen />);
+    expect(screen.getByTestId("rule-table-selected-id")).toHaveTextContent(
+      "rule-1",
+    );
   });
 });
