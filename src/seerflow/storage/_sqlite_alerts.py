@@ -26,6 +26,8 @@ from seerflow.models.query import Page
 from seerflow.sigma.attack import format_technique
 
 if TYPE_CHECKING:
+    import asyncio
+
     import aiosqlite
 
     from seerflow.models._types import FeedbackType
@@ -135,6 +137,12 @@ class _SqliteAlertMixin:
     __slots__ = ()
 
     _conn: aiosqlite.Connection
+    # S-340: shared connection-level write lock owned by ``SqliteBackend``. Alert
+    # writes share the single ``_conn`` transaction with event-batch / template /
+    # model-state writes, so every commit here must be serialized against them to
+    # avoid "cannot commit transaction - SQL statements in progress" dropping a
+    # write under concurrent flushes.
+    _write_lock: asyncio.Lock
 
     async def write_alert(
         self,
@@ -171,40 +179,44 @@ class _SqliteAlertMixin:
             dedup_window_ns,
             dedup_window_ns,
         )
-        try:
-            async with await self._conn.execute(_INSERT_ALERT_SQL, params) as cursor:
-                row = await cursor.fetchone()
-            # Only refresh junction rows when this is a fresh insert or a
-            # window-reset (dedup_count == 1). Within-window dedup bumps
-            # preserve the stored alert and its timestamp, so its junction
-            # rows are already correct.
-            if row is not None and row[0] == 1:
-                await self._conn.execute(
-                    "DELETE FROM alert_tactics WHERE dedup_key = ?", (alert.dedup_key,)
-                )
-                await self._conn.execute(
-                    "DELETE FROM alert_techniques WHERE dedup_key = ?", (alert.dedup_key,)
-                )
-                if alert.mitre_tactics:
-                    await self._conn.executemany(
-                        "INSERT OR IGNORE INTO alert_tactics "
-                        "(dedup_key, tactic, timestamp_ns) VALUES (?, ?, ?)",
-                        [(alert.dedup_key, t, alert.timestamp_ns) for t in alert.mitre_tactics],
+        async with self._write_lock:
+            try:
+                async with await self._conn.execute(_INSERT_ALERT_SQL, params) as cursor:
+                    row = await cursor.fetchone()
+                # Only refresh junction rows when this is a fresh insert or a
+                # window-reset (dedup_count == 1). Within-window dedup bumps
+                # preserve the stored alert and its timestamp, so its junction
+                # rows are already correct.
+                if row is not None and row[0] == 1:
+                    await self._conn.execute(
+                        "DELETE FROM alert_tactics WHERE dedup_key = ?", (alert.dedup_key,)
                     )
-                if alert.mitre_techniques:
-                    await self._conn.executemany(
-                        "INSERT OR IGNORE INTO alert_techniques "
-                        "(dedup_key, technique, timestamp_ns) VALUES (?, ?, ?)",
-                        [
-                            (alert.dedup_key, format_technique(t), alert.timestamp_ns)
-                            for t in alert.mitre_techniques
-                        ],
+                    await self._conn.execute(
+                        "DELETE FROM alert_techniques WHERE dedup_key = ?", (alert.dedup_key,)
                     )
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("write_alert failed for alert %s", alert.alert_id)
-            raise
+                    if alert.mitre_tactics:
+                        await self._conn.executemany(
+                            "INSERT OR IGNORE INTO alert_tactics "
+                            "(dedup_key, tactic, timestamp_ns) VALUES (?, ?, ?)",
+                            [
+                                (alert.dedup_key, t, alert.timestamp_ns)
+                                for t in alert.mitre_tactics
+                            ],
+                        )
+                    if alert.mitre_techniques:
+                        await self._conn.executemany(
+                            "INSERT OR IGNORE INTO alert_techniques "
+                            "(dedup_key, technique, timestamp_ns) VALUES (?, ?, ?)",
+                            [
+                                (alert.dedup_key, format_technique(t), alert.timestamp_ns)
+                                for t in alert.mitre_techniques
+                            ],
+                        )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("write_alert failed for alert %s", alert.alert_id)
+                raise
         return row is not None and row[0] == 1
 
     async def query_alerts(self, filters: AlertQuery) -> Page[Alert]:
@@ -327,20 +339,21 @@ class _SqliteAlertMixin:
         updated = msgspec.structs.replace(alert, feedback=feedback, feedback_note=note)
         data = msgspec.msgpack.encode(updated)
         submitted_at_ns = time.time_ns()
-        try:
-            await self._conn.execute("BEGIN IMMEDIATE")
-            await self._conn.execute(
-                "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
-                [feedback, data, alert_id],
-            )
-            await self._insert_feedback_event_row(
-                alert_id, feedback, note, origin, submitted_at_ns
-            )
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("update_feedback failed for alert %s", alert_id)
-            raise
+        async with self._write_lock:
+            try:
+                await self._conn.execute("BEGIN IMMEDIATE")
+                await self._conn.execute(
+                    "UPDATE alerts SET feedback = ?, data = ? WHERE alert_id = ?",
+                    [feedback, data, alert_id],
+                )
+                await self._insert_feedback_event_row(
+                    alert_id, feedback, note, origin, submitted_at_ns
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("update_feedback failed for alert %s", alert_id)
+                raise
 
     async def get_alert_by_id(self, alert_id: str) -> Alert | None:
         """Retrieve a single alert by ID, or None if not found."""
@@ -432,15 +445,16 @@ class _SqliteAlertMixin:
         submitted_at_ns: int,
     ) -> None:
         """Append an immutable row to the feedback audit log."""
-        try:
-            await self._insert_feedback_event_row(
-                alert_id, feedback, note, origin, submitted_at_ns
-            )
-            await self._conn.commit()
-        except Exception:
-            await self._conn.rollback()
-            _log.exception("append_feedback_event failed for alert %s", alert_id)
-            raise
+        async with self._write_lock:
+            try:
+                await self._insert_feedback_event_row(
+                    alert_id, feedback, note, origin, submitted_at_ns
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                _log.exception("append_feedback_event failed for alert %s", alert_id)
+                raise
 
     async def list_feedback_events(
         self, alert_id: str, page: int = 1, limit: int = 50
