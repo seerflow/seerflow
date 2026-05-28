@@ -84,3 +84,51 @@ class TestWriteBufferFlush:
         await asyncio.gather(buf.flush(), buf.flush())
         total_events = sum(len(b) for b in recorder["batches"])
         assert total_events == 3
+
+    async def test_flush_waits_for_inflight_callback(self) -> None:
+        """S-348: flush() must not return while a concurrent callback commit is in flight.
+
+        Reproduces the profile-pipeline flake. The periodic flush task drains the
+        buffer and parks inside the (slow) callback before its "commit" lands. A
+        second flush() — standing in for the harness's explicit ``storage.flush()``
+        — used to acquire the lock, see an empty buffer, and return immediately,
+        even though the in-flight callback had not committed yet. The fix makes
+        flush() a true barrier: it cannot return until every buffered event's
+        callback has completed.
+        """
+        gate = asyncio.Event()
+        committed = {"done": False}
+        entered = asyncio.Event()
+
+        async def slow_callback(_batch: list[Any]) -> None:
+            entered.set()
+            await gate.wait()
+            committed["done"] = True
+
+        buf = WriteBuffer(slow_callback, max_size=9999, flush_interval=0.01)
+        buf.start()
+        await buf.append(["a", "b", "c"])
+
+        # Let the periodic task drain the buffer and park inside slow_callback.
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+        # The harness's explicit flush(). It must observe the in-flight commit
+        # and wait for it, NOT return early on an empty buffer.
+        async def second_flush() -> None:
+            await buf.flush()
+            # When flush() returns, the in-flight callback MUST have committed.
+            assert committed["done"], (
+                "flush() returned before the in-flight callback committed — "
+                "the S-348 durability barrier is broken"
+            )
+
+        flush_task = asyncio.create_task(second_flush())
+        # Give second_flush a chance to (wrongly) return early if the bug exists.
+        await asyncio.sleep(0.05)
+        assert not flush_task.done(), (
+            "flush() returned while a callback was still in flight (S-348 race)"
+        )
+
+        gate.set()  # release the in-flight callback
+        await asyncio.wait_for(flush_task, timeout=1.0)
+        await buf.close()
