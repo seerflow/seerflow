@@ -100,6 +100,12 @@ const ALLOWLIST: AllowlistEntry[] = [
   // decision is documented inline in `lib/severity.ts` and pinned by
   // `severity.test.ts`. critical/high/medium migrated to `crit`/`warn` tokens.
   //
+  // Note (S-350): `warn-2` (the dedicated medium-severity brand var,
+  // var(--warn-2)) is a brand token, not a Tailwind palette family. SEMANTIC_RE
+  // only matches the bright palette families (red/orange/.../teal), so
+  // `bg-warn-2`/`text-warn-2` are never flagged and need no allowlist entry;
+  // pinned by the semantic-palette test's "must NOT be flagged" list.
+  //
   // Test files: the S-345/S-346/S-349 regression tests intentionally include the
   // forbidden tokens in their assertion regexes (asserting absence). Filtered
   // by the test-file extension below.
@@ -212,7 +218,18 @@ describe("design-token sweep guard (S-346 / S-349)", () => {
       expect(SEMANTIC_RE.test(cls)).toBe(true);
     }
     // The kept neutral slate band and the brand tokens must NOT be flagged.
-    for (const cls of ["text-slate-500", "text-crit", "bg-warn/10", "text-info", "bg-destructive/10"]) {
+    // S-350 — `warn-2` is the dedicated medium-severity brand var; it is a
+    // brand token (var(--warn-2)), never a Tailwind palette literal, so the
+    // semantic-palette rule must leave it alone.
+    for (const cls of [
+      "text-slate-500",
+      "text-crit",
+      "bg-warn/10",
+      "text-info",
+      "bg-destructive/10",
+      "bg-warn-2/15",
+      "text-warn-2",
+    ]) {
       expect(SEMANTIC_RE.test(cls)).toBe(false);
     }
   });
