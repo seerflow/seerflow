@@ -10,6 +10,11 @@
  *   - `bg-white` / `bg-black` / `text-white` / `text-black` (incl. `/<opacity>`)
  *   - inline / style-prop hardcoded `#xxxxxx` colour literals
  *
+ * S-349 extends the same guard to the bright SEMANTIC palette families that
+ * S-346 deferred — `red` / `orange` / `amber` / `yellow` / `green` / `emerald` /
+ * `lime` / `teal` palette steps. These must use the brand semantic tokens
+ * (`crit`/`warn`/`info`/`destructive`) so the hues flip per theme.
+ *
  * Intentional, narrowly-justified exceptions are kept on an allowlist below.
  * Each entry pairs a path glob with the regex it is allowed to match — adding a
  * raw "ignore everything" rule for a whole file is deliberately not supported,
@@ -30,6 +35,14 @@ const SRC_ROOT = HERE; // tests live alongside src; HERE === <repo>/frontend/src
 const ZINC_RE = /\b(?:bg|text|border|hover:bg|hover:text|divide)-zinc-\d+/;
 const BW_RE = /\b(?:bg|text)-(?:white|black)(?:\/\d+)?\b/;
 const HEX_RE = /#[0-9a-fA-F]{3,8}\b/;
+// S-349 — bright semantic Tailwind palette literals that the semantic-palette
+// sweep replaced with the brand tokens (`crit`/`warn`/`info`/`destructive`).
+// Once migrated, re-introducing any of these hue families as a fixed palette
+// step (red / orange / amber / yellow / green / emerald / lime / teal) is a
+// regression: those literals have no `.sf-light` variant and read muddy in the
+// theme they were not tuned for. Migrate to the brand semantic tokens instead.
+const SEMANTIC_RE =
+  /\b(?:bg|text|border|hover:bg|hover:text|divide)-(?:red|orange|amber|yellow|green|emerald|lime|teal)-\d+/;
 
 interface AllowlistEntry {
   /** Glob-free path suffix the file path must end with (POSIX separators). */
@@ -81,7 +94,13 @@ const ALLOWLIST: AllowlistEntry[] = [
     pattern: /hover:bg-zinc-50 dark:hover:bg-zinc-900\/40/,
     reason: "S-346 explanatory comment — documents the removed classes.",
   },
-  // Test files: the S-345/S-346 regression tests intentionally include the
+  // Note (S-349): the `low` severity band intentionally keeps the neutral
+  // `slate-500` grey (theme-stable muted neutral). `slate` is deliberately NOT
+  // in SEMANTIC_RE's hue list, so no allowlist entry is needed — the kept
+  // decision is documented inline in `lib/severity.ts` and pinned by
+  // `severity.test.ts`. critical/high/medium migrated to `crit`/`warn` tokens.
+  //
+  // Test files: the S-345/S-346/S-349 regression tests intentionally include the
   // forbidden tokens in their assertion regexes (asserting absence). Filtered
   // by the test-file extension below.
 ];
@@ -131,6 +150,7 @@ async function scan(): Promise<Violation[]> {
     { name: "zinc-palette", re: ZINC_RE },
     { name: "bw-palette", re: BW_RE },
     { name: "hex-literal", re: HEX_RE },
+    { name: "semantic-palette", re: SEMANTIC_RE },
   ];
   for (const file of files) {
     // Skip test files entirely for the bw/zinc rules — they may legitimately
@@ -159,7 +179,7 @@ async function scan(): Promise<Violation[]> {
   return out;
 }
 
-describe("design-token sweep guard (S-346)", () => {
+describe("design-token sweep guard (S-346 / S-349)", () => {
   it("does not introduce forbidden Tailwind palette classes or hex literals", async () => {
     const violations = await scan();
     if (violations.length > 0) {
@@ -167,12 +187,33 @@ describe("design-token sweep guard (S-346)", () => {
         (v) => `  ${v.file}:${v.line}  [${v.rule}]  ${v.text}`,
       );
       throw new Error(
-        `S-346: ${violations.length} forbidden colour usage(s) under frontend/src/:\n` +
+        `${violations.length} forbidden colour usage(s) under frontend/src/:\n` +
           lines.join("\n") +
-          "\n\nMigrate to brand CSS tokens (var(--surface) / var(--text-3) etc.) " +
-          "or add a justified allowlist entry in design-tokens.guard.test.ts.",
+          "\n\nMigrate to brand CSS tokens (var(--surface) / var(--text-3), or the " +
+          "crit/warn/info/destructive Tailwind tokens) or add a justified allowlist " +
+          "entry in design-tokens.guard.test.ts.",
       );
     }
     expect(violations).toEqual([]);
+  });
+
+  // S-349 — assert the new semantic-palette rule actually catches the bright
+  // hue families it is meant to guard, so AC4 ("no new un-annotated violations
+  // slip past the guard") is itself verified rather than assumed.
+  it("semantic-palette rule flags each bright hue family it guards", () => {
+    for (const cls of [
+      "text-red-500",
+      "bg-orange-500/15",
+      "text-amber-700",
+      "bg-yellow-500/15",
+      "bg-green-500/10",
+      "bg-emerald-100",
+    ]) {
+      expect(SEMANTIC_RE.test(cls)).toBe(true);
+    }
+    // The kept neutral slate band and the brand tokens must NOT be flagged.
+    for (const cls of ["text-slate-500", "text-crit", "bg-warn/10", "text-info", "bg-destructive/10"]) {
+      expect(SEMANTIC_RE.test(cls)).toBe(false);
+    }
   });
 });

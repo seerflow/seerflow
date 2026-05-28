@@ -26,4 +26,19 @@ describe("FeedbackHistory", () => {
     render(<FeedbackHistory items={[]} />);
     expect(screen.getByText(/no feedback yet/i)).toBeInTheDocument();
   });
+
+  it("tp/fp badges use brand tokens, not fixed light-palette literals (S-349)", () => {
+    render(<FeedbackHistory items={[ev({ feedback: "tp" }), ev({ feedback: "fp" })]} />);
+    const rows = screen.getAllByTestId("feedback-history-row");
+    // Rows render in array order: rows[0] is the tp event, rows[1] the fp event.
+    const tpBadge = rows[0].querySelector("span");
+    const fpBadge = rows[1].querySelector("span");
+    expect(fpBadge?.className).toContain("text-warn");
+    expect(tpBadge?.className).toContain("text-info");
+    for (const r of rows) {
+      expect(r.className + (r.querySelector("span")?.className ?? "")).not.toMatch(
+        /emerald-\d+|amber-\d+/,
+      );
+    }
+  });
 });

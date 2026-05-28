@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { severityBucket } from "./severity";
+import { severityBucket, SEVERITY_CLASS } from "./severity";
 
 describe("severityBucket (OCSF 0..6)", () => {
   it.each([
@@ -17,5 +17,29 @@ describe("severityBucket (OCSF 0..6)", () => {
 
   it("treats out-of-range high ids as critical (defensive)", () => {
     expect(severityBucket(99)).toBe("critical");
+  });
+});
+
+describe("SEVERITY_CLASS brand-token palette (S-349)", () => {
+  it("critical uses the --crit brand token, not a red-* palette literal", () => {
+    expect(SEVERITY_CLASS.critical).toContain("text-crit");
+    expect(SEVERITY_CLASS.critical).toContain("bg-crit");
+    expect(SEVERITY_CLASS.critical).not.toMatch(/red-\d+/);
+  });
+
+  it("high uses the --warn brand token, not an orange-* palette literal", () => {
+    expect(SEVERITY_CLASS.high).toContain("text-warn");
+    expect(SEVERITY_CLASS.high).toContain("bg-warn");
+    expect(SEVERITY_CLASS.high).not.toMatch(/orange-\d+/);
+  });
+
+  it("medium uses the --warn brand token, not a yellow-* palette literal", () => {
+    expect(SEVERITY_CLASS.medium).toContain("text-warn");
+    expect(SEVERITY_CLASS.medium).toContain("bg-warn");
+    expect(SEVERITY_CLASS.medium).not.toMatch(/yellow-\d+/);
+  });
+
+  it("low keeps the neutral slate band (intentional, theme-stable)", () => {
+    expect(SEVERITY_CLASS.low).toContain("text-slate-500");
   });
 });

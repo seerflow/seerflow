@@ -26,8 +26,9 @@ if [[ ! -d "$SRC_ROOT" ]]; then
 fi
 
 # Combined regex covering the forbidden surface/text/border palette utilities
-# and inline hex literals (AC1 of S-346).
-PATTERN='(\b(bg|text|border|hover:bg|hover:text|divide)-zinc-[0-9]+|\b(bg|text)-(white|black)(/[0-9]+)?\b|#[0-9a-fA-F]{3,8}\b)'
+# and inline hex literals (AC1 of S-346), plus the bright semantic palette
+# families S-349 migrated to the brand crit/warn/info/destructive tokens.
+PATTERN='(\b(bg|text|border|hover:bg|hover:text|divide)-zinc-[0-9]+|\b(bg|text)-(white|black)(/[0-9]+)?\b|#[0-9a-fA-F]{3,8}\b|\b(bg|text|border|hover:bg|hover:text|divide)-(red|orange|amber|yellow|green|emerald|lime|teal)-[0-9]+)'
 
 # Files we deliberately allow to contain at least one of the patterns. Keep in
 # sync with the ALLOWLIST in `src/design-tokens.guard.test.ts`. Each entry is a

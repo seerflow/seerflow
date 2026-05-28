@@ -97,9 +97,12 @@ export function UploadRuleDialog({ open, onClose, onSaved }: Props): JSX.Element
 
         {result && (
           <div
+            // S-349: the valid branch's fixed green fill (no brand var) was
+            // migrated to `bg-info/10 text-info` (--info), which flips per theme.
+            // The invalid branch already used the `--destructive` brand token — kept.
             className={
               "rounded p-2 text-sm " +
-              (result.valid ? "bg-green-500/10" : "bg-destructive/10 text-destructive")
+              (result.valid ? "bg-info/10 text-info" : "bg-destructive/10 text-destructive")
             }
             data-testid="sigma-upload-result"
           >

@@ -131,6 +131,16 @@ describe("DrilldownPanel", () => {
     expect(await screen.findByText(/Scheduled task created/)).toBeInTheDocument();
   });
 
+  it("error text uses the --crit brand token, not text-red-500 (S-349)", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("boom"));
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const errEl = await screen.findByText(/boom/);
+    expect(errEl.className).toContain("text-crit");
+    expect(errEl.className).not.toMatch(/text-red-\d+/);
+  });
+
   it("uses cache on second open of the same cell (no second fetch)", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });

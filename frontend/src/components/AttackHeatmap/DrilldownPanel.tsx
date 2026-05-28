@@ -220,10 +220,10 @@ export function DrilldownPanel({ matrix, coverageWindow: win }: DrilldownPanelPr
               )}
               {state.error && !state.loading && (
                 <div className="space-y-2">
-                  {/* S-346: text-red-500 left intentional — bright semantic error
-                      colour reads correctly in both themes; sweep covers only the
-                      zinc/white/black/hex palette per AC1. */}
-                  <p className="text-xs text-red-500">{state.error}</p>
+                  {/* S-349: the fixed red error colour (deferred from S-346 AC1)
+                      was migrated to the `crit` brand token (--crit), which flips
+                      per theme rather than staying a fixed Tailwind red. */}
+                  <p className="text-xs text-crit">{state.error}</p>
                   <button
                     type="button"
                     onClick={handleRetry}
