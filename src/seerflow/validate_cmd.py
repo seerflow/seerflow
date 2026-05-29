@@ -15,9 +15,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import msgspec.json
-
-from seerflow.cli_format import format_table
+from seerflow.cli_format import emit_doc
 
 if TYPE_CHECKING:
     import argparse
@@ -100,15 +98,6 @@ def _validate_dataset_dir(raw: str) -> Path:
     return path
 
 
-def _emit(doc: dict[str, object], *, as_json: bool) -> None:
-    """Write ``doc`` to stdout as JSON or a human two-column table."""
-    if as_json:
-        sys.stdout.write(msgspec.json.encode(doc).decode() + "\n")
-        return
-    rows = [[k, str(doc[k])] for k in doc]
-    print(format_table(["metric", "value"], rows))
-
-
 def run_validate(args: argparse.Namespace) -> int:
     """``seerflow validate`` entry point. Returns a process exit code."""
     try:
@@ -120,7 +109,7 @@ def run_validate(args: argparse.Namespace) -> int:
 
     result = run_validation(dataset)
     doc = _result_to_dict(result, dataset_dir=str(dataset))
-    _emit(doc, as_json=bool(args.json))
+    emit_doc(doc, as_json=bool(args.json))
     return EXIT_OK
 
 
