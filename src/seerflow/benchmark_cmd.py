@@ -13,9 +13,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-import msgspec.json
-
-from seerflow.cli_format import format_table
+from seerflow.cli_format import emit_doc, format_table
 from seerflow.validate_cmd import (
     EXIT_OK,
     EXIT_USAGE,
@@ -45,15 +43,6 @@ def _benchmark_to_dict(result: BenchmarkResult, *, seed: int) -> dict[str, objec
         "alerts": result.alerts,
         "seed": seed,
     }
-
-
-def _emit_benchmark(doc: dict[str, object], *, as_json: bool) -> None:
-    """Write ``doc`` to stdout as JSON or a human two-column table."""
-    if as_json:
-        sys.stdout.write(msgspec.json.encode(doc).decode() + "\n")
-        return
-    rows = [[k, str(doc[k])] for k in doc]
-    print(format_table(["metric", "value"], rows))
 
 
 def _render_scorecard(
@@ -112,7 +101,7 @@ def run_benchmark_cmd(args: argparse.Namespace) -> int:
     from seerflow.launch.benchmark import run_benchmark
 
     bench = run_benchmark(args.count, seed=args.seed)
-    _emit_benchmark(_benchmark_to_dict(bench, seed=args.seed), as_json=bool(args.json))
+    emit_doc(_benchmark_to_dict(bench, seed=args.seed), as_json=bool(args.json))
     return EXIT_OK
 
 
