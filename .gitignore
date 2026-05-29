@@ -163,12 +163,18 @@ frontend/coverage/
 # Python `lib/` pattern (line 17) accidentally ignores frontend/src/lib/ — un-ignore.
 !frontend/src/lib/
 !frontend/src/lib/**
-src/seerflow/web/dist/
+src/seerflow/web/dist/*
 # …but keep the directory itself tracked via a placeholder so the package
 # layout is intact in fresh checkouts that never ran `npm run build`
 # (editable installs, CI runs that skip the frontend build).
-!src/seerflow/web/dist/
 !src/seerflow/web/dist/.keep
+
+# E2E artifacts
+frontend/playwright-report/
+frontend/test-results/
+
+# LANL / local datasets
+data/
 
 # S-084: profiling artefacts (py-spy SVGs, memray .bin/.html) — generated
 # locally by tests/benchmarks/profile_pipeline.py + the outer profiler.
