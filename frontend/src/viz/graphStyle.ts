@@ -5,14 +5,27 @@
  * fast-refresh friendly.
  */
 import { riskToColor } from "./entityGraphAdapter";
-import type { resolveTokens } from "@/lib/theme/resolveTokens";
+import type { ThemeTokens, resolveTokens } from "@/lib/theme/resolveTokens";
+import { toCanvasColor } from "@/lib/oklch";
 
 // Canvas-safe monospace stack. Cytoscape renders labels to <canvas>, which
 // cannot resolve CSS custom properties — `var(--font-mono)` silently fell back
 // to the browser default. Mirror the --font-mono stack with concrete names.
 const LABEL_FONT_FAMILY = '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
-export function buildStyle(tokens: ReturnType<typeof resolveTokens>) {
+// Cytoscape's color parser rejects `oklch(...)` strings (the brand token
+// format) and silently falls back to defaults — gray nodes, black labels. So
+// every token color is coerced to hex before it reaches the stylesheet.
+function hexifyTokens(tokens: ThemeTokens): ThemeTokens {
+  const out = {} as ThemeTokens;
+  for (const key of Object.keys(tokens) as (keyof ThemeTokens)[]) {
+    out[key] = toCanvasColor(tokens[key]);
+  }
+  return out;
+}
+
+export function buildStyle(rawTokens: ReturnType<typeof resolveTokens>) {
+  const tokens = hexifyTokens(rawTokens);
   return [
     {
       selector: "node",
@@ -25,7 +38,7 @@ export function buildStyle(tokens: ReturnType<typeof resolveTokens>) {
         "width": (ele: { data: (k: string) => number }) => ele.data("size") ?? 12,
         "height": (ele: { data: (k: string) => number }) => ele.data("size") ?? 12,
         "label": (ele: { data: (k: string) => string }) => ele.data("label") ?? "",
-        "font-size": 9,
+        "font-size": 8,
         "font-family": LABEL_FONT_FAMILY,
         // High-contrast label text with a background-colored halo so names stay
         // legible over edges and against dark/light canvas alike.
