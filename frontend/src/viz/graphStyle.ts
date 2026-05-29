@@ -38,7 +38,7 @@ export function buildStyle(rawTokens: ReturnType<typeof resolveTokens>) {
         "width": (ele: { data: (k: string) => number }) => ele.data("size") ?? 12,
         "height": (ele: { data: (k: string) => number }) => ele.data("size") ?? 12,
         "label": (ele: { data: (k: string) => string }) => ele.data("label") ?? "",
-        "font-size": 9,
+        "font-size": 8,
         "font-family": LABEL_FONT_FAMILY,
         // High-contrast label text with a background-colored halo so names stay
         // legible over edges and against dark/light canvas alike.
