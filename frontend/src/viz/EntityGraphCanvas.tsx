@@ -13,8 +13,9 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { GraphEntity, GraphRelation } from "./entityGraphAdapter";
-import { storeRelationsToCyElements, riskToColor } from "./entityGraphAdapter";
+import { storeRelationsToCyElements } from "./entityGraphAdapter";
 import { resolveTokens, subscribeToThemeChanges } from "@/lib/theme/resolveTokens";
+import { buildStyle } from "./graphStyle";
 
 // --------------------------------------------------------------------------
 // Types
@@ -250,63 +251,3 @@ export const EntityGraphCanvas = forwardRef<
   );
 });
 
-// --------------------------------------------------------------------------
-// Style builder — maps ThemeTokens to Cytoscape style array
-// --------------------------------------------------------------------------
-
-function buildStyle(tokens: ReturnType<typeof resolveTokens>) {
-  return [
-    {
-      selector: "node",
-      style: {
-        "background-color": (ele: { data: (k: string) => number }) =>
-          riskToColor(ele.data("riskScore") ?? 0, tokens),
-        "border-color": (ele: { data: (k: string) => number }) =>
-          riskToColor(ele.data("riskScore") ?? 0, tokens),
-        "border-width": 1,
-        "width": (ele: { data: (k: string) => number }) => ele.data("size") ?? 12,
-        "height": (ele: { data: (k: string) => number }) => ele.data("size") ?? 12,
-        "label": (ele: { data: (k: string) => string }) => ele.data("label") ?? "",
-        "font-size": 10,
-        "font-family": "var(--font-mono)",
-        "color": tokens.text2,
-        "text-valign": "bottom" as const,
-        "text-margin-y": 4,
-        "opacity": 0.9,
-      },
-    },
-    {
-      selector: "node:selected",
-      style: {
-        "border-color": tokens.crit,
-        "border-width": 2,
-        "border-style": "dashed" as const,
-      },
-    },
-    {
-      selector: "edge",
-      style: {
-        "line-color": tokens.line2,
-        "width": 1,
-        "opacity": 0.6,
-        "curve-style": "bezier" as const,
-      },
-    },
-    {
-      selector: "edge[severity > 0.6]",
-      style: {
-        "line-color": tokens.warn,
-        "width": 1.5,
-        "opacity": 0.8,
-      },
-    },
-    {
-      selector: "edge[severity > 0.8]",
-      style: {
-        "line-color": tokens.crit,
-        "width": 2,
-        "opacity": 0.9,
-      },
-    },
-  ];
-}
