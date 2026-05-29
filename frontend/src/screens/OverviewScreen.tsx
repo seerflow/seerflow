@@ -13,6 +13,7 @@ import React, { useMemo } from "react";
 import { useAlertStore } from "@/stores/alerts";
 import { useStatusStore } from "@/stores/status";
 import { selectActiveEntities, selectMeanLatencyMs } from "@/lib/liveStats";
+import { deriveTopRiskEntities } from "@/lib/topRiskEntities";
 
 import { KpiStrip } from "@/components/Overview/KpiStrip";
 import { SeverityChartPanel } from "@/components/Overview/SeverityChartPanel";
@@ -110,6 +111,10 @@ export const OverviewScreen: React.FC = () => {
 
   const recentAlerts = useMemo(() => alerts.slice(0, 5), [alerts]);
 
+  // Live "Top risk entities" rolled up from the alert store; demo fallback when
+  // the pipeline is offline with no alerts (same branch as the rest of demo mode).
+  const liveTopEntities = useMemo(() => deriveTopRiskEntities(alerts), [alerts]);
+
   const kpiProps = isDemoMode
     ? DEMO_KPI
     : {
@@ -162,7 +167,7 @@ export const OverviewScreen: React.FC = () => {
           overflow: "hidden",
         }}
       >
-        <TopRiskEntities entities={isDemoMode ? DEMO_ENTITIES : []} />
+        <TopRiskEntities entities={isDemoMode ? DEMO_ENTITIES : liveTopEntities} />
       </div>
     </div>
   );
