@@ -23,10 +23,10 @@ jobs:
       pull-requests: write  # required to post the drift summary as a PR comment
     steps:
       - name: Checkout seerflow
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout seerflow-guide@main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: seerflow/seerflow-guide
           ref: main
@@ -52,7 +52,7 @@ jobs:
 
       - name: Upload drift report
         if: always() && hashFiles('drift-report.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: docs-drift-report
           path: drift-report.json
@@ -60,7 +60,7 @@ jobs:
 
       - name: Post drift summary to PR
         if: failure() && hashFiles('drift-report.json') != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
