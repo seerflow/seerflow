@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from seerflow.sigma.state import SigmaRuleState
 
 if TYPE_CHECKING:
+    import asyncio
     from collections.abc import Mapping
 
     import aiosqlite
@@ -49,6 +50,10 @@ class _SqliteSigmaStateMixin:
     __slots__: tuple[str, ...] = ()
 
     _conn: aiosqlite.Connection  # supplied by composing class
+    # S-340: shared connection-level write lock (owned by ``SqliteBackend``).
+    # Sigma-state writes share the single ``_conn`` transaction with event /
+    # alert / template writes, so their commits must be serialized too.
+    _write_lock: asyncio.Lock
 
     async def get_all(self) -> dict[str, SigmaRuleState]:
         async with await self._conn.execute(_SELECT_ALL_SQL) as cursor:
@@ -66,8 +71,9 @@ class _SqliteSigmaStateMixin:
 
     async def set_enabled(self, rule_id: str, enabled: bool) -> None:
         now_ns = time.time_ns()
-        await self._conn.execute(_UPSERT_ENABLED_SQL, (rule_id, 1 if enabled else 0, now_ns))
-        await self._conn.commit()
+        async with self._write_lock:
+            await self._conn.execute(_UPSERT_ENABLED_SQL, (rule_id, 1 if enabled else 0, now_ns))
+            await self._conn.commit()
 
     async def increment_counts(
         self,
@@ -80,5 +86,6 @@ class _SqliteSigmaStateMixin:
             (rule_id, delta, last_fired_ns, now_ns)
             for rule_id, (delta, last_fired_ns) in deltas.items()
         ]
-        await self._conn.executemany(_UPSERT_COUNT_SQL, rows)
-        await self._conn.commit()
+        async with self._write_lock:
+            await self._conn.executemany(_UPSERT_COUNT_SQL, rows)
+            await self._conn.commit()

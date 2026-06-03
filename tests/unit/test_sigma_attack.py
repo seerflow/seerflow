@@ -82,6 +82,23 @@ def test_resolve_tactic_accepts_name_and_id_case_insensitive(value: str, expecte
     assert resolve_tactic(value) == expected
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("command-and-control", "command_and_control"),
+        ("Command-And-Control", "command_and_control"),
+        ("defense-evasion", "defense_evasion"),
+        ("initial-access", "initial_access"),
+        ("lateral-movement", "lateral_movement"),
+    ],
+)
+def test_resolve_tactic_normalizes_hyphenated_sigmahq_form(value: str, expected: str) -> None:
+    """SigmaHQ writes multi-word tactics with hyphens; resolve_tactic must
+    accept that form (used by ``--tactic`` and the REST API) and return the
+    canonical underscore name."""
+    assert resolve_tactic(value) == expected
+
+
 @pytest.mark.parametrize("value", ["", "not_a_tactic", "TA9999", "tailgating"])
 def test_resolve_tactic_returns_none_for_unknown(value: str) -> None:
     assert resolve_tactic(value) is None

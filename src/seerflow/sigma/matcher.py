@@ -108,14 +108,24 @@ def _extract_attack_tags(
         # Techniques start with "t" followed by digits (e.g. t1033, t1021.001)
         if name.startswith("t") and len(name) > 1 and name[1:2].isdigit():
             techniques.append(name)
+        elif name.startswith("s") and len(name) > 1 and name[1:2].isdigit():
+            # MITRE Software ID (e.g. attack.s0508 = Ngrok). SigmaHQ tags the
+            # tool a rule detects; it is neither a tactic nor a technique, so
+            # skip it silently rather than warn as an unknown tactic.
+            continue
         else:
-            if not is_valid_tactic(name):
+            # SigmaHQ tags multi-word tactics with hyphens
+            # (``command-and-control``); our canonical map keys them with
+            # underscores. Normalize so valid tactics resolve (and don't
+            # trip the warning) and are stored in canonical form.
+            tactic = name.replace("-", "_")
+            if not is_valid_tactic(tactic):
                 logger.warning(
                     "Unknown ATT&CK tactic '%s' in rule '%s'",
                     name,
                     rule.title or "Untitled",
                 )
-            tactics.append(name)
+            tactics.append(tactic)
     return tuple(tactics), tuple(techniques)
 
 

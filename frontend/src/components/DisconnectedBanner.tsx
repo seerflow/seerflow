@@ -32,7 +32,10 @@ export function DisconnectedBanner({ debounceMs = 3000 }: Props = {}): JSX.Eleme
   if (!show) return null;
 
   return (
-    <div role="status" aria-live="polite" className="bg-amber-500/10 px-3 py-1 text-xs text-amber-700">
+    // S-349: the former fixed amber palette literals were migrated to the brand
+    // `warn` token. The old amber text colour had no dark-theme variant and read
+    // muddy on the dark `--bg`; `text-warn` (→ --warn) flips per theme.
+    <div role="status" aria-live="polite" className="bg-warn/10 px-3 py-1 text-xs text-warn">
       Live stream disconnected — retrying…
     </div>
   );

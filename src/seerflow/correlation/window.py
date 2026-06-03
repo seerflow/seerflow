@@ -7,6 +7,8 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from seerflow.models.event import SeerflowEvent
     from seerflow.models.query import TimeRange
 
@@ -18,12 +20,33 @@ class EntityWindowBuffer:
     Events older than ``window_ns`` are lazily pruned on query.
     """
 
-    __slots__ = ("_buffers", "_eviction_count", "_max_entities", "_max_events", "_window_ns")
+    __slots__ = (
+        "_buffers",
+        "_clock_ns",
+        "_eviction_count",
+        "_max_entities",
+        "_max_events",
+        "_window_ns",
+    )
 
-    def __init__(self, window_ns: int, max_events: int = 1000, max_entities: int = 10_000) -> None:
+    def __init__(
+        self,
+        window_ns: int,
+        max_events: int = 1000,
+        max_entities: int = 10_000,
+        *,
+        clock_ns: Callable[[], int] = time.time_ns,
+    ) -> None:
         self._window_ns = window_ns
         self._max_events = max_events
         self._max_entities = max_entities
+        # S-334: the "now" used to compute the lazy-prune cutoff is
+        # dependency-injected (defaults to wall-clock ``time.time_ns``).
+        # The LANL determinism harness injects a frozen replay-epoch clock so
+        # pruning is a pure function of the rebased event timestamps —
+        # invariant to real wall-clock drift on a slow CI runner. Production
+        # keeps the default, so live behaviour is byte-identical.
+        self._clock_ns = clock_ns
         self._buffers: dict[str, deque[SeerflowEvent]] = {}
         # S-082: cumulative LRU evictions since process start. Exposed via
         # ``bounds()`` for the memory-bounds audit.
@@ -64,7 +87,7 @@ class EntityWindowBuffer:
             return []
 
         # Lazy prune expired events from the left
-        cutoff = time.time_ns() - self._window_ns
+        cutoff = self._clock_ns() - self._window_ns
         while buf and buf[0].timestamp_ns < cutoff:
             buf.popleft()
 
@@ -86,7 +109,7 @@ class EntityWindowBuffer:
 
     def prune(self) -> None:
         """Remove all expired events and empty entity buffers."""
-        cutoff = time.time_ns() - self._window_ns
+        cutoff = self._clock_ns() - self._window_ns
         empty_keys: list[str] = []
         for entity_uuid, buf in self._buffers.items():
             while buf and buf[0].timestamp_ns < cutoff:

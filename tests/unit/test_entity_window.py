@@ -148,3 +148,45 @@ class TestEntityWindowLRU:
         buf.add_event("uuid-a", _make_event(timestamp_ns=now))
         buf.add_event("uuid-b", _make_event(timestamp_ns=now + 1000))
         assert buf.entity_count == 2
+
+
+class TestEntityWindowInjectedClock:
+    """S-334: aging clock is dependency-injected, not read from wall-clock.
+
+    Pinning ``clock_ns`` makes lazy prune a pure function of the injected
+    epoch, so window contents are invariant to real wall-clock drift.
+    """
+
+    def test_query_prune_uses_injected_clock(self) -> None:
+        epoch = 1_767_225_600_000_000_000  # fixed replay epoch
+        buf = EntityWindowBuffer(
+            window_ns=60_000_000_000,
+            max_events=100,
+            clock_ns=lambda: epoch,
+        )
+        # Event one second inside the window relative to the injected epoch.
+        inside = _make_event(timestamp_ns=epoch - 1_000_000_000)
+        # Event two seconds *before* the window opens — must be pruned.
+        outside = _make_event(timestamp_ns=epoch - 120_000_000_000)
+        buf.add_event("e", outside)
+        buf.add_event("e", inside)
+        results = buf.query("e")
+        assert [r.event_id for r in results] == [inside.event_id]
+
+    def test_query_invariant_to_real_wallclock(self, monkeypatch) -> None:
+        epoch = 1_767_225_600_000_000_000
+        # Make the module-level wall-clock jump arbitrarily; the injected
+        # clock must shield the buffer from it entirely.
+        import seerflow.correlation.window as window_mod
+
+        monkeypatch.setattr(window_mod.time, "time_ns", lambda: epoch + 10 * 86400 * 10**9)
+        buf = EntityWindowBuffer(window_ns=60_000_000_000, clock_ns=lambda: epoch)
+        ev = _make_event(timestamp_ns=epoch - 1_000_000_000)
+        buf.add_event("e", ev)
+        assert len(buf.query("e")) == 1  # not pruned by the drifting wall-clock
+
+    def test_default_clock_is_wallclock(self) -> None:
+        buf = EntityWindowBuffer(window_ns=60_000_000_000)
+        ev = _make_event(timestamp_ns=time.time_ns())
+        buf.add_event("e", ev)
+        assert len(buf.query("e")) == 1

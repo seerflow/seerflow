@@ -30,7 +30,14 @@ export type FixtureAlert = {
 };
 
 export type FixtureAlertDetail = FixtureAlert & {
-  contributing_events?: Array<{ event_id: string; timestamp_ns: bigint; message: string }>;
+  contributing_events?: Array<{
+    event_id: string;
+    timestamp_ns: bigint;
+    message: string;
+    // S-338: optional enrichment carried by the live wire payload.
+    severity_text?: string;
+    entity_path?: { src?: string | null; dst?: string | null };
+  }>;
 };
 
 // Five warm-up alerts. Severity buckets follow the OCSF `SeverityLevel`
@@ -171,11 +178,17 @@ export function detailFor(id: string): FixtureAlertDetail {
         event_id: "evt-1",
         timestamp_ns: 1_700_000_000_000_000n,
         message: "Process launched",
+        // S-338: hydrated enrichment so the level + entity-path columns
+        // mirror the production wire payload.
+        severity_text: "ERROR",
+        entity_path: { src: "host-1", dst: "host-2" },
       },
       {
         event_id: "evt-2",
         timestamp_ns: 1_700_000_000_000_001n,
         message: "Network connection",
+        severity_text: "WARN",
+        entity_path: { src: "host-1", dst: null },
       },
     ],
   };

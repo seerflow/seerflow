@@ -142,10 +142,14 @@ async def run_query_alerts(storage: StorageBackend, args: argparse.Namespace) ->
         )
         return
 
+    tactic_filter = args.tactic
     if args.tactic is not None:
-        from seerflow.sigma.attack import TACTICS, is_valid_tactic
+        from seerflow.sigma.attack import TACTICS, resolve_tactic
 
-        if not is_valid_tactic(args.tactic):
+        # Normalize to the canonical underscore name (accepts hyphenated
+        # SigmaHQ form and TA-IDs) so the filter matches stored tactics.
+        tactic_filter = resolve_tactic(args.tactic)
+        if tactic_filter is None:
             print(
                 f"Error: unknown tactic '{args.tactic}'. Valid: {', '.join(sorted(TACTICS))}",
                 file=sys.stderr,
@@ -186,7 +190,7 @@ async def run_query_alerts(storage: StorageBackend, args: argparse.Namespace) ->
             alert_type=args.type,
             severity_min=args.severity,
             limit=args.limit,
-            tactic=args.tactic,
+            tactic=tactic_filter,
             technique=args.technique,
         )
     except ValueError as exc:

@@ -140,23 +140,40 @@ async function stubSigmaRoutes(page: Page) {
   });
 }
 
-test("toggle a sigma rule and reload — state persists", async ({ page }) => {
+// S-341 (Apr 2026 / 2026-05-27 redesign): the legacy `<h1>Sigma rules</h1>`
+// heading is gone (mockup uses breadcrumb chrome only); the in-row toggle
+// switch was replaced by a status dot + a Disable button on the detail panel.
+// The smoke now drives the new chrome: list loads, selecting the row opens
+// the detail panel, the detail Disable button toggles enable state, and the
+// state survives a reload.
+test("disable a sigma rule via detail panel and reload — state persists", async ({ page }) => {
   await stubSigmaRoutes(page);
   await page.goto("/#sigma-rules");
 
-  await expect(page.getByRole("heading", { name: "Sigma rules" })).toBeVisible();
-  await expect(page.getByText("E2E Bundled Test Rule")).toBeVisible();
+  // New chrome: the breadcrumb owns the title — no in-panel heading.
+  await expect(page.getByRole("heading", { name: "Sigma rules" })).toHaveCount(0);
 
-  const toggle = page.getByRole("switch", { name: /toggle rule e2e bundled test rule/i });
-  await expect(toggle).toBeChecked();
-  await toggle.click();
-  await expect(toggle).not.toBeChecked();
+  // The row renders rule_id (mono) as its primary label.
+  const row = page.getByTestId(
+    "sigma-rule-row-11111111-2222-3333-4444-555555555555",
+  );
+  await expect(row).toBeVisible();
+  await row.click();
+
+  // Detail panel opens.
+  await expect(page.getByTestId("rule-detail-panel-header")).toBeVisible();
+  // Disable button toggles the rule.
+  const disableBtn = page.getByRole("button", { name: /^Disable$/ });
+  await expect(disableBtn).toBeVisible();
+  await disableBtn.click();
+  // After toggle the panel re-renders with Enable.
+  await expect(page.getByRole("button", { name: /^Enable$/ })).toBeVisible();
 
   await page.reload();
-  const toggleAfter = page.getByRole("switch", {
-    name: /toggle rule e2e bundled test rule/i,
-  });
-  await expect(toggleAfter).not.toBeChecked();
+  // After reload the row still loads; its status dot now uses text-3 (disabled).
+  await expect(
+    page.getByTestId("sigma-rule-row-11111111-2222-3333-4444-555555555555"),
+  ).toBeVisible();
 });
 
 // Monaco's contenteditable surface does not capture page.keyboard.type

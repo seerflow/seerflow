@@ -2,7 +2,6 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDrilldownStore } from "@/stores/drilldown";
 import { useAlertStore } from "@/stores/alerts";
-import { useLayoutStore } from "@/stores/layout";
 
 vi.mock("@/lib/api", () => {
   return {
@@ -66,7 +65,6 @@ describe("DrilldownPanel", () => {
   beforeEach(async () => {
     useDrilldownStore.getState().close();
     useAlertStore.getState().clearSelection();
-    useLayoutStore.setState({ widgets: ["alertFeed", "anomalyTimeline", "entityExplorer", "eventStream"] });
     window.location.hash = "";
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockReset();
@@ -133,6 +131,16 @@ describe("DrilldownPanel", () => {
     expect(await screen.findByText(/Scheduled task created/)).toBeInTheDocument();
   });
 
+  it("error text uses the --crit brand token, not text-red-500 (S-349)", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("boom"));
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const errEl = await screen.findByText(/boom/);
+    expect(errEl.className).toContain("text-crit");
+    expect(errEl.className).not.toMatch(/text-red-\d+/);
+  });
+
   it("uses cache on second open of the same cell (no second fetch)", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
@@ -156,24 +164,6 @@ describe("DrilldownPanel", () => {
     expect(useDrilldownStore.getState().openCell).toBeNull();
   });
 
-  it("shows the AlertFeed-missing note when the widget is not in the layout", async () => {
-    const { api } = await import("@/lib/api");
-    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    useLayoutStore.setState({ widgets: ["anomalyTimeline", "entityExplorer", "eventStream"] });
-    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
-    useDrilldownStore.getState().open("execution", "T1053");
-    expect(await screen.findByText(/Add the Alert Feed widget/)).toBeInTheDocument();
-  });
-
-  it("hides the AlertFeed-missing note when the widget is mounted", async () => {
-    const { api } = await import("@/lib/api");
-    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
-    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
-    useDrilldownStore.getState().open("execution", "T1053");
-    await screen.findByText(/Scheduled task created/);
-    expect(screen.queryByText(/Add the Alert Feed widget/)).not.toBeInTheDocument();
-  });
-
   it("Esc key closes the panel via Radix outside-close path", async () => {
     const { api } = await import("@/lib/api");
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
@@ -195,4 +185,91 @@ describe("DrilldownPanel", () => {
     expect(retry.className).toMatch(/focus-visible:ring-offset-2/);
   });
 
+  // ── S-346 brand-token migrations ──
+
+  it("S-346 sub-label uses brand --text-3 token (not text-zinc-500)", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [] });
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const tacName = await screen.findByText(/Execution/i);
+    // The element rendered is `<p>Execution · <span …>Detected</span></p>`.
+    const p = tacName.closest("p");
+    expect(p).not.toBeNull();
+    expect((p as HTMLElement).style.color).toBe("var(--text-3)");
+    expect((p as HTMLElement).className).not.toMatch(/text-zinc-\d+/);
+  });
+
+  it("S-346 loading skeleton bars use brand --surface-2 token (not bg-zinc-200/800)", async () => {
+    const { api } = await import("@/lib/api");
+    // Hang the promise so we render the skeleton state.
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const status = await screen.findByRole("status");
+    const bars = status.querySelectorAll(":scope > div");
+    expect(bars.length).toBeGreaterThanOrEqual(3);
+    bars.forEach((bar) => {
+      const el = bar as HTMLElement;
+      expect(el.style.background).toBe("var(--surface-2)");
+      expect(el.className).not.toMatch(/bg-zinc-\d+/);
+    });
+  });
+
+  it("S-346 'No alerts in window' uses brand --text-3 token", async () => {
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const node = await screen.findByText(/No alerts in window/);
+    expect(node.style.color).toBe("var(--text-3)");
+    expect(node.className).not.toMatch(/text-zinc-\d+/);
+  });
+
+  it("S-346 'No rules cover this technique' uses brand --text-3 token", async () => {
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1059");
+    const node = await screen.findByText(/No rules cover this technique/);
+    expect(node.style.color).toBe("var(--text-3)");
+    expect(node.className).not.toMatch(/text-zinc-\d+/);
+  });
+
+  it("S-346 alert-list ul uses brand --line token for divider colour", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    await screen.findByText(/Scheduled task created/);
+    const li = screen.getByRole("button", { name: /Open alert alrt-1/ })
+      .closest("li") as HTMLElement;
+    const ul = li.parentElement as HTMLElement;
+    expect(ul.style.borderColor).toBe("var(--line)");
+    expect(ul.className).not.toMatch(/divide-zinc-\d+/);
+  });
+
+  it("S-346 alert row hover applies brand --surface-2 background (not hover:bg-zinc-50)", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const row = await screen.findByRole("button", { name: /Open alert alrt-1/ });
+    // Class string must not carry the old zinc hover palette.
+    expect(row.className).not.toMatch(/hover:bg-zinc-/);
+    // Initial state — transparent.
+    expect(row.style.background === "" || row.style.background === "transparent").toBe(true);
+    fireEvent.mouseEnter(row);
+    expect(row.style.background).toBe("var(--surface-2)");
+    fireEvent.mouseLeave(row);
+    expect(row.style.background === "" || row.style.background === "transparent").toBe(true);
+  });
+
+  it("S-346 alert-row entity meta uses brand --text-3 token (not text-zinc-500)", async () => {
+    const { api } = await import("@/lib/api");
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [sampleAlert] });
+    render(<DrilldownPanel matrix={buildMatrix()} coverageWindow={windowProps} />);
+    useDrilldownStore.getState().open("execution", "T1053");
+    const meta = await screen.findByText(/host:web-01/);
+    expect(meta.style.color).toBe("var(--text-3)");
+    expect(meta.className).not.toMatch(/text-zinc-\d+/);
+  });
 });

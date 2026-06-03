@@ -390,6 +390,57 @@ class TestRunQueryAlerts:
 
         await storage.close()
 
+    async def test_alerts_hyphenated_tactic_filter_matches_canonical(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A hyphenated ``--tactic command-and-control`` (SigmaHQ form) must
+        normalize and match an alert stored under the canonical underscore
+        tactic name."""
+        import argparse
+
+        from seerflow.config import StorageConfig
+        from seerflow.models.alert import Alert
+        from seerflow.models.event import SeverityLevel
+        from seerflow.query import run_query_alerts
+        from seerflow.storage.sqlite import SqliteBackend
+
+        storage_cfg = StorageConfig(backend="sqlite", sqlite_path=str(tmp_path / "test.db"))
+        storage = await SqliteBackend.connect(storage_cfg)
+
+        alert = Alert(
+            alert_id="alert-c2",
+            alert_type="sigma",
+            timestamp_ns=1_700_000_000_000_000_000,
+            severity_id=SeverityLevel.ERROR,
+            rule_name="c2-beacon",
+            description="beaconing detected",
+            entity_uuid="ent-1",
+            entity_value="10.0.0.9",
+            entity_type="ip",
+            contributing_events=(uuid.uuid4(),),
+            risk_score=0.9,
+            dedup_key="sigma:c2:syslog",
+            mitre_tactics=("command_and_control",),
+        )
+        await storage.write_alert(alert)
+
+        args = argparse.Namespace(
+            last=None,
+            type=None,
+            severity=None,
+            limit=50,
+            json=False,
+            tactic="command-and-control",
+            technique=None,
+        )
+        await run_query_alerts(storage, args)
+        captured = capsys.readouterr()
+
+        assert "c2-beacon" in captured.out
+        assert "unknown tactic" not in captured.out
+
+        await storage.close()
+
     async def test_alerts_with_last_filter(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

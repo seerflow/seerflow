@@ -5,8 +5,7 @@
 // both tick on real wall time; a mocked clock desynchronises the close
 // signal from the banner setTimeout.
 //
-// The banner shares `role="status"` with the summary-badges connection dot,
-// so every banner assertion must filter by the banner text.
+// The banner has `role="status"`; assertions filter by the banner text.
 
 import { expect, test } from "@playwright/test";
 import { stubRestAlerts, stubWebSocket } from "../fixtures/stubs";
@@ -21,8 +20,10 @@ test("disconnect banner appears 3s after WS close and hides on reconnect", async
   await stubRestAlerts(page);
   const ws = await stubWebSocket(page);
 
-  await page.goto("/");
+  await page.goto("/#/alerts");
 
+  // All tab so the loaded rows are visible regardless of derived status.
+  await page.getByRole("tab", { name: /All/ }).click();
   await expect(page.getByRole("button", { name: /^alert / })).toHaveCount(5);
 
   // S-062 Phase A: DisconnectedBanner moved from inside AlertFeed/AnomalyTimeline

@@ -7,10 +7,11 @@ This is an **additive** sibling to :mod:`seerflow.lanl.validator` (S-305):
 it never alters the in-memory ``run_validation`` path or its published
 numbers. The streaming clock-rebase uses a single constant offset derived
 from the FIRST merged record (``REPLAY_EPOCH_NS - min_ts``); combined with
-the inherited :func:`seerflow.lanl.validator._frozen_replay_clock` the
-metrics stay byte-identical across machines (the S-305 determinism
-property is preserved by construction — both rebases are pure additive
-offsets, so inter-event deltas are identical under the frozen clock).
+the frozen replay clock injected into ``assemble_handler`` (S-334
+``clock_ns``) the metrics stay byte-identical across machines (the S-305
+determinism property is preserved by construction — both rebases are pure
+additive offsets, so inter-event deltas are identical under the frozen
+clock).
 """
 
 from __future__ import annotations
@@ -353,28 +354,28 @@ async def _replay_stream(
 
     Returns ``(segment_events_processed, offset_ns)``.
     """
-    from seerflow.lanl import validator
-
     processed = 0  # events processed in THIS segment (drives throughput)
     # Cumulative consumed prefix (carried across resumes via the cursor).
     consumed = resume_cursor.events_processed if resume_cursor else 0
     offset_ns: int | None = resume_cursor.offset_ns if resume_cursor else None
     counts: dict[str, int] = dict(resume_cursor.positions) if resume_cursor else {}
-    with validator._frozen_replay_clock(validator.REPLAY_EPOCH_NS):
-        async for raw in stream_raw_events(dataset_dir, resume_cursor=resume_cursor):
-            await assembled.handler(raw)
-            processed += 1
-            consumed += 1
-            src = _CURSOR_NAME_BY_SOURCE_ID[raw.source_id]
-            counts[src] = counts.get(src, 0) + 1
-            if offset_ns is None:
-                offset_ns = raw.received_ns - _first_record_time_ns(dataset_dir)
-            if processed % checkpoint_interval == 0:
-                await assembled.engines.ensemble.save_all_state(storage)
-                await _persist_cursor(storage, consumed, offset_ns, counts)
-                await _checkpoint_baselines(assembled, storage)
-            if max_events is not None and processed >= max_events:
-                break
+    # S-334: the aging clock is anchored to the replay epoch via the
+    # ``clock_ns`` injected into ``assemble_handler`` (above), so no
+    # module-attribute freeze is needed around the replay loop.
+    async for raw in stream_raw_events(dataset_dir, resume_cursor=resume_cursor):
+        await assembled.handler(raw)
+        processed += 1
+        consumed += 1
+        src = _CURSOR_NAME_BY_SOURCE_ID[raw.source_id]
+        counts[src] = counts.get(src, 0) + 1
+        if offset_ns is None:
+            offset_ns = raw.received_ns - _first_record_time_ns(dataset_dir)
+        if processed % checkpoint_interval == 0:
+            await assembled.engines.ensemble.save_all_state(storage)
+            await _persist_cursor(storage, consumed, offset_ns, counts)
+            await _checkpoint_baselines(assembled, storage)
+        if max_events is not None and processed >= max_events:
+            break
     await assembled.engines.ensemble.save_all_state(storage)
     if offset_ns is not None:
         await _persist_cursor(storage, consumed, offset_ns, counts)
@@ -436,7 +437,13 @@ async def _drive(
     from seerflow.pipeline.assembly import assemble_handler
 
     redteam = _read_redteam(dataset_dir)
-    assembled = await assemble_handler(SeerflowConfig(), storage)
+    # S-334: anchor the aging clock to the replay epoch via dependency
+    # injection (was the ``_frozen_replay_clock`` module-attribute monkeypatch).
+    from seerflow.lanl import validator
+
+    assembled = await assemble_handler(
+        SeerflowConfig(), storage, clock_ns=lambda: validator.REPLAY_EPOCH_NS
+    )
     t0 = _time.perf_counter()
     try:
         processed, offset_ns = await _replay_stream(

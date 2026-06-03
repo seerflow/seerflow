@@ -8,7 +8,7 @@ POST /api/v1/alerts/{id}/feedback -- TP/FP feedback
 from __future__ import annotations
 
 import logging
-from typing import Annotated, get_args
+from typing import TYPE_CHECKING, Annotated, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 
@@ -16,14 +16,18 @@ from seerflow.api.deps import StorageDeps, get_storage, parse_timestamp_ns
 from seerflow.api.limits import detail_limit, limiter, list_limit
 from seerflow.api.schemas import (
     AlertResponse,
+    ContributingEventResponse,
     FeedbackEventResponse,
     FeedbackRequest,
     PaginatedResponse,
 )
 from seerflow.models._types import AlertType
 from seerflow.models.event import SEVERITY_MAX, SEVERITY_MIN
-from seerflow.models.query import AlertQuery, TimeRange
+from seerflow.models.query import AlertQuery, EventQuery, TimeRange
 from seerflow.sigma.attack import is_valid_technique, resolve_tactic
+
+if TYPE_CHECKING:
+    import uuid
 
 _log = logging.getLogger("seerflow")
 
@@ -32,6 +36,64 @@ router = APIRouter(tags=["alerts"])
 Storage = Annotated[StorageDeps, Depends(get_storage)]
 
 _VALID_ALERT_TYPES = frozenset(get_args(AlertType))
+
+# S-338: lookback window opened around the alert when hydrating
+# ``contributing_events`` for the detail endpoint. Mirrors the value used by
+# ``seerflow.llm.explanation.service._EVENT_LOOKBACK_NS`` — wide enough to
+# tolerate modest clock drift, narrow enough to keep the storage query cheap.
+_DETAIL_EVENT_LOOKBACK_NS = 24 * 3600 * 1_000_000_000  # 24 hours
+# Cap on hydrated rows. One screenful in the mockup grid is ~16 entries; we
+# keep the JSON detail bounded for slow connections.
+_DETAIL_CONTRIBUTING_EVENT_CAP = 16
+
+
+async def _hydrate_contributing_events(
+    storage: StorageDeps,
+    alert_id: str,
+    contributing: tuple[uuid.UUID, ...],
+    entity_uuid: str,
+    alert_ts_ns: int,
+) -> list[ContributingEventResponse] | None:
+    """Look up the events referenced by ``alert.contributing_events`` and
+    convert them to ``ContributingEventResponse`` rows (S-338).
+
+    Returns ``None`` when the alert references no events OR when the lookup
+    window misses every referenced event (e.g. they aged out of hot
+    storage). Either condition causes the route to omit the field from the
+    response payload, which the dashboard tolerates.
+    """
+    if not contributing:
+        return None
+    wanted = set(contributing)
+    time_range = TimeRange(
+        start_ns=max(0, alert_ts_ns - _DETAIL_EVENT_LOOKBACK_NS),
+        end_ns=alert_ts_ns + _DETAIL_EVENT_LOOKBACK_NS,
+    )
+    query = EventQuery(
+        time_range=time_range,
+        entity_uuid=entity_uuid,
+        page=1,
+        # Pull a generous slice so we can filter down to the referenced IDs.
+        limit=min(1000, max(_DETAIL_CONTRIBUTING_EVENT_CAP * 8, 32)),
+    )
+    try:
+        page = await storage.log_store.query_events(query)
+    except Exception:  # pragma: no cover - defensive
+        _log.warning(
+            "alert detail: failed to hydrate contributing_events for %s",
+            alert_id,
+            exc_info=True,
+        )
+        return None
+    picked = [ev for ev in page.items if ev.event_id in wanted]
+    if not picked:
+        return None
+    # Oldest-first matches the explanation-service convention; cap to keep
+    # the JSON payload bounded.
+    picked.sort(key=lambda e: e.timestamp_ns)
+    if len(picked) > _DETAIL_CONTRIBUTING_EVENT_CAP:
+        picked = picked[-_DETAIL_CONTRIBUTING_EVENT_CAP:]
+    return [ContributingEventResponse.from_event(ev) for ev in picked]
 
 
 @router.get(
@@ -120,11 +182,24 @@ async def get_alert(
     alert_id: Annotated[str, Path(max_length=64, description="Alert ID (UUID)")],
     storage: Storage,
 ) -> AlertResponse:
-    """Get a single alert by ID."""
+    """Get a single alert by ID.
+
+    S-338: this endpoint hydrates ``contributing_events`` with per-event
+    ``severity_text`` + ``entity_path`` so the dashboard's alert-detail grid
+    can render the mockup's level / entity-path columns and row tinting
+    without an extra round trip.
+    """
     alert = await storage.alert_store.get_alert_by_id(alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
-    return AlertResponse.from_alert(alert)
+    hydrated = await _hydrate_contributing_events(
+        storage,
+        alert_id,
+        alert.contributing_events,
+        alert.entity_uuid,
+        alert.timestamp_ns,
+    )
+    return AlertResponse.from_alert(alert, contributing_events=hydrated)
 
 
 @router.post(

@@ -1,8 +1,11 @@
 import { create } from "zustand";
 
 type Theme = "light" | "dark";
-const STORAGE_KEY = "seerflow.theme";
 
+/** localStorage key — new mechanism (was "seerflow.theme") */
+const STORAGE_KEY = "seerflow-theme";
+
+/** Read persisted theme; default is dark (no class on <html>). */
 function readInitial(): Theme {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
@@ -10,12 +13,18 @@ function readInitial(): Theme {
   } catch {
     /* jsdom/SSR: no localStorage */
   }
-  return "light";
+  return "dark";
 }
 
+/**
+ * Apply theme to <html> via .sf-light class.
+ * Dark = no class (default), Light = .sf-light present.
+ * Persists to localStorage and broadcasts a `seerflow-theme` event so
+ * every toggle widget and Cytoscape/uPlot theme resolver stays in sync.
+ */
 function apply(theme: Theme): void {
   try {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle("sf-light", theme === "light");
   } catch {
     /* non-DOM env */
   }
@@ -23,6 +32,13 @@ function apply(theme: Theme): void {
     localStorage.setItem(STORAGE_KEY, theme);
   } catch {
     /* ignore */
+  }
+  try {
+    window.dispatchEvent(
+      new CustomEvent("seerflow-theme", { detail: { light: theme === "light" } }),
+    );
+  } catch {
+    /* non-DOM env */
   }
 }
 

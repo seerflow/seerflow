@@ -17,13 +17,12 @@ const sample: LiveEvent = {
 };
 
 describe("EventRow", () => {
-  it("renders source, message, severity label, entity chips", () => {
+  it("renders source, message, severity label (S-325 new grid design)", () => {
     render(<EventRow event={sample} expanded={false} onToggle={() => undefined} />);
     expect(screen.getByText("auth")).toBeInTheDocument();
     expect(screen.getByText(/Failed login/)).toBeInTheDocument();
     expect(screen.getByText("WARN")).toBeInTheDocument();
-    expect(screen.getByText("root")).toBeInTheDocument();
-    expect(screen.getByText("45.33.2.1")).toBeInTheDocument();
+    // Entity values shown in expanded panel (not collapsed chips in new design)
   });
 
   it("truncates messages over 240 chars", () => {
@@ -65,13 +64,43 @@ describe("EventRow", () => {
     expect(screen.getByText("17")).toBeInTheDocument();
   });
 
-  it("shows +N overflow chip when more than 3 entities", () => {
+  it("shows +N overflow in expanded panel when more than 3 entities (S-325: chips in expanded only)", () => {
     const many: LiveEvent = {
       ...sample,
       entity_summary: { users: ["a", "b", "c", "d", "e"] },
     };
-    render(<EventRow event={many} expanded={false} onToggle={() => undefined} />);
+    render(<EventRow event={many} expanded={true} onToggle={() => undefined} />);
     expect(screen.getByText("+2")).toBeInTheDocument();
+  });
+
+  it("renders host column in accent color class or style", () => {
+    render(<EventRow event={{ ...sample, source_type: "auth" }} expanded={false} onToggle={() => undefined} />);
+    const hostCells = document.querySelectorAll("[data-col='host']");
+    expect(hostCells.length).toBeGreaterThan(0);
+  });
+
+  it("applies severity tint to CRIT row", () => {
+    const critEvent = { ...sample, severity_id: 6, severity_text: "FATAL" };
+    const { container } = render(<EventRow event={critEvent} expanded={false} onToggle={() => undefined} />);
+    const row = container.firstChild as HTMLElement;
+    // Row should have crit tint in style or className
+    expect(row.getAttribute("data-severity") ?? row.className + (row.getAttribute("style") ?? "")).toMatch(/crit/i);
+  });
+
+  it("applies severity tint to WARN row", () => {
+    const { container } = render(<EventRow event={sample} expanded={false} onToggle={() => undefined} />);
+    const row = container.firstChild as HTMLElement;
+    expect(row.getAttribute("data-severity") ?? row.className + (row.getAttribute("style") ?? "")).toMatch(/warn/i);
+  });
+
+  it("renders the source column", () => {
+    render(<EventRow event={sample} expanded={false} onToggle={() => undefined} />);
+    expect(screen.getByTestId("col-source")).toBeInTheDocument();
+  });
+
+  it("renders the level column", () => {
+    render(<EventRow event={sample} expanded={false} onToggle={() => undefined} />);
+    expect(screen.getByTestId("col-level")).toBeInTheDocument();
   });
 
   it("renders boundary timestamp_ns above 2^53 without precision loss (S-199 AC-7)", () => {

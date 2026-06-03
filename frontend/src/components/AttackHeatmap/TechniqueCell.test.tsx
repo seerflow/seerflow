@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { TechniqueCell } from "./TechniqueCell";
+// intensityLevel and INTENSITY_STYLE are tested via the component's data-intensity attribute and inline style
 
 const baseProps = {
   tactic: "execution",
@@ -56,19 +57,78 @@ describe("TechniqueCell", () => {
     );
   });
 
-  it("uses cell-detected class when both flags true", () => {
-    render(<TechniqueCell {...baseProps} />);
-    expect(screen.getByRole("button").className).toMatch(/cell-detected/);
+  // ── Intensity data-attribute tests (replace old cell-* class assertions) ──
+
+  it("applies crit intensity when detected && alertCount > 0", () => {
+    render(<TechniqueCell {...baseProps} detected={true} alertCount={2} />);
+    expect(screen.getByRole("button")).toHaveAttribute("data-intensity", "crit");
   });
 
-  it("uses cell-covered class when only covered", () => {
-    render(<TechniqueCell {...baseProps} detected={false} />);
-    expect(screen.getByRole("button").className).toMatch(/cell-covered/);
+  it("applies warn intensity when detected && alertCount === 0", () => {
+    render(<TechniqueCell {...baseProps} detected={true} alertCount={0} />);
+    expect(screen.getByRole("button")).toHaveAttribute("data-intensity", "warn");
   });
 
-  it("uses cell-gap class when uncovered", () => {
-    render(<TechniqueCell {...baseProps} covered={false} detected={false} />);
-    expect(screen.getByRole("button").className).toMatch(/cell-gap/);
+  it("applies low intensity when covered && ruleCount > 1 && not detected", () => {
+    render(<TechniqueCell {...baseProps} detected={false} covered={true} ruleCount={3} alertCount={0} />);
+    expect(screen.getByRole("button")).toHaveAttribute("data-intensity", "low");
+  });
+
+  it("applies min intensity when covered && ruleCount === 1 && not detected", () => {
+    render(<TechniqueCell {...baseProps} detected={false} covered={true} ruleCount={1} alertCount={0} />);
+    expect(screen.getByRole("button")).toHaveAttribute("data-intensity", "min");
+  });
+
+  it("applies none intensity when not covered", () => {
+    render(
+      <TechniqueCell
+        {...baseProps}
+        covered={false}
+        detected={false}
+        ruleCount={0}
+        alertCount={0}
+        ruleNames={[]}
+      />,
+    );
+    expect(screen.getByRole("button")).toHaveAttribute("data-intensity", "none");
+  });
+
+  it("does NOT apply cell-detected / cell-covered / cell-gap class names", () => {
+    const { rerender } = render(<TechniqueCell {...baseProps} detected={true} alertCount={2} />);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-detected/);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-covered/);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-gap/);
+
+    rerender(<TechniqueCell {...baseProps} detected={false} covered={true} />);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-detected/);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-covered/);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-gap/);
+
+    rerender(<TechniqueCell {...baseProps} detected={false} covered={false} />);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-detected/);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-covered/);
+    expect(screen.getByRole("button").className).not.toMatch(/cell-gap/);
+  });
+
+  it("crit cell has background token var(--crit) in inline style", () => {
+    render(<TechniqueCell {...baseProps} detected={true} alertCount={2} />);
+    const btn = screen.getByRole("button");
+    expect(btn.style.background).toBe("var(--crit)");
+  });
+
+  it("none cell has background token var(--surface-2) in inline style", () => {
+    render(
+      <TechniqueCell
+        {...baseProps}
+        covered={false}
+        detected={false}
+        ruleCount={0}
+        alertCount={0}
+        ruleNames={[]}
+      />,
+    );
+    const btn = screen.getByRole("button");
+    expect(btn.style.background).toBe("var(--surface-2)");
   });
 
   it("calls onOpen with (tactic, technique) on click", () => {
@@ -108,6 +168,22 @@ describe("TechniqueCell", () => {
     expect(screen.getByText(/sigma_rule_a/)).toBeInTheDocument();
     fireEvent.click(btn);
     expect(screen.queryByText(/sigma_rule_a/)).not.toBeInTheDocument();
+  });
+
+  it("S-345 tooltip uses brand design tokens — readable in both themes", () => {
+    render(<TechniqueCell {...baseProps} />);
+    fireEvent.mouseEnter(screen.getByRole("button"));
+    const tooltip = screen.getByRole("tooltip");
+    // Inline-styled with brand tokens so the colours switch with the theme
+    // automatically. The previous `bg-white dark:bg-zinc-900` had no explicit
+    // text colour, so dark mode rendered default black-on-near-black text.
+    expect(tooltip.style.background).toBe("var(--surface)");
+    expect(tooltip.style.color).toBe("var(--text)");
+    expect(tooltip.style.border).toMatch(/var\(--line\)/);
+    // Regression: the old hardcoded zinc/Tailwind classes must NOT be back.
+    expect(tooltip.className).not.toMatch(
+      /\b(bg-white|bg-zinc-\d+|text-zinc-(?!500\b)\d+|border-zinc-\d+|dark:)/,
+    );
   });
 
   it("uses design-token focus ring (no hardcoded outline color)", () => {

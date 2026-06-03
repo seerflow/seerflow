@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 import ssl as _ssl
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -349,6 +350,7 @@ async def assemble_handler(
     *,
     capture_sink: object | None = None,
     ws_manager: object | None = None,
+    clock_ns: Callable[[], int] = time.time_ns,
 ) -> AssembledHandler:
     """Build the full-stack ``make_handler(...)`` wiring (no receivers/API).
 
@@ -363,6 +365,16 @@ async def assemble_handler(
     real ``ConnectionManager`` read off ``api_app.state.ws_manager`` so the
     pipeline handler and the ``/api/v1/ws`` route share one fan-out. The
     default preserves byte-identical behaviour for S-303/S-305.
+
+    ``clock_ns`` is the "now" the wall-clock-relative aging components
+    (:class:`~seerflow.correlation.window.EntityWindowBuffer` lazy prune and
+    :class:`~seerflow.correlation.risk.RiskRegister` exponential decay) read
+    to measure event age. It defaults to wall-clock ``time.time_ns`` so live
+    behaviour is byte-identical; the S-334 LANL determinism harness injects a
+    frozen replay-epoch clock so those two components are anchored to the
+    deterministic event stream rather than real wall-clock, making the
+    harness metrics invariant to runner speed (no module-attribute
+    monkeypatch needed).
     """
     # --- TAXII feed manager + IoC matcher (run.py:440-471) ---
     (
@@ -472,6 +484,7 @@ async def assemble_handler(
         window_ns=config.correlation.window_duration_seconds * 1_000_000_000,
         max_events=config.correlation.max_events_per_entity,
         max_entities=config.correlation.max_entities,
+        clock_ns=clock_ns,
     )
     watermark = Watermark(
         tolerance_ns=config.correlation.late_tolerance_seconds * 1_000_000_000,
@@ -482,6 +495,7 @@ async def assemble_handler(
         half_life_ns=config.detection.risk_half_life_hours * 3600 * 1_000_000_000,
         threshold=config.detection.risk_threshold,
         max_entities=config.detection.risk_max_entities,
+        clock_ns=clock_ns,
     )
 
     # --- Correlation rules + engine + holder + reloader (run.py:616-653) ---

@@ -18,8 +18,8 @@ const sample = (id: string, title: string): SigmaRuleSummary => ({
   alert_count_24h: 0,
 });
 
-describe("RuleTable", () => {
-  it("renders one row per rule", () => {
+describe("RuleTable (S-341 mockup grid)", () => {
+  it("renders one row per rule (by rule_id)", () => {
     render(
       <RuleTable
         rules={[sample("a", "AAA"), sample("b", "BBB")]}
@@ -27,8 +27,10 @@ describe("RuleTable", () => {
         onToggle={() => {}}
       />,
     );
-    expect(screen.getByText("AAA")).toBeInTheDocument();
-    expect(screen.getByText("BBB")).toBeInTheDocument();
+    // Mockup row shows rule_id (mono) as the primary cell — title was the
+    // old `<table>` chrome.
+    expect(screen.getByTestId("sigma-rule-row-a")).toBeInTheDocument();
+    expect(screen.getByTestId("sigma-rule-row-b")).toBeInTheDocument();
   });
 
   it("renders empty-state when no rules", () => {
@@ -36,10 +38,55 @@ describe("RuleTable", () => {
     expect(screen.getByTestId("sigma-rules-empty")).toBeInTheDocument();
   });
 
-  it("renders header columns", () => {
-    render(<RuleTable rules={[sample("a", "A")]} onSelect={() => {}} onToggle={() => {}} />);
-    expect(screen.getByText("Title")).toBeInTheDocument();
-    expect(screen.getByText("Severity")).toBeInTheDocument();
-    expect(screen.getByText(/24h alerts/i)).toBeInTheDocument();
+  it("renders mockup header cells: rule · tactic / hits 24h / prec", () => {
+    render(
+      <RuleTable rules={[sample("a", "A")]} onSelect={() => {}} onToggle={() => {}} />,
+    );
+    expect(screen.getByText("rule · tactic")).toBeInTheDocument();
+    expect(screen.getByText("hits 24h")).toBeInTheDocument();
+    expect(screen.getByText("prec")).toBeInTheDocument();
+  });
+
+  it("uses the mockup's 5-col grid template on the header", () => {
+    render(
+      <RuleTable rules={[sample("a", "A")]} onSelect={() => {}} onToggle={() => {}} />,
+    );
+    const header = screen.getByTestId("sigma-rules-table-header");
+    expect(header).toHaveStyle({
+      gridTemplateColumns: "12px 1fr 80px 60px 40px",
+    });
+  });
+
+  it("marks the selected row with data-selected='true'", () => {
+    render(
+      <RuleTable
+        rules={[sample("a", "A"), sample("b", "B")]}
+        onSelect={() => {}}
+        onToggle={() => {}}
+        selectedRuleId="b"
+      />,
+    );
+    expect(screen.getByTestId("sigma-rule-row-a")).toHaveAttribute(
+      "data-selected",
+      "false",
+    );
+    expect(screen.getByTestId("sigma-rule-row-b")).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+  });
+
+  it("leaves all rows unselected when selectedRuleId is null/undefined", () => {
+    render(
+      <RuleTable
+        rules={[sample("a", "A")]}
+        onSelect={() => {}}
+        onToggle={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("sigma-rule-row-a")).toHaveAttribute(
+      "data-selected",
+      "false",
+    );
   });
 });

@@ -19,6 +19,10 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Overlay
     className={cn(
+      // design-token-sweep S-346: intentional — `bg-black/80` is the standard
+      // shadcn/Radix sheet scrim (a dim layer behind the side panel). It reads
+      // correctly in both themes; the sweep targets surface/text utility
+      // classes, not the modal-scrim convention.
       "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}

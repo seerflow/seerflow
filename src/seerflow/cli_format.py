@@ -1,6 +1,11 @@
 """Shared formatting helpers for CLI output."""
+# ruff: noqa: T201 -- print() is the CLI output mechanism.
 
 from __future__ import annotations
+
+import sys
+
+import msgspec.json
 
 
 def format_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -25,4 +30,18 @@ def format_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["format_table"]
+def emit_doc(doc: dict[str, object], *, as_json: bool) -> None:
+    """Write ``doc`` to stdout as JSON or a human two-column metric table.
+
+    The shared emitter for CLI commands whose machine-readable output is a
+    flat ``metric``/``value`` document: ``--json`` writes the msgspec-encoded
+    object plus a trailing newline; otherwise a two-column table is printed.
+    """
+    if as_json:
+        sys.stdout.write(msgspec.json.encode(doc).decode() + "\n")
+        return
+    rows = [[k, str(doc[k])] for k in doc]
+    print(format_table(["metric", "value"], rows))
+
+
+__all__ = ["emit_doc", "format_table"]

@@ -72,6 +72,27 @@ describe("UploadRuleDialog", () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith("rid-X"));
   });
 
+  it("valid-result panel uses the --info brand token, not bg-green-500 (S-349)", async () => {
+    render(<UploadRuleDialog open onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByTestId("yaml-editor"), { target: { value: "title: T" } });
+    mockedValidate.mockResolvedValueOnce({ valid: true, rule_id: "rid", title: "T" });
+    fireEvent.click(screen.getByRole("button", { name: /validate/i }));
+    const panel = await screen.findByTestId("sigma-upload-result");
+    expect(panel.className).toContain("bg-info/10");
+    expect(panel.className).toContain("text-info");
+    expect(panel.className).not.toMatch(/green-\d+/);
+  });
+
+  it("invalid-result panel keeps the --destructive brand token (S-349)", async () => {
+    render(<UploadRuleDialog open onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByTestId("yaml-editor"), { target: { value: "x: [" } });
+    mockedValidate.mockResolvedValueOnce({ valid: false, stage: "yaml", message: "bad" });
+    fireEvent.click(screen.getByRole("button", { name: /validate/i }));
+    const panel = await screen.findByTestId("sigma-upload-result");
+    expect(panel.className).toContain("bg-destructive/10");
+    expect(panel.className).toContain("text-destructive");
+  });
+
   it("save error surfaces stage=compile message", async () => {
     render(<UploadRuleDialog open onClose={() => {}} onSaved={() => {}} />);
     fireEvent.change(screen.getByTestId("yaml-editor"), {
