@@ -101,9 +101,9 @@ class TestParseFlowLine:
         assert record.time == 400
         assert record.duration == 5
         assert record.src_computer == "C9"
-        assert record.src_port == 1024
+        assert record.src_port == "1024"
         assert record.dst_computer == "C10"
-        assert record.dst_port == 443
+        assert record.dst_port == "443"
         assert record.protocol == 6
         assert record.packet_count == 10
         assert record.byte_count == 1500
@@ -111,7 +111,17 @@ class TestParseFlowLine:
     def test_parse_flow_missing_port(self) -> None:
         line = "500,0,C11,?,C12,80,17,1,64"
         record = parse_flow_line(line)
-        assert record.src_port == -1
+        assert record.src_port == "?"
+
+    def test_parse_flow_anonymized_port(self) -> None:
+        # LANL anonymizes non-well-known ports as a consistent "N<id>" token;
+        # well-known ports stay numeric. Both must round-trip verbatim — they
+        # are categorical identifiers (only ever rendered into the event
+        # message), never integers.
+        line = "1,0,C1065,389,C3799,N10451,6,10,5323"
+        record = parse_flow_line(line)
+        assert record.src_port == "389"
+        assert record.dst_port == "N10451"
 
     def test_flow_record_is_frozen(self) -> None:
         line = "400,5,C9,1024,C10,443,6,10,1500"
