@@ -283,30 +283,58 @@ at that directory.
 
 ### 4.3 Streaming path for billion-event scale
 
-For the full dataset, use the **bounded-memory, resumable** streaming harness
-(S-309 / FR-077). It is a Python API (no CLI yet):
+For the full dataset, use the **bounded-memory** streaming harness (S-309 /
+FR-077). Reality check before you start: throughput is ~390 events/sec
+(CPU-bound — HSTrees walks + Sigma regex), so the full ~1.61B-event set is
+**~48 days**, and the first red-team event is ~58.7M events in (**~42 h**) —
+precision/recall are a hard 0.0 before then (see S-356).
+
+**Recommended — the resumable runner** `tools/run_lanl_streaming.py`. It uses a
+caller-owned, on-disk state DB (survives a process kill — resume by re-running
+the same command), filters out the per-event ANOMALY log flood while keeping
+genuine warnings, and prints the real result fields:
+
+```bash
+mkdir -p data/lanl_run
+nohup uv run python tools/run_lanl_streaming.py data/lanl \
+    --state-db data/lanl_run/state.db > data/lanl_run/run.log 2>&1 &
+
+# progress of an in-flight run (reads the live cursor; WAL-safe):
+uv run python tools/run_lanl_streaming.py --status --state-db data/lanl_run/state.db
+```
+
+**Direct API** (quick bounded passes). Note: `run_streaming_validation` writes
+its checkpoints to a `TemporaryDirectory` that is deleted on return, so it is
+**not** resumable across a kill — for a resumable run use
+`resume_streaming_validation_async` with your own storage backend (what the
+runner above does).
 
 ```bash
 uv run python - <<'PY'
+import logging
+logging.getLogger("seerflow").setLevel(logging.ERROR)  # silence per-event ANOMALY flood
 from pathlib import Path
 from seerflow.lanl.streaming import run_streaming_validation
 
 result = run_streaming_validation(
     Path("data/lanl"),
-    checkpoint_interval=10_000,   # checkpoint every N events (resumable)
-    max_events=1_000_000,         # cap the run; None = whole dataset
+    checkpoint_interval=10_000,   # checkpoint cadence
+    max_events=1_000_000,         # cap the run; None = whole dataset (~48 days)
 )
 print("precision", result.precision, "recall", result.recall, "f1", result.f1_score)
-print("throughput_eps", result.throughput_eps)
+print("throughput_events_per_s", result.throughput_events_per_s)
 PY
 ```
 
-- **Bounded memory:** k-way merge across the four CSVs — never loads the full
+- **Bounded memory:** k-way merge across the CSVs — never loads the full
   dataset into RAM.
-- **Resumable:** checkpoints every `checkpoint_interval` events.
-- **`max_events`:** caps the run for a quick large-but-not-full pass.
+- **Resumable:** only via `resume_streaming_validation_async` + a persistent
+  storage backend (the runner above). The `run_streaming_validation`
+  convenience wrapper uses a throwaway temp DB and does not survive a kill.
+- **`max_events`:** caps the run for a quick large-but-not-full pass (a 1M cap
+  stays in the dataset head — no attacks, so accuracy is 0.0).
 - Returns a `StreamingValidationResult` — a transparent `ValidationResult`
-  passthrough plus `throughput_eps` / latency fields.
+  passthrough plus `throughput_events_per_s` / `mean_event_latency_s` fields.
 
 ### 4.4 Pure throughput/latency benchmark
 
