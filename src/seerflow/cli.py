@@ -421,6 +421,24 @@ def _add_benchmark_subparser(subparsers: argparse._SubParsersAction) -> None:  #
     )
 
 
+def _add_lanl_report_subparser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Add ``seerflow lanl-report`` — re-render a stored LANL benchmark sidecar (S-358)."""
+    p = subparsers.add_parser(
+        "lanl-report",
+        help="Re-render a stored LANL benchmark report sidecar (table or JSON)",
+    )
+    p.add_argument(
+        "report_json",
+        help="Path to the sidecar JSON written by the LANL runner",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit the report as a JSON object instead of a human-readable table",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser."""
     parser = argparse.ArgumentParser(
@@ -567,6 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_validate_subparser(subparsers)
     _add_benchmark_subparser(subparsers)
+    _add_lanl_report_subparser(subparsers)
 
     return parser
 
