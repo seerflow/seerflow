@@ -299,24 +299,36 @@ class TestLoadBaselinesRejection:
 
 
 # ---------------------------------------------------------------------------
-# Shipped baselines.yaml — must RAISE due to unresolved published placeholder
+# Shipped baselines.yaml — loads cleanly now that S-358 Task 3 populated the
+# published rows with real, cited values (no remaining null placeholder).
 # ---------------------------------------------------------------------------
 
 
 class TestShippedBaselinesYaml:
-    def test_shipped_yaml_raises_due_to_published_placeholder(self) -> None:
-        """The packaged baselines.yaml has a published row with value=null.
+    def test_shipped_yaml_loads(self) -> None:
+        """The packaged baselines.yaml loads with no unresolved placeholders.
 
-        This is intentional: the registry cannot ship with unresolved published
-        baselines. load_baselines() must raise ValueError.
-
-        NOTE: This test flips to a positive assertion (no raise) after
-        S-358 Task 3 populates the published rows with real values.
+        S-358 Task 3 replaced the value=null published placeholder with real,
+        cited LANL auth+redteam detection results, so load_baselines() now
+        succeeds and yields both project_target and published rows.
         """
         from seerflow.lanl.report.baselines import load_baselines
 
-        with pytest.raises(ValueError):
-            load_baselines()  # default path = packaged baselines.yaml
+        baselines = load_baselines()  # default path = packaged baselines.yaml
+        assert baselines, "shipped registry must yield at least one baseline"
+        kinds = {b.kind for b in baselines}
+        assert "project_target" in kinds
+        assert "published" in kinds
+
+    def test_shipped_yaml_has_cited_published_auc(self) -> None:
+        """At least one published AUC baseline exists with a non-empty source."""
+        from seerflow.lanl.report.baselines import load_baselines
+
+        published_auc = [
+            b for b in load_baselines() if b.kind == "published" and b.metric == "auc"
+        ]
+        assert published_auc, "expected >=1 published AUC baseline after Task 3"
+        assert all(b.source.strip() for b in published_auc)
 
     def test_default_path_resolves_to_package_dir(self) -> None:
         """load_baselines() with no args reads from the installed package dir."""

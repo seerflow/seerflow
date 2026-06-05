@@ -1,12 +1,19 @@
 # LANL benchmark baselines registry (S-358).
 #
-# project_target rows: derived from the Seerflow PRD / acceptance criteria.
-# published rows: populated by S-358 Task 3 research pass.
+# project_target rows: derived from the Seerflow PRD / acceptance criteria + the
+#   S-358 research pass acceptance-SLA proposal (closes functional-review OQ-2).
+# published rows: real, cited LANL 2015 auth+redteam detection results gathered
+#   by the S-358 Task 3 research pass.
 #
 # IMPORTANT: any row with value: null causes load_baselines() to raise
 # ValueError — the registry refuses to load with unresolved published baselines.
-# Populate all published rows before using load_baselines() in production.
+#
+# Caveats that apply to ALL published rows below: the LANL auth+redteam base rate
+# is ~749 / 1.05B ≈ 7e-7, so raw precision/AP are near-zero across the field;
+# ranking AUC and recall@operating-point are the meaningful, comparable metrics.
+# Label mapping is event-level ((time,user,src,dst) tuples) unless noted.
 
+# --- project targets ---------------------------------------------------------
 - metric: false_positive_rate
   kind: project_target
   value: 0.02
@@ -17,7 +24,14 @@
   kind: project_target
   value: 0.0
   comparison: gt
-  source: "documents/testing-seerflow-against-lanl.md §5 (AUC a real area in (0,1))"
+  source: "testing-seerflow-against-lanl.md §5 (AUC a real area in (0,1))"
+
+- metric: auc
+  kind: project_target
+  value: 0.97
+  comparison: gte
+  source: "S-358 research pass — OQ-2 acceptance SLA floor"
+  notes: "Field floor: Tuor 2018 AUC 0.98, Argus (S&P 2024) 0.9817. 0.97 is a v1 bar a credible method clears; Seerflow's streaming online ML sits in the sequence-model tier."
 
 - metric: true_positives
   kind: project_target
@@ -25,9 +39,24 @@
   comparison: gte
   source: "functional-review OQ-2 minimal works bar (>=1 red-team TP)"
 
-# published rows populated by S-358 Task 3 research pass
+# --- published (cited; S-358 Task 3 research pass) ---------------------------
 - metric: auc
   kind: published
-  value: null
+  value: 0.98
   comparison: gte
-  source: "PENDING research pass S-358 Task 3"
+  source: "Tuor et al. 2017, RNN language model (arXiv:1712.00557)"
+  notes: "Event-level RNN-LM on auth.txt, auth-only. Closest tier to Seerflow's streaming online ML. Confidence: HIGH."
+
+- metric: auc
+  kind: published
+  value: 0.9817
+  comparison: gte
+  source: "Argus — Xu, Shu, Li, IEEE S&P 2024 (github C0ldstudy/Argus)"
+  notes: "SOTA unsupervised graph (temporal DTG). AP only ~0.007 at full base rate — AUC is the comparable metric. Confidence: HIGH."
+
+- metric: recall
+  kind: published
+  value: 0.85
+  comparison: gte
+  source: "Bowman et al., USENIX RAID 2020 (unsupervised graph AI)"
+  notes: "TPR 0.85 at FPR 0.9% — an operating point, NOT overall recall; directional anchor only, near Seerflow's FP<2% target. Confidence: HIGH."
