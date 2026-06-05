@@ -12,7 +12,7 @@ FIRST_ATTACK_EVENTS — subset of events with red-team activity.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal, Protocol, runtime_checkable
 
 import msgspec
 
@@ -22,6 +22,63 @@ import msgspec
 
 TOTAL_EVENTS: int = 1_607_452_967
 FIRST_ATTACK_EVENTS: int = 58_655_985
+
+# ---------------------------------------------------------------------------
+# Literal discriminants — single source of truth for known field values.
+# ``baselines.py`` derives its known-value frozensets from these via
+# ``typing.get_args`` so there is exactly one place to edit.
+# ---------------------------------------------------------------------------
+
+BaselineKind = Literal["project_target", "published"]
+Comparison = Literal["lt", "lte", "gt", "gte"]
+Verdict = Literal["pass", "below", "above", "n/a"]
+
+
+# ---------------------------------------------------------------------------
+# Structural Protocols for ``AccuracySummary.from_validation_result``
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class ScenarioLike(Protocol):
+    """Structural shape of a ``ValidationResult`` attack scenario."""
+
+    name: str
+    detected: bool
+    mttd_seconds: float | None
+    missed_record_count: int
+
+
+@runtime_checkable
+class MissedAttributionLike(Protocol):
+    """Structural shape of a ``ValidationResult`` missed attribution."""
+
+    record_repr: str
+
+
+@runtime_checkable
+class ValidationResultLike(Protocol):
+    """Structural shape consumed by :meth:`AccuracySummary.from_validation_result`.
+
+    Both :class:`~seerflow.lanl.validator.ValidationResult` and
+    :class:`~seerflow.lanl.streaming.StreamingValidationResult` satisfy this
+    Protocol (the latter delegates attribute access via ``__getattr__``), as do
+    the ``SimpleNamespace`` fakes used in the unit tests.
+    """
+
+    precision: float
+    recall: float
+    f1_score: float
+    auc: float | None
+    false_positive_rate: float
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+    total_alerts: int
+    patterns_detected: frozenset[str]
+    attack_scenarios: tuple[ScenarioLike, ...]
+    missed_attributions: tuple[MissedAttributionLike, ...]
+
 
 # ---------------------------------------------------------------------------
 # HostInfo
@@ -93,11 +150,16 @@ class AccuracySummary(msgspec.Struct, frozen=True):
     missed_attributions: tuple[str, ...]
 
     @classmethod
-    def from_validation_result(cls, result: object) -> AccuracySummary:
+    def from_validation_result(cls, result: ValidationResultLike) -> AccuracySummary:
         """Map a :class:`~seerflow.lanl.validator.ValidationResult` (or a
         :class:`~seerflow.lanl.streaming.StreamingValidationResult`, which
         delegates attribute access via ``__getattr__``) to an
         :class:`AccuracySummary`.
+
+        *result* is annotated with the structural :class:`ValidationResultLike`
+        Protocol so mypy type-checks the field mapping. The ``getattr``
+        defensive defaults are retained because the real results and the
+        ``SimpleNamespace`` test fakes may omit optional attributes.
 
         Tolerates:
         - ``auc`` being ``None`` → normalised to ``0.0``.
@@ -108,18 +170,13 @@ class AccuracySummary(msgspec.Struct, frozen=True):
         - ``missed_attributions`` entries with a ``record_repr`` attribute or
           being plain strings.
         """
-
-        # Use Any so mypy can follow the attribute access on the protocol-duck
-        # type (ValidationResult / StreamingValidationResult / SimpleNamespace).
-        r: Any = result
-
-        raw_auc: Any = getattr(r, "auc", None)
+        raw_auc = getattr(result, "auc", None)
         auc: float = 0.0 if raw_auc is None else float(raw_auc)
 
-        raw_patterns: Any = getattr(r, "patterns_detected", None) or frozenset()
+        raw_patterns = getattr(result, "patterns_detected", None) or frozenset()
         patterns: tuple[str, ...] = tuple(sorted(raw_patterns))
 
-        raw_scenarios: Any = getattr(r, "attack_scenarios", None) or ()
+        raw_scenarios = getattr(result, "attack_scenarios", None) or ()
         scenarios: tuple[ScenarioSummary, ...] = tuple(
             ScenarioSummary(
                 name=str(getattr(sc, "name", "")),
@@ -130,21 +187,21 @@ class AccuracySummary(msgspec.Struct, frozen=True):
             for sc in raw_scenarios
         )
 
-        raw_attrs: Any = getattr(r, "missed_attributions", None) or ()
+        raw_attrs = getattr(result, "missed_attributions", None) or ()
         missed_attributions: tuple[str, ...] = tuple(
             getattr(ma, "record_repr", str(ma)) for ma in raw_attrs
         )
 
         return cls(
-            precision=float(getattr(r, "precision", 0.0)),
-            recall=float(getattr(r, "recall", 0.0)),
-            f1=float(getattr(r, "f1_score", 0.0)),
+            precision=float(getattr(result, "precision", 0.0)),
+            recall=float(getattr(result, "recall", 0.0)),
+            f1=float(getattr(result, "f1_score", 0.0)),
             auc=auc,
-            false_positive_rate=float(getattr(r, "false_positive_rate", 0.0)),
-            true_positives=int(getattr(r, "true_positives", 0)),
-            false_positives=int(getattr(r, "false_positives", 0)),
-            false_negatives=int(getattr(r, "false_negatives", 0)),
-            total_alerts=int(getattr(r, "total_alerts", 0)),
+            false_positive_rate=float(getattr(result, "false_positive_rate", 0.0)),
+            true_positives=int(getattr(result, "true_positives", 0)),
+            false_positives=int(getattr(result, "false_positives", 0)),
+            false_negatives=int(getattr(result, "false_negatives", 0)),
+            total_alerts=int(getattr(result, "total_alerts", 0)),
             patterns_detected=patterns,
             scenarios=scenarios,
             missed_attributions=missed_attributions,
@@ -160,9 +217,9 @@ class Baseline(msgspec.Struct, frozen=True):
     """A single performance or quality target or published reference point."""
 
     metric: str
-    kind: str  # "project_target" | "published"
+    kind: BaselineKind
     value: float
-    comparison: str  # "lt" | "lte" | "gt" | "gte"
+    comparison: Comparison
     source: str
     notes: str | None = None
 
@@ -179,9 +236,9 @@ class ComparisonRow(msgspec.Struct, frozen=True):
     seerflow_value: float
     baseline_name: str
     baseline_value: float
-    comparison: str
+    comparison: Comparison
     delta: float
-    verdict: str  # "pass" | "below" | "above" | "n/a"
+    verdict: Verdict
 
 
 # ---------------------------------------------------------------------------

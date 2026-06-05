@@ -16,11 +16,11 @@ raise until the research pass populates real values.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, get_args
 
 import yaml
 
-from seerflow.lanl.report.schema import Baseline
+from seerflow.lanl.report.schema import Baseline, BaselineKind, Comparison
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -41,8 +41,10 @@ _KNOWN_METRICS: frozenset[str] = frozenset(
     }
 )
 
-_KNOWN_KINDS: frozenset[str] = frozenset({"project_target", "published"})
-_KNOWN_COMPARISONS: frozenset[str] = frozenset({"lt", "lte", "gt", "gte"})
+# Single source of truth: derive from the schema ``Literal`` aliases so the
+# loader's allow-lists cannot drift from the type definitions.
+_KNOWN_KINDS: frozenset[str] = frozenset(get_args(BaselineKind))
+_KNOWN_COMPARISONS: frozenset[str] = frozenset(get_args(Comparison))
 
 
 # ---------------------------------------------------------------------------
@@ -103,10 +105,12 @@ def _validate_row(row: Any, index: int) -> Baseline:
         notes = str(notes)
 
     return Baseline(
+        # kind/comparison are validated against the known sets above, so the
+        # casts are sound; they narrow ``str`` to the schema Literal aliases.
         metric=metric,
-        kind=kind,
+        kind=cast("BaselineKind", kind),
         value=value,
-        comparison=comparison,
+        comparison=cast("Comparison", comparison),
         source=source,
         notes=notes if notes else None,
     )

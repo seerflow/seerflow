@@ -7,9 +7,14 @@ Markdown containing the exact metrics. No I/O, no datetime.now().
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from seerflow.lanl.validator import ValidationResult
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_result(
@@ -184,3 +189,34 @@ def test_report_auc_none_renders_na(render):
     out = render(_make_result(), dataset_label="synthetic LANL subset", date="2026-05-16")
     # _make_result leaves auc=None -> rendered as N/A, never a bare "None".
     assert "N/A" in out
+
+
+# ---------------------------------------------------------------------------
+# S-359 — _main write-path hardening (refuse symlink-follow writes)
+# ---------------------------------------------------------------------------
+
+
+def test_main_writes_to_regular_path(tmp_path: Path) -> None:
+    """_main writes the report to a normal (non-symlink) argv[1] path."""
+    from seerflow.lanl import report_renderer
+
+    out = tmp_path / "report.md"
+    rc = report_renderer._main(["prog", str(out)])
+    assert rc == 0
+    assert out.read_text(encoding="utf-8").startswith("# LANL")
+
+
+def test_main_refuses_symlink_target(tmp_path: Path) -> None:
+    """_main refuses to follow a symlink at argv[1] (no symlink-follow write)."""
+    from seerflow.lanl import report_renderer
+
+    real = tmp_path / "real.md"
+    real.write_text("SENTINEL", encoding="utf-8")
+    link = tmp_path / "link.md"
+    link.symlink_to(real)
+
+    with pytest.raises(ValueError, match="symlink"):
+        report_renderer._main(["prog", str(link)])
+
+    # The real file must be untouched (no follow-through write).
+    assert real.read_text(encoding="utf-8") == "SENTINEL"

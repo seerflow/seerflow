@@ -29,14 +29,16 @@ from seerflow.lanl.report.schema import (
     RunTelemetry,
     ScenarioSummary,
 )
+from tests.unit.conftest import build_accuracy, build_host, build_telemetry
 
 # ---------------------------------------------------------------------------
-# Fixtures / helpers
+# Helpers — delegate to the shared builders in tests/unit/conftest.py, keeping
+# this file's CLI-specific asserted values.
 # ---------------------------------------------------------------------------
 
 
 def _make_accuracy() -> AccuracySummary:
-    return AccuracySummary(
+    return build_accuracy(
         precision=0.85,
         recall=0.90,
         f1=0.875,
@@ -60,7 +62,7 @@ def _make_accuracy() -> AccuracySummary:
 
 
 def _make_telemetry() -> RunTelemetry:
-    return RunTelemetry(
+    return build_telemetry(
         wall_s=42.5,
         events_processed=3000,
         throughput_eps=70.5,
@@ -70,7 +72,7 @@ def _make_telemetry() -> RunTelemetry:
 
 
 def _make_host() -> HostInfo:
-    return HostInfo(
+    return build_host(
         cpu_model="Intel(R) Core(TM) i7-9750H",
         physical_cores=6,
         logical_cores=12,

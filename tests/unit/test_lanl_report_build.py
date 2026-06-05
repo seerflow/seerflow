@@ -5,6 +5,8 @@ All tests are synchronous. Never add @pytest.mark.asyncio.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from seerflow.lanl.report.schema import (
@@ -18,14 +20,17 @@ from seerflow.lanl.report.schema import (
     ScenarioSummary,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures (delegate to the shared factories in tests/unit/conftest.py)
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
-def accuracy() -> AccuracySummary:
-    return AccuracySummary(
+def accuracy(make_accuracy: Callable[..., AccuracySummary]) -> AccuracySummary:
+    return make_accuracy(
         precision=0.75,
         recall=0.40,
         f1=0.52,
@@ -49,8 +54,8 @@ def accuracy() -> AccuracySummary:
 
 
 @pytest.fixture()
-def telemetry() -> RunTelemetry:
-    return RunTelemetry(
+def telemetry(make_telemetry: Callable[..., RunTelemetry]) -> RunTelemetry:
+    return make_telemetry(
         wall_s=120.0,
         events_processed=46_800,
         throughput_eps=390.0,
@@ -60,8 +65,8 @@ def telemetry() -> RunTelemetry:
 
 
 @pytest.fixture()
-def host() -> HostInfo:
-    return HostInfo(
+def host(make_host: Callable[..., HostInfo]) -> HostInfo:
+    return make_host(
         cpu_model="Intel i7-8750H",
         physical_cores=6,
         logical_cores=12,
@@ -371,8 +376,11 @@ def test_build_report_unknown_comparison_is_na(
     bl = Baseline(
         metric="auc",
         kind="published",
+        # invalid on purpose: exercises the defensive n/a branch. msgspec does
+        # not validate Literal on direct construction, so this builds at runtime;
+        # the type-ignore keeps mypy happy. load_baselines would reject it.
+        comparison="eq",  # type: ignore[arg-type]
         value=0.5,
-        comparison="eq",  # not a valid operator; load_baselines would reject it
         source="bogus op",
     )
     assert build_report(accuracy, telemetry, [bl], host).comparisons[0].verdict == "n/a"
