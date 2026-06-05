@@ -135,8 +135,8 @@ class KillChainConfig:
 class DetectionConfig:
     """ML detection configuration."""
 
-    hst_window_size: int = 1000
-    hst_n_trees: int = 25
+    hst_window_size: int = 250
+    hst_n_trees: int = 10
     dspot_calibration_window: int = 1000
     dspot_risk_level: float = 0.0001
     dspot_initial_percentile: int = 98

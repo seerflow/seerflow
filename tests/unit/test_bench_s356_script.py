@@ -35,3 +35,41 @@ def test_bench_main_prints_eps(
     assert "per_event_eps=" in out
     eps = float(out.split("per_event_eps=")[1].strip())
     assert eps > 0.0
+
+
+def test_bench_measure_accepts_hst_overrides() -> None:
+    """S-360: ``_measure`` accepts optional HST n_trees/window_size overrides so a
+    single script reproduces the old (25/1000) and new (10/250) eps numbers."""
+    from tests.perf.bench_s356_throughput import _measure
+
+    n, _timed_events, _elapsed, eps = _measure(_FIXTURE, passes=1, n_trees=25, window_size=1000)
+    assert n > 0
+    assert eps > 0.0
+
+
+def test_bench_main_accepts_hst_override_flags(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S-360: ``--n-trees`` / ``--window-size`` flags are parsed and printed."""
+    from tests.perf.bench_s356_throughput import _main
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bench",
+            "--passes",
+            "1",
+            "--dataset",
+            str(_FIXTURE),
+            "--n-trees",
+            "10",
+            "--window-size",
+            "250",
+        ],
+    )
+    rc = _main()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "per_event_eps=" in out
+    assert "n_trees=10" in out
+    assert "window_size=250" in out

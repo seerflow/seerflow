@@ -56,7 +56,7 @@ class HSTDetector:
 
     __slots__ = ("_feat_cache", "_feat_key", "_model")
 
-    def __init__(self, *, n_trees: int = 25, window_size: int = 1000, seed: int = 42) -> None:
+    def __init__(self, *, n_trees: int = 10, window_size: int = 250, seed: int = 42) -> None:
         self._model = anomaly.HalfSpaceTrees(
             n_trees=n_trees,
             height=_HST_HEIGHT,

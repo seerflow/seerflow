@@ -54,7 +54,7 @@ def _log_safe(value: str, *, max_len: int = 64) -> str:
 
 
 # Memory estimation constants (bytes) — approximate per-instance footprint.
-_MEM_HST = 51_200  # ~50 KB: River HalfSpaceTrees, 25 trees
+_MEM_HST = 51_200  # ~50 KB: River HST conservative ceiling (S-360 default 10 trees uses <= this)
 _MEM_HW = 12_288  # ~12 KB: 1440 seasonal floats + state
 _MEM_CUSUM = 200  # ~200 B: O(1) counters + floats
 _MEM_MARKOV_ENTITY = 10_240  # ~10 KB: transition matrix per entity
