@@ -48,6 +48,11 @@ class CompiledRule:
     attack_techniques: tuple[str, ...]
     logsource_key: tuple[str, str, str]
     _rule: SigmaRule  # keep reference for condition evaluation
+    # S-356: parsed condition nodes cached at compile time. ``match_event``
+    # re-read ``rule.detection.parsed_condition`` on every event before; the
+    # cached nodes are the same objects, so match decisions are identical —
+    # this only removes the per-event attribute walk.
+    parsed_conditions: tuple[Any, ...] = ()
 
 
 _SIGMA_LEVEL_MAP: dict[str | None, SeverityLevel] = {
@@ -129,6 +134,26 @@ def _extract_attack_tags(
     return tuple(tactics), tuple(techniques)
 
 
+def _prewarm_regexes(node: Any) -> None:
+    """Walk a parsed condition tree and compile every ``SigmaString`` regex
+    into the module cache (S-356).
+
+    Pure side-effect on ``_regex_cache``; idempotent. After this runs at
+    compile time, the per-event ``_match_field_value`` call is a guaranteed
+    cache hit, never a compile — and uses the exact pattern the lazy path
+    would have produced, so behavior is unchanged.
+    """
+    if isinstance(node, ConditionFieldEqualsValueExpression):
+        value = node.value
+        if isinstance(value, SigmaString):
+            _sigma_string_to_regex(value)
+        return
+    args = getattr(node, "args", None)
+    if args:
+        for arg in args:
+            _prewarm_regexes(arg)
+
+
 def compile_rule(rule: SigmaRule) -> CompiledRule:
     """Compile a parsed SigmaRule into a CompiledRule for evaluation.
 
@@ -145,6 +170,13 @@ def compile_rule(rule: SigmaRule) -> CompiledRule:
     level_str = rule.level.name.lower() if rule.level else None
     severity = _SIGMA_LEVEL_MAP.get(level_str, SeverityLevel.INFORMATIONAL)
 
+    # S-356: cache the parsed condition nodes once (``match_event`` re-read
+    # ``parsed_condition`` per event before) and pre-warm the regex cache for
+    # every SigmaString leaf so per-event matching never compiles a pattern.
+    parsed_conditions = tuple(c.parsed for c in (rule.detection.parsed_condition or []))
+    for node in parsed_conditions:
+        _prewarm_regexes(node)
+
     return CompiledRule(
         rule_id=compute_rule_id(rule),
         rule_name=rule.title or "Untitled",
@@ -154,6 +186,7 @@ def compile_rule(rule: SigmaRule) -> CompiledRule:
         attack_techniques=techniques,
         logsource_key=logsource_key,
         _rule=rule,
+        parsed_conditions=parsed_conditions,
     )
 
 
@@ -228,9 +261,11 @@ def match_event(compiled: CompiledRule, event: dict[str, Any]) -> bool:
 
     Walks the rule's parsed condition tree, evaluating leaf nodes
     (``ConditionFieldEqualsValueExpression``) against the event.
+
+    S-356: uses the parsed condition nodes cached on the CompiledRule at
+    compile time instead of re-reading ``rule.detection.parsed_condition``
+    on every event — same nodes, identical evaluation.
     """
-    rule = compiled._rule
-    conditions = rule.detection.parsed_condition
-    if not conditions:
+    if not compiled.parsed_conditions:
         return False
-    return all(_eval_node(c.parsed, event) for c in conditions)
+    return all(_eval_node(node, event) for node in compiled.parsed_conditions)

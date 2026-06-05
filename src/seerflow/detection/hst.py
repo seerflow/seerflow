@@ -54,7 +54,7 @@ def _extract_features(event: SeerflowEvent) -> dict[str, float]:
 class HSTDetector:
     """Streaming content anomaly detector using River Half-Space Trees."""
 
-    __slots__ = ("_model",)
+    __slots__ = ("_feat_cache", "_feat_key", "_model")
 
     def __init__(self, *, n_trees: int = 25, window_size: int = 1000, seed: int = 42) -> None:
         self._model = anomaly.HalfSpaceTrees(
@@ -63,16 +63,36 @@ class HSTDetector:
             window_size=window_size,
             seed=seed,
         )
+        # S-356: one-entry feature cache. ``process_event`` calls ``score(event)``
+        # then ``learn(event)`` for the SAME event; both extract the identical
+        # feature dict. Cache the last event's features (keyed on event_id) so
+        # the pair extracts once. Output (score + learned state) is bit-identical
+        # — this only removes the duplicate pure-function call. Memory is O(1)
+        # (a single dict for the most recent event).
+        self._feat_key: object | None = None
+        self._feat_cache: dict[str, float] = {}
+
+    def _features_for(self, event: SeerflowEvent) -> dict[str, float]:
+        """Extract (or reuse cached) features for *event*.
+
+        The cache holds exactly the last event's features. Identical output to
+        calling :func:`_extract_features` directly — it only avoids the
+        duplicate extraction across a score/learn pair on the same event.
+        """
+        if self._feat_key != event.event_id:
+            self._feat_cache = _extract_features(event)
+            self._feat_key = event.event_id
+        return self._feat_cache
 
     def score(self, event: SeerflowEvent) -> float:
         """Return anomaly score in [0.0, 1.0]."""
-        features = _extract_features(event)
+        features = self._features_for(event)
         raw: float = self._model.score_one(features)  # type: ignore[no-untyped-call]
         return max(0.0, min(1.0, raw))
 
     def learn(self, event: SeerflowEvent) -> None:
         """Update HST model incrementally."""
-        features = _extract_features(event)
+        features = self._features_for(event)
         self._model.learn_one(features)  # type: ignore[no-untyped-call]
 
     def serialize(self) -> bytes:

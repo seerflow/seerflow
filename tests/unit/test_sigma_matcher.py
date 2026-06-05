@@ -479,3 +479,82 @@ detection:
     compiled = compile_rule(rule)
     assert isinstance(compiled.rule_id, str)
     assert len(compiled.rule_id) == 36
+
+
+class TestSigmaPrecompileCache:
+    """S-356: compile_rule caches parsed conditions + pre-warms regexes so the
+    per-event match path is a pure cache hit, producing identical decisions."""
+
+    _RULE_YAML = """
+        title: Whoami detection
+        status: test
+        logsource:
+            category: process_creation
+            product: linux
+        detection:
+            sel:
+                message|contains: whoami
+            condition: sel
+        level: high
+    """
+
+    def test_compile_rule_caches_parsed_conditions(self) -> None:
+        """compile_rule must cache the parsed condition nodes so match_event
+        does not re-read rule.detection.parsed_condition per event."""
+        cr = _make_compiled(self._RULE_YAML)
+        assert hasattr(cr, "parsed_conditions")
+        assert len(cr.parsed_conditions) >= 1
+
+    def test_precompiled_match_equals_lazy_match(self) -> None:
+        """match_event over a precompiled rule yields the same decision the
+        lazy path produced (regression guard for the optimization)."""
+        cr = _make_compiled(self._RULE_YAML)
+        assert match_event(cr, {"message": "bash -c whoami"}) is True
+        assert match_event(cr, {"message": "bash -c ls"}) is False
+
+
+class TestEvalNodeBranchCoverage:
+    """S-356: close pre-existing _eval_node branch gaps surfaced by the
+    touched-path coverage gate (numeric-value edge paths + keyword non-string)."""
+
+    def test_numeric_value_missing_field_returns_false(self) -> None:
+        """A numeric Sigma value against an event missing that field -> False."""
+        cr = _make_compiled("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                sel:
+                    EventID: 4625
+                condition: sel
+            level: medium
+        """)
+        # template_id (the remapped EventID) absent -> _eval_node line 232.
+        assert match_event(cr, {"message": "no event id here"}) is False
+
+    def test_numeric_value_in_tuple_field(self) -> None:
+        """A numeric Sigma value checked against a tuple field via membership."""
+        from sigma.conditions import ConditionFieldEqualsValueExpression
+
+        from seerflow.sigma.matcher import (
+            CompiledRule,
+            _eval_node,
+        )
+
+        # Build a leaf node directly: field is a TUPLE_FIELD, value is numeric.
+        node = ConditionFieldEqualsValueExpression("related_ips", 42)
+        assert _eval_node(node, {"related_ips": (42, 7)}) is True
+        assert _eval_node(node, {"related_ips": (1, 2)}) is False
+        assert isinstance(CompiledRule, type)  # import sanity
+
+    def test_keyword_non_string_value(self) -> None:
+        """A keyword (ConditionValueExpression) with a non-SigmaString value
+        falls back to substring search via str()."""
+        from sigma.conditions import ConditionValueExpression
+
+        from seerflow.sigma.matcher import _eval_node
+
+        node = ConditionValueExpression(4625)
+        assert _eval_node(node, {"message": "code 4625 seen"}) is True
+        assert _eval_node(node, {"message": "nothing here"}) is False

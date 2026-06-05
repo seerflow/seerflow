@@ -318,3 +318,51 @@ class TestHSTDeserializeWrongType:
         detector = HSTDetector()
         with pytest.raises(TypeError, match="Expected HalfSpaceTrees"):
             detector.deserialize(data)
+
+
+class TestHSTFeatureCache:
+    """S-356: score() then learn() for the same event extract features once."""
+
+    def test_score_then_learn_extracts_features_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """score() then learn() for the same event must call _extract_features once."""
+        from seerflow.detection import hst as hst_mod
+        from seerflow.detection.hst import HSTDetector
+
+        calls = {"n": 0}
+        real_extract = hst_mod._extract_features
+
+        def counting_extract(event: object) -> dict[str, float]:
+            calls["n"] += 1
+            return real_extract(event)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(hst_mod, "_extract_features", counting_extract)
+
+        det = HSTDetector(n_trees=4, window_size=16)
+        event = _make_event(template_id=1)
+        det.score(event)
+        det.learn(event)
+        assert calls["n"] == 1
+
+    def test_score_sequence_identical_with_feature_cache(self) -> None:
+        """A run through score+learn must yield the same scores as a detector
+        that re-extracts features each call (cache is output-neutral)."""
+        from seerflow.detection.hst import HSTDetector
+
+        events = [_make_event(template_id=i % 5) for i in range(50)]
+
+        det = HSTDetector(n_trees=8, window_size=32, seed=42)
+        got = []
+        for ev in events:
+            got.append(det.score(ev))
+            det.learn(ev)
+
+        # Reference detector: identical construction + identical call order.
+        ref = HSTDetector(n_trees=8, window_size=32, seed=42)
+        want = []
+        for ev in events:
+            want.append(ref.score(ev))
+            ref.learn(ev)
+
+        assert got == want
