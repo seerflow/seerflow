@@ -341,3 +341,42 @@ class TestShippedBaselinesYaml:
         pkg_dir = Path(mod.__file__).parent
         yaml_path = pkg_dir / "baselines.yaml"
         assert yaml_path.exists(), f"baselines.yaml not found at {yaml_path}"
+
+
+# ---------------------------------------------------------------------------
+# Malformed-structure rejection paths
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedStructure:
+    def test_non_list_top_level_raises(self, tmp_path: Path) -> None:
+        from seerflow.lanl.report.baselines import load_baselines
+
+        yaml_file = _write_yaml(tmp_path, "metric: auc\nkind: project_target\n")
+        with pytest.raises(ValueError, match="list"):
+            load_baselines(yaml_file)
+
+    def test_non_dict_row_raises(self, tmp_path: Path) -> None:
+        from seerflow.lanl.report.baselines import load_baselines
+
+        yaml_file = _write_yaml(tmp_path, "- just a string\n")
+        with pytest.raises(ValueError, match="mapping"):
+            load_baselines(yaml_file)
+
+    def test_non_string_notes_coerced(self, tmp_path: Path) -> None:
+        """A non-string `notes` value is coerced to str rather than rejected."""
+        from seerflow.lanl.report.baselines import load_baselines
+
+        yaml_file = _write_yaml(
+            tmp_path,
+            """\
+            - metric: auc
+              kind: project_target
+              value: 0.5
+              comparison: gt
+              source: "s"
+              notes: 123
+            """,
+        )
+        (b,) = load_baselines(yaml_file)
+        assert b.notes == "123"

@@ -113,8 +113,8 @@ def _render_comparison_section(report: Report) -> list[str]:
         f"  {'source':<{col_src}} {'verdict':<{col_verdict}} {'delta':>{col_delta}}"
     )
     sep = (
-        f"  {'─' * col_metric} {'─' * col_sf:>{col_sf}} {'─' * col_bl:>{col_bl}}"
-        f"  {'─' * col_src:<{col_src}} {'─' * col_verdict:<{col_verdict}} {'─' * col_delta:>{col_delta}}"
+        f"  {'─' * col_metric} {'─' * col_sf} {'─' * col_bl}"
+        f"  {'─' * col_src} {'─' * col_verdict} {'─' * col_delta}"
     )
     lines += [header, sep]
 

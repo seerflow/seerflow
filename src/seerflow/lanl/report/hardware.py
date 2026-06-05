@@ -8,12 +8,15 @@ the injectable ``_read_file`` helper so tests can monkeypatch it to a raiser.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import platform as _platform
 from pathlib import Path
 
 from seerflow.lanl.report.schema import HostInfo, Projection
+
+_log = logging.getLogger("seerflow.lanl.report")
 
 # ---------------------------------------------------------------------------
 # Internal file-read helper (monkeypatched in tests)
@@ -121,8 +124,8 @@ def detect_host() -> HostInfo:
     try:
         cpuinfo_text = _read_file("/proc/cpuinfo")
         cpu_model, physical_cores = _parse_cpuinfo(cpuinfo_text)
-    except Exception:  # noqa: S110
-        pass
+    except Exception:
+        _log.debug("host detection: /proc/cpuinfo unavailable", exc_info=True)
 
     if cpu_model is None:
         proc = _platform.processor()
@@ -131,8 +134,8 @@ def detect_host() -> HostInfo:
     try:
         meminfo_text = _read_file("/proc/meminfo")
         ram_gb = _parse_meminfo(meminfo_text)
-    except Exception:  # noqa: S110
-        pass
+    except Exception:
+        _log.debug("host detection: /proc/meminfo unavailable", exc_info=True)
 
     logical_cores: int | None = os.cpu_count()
 

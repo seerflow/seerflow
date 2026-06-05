@@ -360,6 +360,50 @@ def test_build_report_empty_baselines(
     assert len(report.projections) > 0
 
 
+def test_build_report_unknown_comparison_is_na(
+    accuracy: AccuracySummary,
+    telemetry: RunTelemetry,
+    host: HostInfo,
+) -> None:
+    """An unrecognised comparison operator yields verdict 'n/a' (defensive)."""
+    from seerflow.lanl.report.build import build_report
+
+    bl = Baseline(
+        metric="auc",
+        kind="published",
+        value=0.5,
+        comparison="eq",  # not a valid operator; load_baselines would reject it
+        source="bogus op",
+    )
+    assert build_report(accuracy, telemetry, [bl], host).comparisons[0].verdict == "n/a"
+
+
+def test_build_report_metric_absent_on_accuracy_skipped(
+    accuracy: AccuracySummary,
+    telemetry: RunTelemetry,
+    host: HostInfo,
+) -> None:
+    """A baseline whose metric is not an AccuracySummary field is skipped."""
+    from seerflow.lanl.report.build import build_report
+
+    bl = Baseline(
+        metric="not_a_real_metric",
+        kind="published",
+        value=1.0,
+        comparison="gte",
+        source="bogus metric",
+    )
+    assert build_report(accuracy, telemetry, [bl], host).comparisons == ()
+
+
+def test_report_main_module_importable() -> None:
+    """`python -m seerflow.lanl.report` entry shim imports cleanly."""
+    import importlib
+
+    mod = importlib.import_module("seerflow.lanl.report.__main__")
+    assert mod is not None
+
+
 def test_build_report_delta_sign(
     accuracy: AccuracySummary,
     telemetry: RunTelemetry,
