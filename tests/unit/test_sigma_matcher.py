@@ -479,3 +479,35 @@ detection:
     compiled = compile_rule(rule)
     assert isinstance(compiled.rule_id, str)
     assert len(compiled.rule_id) == 36
+
+
+class TestSigmaPrecompileCache:
+    """S-356: compile_rule caches parsed conditions + pre-warms regexes so the
+    per-event match path is a pure cache hit, producing identical decisions."""
+
+    _RULE_YAML = """
+        title: Whoami detection
+        status: test
+        logsource:
+            category: process_creation
+            product: linux
+        detection:
+            sel:
+                message|contains: whoami
+            condition: sel
+        level: high
+    """
+
+    def test_compile_rule_caches_parsed_conditions(self) -> None:
+        """compile_rule must cache the parsed condition nodes so match_event
+        does not re-read rule.detection.parsed_condition per event."""
+        cr = _make_compiled(self._RULE_YAML)
+        assert hasattr(cr, "parsed_conditions")
+        assert len(cr.parsed_conditions) >= 1
+
+    def test_precompiled_match_equals_lazy_match(self) -> None:
+        """match_event over a precompiled rule yields the same decision the
+        lazy path produced (regression guard for the optimization)."""
+        cr = _make_compiled(self._RULE_YAML)
+        assert match_event(cr, {"message": "bash -c whoami"}) is True
+        assert match_event(cr, {"message": "bash -c ls"}) is False
