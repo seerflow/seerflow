@@ -54,7 +54,9 @@ def test_validation_result_protocol_accepts_namespace() -> None:
     """A SimpleNamespace ValidationResult fake structurally satisfies the Protocol."""
     from seerflow.lanl.report.schema import ValidationResultLike
 
-    fake: ValidationResultLike = _make_fake_validation_result()  # type: ignore[assignment]
+    fake = _make_fake_validation_result()
+    # ValidationResultLike is @runtime_checkable, so the structural fake passes.
+    assert isinstance(fake, ValidationResultLike)
     assert fake.precision == 0.8
 
 

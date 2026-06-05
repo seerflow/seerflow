@@ -79,6 +79,7 @@ class ValidationResultLike(Protocol):
     attack_scenarios: tuple[ScenarioLike, ...]
     missed_attributions: tuple[MissedAttributionLike, ...]
 
+
 # ---------------------------------------------------------------------------
 # HostInfo
 # ---------------------------------------------------------------------------
