@@ -219,7 +219,14 @@ def _main(argv: list[str]) -> int:
         date="generated",
     )
     if len(argv) > 1:
-        Path(argv[1]).write_text(md, encoding="utf-8")
+        out = Path(argv[1])
+        # Refuse to write through a symlink: an attacker who can pre-create the
+        # target path as a symlink could otherwise redirect the write to an
+        # arbitrary file. Resolve only after the symlink check so the message
+        # names the path the caller actually passed.
+        if out.is_symlink():
+            raise ValueError(f"refusing to write through symlink: {out}")
+        out.resolve().write_text(md, encoding="utf-8")
     else:
         sys.stdout.write(md)
     return 0
