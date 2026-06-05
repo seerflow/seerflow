@@ -29,9 +29,13 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from seerflow.receivers.base import RawEvent
 
 
-def _load_rebased_events(dataset: Path) -> list:  # type: ignore[type-arg]
+def _load_rebased_events(dataset: Path) -> list[RawEvent]:
     """Build the time-rebased LANL ``RawEvent`` stream for *dataset*.
 
     Uses the exact deterministic rebase as ``run_validation_async`` (frozen
