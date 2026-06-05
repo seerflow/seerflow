@@ -23,7 +23,7 @@ from seerflow.lanl.parser import (
     parse_proc_line,
     parse_redteam_line,
 )
-from seerflow.lanl.report import render_validation_report
+from seerflow.lanl.report_renderer import render_validation_report
 from seerflow.lanl.validator import (
     ValidationResult,
     run_streaming_validation,

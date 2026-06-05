@@ -185,6 +185,10 @@ def main() -> None:
             from seerflow.benchmark_cmd import run_benchmark_cmd
 
             sys.exit(run_benchmark_cmd(args))
+        elif args.command == "lanl-report":
+            from seerflow.lanl.report_cmd import run_lanl_report
+
+            sys.exit(run_lanl_report(args))
         else:
             raise AssertionError(f"Unhandled command: {args.command!r}")
     except KeyboardInterrupt:

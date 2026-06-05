@@ -150,6 +150,41 @@ async def _run(
     _out(f"f1         {result.f1_score}")
     _out(f"throughput {result.throughput_events_per_s:,.0f} eps")
     _out(f"latency    {result.mean_event_latency_s * 1e3:.3f} ms/event")
+
+    from seerflow.lanl.report.baselines import load_baselines
+    from seerflow.lanl.report.build import build_report
+    from seerflow.lanl.report.hardware import detect_host
+    from seerflow.lanl.report.io import write_report_json
+    from seerflow.lanl.report.render import render_table
+    from seerflow.lanl.report.schema import AccuracySummary, RunTelemetry
+
+    try:
+        import resource as _resource
+
+        _rss_kb = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
+        peak_rss_mb: float | None = _rss_kb / 1024
+    except ImportError:
+        peak_rss_mb = None
+
+    events_processed_int: int = getattr(result, "total_events_processed", 0) or 0
+    telemetry = RunTelemetry(
+        wall_s=dt,
+        events_processed=events_processed_int,
+        throughput_eps=result.throughput_events_per_s,
+        mean_latency_s=result.mean_event_latency_s,
+        peak_rss_mb=peak_rss_mb,
+    )
+    accuracy = AccuracySummary.from_validation_result(result)
+    host = detect_host()
+
+    report_path = state_db.parent / "report.json"
+    write_report_json(report_path, accuracy, telemetry, host)
+
+    report = build_report(accuracy, telemetry, load_baselines(), host)
+    for line in render_table(report).splitlines():
+        _out(line)
+
+    _out(f"\nTo re-render:  seerflow lanl-report {report_path}")
     return 0
 
 

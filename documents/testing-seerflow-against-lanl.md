@@ -303,6 +303,24 @@ nohup uv run python tools/run_lanl_streaming.py data/lanl \
 uv run python tools/run_lanl_streaming.py --status --state-db data/lanl_run/state.db
 ```
 
+**End-of-run report (S-358).** When the runner finishes it writes
+`<state-db dir>/report.json` and prints a four-section report: **behavior**
+(precision/recall/F1/AUC/FPR + per-scenario MTTD), **comparison vs baselines**
+(project targets like FP<2% / AUC>0 / the OQ-2 AUC≥0.97 SLA, and cited published
+LANL results — Tuor 2017 AUC 0.98, Argus/S&P 2024 0.9817, Bowman RAID 2020 recall
+0.85), **efficiency & host** (throughput/latency/peak-RSS + this machine's
+CPU/cores/RAM), and a **hardware projection** (full-run ETA, and a conditional
+"if sharded to N → ~wall/N" table — flagged single-threaded until S-356). Re-render
+any saved sidecar against the current baselines registry:
+
+```bash
+uv run python -m seerflow lanl-report data/lanl_run/report.json        # table
+uv run python -m seerflow lanl-report data/lanl_run/report.json --json # machine-readable
+```
+
+Baselines live in `src/seerflow/lanl/report/baselines.yaml` (project targets +
+cited published numbers); edit there and re-render to update the comparison.
+
 **Direct API** (quick bounded passes). Note: `run_streaming_validation` writes
 its checkpoints to a `TemporaryDirectory` that is deleted on return, so it is
 **not** resumable across a kill — for a resumable run use
@@ -361,6 +379,14 @@ measures the *engine*, not LANL accuracy.
 | Per-scenario MTTD | c2 only | every scenario should have a finite MTTD |
 | `missed_attributions` empty | no | ideally yes (every red-team event covered) |
 | Peak RSS (streaming) | n/a | **flat** as `max_events` grows |
+
+**Acceptance SLA (S-358 / closes OQ-2).** The full-run pass bar is encoded as
+`project_target` rows in `src/seerflow/lanl/report/baselines.yaml` and scored
+automatically by the end-of-run report: **AUC ≥ 0.97** (field floor — Tuor 2018
+reaches 0.98, Argus/S&P 2024 0.9817), **false-positive rate ≤ 2%** (PRD), and
+**≥ 1 red-team true positive**. The report's comparison table also shows
+Seerflow against the cited published results, so "how it stacks up vs the field"
+is part of the run output rather than a manual lookup.
 
 ---
 
