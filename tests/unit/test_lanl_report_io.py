@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 from seerflow.lanl.report.schema import (
@@ -21,13 +22,13 @@ from seerflow.lanl.report.schema import (
 )
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures (delegate to the shared factories in tests/unit/conftest.py)
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
-def accuracy() -> AccuracySummary:
-    return AccuracySummary(
+def accuracy(make_accuracy: Callable[..., AccuracySummary]) -> AccuracySummary:
+    return make_accuracy(
         precision=0.87,
         recall=0.80,
         f1=0.833,
@@ -51,8 +52,8 @@ def accuracy() -> AccuracySummary:
 
 
 @pytest.fixture()
-def telemetry() -> RunTelemetry:
-    return RunTelemetry(
+def telemetry(make_telemetry: Callable[..., RunTelemetry]) -> RunTelemetry:
+    return make_telemetry(
         wall_s=120.5,
         events_processed=500_000,
         throughput_eps=4150.0,
@@ -62,8 +63,8 @@ def telemetry() -> RunTelemetry:
 
 
 @pytest.fixture()
-def host() -> HostInfo:
-    return HostInfo(
+def host(make_host: Callable[..., HostInfo]) -> HostInfo:
+    return make_host(
         cpu_model="AMD Ryzen 5 3600",
         physical_cores=6,
         logical_cores=12,

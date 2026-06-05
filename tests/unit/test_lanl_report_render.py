@@ -5,6 +5,8 @@ Tests cover render_table and render_json.  Written FIRST (TDD — RED phase).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import msgspec
 import pytest
 
@@ -18,14 +20,17 @@ from seerflow.lanl.report.schema import (
     ScenarioSummary,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures (delegate to the shared factories in tests/unit/conftest.py)
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
-def accuracy() -> AccuracySummary:
-    return AccuracySummary(
+def accuracy(make_accuracy: Callable[..., AccuracySummary]) -> AccuracySummary:
+    return make_accuracy(
         precision=0.92,
         recall=0.88,
         f1=0.899,
@@ -55,8 +60,8 @@ def accuracy() -> AccuracySummary:
 
 
 @pytest.fixture()
-def telemetry() -> RunTelemetry:
-    return RunTelemetry(
+def telemetry(make_telemetry: Callable[..., RunTelemetry]) -> RunTelemetry:
+    return make_telemetry(
         wall_s=300.0,
         events_processed=1_000_000,
         throughput_eps=3333.33,
@@ -66,8 +71,8 @@ def telemetry() -> RunTelemetry:
 
 
 @pytest.fixture()
-def host() -> HostInfo:
-    return HostInfo(
+def host(make_host: Callable[..., HostInfo]) -> HostInfo:
+    return make_host(
         cpu_model="Intel Core i7-9750H",
         physical_cores=6,
         logical_cores=12,
