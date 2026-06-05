@@ -76,15 +76,19 @@ class FlowRecord:
         time, duration, src_computer, src_port,
         dst_computer, dst_port, protocol, packet_count, byte_count
 
-    Missing port values (``?``) are stored as ``-1``.
+    Ports are stored verbatim as strings: LANL anonymizes non-well-known
+    ports to a consistent ``N<id>`` token (well-known ports stay numeric),
+    and missing values are the marker ``?``. Ports are categorical
+    identifiers here — only rendered into the event message, never compared
+    numerically — so the raw token is preserved without loss.
     """
 
     time: int
     duration: int
     src_computer: str
-    src_port: int
+    src_port: str
     dst_computer: str
-    dst_port: int
+    dst_port: str
     protocol: int
     packet_count: int
     byte_count: int
@@ -137,11 +141,15 @@ def _parse_int(value: str) -> int:
     return int(value)
 
 
-def _parse_port(value: str) -> int:
-    """Convert a port field value to int; returns -1 for missing (``?``)."""
-    if value == "?":
-        return -1
-    return int(value)
+def _parse_port(value: str) -> str:
+    """Return a LANL port field verbatim.
+
+    Ports are categorical, not numeric: well-known ports appear as their
+    number (``"389"``), non-well-known ports are anonymized to a consistent
+    ``"N<id>"`` token, and missing values are ``"?"``. The raw token is kept
+    so the anonymized identity (and the missing marker) survive intact.
+    """
+    return value
 
 
 def _parse_success(value: str) -> bool:
@@ -225,7 +233,8 @@ def parse_flow_line(line: str) -> FlowRecord:
         time, duration, src_computer, src_port,
         dst_computer, dst_port, protocol, packet_count, byte_count
 
-    Missing port values (``?``) are stored as ``-1``.
+    Ports are kept verbatim as strings (numeric, anonymized ``N<id>``, or the
+    missing marker ``?``) — see :class:`FlowRecord`.
 
     Args:
         line: A raw CSV line.
