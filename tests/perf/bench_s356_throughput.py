@@ -31,29 +31,19 @@ import time
 from pathlib import Path
 
 
-async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, float]:
-    """Return ``(events_per_pass, timed_events, timed_elapsed_s, eps)``.
+def _load_rebased_events(dataset: Path) -> list:  # type: ignore[type-arg]
+    """Build the time-rebased LANL ``RawEvent`` stream for *dataset*.
 
-    One untimed warmup pass primes the detectors; ``passes`` timed passes
-    then drive the same event stream through the assembled handler.
+    Uses the exact deterministic rebase as ``run_validation_async`` (frozen
+    replay epoch) so the benchmark drives the same stream the harness scores.
     """
-    import tempfile
-
-    from seerflow.config import SeerflowConfig, StorageConfig
-    from seerflow.lanl import validator
-    from seerflow.lanl.parser import (
-        parse_auth_line,
-        parse_flow_line,
-        parse_proc_line,
-    )
+    from seerflow.lanl.parser import parse_auth_line, parse_flow_line, parse_proc_line
     from seerflow.lanl.validator import (
         REPLAY_EPOCH_NS,
         REPLAY_HEADROOM_NS,
         _build_raw_events,
         _rebased,
     )
-    from seerflow.pipeline.assembly import assemble_handler
-    from seerflow.storage import connect_storage
 
     def _read_lines(filename: str) -> list[str]:
         p = dataset / filename
@@ -66,15 +56,32 @@ async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, f
     flow = [parse_flow_line(ln) for ln in _read_lines("flows.csv")]
     raw_events = _build_raw_events(auth, proc, flow)
     if not raw_events:
-        return 0, 0, 0.0, 0.0
+        return []
 
-    # Same deterministic rebase as run_validation_async (frozen replay epoch).
     max_ts = max(r.received_ns for r in raw_events)
     offset_ns = REPLAY_EPOCH_NS - max_ts - REPLAY_HEADROOM_NS
-    raw_events = sorted(
+    return sorted(
         (_rebased(r, offset_ns) for r in raw_events),
         key=lambda r: r.received_ns,
     )
+
+
+async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, float]:
+    """Return ``(events_per_pass, timed_events, timed_elapsed_s, eps)``.
+
+    One untimed warmup pass primes the detectors; ``passes`` timed passes
+    then drive the same event stream through the assembled handler.
+    """
+    import tempfile
+
+    from seerflow.config import SeerflowConfig, StorageConfig
+    from seerflow.lanl.validator import REPLAY_EPOCH_NS
+    from seerflow.pipeline.assembly import assemble_handler
+    from seerflow.storage import connect_storage
+
+    raw_events = _load_rebased_events(dataset)
+    if not raw_events:
+        return 0, 0, 0.0, 0.0
     n = len(raw_events)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -102,9 +109,6 @@ async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, f
 
     timed_events = n * passes
     eps = timed_events / elapsed if elapsed > 0 else 0.0
-    # Reference validator import keeps the module dependency explicit for callers
-    # auditing what stack this drives.
-    assert validator.REPLAY_EPOCH_NS == REPLAY_EPOCH_NS
     return n, timed_events, elapsed, eps
 
 
