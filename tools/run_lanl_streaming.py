@@ -63,9 +63,7 @@ class _DropAnomaly(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.msg
-        return not (
-            isinstance(msg, str) and msg.lstrip().startswith(_FLOOD_PREFIXES)
-        )
+        return not (isinstance(msg, str) and msg.lstrip().startswith(_FLOOD_PREFIXES))
 
 
 def _configure_logging() -> None:
@@ -83,9 +81,7 @@ async def _connect(state_db: Path):
     from seerflow.storage import connect_storage
 
     state_db.parent.mkdir(parents=True, exist_ok=True)
-    return await connect_storage(
-        StorageConfig(backend="sqlite", sqlite_path=str(state_db))
-    )
+    return await connect_storage(StorageConfig(backend="sqlite", sqlite_path=str(state_db)))
 
 
 async def _status(state_db: Path) -> int:
@@ -158,9 +154,7 @@ async def _run(
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(
-        description="Resumable LANL streaming validation runner"
-    )
+    p = argparse.ArgumentParser(description="Resumable LANL streaming validation runner")
     p.add_argument("dataset_dir", type=Path, nargs="?", default=Path("data/lanl"))
     p.add_argument(
         "--state-db",
