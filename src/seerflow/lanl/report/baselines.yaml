@@ -1,0 +1,33 @@
+# LANL benchmark baselines registry (S-358).
+#
+# project_target rows: derived from the Seerflow PRD / acceptance criteria.
+# published rows: populated by S-358 Task 3 research pass.
+#
+# IMPORTANT: any row with value: null causes load_baselines() to raise
+# ValueError — the registry refuses to load with unresolved published baselines.
+# Populate all published rows before using load_baselines() in production.
+
+- metric: false_positive_rate
+  kind: project_target
+  value: 0.02
+  comparison: lte
+  source: "PRD 2026-03-17 success metrics (FP < 2% after 24h baseline)"
+
+- metric: auc
+  kind: project_target
+  value: 0.0
+  comparison: gt
+  source: "documents/testing-seerflow-against-lanl.md §5 (AUC a real area in (0,1))"
+
+- metric: true_positives
+  kind: project_target
+  value: 1
+  comparison: gte
+  source: "functional-review OQ-2 minimal works bar (>=1 red-team TP)"
+
+# published rows populated by S-358 Task 3 research pass
+- metric: auc
+  kind: published
+  value: null
+  comparison: gte
+  source: "PENDING research pass S-358 Task 3"
