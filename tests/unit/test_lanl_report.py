@@ -7,9 +7,14 @@ Markdown containing the exact metrics. No I/O, no datetime.now().
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from seerflow.lanl.validator import ValidationResult
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_result(
@@ -191,7 +196,7 @@ def test_report_auc_none_renders_na(render):
 # ---------------------------------------------------------------------------
 
 
-def test_main_writes_to_regular_path(tmp_path):
+def test_main_writes_to_regular_path(tmp_path: Path) -> None:
     """_main writes the report to a normal (non-symlink) argv[1] path."""
     from seerflow.lanl import report_renderer
 
@@ -201,7 +206,7 @@ def test_main_writes_to_regular_path(tmp_path):
     assert out.read_text(encoding="utf-8").startswith("# LANL")
 
 
-def test_main_refuses_symlink_target(tmp_path):
+def test_main_refuses_symlink_target(tmp_path: Path) -> None:
     """_main refuses to follow a symlink at argv[1] (no symlink-follow write)."""
     from seerflow.lanl import report_renderer
 
