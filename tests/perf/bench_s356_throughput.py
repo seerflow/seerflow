@@ -46,7 +46,12 @@ async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, f
         parse_flow_line,
         parse_proc_line,
     )
-    from seerflow.lanl.validator import REPLAY_EPOCH_NS, REPLAY_HEADROOM_NS, _build_raw_events, _rebased
+    from seerflow.lanl.validator import (
+        REPLAY_EPOCH_NS,
+        REPLAY_HEADROOM_NS,
+        _build_raw_events,
+        _rebased,
+    )
     from seerflow.pipeline.assembly import assemble_handler
     from seerflow.storage import connect_storage
 
