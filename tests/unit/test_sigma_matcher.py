@@ -511,3 +511,50 @@ class TestSigmaPrecompileCache:
         cr = _make_compiled(self._RULE_YAML)
         assert match_event(cr, {"message": "bash -c whoami"}) is True
         assert match_event(cr, {"message": "bash -c ls"}) is False
+
+
+class TestEvalNodeBranchCoverage:
+    """S-356: close pre-existing _eval_node branch gaps surfaced by the
+    touched-path coverage gate (numeric-value edge paths + keyword non-string)."""
+
+    def test_numeric_value_missing_field_returns_false(self) -> None:
+        """A numeric Sigma value against an event missing that field -> False."""
+        cr = _make_compiled("""
+            title: Test
+            status: test
+            logsource:
+                category: test
+            detection:
+                sel:
+                    EventID: 4625
+                condition: sel
+            level: medium
+        """)
+        # template_id (the remapped EventID) absent -> _eval_node line 232.
+        assert match_event(cr, {"message": "no event id here"}) is False
+
+    def test_numeric_value_in_tuple_field(self) -> None:
+        """A numeric Sigma value checked against a tuple field via membership."""
+        from sigma.conditions import ConditionFieldEqualsValueExpression
+
+        from seerflow.sigma.matcher import (
+            CompiledRule,
+            _eval_node,
+        )
+
+        # Build a leaf node directly: field is a TUPLE_FIELD, value is numeric.
+        node = ConditionFieldEqualsValueExpression("related_ips", 42)
+        assert _eval_node(node, {"related_ips": (42, 7)}) is True
+        assert _eval_node(node, {"related_ips": (1, 2)}) is False
+        assert isinstance(CompiledRule, type)  # import sanity
+
+    def test_keyword_non_string_value(self) -> None:
+        """A keyword (ConditionValueExpression) with a non-SigmaString value
+        falls back to substring search via str()."""
+        from sigma.conditions import ConditionValueExpression
+
+        from seerflow.sigma.matcher import _eval_node
+
+        node = ConditionValueExpression(4625)
+        assert _eval_node(node, {"message": "code 4625 seen"}) is True
+        assert _eval_node(node, {"message": "nothing here"}) is False
