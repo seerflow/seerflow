@@ -23,12 +23,13 @@
 #   --email <addr>   --usage <text>   --files "<list>"   --dest <dir>
 #
 # Notes:
-#   * The token embeds a timestamp and expires. auth.txt.gz is 7.2 GB and may
-#     outlast a token; this script re-mints a fresh token before each member
-#     so a long auth download starts clean. A single member that itself
-#     outlives its token will 403 mid-stream — re-run; completed members are
-#     skipped.
-#   * Re-running skips any member whose .csv already exists.
+#   * The token embeds a timestamp and expires, and the fence resets long
+#     transfers; auth.txt.gz is 7.2 GB and outlives a single token. download_gz
+#     handles this in-process: it re-mints a fresh token and resumes the partial
+#     .gz (`-C -`) on every attempt, aborting stalled sockets, until the file
+#     reaches its probed full size (capped at MAX_ATTEMPTS=300 per member).
+#   * Re-running skips any member whose .csv already exists; a partial .gz from
+#     an interrupted run is resumed, not restarted.
 
 set -euo pipefail
 
@@ -38,6 +39,7 @@ EMAIL="${EMAIL:-}"
 USAGE="${USAGE:-Evaluating Seerflow streaming log-anomaly detection}"
 FILES="${FILES:-auth proc flows dns redteam}"
 DEST="${DEST:-data/lanl}"
+MAX_ATTEMPTS="${MAX_ATTEMPTS:-300}"
 
 usage() {
   cat <<'EOF'
@@ -111,6 +113,51 @@ mint_token() {
   printf '%s' "$body"
 }
 
+probe_size() {
+  # Total byte length of a member, via a one-byte Range probe on a fresh token.
+  # Echoes the size (e.g. "7626505158") or empty string if the server withholds
+  # Content-Range — callers must tolerate an empty result.
+  local name="$1" token cr
+  token="$(mint_token)"
+  cr="$(curl -sS -r 0-0 -D - -o /dev/null \
+    "$BASE/data-fence/$token/cyber1/$name.txt.gz" 2>/dev/null \
+    | tr -d '\r' | grep -i '^Content-Range:' | tail -1 || true)"
+  # cr = "Content-Range: bytes 0-0/7626505158" -> strip everything up to "/"
+  [[ "$cr" == *"/"* ]] && printf '%s' "${cr##*/}"
+}
+
+download_gz() {
+  # Resilient resume loop for one member. The LANL fence resets long transfers
+  # and its tokens expire before a 7 GB member finishes, so a single curl is
+  # not enough. We probe the target size, then loop: re-mint a fresh token,
+  # resume the partial .gz with `-C -`, and abort stalled sockets quickly
+  # (--speed-time) so the next attempt starts clean. Completed bytes persist
+  # on disk between attempts. Returns 0 once the file reaches its full size.
+  local name="$1" gz="$2" target attempt=0 have
+  target="$(probe_size "$name")"
+  while :; do
+    have="$(stat -c %s "$gz" 2>/dev/null || echo 0)"
+    if [[ -n "$target" && "$have" -ge "$target" ]]; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [[ "$attempt" -gt "$MAX_ATTEMPTS" ]]; then
+      echo "error: $name still incomplete after $MAX_ATTEMPTS attempts" \
+        "($have/${target:-?} bytes) — re-run to continue" >&2
+      return 1
+    fi
+    echo "          [attempt $attempt] resuming from $have bytes${target:+ / $target}"
+    if curl -fSL -C - \
+      --retry 5 --retry-all-errors --retry-delay 5 \
+      --speed-time 60 --speed-limit 500 \
+      "$BASE/data-fence/$(mint_token)/cyber1/$name.txt.gz" -o "$gz"; then
+      # curl reports success; with no known target trust it, else re-check size.
+      [[ -z "$target" ]] && return 0
+    fi
+    sleep 3
+  done
+}
+
 mkdir -p "$DEST"
 
 read -ra members <<< "$FILES"
@@ -124,10 +171,8 @@ for name in "${members[@]}"; do
     echo "[$i/$total] skip $name — $csv already present"
     continue
   fi
-  token="$(mint_token)"
-  url="$BASE/data-fence/$token/cyber1/$name.txt.gz"
   echo "[$i/$total] downloading $name.txt.gz ..."
-  curl -fSL --retry 3 --retry-delay 2 -C - "$url" -o "$gz"
+  download_gz "$name" "$gz"
   echo "          decompressing -> $csv"
   gunzip -kc "$gz" > "$csv"
   echo "          $(wc -l < "$csv") rows"
