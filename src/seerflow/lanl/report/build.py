@@ -13,10 +13,12 @@ from seerflow.lanl.report.schema import (
     TOTAL_EVENTS,
     AccuracySummary,
     Baseline,
+    Comparison,
     ComparisonRow,
     HostInfo,
     Report,
     RunTelemetry,
+    Verdict,
 )
 
 # ---------------------------------------------------------------------------
@@ -30,8 +32,8 @@ _VERDICT_FAIL_BELOW = frozenset({"gte", "gt"})
 def _evaluate_verdict(
     seerflow_value: float,
     baseline_value: float,
-    comparison: str,
-) -> str:
+    comparison: Comparison,
+) -> Verdict:
     """Return ``"pass"``, ``"below"``, or ``"above"`` for a comparison.
 
     The *comparison* string describes the condition that seerflow **must**

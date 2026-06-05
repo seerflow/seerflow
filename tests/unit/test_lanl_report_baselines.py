@@ -25,6 +25,22 @@ def _write_yaml(tmp_path: Path, content: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Single source of known values (S-359)
+# ---------------------------------------------------------------------------
+
+
+def test_known_sets_derive_from_schema_literals() -> None:
+    """_KNOWN_KINDS / _KNOWN_COMPARISONS are derived from the schema Literals."""
+    from typing import get_args
+
+    from seerflow.lanl.report.baselines import _KNOWN_COMPARISONS, _KNOWN_KINDS
+    from seerflow.lanl.report.schema import BaselineKind, Comparison
+
+    assert _KNOWN_KINDS == frozenset(get_args(BaselineKind))
+    assert _KNOWN_COMPARISONS == frozenset(get_args(Comparison))
+
+
+# ---------------------------------------------------------------------------
 # load_baselines — valid input
 # ---------------------------------------------------------------------------
 

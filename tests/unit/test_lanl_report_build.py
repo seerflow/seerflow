@@ -371,8 +371,11 @@ def test_build_report_unknown_comparison_is_na(
     bl = Baseline(
         metric="auc",
         kind="published",
+        # invalid on purpose: exercises the defensive n/a branch. msgspec does
+        # not validate Literal on direct construction, so this builds at runtime;
+        # the type-ignore keeps mypy happy. load_baselines would reject it.
+        comparison="eq",  # type: ignore[arg-type]
         value=0.5,
-        comparison="eq",  # not a valid operator; load_baselines would reject it
         source="bogus op",
     )
     assert build_report(accuracy, telemetry, [bl], host).comparisons[0].verdict == "n/a"

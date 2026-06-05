@@ -36,6 +36,29 @@ def _make_fake_validation_result(**overrides: object) -> types.SimpleNamespace:
 
 
 # ---------------------------------------------------------------------------
+# Literal aliases + result Protocol (S-359)
+# ---------------------------------------------------------------------------
+
+
+def test_literal_aliases_exported() -> None:
+    from typing import get_args
+
+    from seerflow.lanl.report.schema import BaselineKind, Comparison, Verdict
+
+    assert frozenset(get_args(BaselineKind)) == {"project_target", "published"}
+    assert frozenset(get_args(Comparison)) == {"lt", "lte", "gt", "gte"}
+    assert frozenset(get_args(Verdict)) == {"pass", "below", "above", "n/a"}
+
+
+def test_validation_result_protocol_accepts_namespace() -> None:
+    """A SimpleNamespace ValidationResult fake structurally satisfies the Protocol."""
+    from seerflow.lanl.report.schema import ValidationResultLike
+
+    fake: ValidationResultLike = _make_fake_validation_result()  # type: ignore[assignment]
+    assert fake.precision == 0.8
+
+
+# ---------------------------------------------------------------------------
 # HostInfo
 # ---------------------------------------------------------------------------
 
