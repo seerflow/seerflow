@@ -32,7 +32,7 @@ storage:
 
 ```yaml
 detection:
-  hst_n_trees: 25
+  hst_n_trees: 10
   hst_window_size: 250
   hw_alpha: 0.2
   hw_beta: 0.05

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from seerflow.config import SeerflowConfig
     from seerflow.receivers.base import RawEvent
 
 
@@ -70,15 +71,45 @@ def _load_rebased_events(dataset: Path) -> list[RawEvent]:
     )
 
 
-async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, float]:
+def _config_with_hst(n_trees: int | None, window_size: int | None) -> SeerflowConfig:
+    """Build a ``SeerflowConfig`` with optional HST overrides.
+
+    S-360: when both overrides are ``None`` the result is byte-identical to a
+    plain ``SeerflowConfig()`` (the default benchmark path is unchanged). When
+    provided, the HST tuning knobs are replaced so one script can reproduce the
+    before (25/1000) and after (10/250) throughput numbers from a single run.
+    """
+    import dataclasses
+
+    from seerflow.config import SeerflowConfig
+
+    config = SeerflowConfig()
+    if n_trees is None and window_size is None:
+        return config
+    detection = dataclasses.replace(
+        config.detection,
+        hst_n_trees=config.detection.hst_n_trees if n_trees is None else n_trees,
+        hst_window_size=config.detection.hst_window_size if window_size is None else window_size,
+    )
+    return dataclasses.replace(config, detection=detection)
+
+
+async def _measure_async(
+    dataset: Path,
+    passes: int,
+    *,
+    n_trees: int | None = None,
+    window_size: int | None = None,
+) -> tuple[int, int, float, float]:
     """Return ``(events_per_pass, timed_events, timed_elapsed_s, eps)``.
 
     One untimed warmup pass primes the detectors; ``passes`` timed passes
-    then drive the same event stream through the assembled handler.
+    then drive the same event stream through the assembled handler. Optional
+    ``n_trees`` / ``window_size`` override the HST tuning knobs (S-360).
     """
     import tempfile
 
-    from seerflow.config import SeerflowConfig, StorageConfig
+    from seerflow.config import StorageConfig
     from seerflow.lanl.validator import REPLAY_EPOCH_NS
     from seerflow.pipeline.assembly import assemble_handler
     from seerflow.storage import connect_storage
@@ -87,15 +118,14 @@ async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, f
     if not raw_events:
         return 0, 0, 0.0, 0.0
     n = len(raw_events)
+    config = _config_with_hst(n_trees, window_size)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         storage = await connect_storage(
             StorageConfig(backend="sqlite", sqlite_path=f"{tmpdir}/bench.db")
         )
         try:
-            assembled = await assemble_handler(
-                SeerflowConfig(), storage, clock_ns=lambda: REPLAY_EPOCH_NS
-            )
+            assembled = await assemble_handler(config, storage, clock_ns=lambda: REPLAY_EPOCH_NS)
             try:
                 # Warmup pass (untimed) — primes detectors / templates / rules.
                 for raw in raw_events:
@@ -116,10 +146,16 @@ async def _measure_async(dataset: Path, passes: int) -> tuple[int, int, float, f
     return n, timed_events, elapsed, eps
 
 
-def _measure(dataset: Path, passes: int) -> tuple[int, int, float, float]:
+def _measure(
+    dataset: Path,
+    passes: int,
+    *,
+    n_trees: int | None = None,
+    window_size: int | None = None,
+) -> tuple[int, int, float, float]:
     """Synchronous wrapper around :func:`_measure_async`."""
     logging.disable(logging.CRITICAL)  # silence per-event logging noise
-    return asyncio.run(_measure_async(dataset, passes))
+    return asyncio.run(_measure_async(dataset, passes, n_trees=n_trees, window_size=window_size))
 
 
 def _main() -> int:
@@ -130,11 +166,28 @@ def _main() -> int:
         type=Path,
         default=Path("tests/fixtures/lanl"),
     )
+    parser.add_argument(
+        "--n-trees",
+        type=int,
+        default=None,
+        help="Override HST n_trees (S-360 before/after tuning; default: config)",
+    )
+    parser.add_argument(
+        "--window-size",
+        type=int,
+        default=None,
+        help="Override HST window_size (S-360 before/after tuning; default: config)",
+    )
     args = parser.parse_args()
 
-    n, timed_events, elapsed, eps = _measure(args.dataset, args.passes)
+    config = _config_with_hst(args.n_trees, args.window_size)
+    n, timed_events, elapsed, eps = _measure(
+        args.dataset, args.passes, n_trees=args.n_trees, window_size=args.window_size
+    )
     print(  # noqa: T201 -- CLI output is the point of this script.
         f"events_per_pass={n} passes={args.passes} "
+        f"n_trees={config.detection.hst_n_trees} "
+        f"window_size={config.detection.hst_window_size} "
         f"timed_events={timed_events} timed_elapsed_s={elapsed:.4f} "
         f"per_event_eps={eps:.1f}"
     )

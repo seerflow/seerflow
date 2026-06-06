@@ -140,6 +140,16 @@ class TestHSTDetector:
         assert isinstance(score, float)
         assert 0.0 <= score <= 1.0
 
+    def test_default_constructor_uses_river_defaults(self) -> None:
+        """S-360: a bare HSTDetector() uses River's library defaults
+        (10 trees / 250-event window) — parity with DetectionConfig defaults."""
+        from seerflow.detection.hst import HSTDetector
+
+        detector = HSTDetector()
+
+        assert detector._model.n_trees == 10
+        assert detector._model.window_size == 250
+
     def test_score_clamped_to_unit_interval(self) -> None:
         """Scores should always be in [0.0, 1.0] regardless of raw model output."""
         from seerflow.detection.hst import HSTDetector

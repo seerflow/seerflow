@@ -299,8 +299,8 @@ def _build_detection(data: dict[str, Any]) -> DetectionConfig:
             f"detection.sigma_rules_dirs must be a list, got {type(raw_sigma_dirs).__name__!r}"
         )
     config = DetectionConfig(
-        hst_window_size=data.get("hst_window_size", 1000),
-        hst_n_trees=data.get("hst_n_trees", 25),
+        hst_window_size=data.get("hst_window_size", 250),
+        hst_n_trees=data.get("hst_n_trees", 10),
         dspot_calibration_window=dspot.get("calibration_window", 1000),
         dspot_risk_level=dspot.get("risk_level", 0.0001),
         dspot_initial_percentile=dspot.get("initial_percentile", 98),

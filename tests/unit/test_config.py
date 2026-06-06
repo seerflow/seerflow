@@ -45,6 +45,21 @@ class TestDefaultConfig:
         assert config.llm.backend == ""
         assert config.llm.ollama_url == "http://localhost:11434"
 
+    def test_default_hst_tuning_uses_river_defaults(self, tmp_path: Path) -> None:
+        """S-360: HST defaults tuned to River's library defaults (10 trees /
+        250-event window) for ~2x per-event throughput. Provably
+        metrics/determinism-neutral on the committed LANL fixture (HST fires no
+        alerts there), so no published-metric re-baseline is needed."""
+        config = load_config(None, search_dir=tmp_path)
+        assert config.detection.hst_n_trees == 10
+        assert config.detection.hst_window_size == 250
+
+    def test_build_detection_dict_path_uses_river_defaults(self) -> None:
+        """S-360: the dict-built config path agrees with the dataclass default."""
+        detection = _build_detection({})
+        assert detection.hst_n_trees == 10
+        assert detection.hst_window_size == 250
+
     def test_data_dir_uses_xdg(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("SEERFLOW_DATA_DIR", raising=False)
         monkeypatch.delenv("XDG_DATA_HOME", raising=False)
