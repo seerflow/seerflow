@@ -8,7 +8,7 @@ path is introduced (S-361 AC-3).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import IO, TYPE_CHECKING, Protocol
+from typing import IO, TYPE_CHECKING, Literal, Protocol
 
 from seerflow.alerting.target import loop_deliver_digest
 
@@ -45,7 +45,7 @@ def _build_console_sink(config: SinkConfig, stream_override: IO[str] | None) -> 
 
     opts = dict(config.options)
     stream = stream_override if stream_override is not None else opts.get("stream", "stdout")
-    fmt = "json" if config.formatter == "json" else "human"
+    fmt: Literal["human", "json"] = "json" if config.formatter == "json" else "human"
     return ConsoleSink(
         stream,  # type: ignore[arg-type]
         fmt=fmt,
