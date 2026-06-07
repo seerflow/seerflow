@@ -375,6 +375,12 @@ def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
 
 _VALID_WEBHOOK_FORMATS = frozenset({"slack", "teams", "json"})
 
+# Sink formatter tokens accepted by ``alerting.sinks[*].formatter``. Superset of
+# the dict-only webhook formats: CEF (S-364) is a line/text format that pairs
+# with text sinks (syslog/webhook), so it is selectable on a sink but NOT on the
+# JSON-POSTing webhook-target validator above.
+_VALID_SINK_FORMATTERS = _VALID_WEBHOOK_FORMATS | {"cef"}
+
 # Reject any header-like field (email From/To/Subject) containing CR/LF —
 # such characters can split SMTP headers on relays that do not enforce
 # Python 3 ``email.message.EmailMessage`` folding semantics.
@@ -431,8 +437,8 @@ def _build_one_sink(idx: int, entry: dict[str, Any]) -> SinkConfig:
     if not isinstance(name, str) or not name:
         raise ConfigError(f"alerting.sinks[{idx}].name must be a non-empty string")
     formatter = entry.get("formatter", "json")
-    if formatter not in _VALID_WEBHOOK_FORMATS:
-        valid = sorted(_VALID_WEBHOOK_FORMATS)
+    if formatter not in _VALID_SINK_FORMATTERS:
+        valid = sorted(_VALID_SINK_FORMATTERS)
         raise ConfigError(
             f"alerting.sinks[{idx}].formatter must be one of {valid}, got {formatter!r}"
         )

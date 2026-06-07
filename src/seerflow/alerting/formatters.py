@@ -1,17 +1,24 @@
-"""Alert formatters for Slack, Microsoft Teams, and plain JSON.
+"""Alert formatters for Slack, Microsoft Teams, plain JSON, and CEF.
 
-Each formatter is a pure function: takes an Alert, returns a JSON-serializable
-dict. No I/O, no side effects.
+Each formatter is a pure function with no I/O and no side effects.
 
-- ``format_slack``  — Slack Block Kit payload
-- ``format_teams``  — Teams Adaptive Card payload (message/attachments envelope)
+- ``format_slack``  — Slack Block Kit payload (dict)
+- ``format_teams``  — Teams Adaptive Card payload (message/attachments dict)
 - ``format_json``   — Flat dict with ISO 8601 timestamp
+- ``format_cef``    — ArcSight Common Event Format single-line string
+
+Unlike the dict-returning webhook formatters, ``format_cef`` returns a single
+``str`` line; it is transport-decoupled and pairs with line/text sinks
+(syslog/webhook) rather than the JSON-POSTing webhook dispatcher.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+
+import seerflow
+from seerflow.models.event import SeverityLevel
 
 if TYPE_CHECKING:
     from seerflow.models.alert import Alert
@@ -279,3 +286,124 @@ def format_json(alert: Alert, *, dashboard_url: str = "") -> dict:  # type: igno
     if dashboard_url:
         result["dashboard_url"] = dashboard_url
     return result
+
+
+# ---------------------------------------------------------------------------
+# CEF (ArcSight Common Event Format) formatter
+# ---------------------------------------------------------------------------
+#
+# Grammar (CEF v0):
+#   CEF:0|Vendor|Product|Version|SignatureID|Name|Severity|Extension
+#
+# Vendor/Product/Version are the static Seerflow product identity, NOT alert
+# data, so they live in constants + the package ``__version__`` (single source
+# of truth — the device version tracks releases automatically).
+
+_CEF_VERSION = "0"
+_CEF_VENDOR = "Seerflow"
+_CEF_PRODUCT = "Seerflow"
+
+# SeverityLevel (TRACE=0 .. FATAL=6) -> CEF severity (0..10). Explicit table:
+# no arithmetic scaling guesswork — every level is conformance-tested.
+_CEF_SEVERITY: dict[SeverityLevel, int] = {
+    SeverityLevel.TRACE: 0,
+    SeverityLevel.INFORMATIONAL: 2,
+    SeverityLevel.NOTICE: 3,
+    SeverityLevel.WARNING: 5,
+    SeverityLevel.ERROR: 7,
+    SeverityLevel.CRITICAL: 9,
+    SeverityLevel.FATAL: 10,
+}
+
+# entity_type -> CEF dictionary key for the well-known types. Other types fall
+# back to a labelled custom string (cs1/cs1Label) carrying the type name.
+_CEF_ENTITY_KEY: dict[str, str] = {"ip": "src", "user": "suser", "host": "shost"}
+
+
+def _cef_escape_header(value: str) -> str:
+    """Escape a CEF header field: ``\\`` then ``|`` (order matters).
+
+    CR/LF are stripped — a header newline would break the single-line record
+    and CEF leaves header-newline behaviour undefined.
+    """
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\r", "").replace("\n", "")
+
+
+def _cef_escape_extension(value: str) -> str:
+    """Escape a CEF extension value: ``\\`` first, then ``=``, newline, CR."""
+    return (
+        value.replace("\\", "\\\\").replace("=", "\\=").replace("\n", "\\n").replace("\r", "\\r")
+    )
+
+
+def _cef_severity(alert: Alert) -> str:
+    """Map the alert's SeverityLevel onto a CEF 0..10 integer string."""
+    return str(_CEF_SEVERITY.get(alert.severity_id, 5))
+
+
+def _cef_entity_pairs(alert: Alert) -> list[tuple[str, str]]:
+    """Entity reference extension pairs; empty when no entity value is set."""
+    if not alert.entity_value:
+        return []
+    key = _CEF_ENTITY_KEY.get(alert.entity_type)
+    if key is not None:
+        return [(key, alert.entity_value)]
+    return [("cs1", alert.entity_value), ("cs1Label", alert.entity_type)]
+
+
+def _cef_extension_pairs(alert: Alert) -> list[tuple[str, str]]:
+    """Build ordered (key, value) extension pairs, omitting absent fields.
+
+    Always-present core keys (rt, externalId, cnt, cn1) anchor the record; the
+    remaining keys degrade gracefully — appended only when their source is set.
+    """
+    pairs: list[tuple[str, str]] = [
+        ("rt", str(alert.timestamp_ns // 1_000_000)),
+        ("externalId", alert.alert_id),
+        ("cnt", str(alert.dedup_count)),
+        ("cn1", f"{alert.risk_score:g}"),
+        ("cn1Label", "RiskScore"),
+        ("cs5", alert.alert_type),
+        ("cs5Label", "AlertType"),
+    ]
+    pairs.extend(_cef_entity_pairs(alert))
+    if alert.entity_uuid:
+        pairs.extend([("cs2", alert.entity_uuid), ("cs2Label", "SeerflowEntityUUID")])
+    if alert.mitre_techniques:
+        techniques = ",".join(alert.mitre_techniques)
+        pairs.extend([("cs3", techniques), ("cs3Label", "MitreTechniques")])
+    if alert.mitre_tactics:
+        tactics = ",".join(alert.mitre_tactics)
+        pairs.extend([("cs4", tactics), ("cs4Label", "MitreTactics")])
+    return pairs
+
+
+def _cef_extension(alert: Alert) -> str:
+    """Render the space-joined ``key=value`` CEF extension blob."""
+    return " ".join(
+        f"{key}={_cef_escape_extension(value)}" for key, value in _cef_extension_pairs(alert)
+    )
+
+
+def format_cef(alert: Alert) -> str:
+    """Return a single-line CEF v0 string representation of the alert.
+
+    Header: ``CEF:0|Vendor|Product|Version|SignatureID|Name|Severity|Extension``.
+    ``SignatureID`` is ``rule_name`` (falling back to ``alert_type`` when empty)
+    and ``Name`` is the alert description. Entity refs, MITRE technique/tactic,
+    risk score, timestamp (CEF ``rt`` milliseconds) and identifiers are mapped
+    into the extension; unmapped/empty fields are omitted (graceful degradation).
+    """
+    signature_id = alert.rule_name or alert.alert_type
+    header = "|".join(
+        [
+            f"CEF:{_CEF_VERSION}",
+            _cef_escape_header(_CEF_VENDOR),
+            _cef_escape_header(_CEF_PRODUCT),
+            _cef_escape_header(seerflow.__version__),
+            _cef_escape_header(signature_id),
+            _cef_escape_header(alert.description),
+            _cef_severity(alert),
+        ]
+    )
+    return f"{header}|{_cef_extension(alert)}"
