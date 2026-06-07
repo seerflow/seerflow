@@ -39,6 +39,7 @@ from seerflow.config import (
     GraphStructuralConfig,
     KillChainConfig,
     LLMConfig,
+    PluginsConfig,
     ReceiverConfig,
     SinkConfig,
     StorageConfig,
@@ -469,6 +470,36 @@ def _build_sinks(raw: object) -> tuple[SinkConfig, ...]:
         used.add(sink.name)
         sinks.append(sink)
     return tuple(sinks)
+
+
+def _build_plugins(data: dict[str, Any]) -> PluginsConfig:
+    """Build :class:`PluginsConfig` from a YAML ``plugins:`` section (S-369).
+
+    ``enabled`` defaults to False (opt-in). ``groups`` defaults to all
+    documented entry-point groups and must be a subset of them.
+    """
+    from seerflow.plugins.groups import KNOWN_PLUGIN_GROUPS
+
+    enabled = data.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ConfigError(f"plugins.enabled must be a boolean, got {type(enabled).__name__}")
+
+    raw_groups = data.get("groups")
+    if raw_groups is None:
+        groups = tuple(sorted(KNOWN_PLUGIN_GROUPS))
+    else:
+        if not isinstance(raw_groups, list):
+            raise ConfigError("plugins.groups must be a list")
+        groups_list: list[str] = []
+        for g in raw_groups:
+            name = str(g)
+            if name not in KNOWN_PLUGIN_GROUPS:
+                known = sorted(KNOWN_PLUGIN_GROUPS)
+                raise ConfigError(f"plugins.groups: unknown plugin group {name!r}; known: {known}")
+            groups_list.append(name)
+        groups = tuple(groups_list)
+
+    return PluginsConfig(enabled=enabled, groups=groups)
 
 
 def _build_email_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:

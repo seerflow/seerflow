@@ -415,6 +415,29 @@ class ThreatIntelConfig:
     matcher: IoCMatcherConfig = field(default_factory=IoCMatcherConfig)
 
 
+def _default_plugin_groups() -> tuple[str, ...]:
+    """All documented entry-point groups, sorted for deterministic config."""
+    from seerflow.plugins.groups import KNOWN_PLUGIN_GROUPS
+
+    return tuple(sorted(KNOWN_PLUGIN_GROUPS))
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class PluginsConfig:
+    """Entry-point plugin loader configuration (S-369 / open-core seam).
+
+    Discovery is **opt-in**: with ``enabled=False`` (the default) the loader
+    never touches entry points and no third-party code runs. ``groups`` is the
+    operator's allow-list of entry-point groups to scan; it defaults to all
+    documented groups but can be narrowed (e.g. receivers only). Loading only
+    ever resolves *already-installed* distributions — the loader never fetches
+    or installs remote code.
+    """
+
+    enabled: bool = False
+    groups: tuple[str, ...] = field(default_factory=_default_plugin_groups)
+
+
 @dataclass(frozen=True, kw_only=True, slots=True)
 class SeerflowConfig:
     """Top-level Seerflow configuration."""
@@ -427,6 +450,7 @@ class SeerflowConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     ueba: UEBAConfig = field(default_factory=UEBAConfig)
     threat_intel: ThreatIntelConfig = field(default_factory=ThreatIntelConfig)
+    plugins: PluginsConfig = field(default_factory=PluginsConfig)
     dashboard_port: int = 8080
     health_bind_address: str = "127.0.0.1"
     log_level: str = "INFO"
@@ -479,6 +503,9 @@ from seerflow._config_builders import (  # noqa: E402
 )
 from seerflow._config_builders import (  # noqa: E402
     _build_llm as _build_llm,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_plugins as _build_plugins,
 )
 from seerflow._config_builders import (  # noqa: E402
     _build_receivers as _build_receivers,
@@ -602,6 +629,7 @@ def load_config(
         llm=_build_llm(raw.get("llm", {})),
         ueba=_build_ueba(raw.get("ueba", {})),
         threat_intel=threat_intel,
+        plugins=_build_plugins(raw.get("plugins", {})),
         dashboard_port=dashboard_port,
         health_bind_address=health_bind_address,
         log_level=log_level,
