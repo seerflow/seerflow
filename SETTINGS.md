@@ -119,3 +119,12 @@ All settings are optional — sensible defaults apply when omitted.
 | `max_events_per_entity` | int | `1000` | Maximum events per entity in the correlation window buffer. |
 | `max_entities` | int | `10000` | Maximum number of entities tracked in the window buffer (LRU eviction). |
 | `late_tolerance_seconds` | int | `30` | Watermark tolerance for late-arriving events (events beyond tolerance skipped for correlation). |
+
+## `plugins`
+
+Entry-point plugin loader (open-core extension seam). Discovers already-installed third-party distributions that implement Seerflow's public Protocols (`Receiver`, `DeliveryTarget`, `StorageBackend`) via `importlib.metadata` entry points. **Opt-in:** disabled by default. Loading runs third-party code in-process; it never fetches or installs remote code.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Master switch. When `false` (default) the loader never reads entry points and no plugin code runs. |
+| `groups` | list[string] | all known groups | Allow-list of entry-point groups to scan. Valid values: `seerflow.receivers`, `seerflow.delivery_targets`, `seerflow.storage_backends`. |
