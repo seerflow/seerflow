@@ -212,6 +212,21 @@ alerting:
   # otlp_mtls_cert_file: /etc/seerflow/otlp-client.pem
   # otlp_mtls_key_file: /etc/seerflow/otlp-client-key.pem
 
+  # Declarative outbound sinks (S-361/FR-005, foundation for EPIC-001).
+  # Each entry registers by unique name behind the shared dispatcher; an
+  # unknown `type` or duplicate `name` fails config load. The formatter is
+  # selectable per sink and decoupled from transport.
+  # sinks:
+  #   - type: console        # one of: console, file
+  #     name: ops-console     # unique across sinks
+  #     formatter: json       # one of: slack, teams, json
+  #     min_severity: 3       # 0-6
+  #   - type: file
+  #     name: audit-file
+  #     formatter: json
+  #     options:              # transport-specific keys
+  #       path: /var/log/seerflow/alerts.ndjson
+
 # ===========================================================================
 # llm — optional LLM backend (alert explanation, NL hunt, rule drafting)
 # ===========================================================================

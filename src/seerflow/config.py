@@ -189,6 +189,22 @@ def _default_routing_drop() -> DefaultRouting:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class SinkConfig:
+    """One declarative outbound sink (S-361/FR-005).
+
+    ``type`` selects a registered sink kind; ``name`` is unique across sinks;
+    ``formatter`` is decoupled from transport. ``options`` carries
+    transport-specific keys as an immutable, hashable tuple of pairs.
+    """
+
+    type: str
+    name: str
+    formatter: str = "json"
+    min_severity: int = 0
+    options: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class AlertingConfig:
     """Alert routing configuration."""
 
@@ -232,6 +248,9 @@ class AlertingConfig:
     console_stream: Literal["stdout", "stderr"] = "stdout"
     console_format: Literal["human", "json"] = "human"
     console_min_severity: int = 0
+    # S-361 / FR-005: declarative sink registration. Empty by default —
+    # additive to the legacy per-sink fields above.
+    sinks: tuple[SinkConfig, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -463,6 +482,9 @@ from seerflow._config_builders import (  # noqa: E402
 )
 from seerflow._config_builders import (  # noqa: E402
     _build_receivers as _build_receivers,
+)
+from seerflow._config_builders import (  # noqa: E402
+    _build_sinks as _build_sinks,
 )
 from seerflow._config_builders import (  # noqa: E402
     _build_storage as _build_storage,
