@@ -23,9 +23,7 @@ def test_sink_config_is_frozen_and_hashable() -> None:
 
 
 def test_sink_config_carries_options_tuple() -> None:
-    s = SinkConfig(
-        type="file", name="f1", formatter="json", options=(("path", "/tmp/a.ndjson"),)
-    )
+    s = SinkConfig(type="file", name="f1", formatter="json", options=(("path", "/tmp/a.ndjson"),))
     assert s.options == (("path", "/tmp/a.ndjson"),)
 
 
@@ -96,6 +94,4 @@ def test_sink_entry_not_a_mapping_raises() -> None:
 
 def test_sink_options_not_a_mapping_raises() -> None:
     with pytest.raises(ConfigError, match="options"):
-        _build_alerting(
-            {"sinks": [{"type": "console", "name": "x", "options": ["path"]}]}
-        )
+        _build_alerting({"sinks": [{"type": "console", "name": "x", "options": ["path"]}]})
