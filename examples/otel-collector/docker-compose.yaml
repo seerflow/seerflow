@@ -1,0 +1,49 @@
+# End-to-end smoke path for the Seerflow OTel cloud-ingestion gateway.
+# ============================================================================
+# Brings up an OpenTelemetry Collector (contrib, pinned v0.147.0) wired to a
+# Seerflow instance so you can validate the gateway → Seerflow path locally
+# before pointing real cloud sources at it. See ./README.md for the full smoke
+# procedure (sending a synthetic OTLP log + observing ingestion).
+#
+#   docker compose -f examples/otel-collector/docker-compose.yaml up
+#
+# The collector reads ./otel-collector-config.yaml; supply cloud credentials
+# via a .env file or the host environment before enabling those receivers.
+# ============================================================================
+
+services:
+  seerflow:
+    # Build the local Seerflow image (repo-root Dockerfile). Swap for a
+    # published image tag in production.
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    init: true
+    ports:
+      - "8080:8080"    # HTTP API (health: /api/v1/health)
+      - "4317:4317"    # OTLP gRPC receiver (otlp_grpc.py)
+      - "4318:4318"    # OTLP HTTP receiver (otlp_http.py, POST /v1/logs)
+    restart: unless-stopped
+
+  otel-collector:
+    # Pinned to the documented v0.147.0 baseline — never :latest.
+    image: otel/opentelemetry-collector-contrib:0.147.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - otel-storage:/var/lib/otelcol/storage   # durable Azure checkpoints
+    environment:
+      # Override the exporter target if Seerflow is not the compose service.
+      SEERFLOW_OTLP_ENDPOINT: seerflow:4317
+      # --- supply per-source credentials below (or via a .env file) ---------
+      # AWS_REGION: us-east-1
+      # GCP_PROJECT_ID: my-project
+      # GCP_PUBSUB_SUBSCRIPTION: projects/my-project/subscriptions/seerflow-logs
+      # AZURE_EVENTHUB_CONNECTION_STRING: Endpoint=sb://...;EntityPath=...
+      # KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - seerflow
+    restart: unless-stopped
+
+volumes:
+  otel-storage:

@@ -1,0 +1,117 @@
+# Seerflow cloud-ingestion gateway — OpenTelemetry Collector (contrib) reference config
+# ============================================================================
+# Pinned to opentelemetry-collector-contrib v0.147.0. See ./README.md for the
+# version-pin rationale, per-receiver stability/caveats, and the end-to-end
+# smoke path. This config fans four cloud LOG sources into a single OTLP
+# exporter pointed at Seerflow's gRPC receiver (otlp_grpc.py, default :4317).
+#
+# IMPORTANT: Seerflow ingests the OTLP **Logs** signal only. This Collector
+# therefore defines a single `logs` pipeline. Do NOT add metrics/traces
+# pipelines that export to the `otlp` (Seerflow) exporter — Seerflow registers
+# no metrics/traces service and would silently drop them.
+#
+# Credentials are supplied via environment variables (never hardcode secrets).
+# Each receiver below is a minimal, documented starting point — tune for your
+# log volume and account layout.
+# ============================================================================
+
+receivers:
+  # --- AWS CloudWatch Logs (logs signal: ALPHA) ---------------------------
+  # Poll-based: the receiver lists/pulls log groups on an interval (not push).
+  # Requires AWS credentials in the standard chain (env / instance role / SSO).
+  awscloudwatch:
+    region: ${env:AWS_REGION:-us-east-1}
+    logs:
+      poll_interval: 1m
+      max_events_per_request: 1000
+      groups:
+        # Autodiscover up to N groups by name prefix. Swap for `named:` to pin
+        # explicit groups/streams. autodiscover and named are mutually exclusive.
+        autodiscover:
+          limit: 50
+          prefix: /aws/
+
+  # --- Google Cloud Pub/Sub (logs signal: BETA) ---------------------------
+  # Community module (developed + tested at Collibra, NOT officially supported
+  # by GCP). Reads log messages from a Pub/Sub subscription that a GCP Logging
+  # sink writes to. Requires GOOGLE_APPLICATION_CREDENTIALS or workload identity.
+  googlecloudpubsub:
+    project: ${env:GCP_PROJECT_ID}
+    subscription: ${env:GCP_PUBSUB_SUBSCRIPTION}
+    # encoding: <extension>   # optional Encoding Extension for raw-text messages
+
+  # --- Azure Event Hubs (logs signal: BETA) -------------------------------
+  # WARNING: checkpoint/offset state is in-memory ONLY unless a storage
+  # extension (see `file_storage` below + `storage:` key) is configured. On
+  # restart the receiver resumes from the latest offset, risking missed or
+  # reprocessed messages. Wire `storage: file_storage` for durable checkpoints.
+  azureeventhub:
+    connection: ${env:AZURE_EVENTHUB_CONNECTION_STRING}
+    group: $$Default
+    # storage: file_storage   # enable for durable checkpoints (uncomment ext)
+
+  # --- Kafka (logs signal: BETA) ------------------------------------------
+  # Consumes OTLP-encoded logs from a Kafka topic. Defaults: topic `otlp_logs`,
+  # encoding `otlp_proto`. Point upstream producers at this topic.
+  kafka:
+    brokers:
+      - ${env:KAFKA_BROKERS:-localhost:9092}
+    protocol_version: 2.1.0
+    logs:
+      topics:
+        - ${env:KAFKA_LOGS_TOPIC:-otlp_logs}
+      encoding: otlp_proto
+
+extensions:
+  # Durable checkpoint storage for the Azure Event Hub receiver (and any other
+  # receiver that supports a `storage:` key). Uncomment `storage: file_storage`
+  # on the azureeventhub receiver above to activate. The directory must be
+  # writable and persisted across restarts (a mounted volume in production).
+  file_storage:
+    directory: /var/lib/otelcol/storage
+    create_directory: true
+
+processors:
+  # Guardrail: stop the Collector before it exhausts memory under burst load.
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  # Batch before export to amortize network overhead into Seerflow.
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+exporters:
+  # Primary path: OTLP/gRPC into Seerflow's otlp_grpc receiver (default :4317).
+  # Endpoint defaults to the compose service name; override via env in prod.
+  # tls.insecure is for the loopback smoke path ONLY — use mTLS in production.
+  otlp:
+    endpoint: ${env:SEERFLOW_OTLP_ENDPOINT:-seerflow:4317}
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+    sending_queue:
+      enabled: true
+
+  # Alternative path: OTLP/HTTP into Seerflow's otlp_http receiver (default
+  # :4318, POST /v1/logs). Swap `otlp` for `otlphttp` in the pipeline below for
+  # HTTP-only environments. The `/v1/logs` path is appended automatically.
+  # otlphttp:
+  #   endpoint: ${env:SEERFLOW_OTLP_HTTP_ENDPOINT:-http://seerflow:4318}
+  #   tls:
+  #     insecure: true
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    # Single logs pipeline — all four cloud receivers fan into the Seerflow
+    # OTLP exporter. (Add `otlphttp` instead of `otlp` for the HTTP path.)
+    logs:
+      receivers: [awscloudwatch, googlecloudpubsub, azureeventhub, kafka]
+      processors: [memory_limiter, batch]
+      exporters: [otlp]
+  telemetry:
+    logs:
+      level: info
