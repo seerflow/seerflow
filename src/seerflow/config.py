@@ -484,6 +484,9 @@ from seerflow._config_builders import (  # noqa: E402
     _build_receivers as _build_receivers,
 )
 from seerflow._config_builders import (  # noqa: E402
+    _build_sinks as _build_sinks,
+)
+from seerflow._config_builders import (  # noqa: E402
     _build_storage as _build_storage,
 )
 from seerflow._config_builders import (  # noqa: E402

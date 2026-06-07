@@ -40,6 +40,7 @@ from seerflow.config import (
     KillChainConfig,
     LLMConfig,
     ReceiverConfig,
+    SinkConfig,
     StorageConfig,
     UEBAConfig,
     UEBASubScoreWeights,
@@ -416,6 +417,58 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
         used_names.add(name)
         targets.append(WebhookTarget(name=name, url=url, format=fmt, min_severity=min_severity))
     return tuple(targets)
+
+
+def _build_one_sink(idx: int, entry: dict[str, Any]) -> SinkConfig:
+    """Validate one ``alerting.sinks`` entry into a ``SinkConfig`` (S-361)."""
+    from seerflow.alerting.sinks.registry import KNOWN_SINK_TYPES, is_known_sink_type
+
+    sink_type = entry.get("type", "")
+    if not is_known_sink_type(sink_type):
+        known = sorted(KNOWN_SINK_TYPES)
+        raise ConfigError(f"alerting.sinks[{idx}].type unknown {sink_type!r}; known: {known}")
+    name = entry.get("name", "")
+    if not isinstance(name, str) or not name:
+        raise ConfigError(f"alerting.sinks[{idx}].name must be a non-empty string")
+    formatter = entry.get("formatter", "json")
+    if formatter not in _VALID_WEBHOOK_FORMATS:
+        valid = sorted(_VALID_WEBHOOK_FORMATS)
+        raise ConfigError(
+            f"alerting.sinks[{idx}].formatter must be one of {valid}, got {formatter!r}"
+        )
+    min_sev = entry.get("min_severity", 0)
+    if not isinstance(min_sev, int) or isinstance(min_sev, bool) or not 0 <= min_sev <= 6:
+        raise ConfigError(f"alerting.sinks[{idx}].min_severity must be an int in [0,6]")
+    raw_opts = entry.get("options", {}) or {}
+    if not isinstance(raw_opts, dict):
+        raise ConfigError(f"alerting.sinks[{idx}].options must be a mapping")
+    options = tuple((str(k), str(v)) for k, v in raw_opts.items())
+    return SinkConfig(
+        type=sink_type,
+        name=name,
+        formatter=formatter,
+        min_severity=min_sev,
+        options=options,
+    )
+
+
+def _build_sinks(raw: object) -> tuple[SinkConfig, ...]:
+    """Validate the declarative ``alerting.sinks`` list (S-361/FR-005)."""
+    if not raw:
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError("alerting.sinks must be a list")
+    sinks: list[SinkConfig] = []
+    used: set[str] = set()
+    for idx, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"alerting.sinks[{idx}] must be a mapping")
+        sink = _build_one_sink(idx, entry)
+        if sink.name in used:
+            raise ConfigError(f"alerting.sinks: duplicate name {sink.name!r}")
+        used.add(sink.name)
+        sinks.append(sink)
+    return tuple(sinks)
 
 
 def _build_email_targets(raw: tuple[dict[str, Any], ...]) -> tuple[Any, ...]:
@@ -1125,6 +1178,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
     otlp_fields = _validate_otlp_settings(data)
     file_fields = _validate_file_settings(data)
     console_fields = _validate_console_settings(data)
+    sinks = _build_sinks(data.get("sinks", ()))
 
     quiet_hours: list[tuple[str, QuietHours]] = list(
         _collect_quiet_hours(webhooks, webhook_targets)
@@ -1166,6 +1220,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         console_stream=console_fields.stream,
         console_format=console_fields.fmt,
         console_min_severity=console_fields.min_severity,
+        sinks=sinks,
     )
 
 

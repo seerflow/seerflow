@@ -58,7 +58,7 @@ def test_duplicate_sink_name_raises() -> None:
             {
                 "sinks": [
                     {"type": "console", "name": "dup", "formatter": "json"},
-                    {"type": "console", "name": "dup", "formatter": "human"},
+                    {"type": "console", "name": "dup", "formatter": "slack"},
                 ]
             }
         )
