@@ -381,6 +381,29 @@ _VALID_WEBHOOK_FORMATS = frozenset({"slack", "teams", "json"})
 _HEADER_INJECTION_RE = re.compile(r"[\r\n]")
 
 
+def _build_headers_map(field_name: str, raw: Any) -> tuple[tuple[str, str], ...]:
+    """Validate a raw header mapping into a hashable tuple of (key, value) pairs.
+
+    Used for both ``alerting.webhooks[*].headers`` and ``alerting.otlp_headers``
+    (S-366). Keys and values must be strings free of CR/LF (header-injection
+    guard, reusing ``_HEADER_INJECTION_RE``). An empty/absent mapping yields ``()``.
+    """
+    if raw in (None, {}):
+        return ()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{field_name} must be a mapping of string to string")
+    pairs: list[tuple[str, str]] = []
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key:
+            raise ConfigError(f"{field_name} keys must be non-empty strings, got {key!r}")
+        if not isinstance(value, str):
+            raise ConfigError(f"{field_name}[{key!r}] value must be a string, got {value!r}")
+        if _HEADER_INJECTION_RE.search(key) or _HEADER_INJECTION_RE.search(value):
+            raise ConfigError(f"{field_name}[{key!r}] must not contain CR/LF characters")
+        pairs.append((key, value))
+    return tuple(pairs)
+
+
 def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[WebhookTarget, ...]:
     """Parse raw webhook dicts into a tuple of WebhookTarget objects."""
     from seerflow.alerting.dispatcher import WebhookTarget
@@ -415,7 +438,12 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
         if name in used_names:
             raise ConfigError(f"alerting.webhooks: duplicate name {name!r}")
         used_names.add(name)
-        targets.append(WebhookTarget(name=name, url=url, format=fmt, min_severity=min_severity))
+        headers = _build_headers_map(f"alerting.webhooks[{idx}].headers", wh.get("headers"))
+        targets.append(
+            WebhookTarget(
+                name=name, url=url, format=fmt, min_severity=min_severity, headers=headers
+            )
+        )
     return tuple(targets)
 
 
@@ -878,6 +906,7 @@ class _OtlpFields(NamedTuple):
     tls_ca_file: str
     mtls_cert_file: str
     mtls_key_file: str
+    headers: tuple[tuple[str, str], ...]
 
 
 class _FileFields(NamedTuple):
@@ -993,6 +1022,7 @@ def _validate_otlp_settings(data: dict[str, Any]) -> _OtlpFields:
             "alerting.otlp_mtls_cert_file and alerting.otlp_mtls_key_file "
             "must both be set or both be empty"
         )
+    headers = _build_headers_map("alerting.otlp_headers", data.get("otlp_headers"))
     return _OtlpFields(
         endpoint=endpoint,
         protocol=protocol,
@@ -1001,6 +1031,7 @@ def _validate_otlp_settings(data: dict[str, Any]) -> _OtlpFields:
         tls_ca_file=tls_ca_file,
         mtls_cert_file=mtls_cert_file,
         mtls_key_file=mtls_key_file,
+        headers=headers,
     )
 
 
@@ -1209,6 +1240,7 @@ def _build_alerting(data: dict[str, Any]) -> AlertingConfig:
         otlp_tls_ca_file=otlp_fields.tls_ca_file,
         otlp_mtls_cert_file=otlp_fields.mtls_cert_file,
         otlp_mtls_key_file=otlp_fields.mtls_key_file,
+        otlp_headers=otlp_fields.headers,
         file_enabled=file_fields.enabled,
         file_path=file_fields.path,
         file_rotation=file_fields.rotation,

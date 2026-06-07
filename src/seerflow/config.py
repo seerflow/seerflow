@@ -233,6 +233,11 @@ class AlertingConfig:
     otlp_tls_ca_file: str = ""
     otlp_mtls_cert_file: str = ""
     otlp_mtls_key_file: str = ""
+    # S-366 / FR-004: optional HTTP headers for the OTLP outbound sink (e.g. an
+    # ``Authorization`` bearer token for a collector behind a gateway). Stored as
+    # a hashable tuple of (key, value) pairs; sourced from env-backed config and
+    # never logged. ``Content-Type`` is owned by the sink and cannot be overridden.
+    otlp_headers: tuple[tuple[str, str], ...] = field(default=(), repr=False)
     # S-313 / FR-072: rotating NDJSON file alert sink. Disabled unless a
     # path is configured (yaml ``alerting.file_path`` or ``--alerts-to``).
     file_enabled: bool = False

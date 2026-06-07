@@ -34,6 +34,8 @@ from opentelemetry.proto.common.v1.common_pb2 import (
 from opentelemetry.proto.logs.v1.logs_pb2 import LogRecord, ResourceLogs, ScopeLogs
 from opentelemetry.proto.resource.v1.resource_pb2 import Resource
 
+from seerflow.alerting._http import post_with_retry
+
 if TYPE_CHECKING:
     import grpc.aio
 
@@ -243,6 +245,9 @@ class OtlpSink:
 
     _MAX_RETRIES = 3
     _RETRY_DELAYS = (1.0, 2.0, 4.0)
+    # The OTLP/HTTP wire format is protobuf; callers cannot override this so a
+    # misconfigured ``headers`` entry can never break the export encoding.
+    _PROTOBUF_CONTENT_TYPE = "application/x-protobuf"
 
     def __init__(
         self,
@@ -255,12 +260,21 @@ class OtlpSink:
         tls_ca_file: str = "",
         mtls_cert_file: str = "",
         mtls_key_file: str = "",
+        headers: dict[str, str] | None = None,
     ) -> None:
         self._endpoint = endpoint
         self._protocol = protocol
         self._export_interval = export_interval
         self._max_pending = max_pending
         self._use_tls = _resolve_tls(endpoint, tls)
+        # S-366: optional auth headers for the HTTP transport (e.g. a bearer
+        # token for a collector behind a gateway). Sourced from env-backed
+        # config — never hardcoded, never logged (``post_with_retry`` only logs
+        # the masked endpoint, and its ``_scrub_secrets`` redacts any Bearer
+        # value that surfaces in an exception string). A defensive copy keeps the
+        # sink's header map immutable after construction. ``Content-Type`` is
+        # owned by the sink and cannot be overridden by a caller entry.
+        self._extra_headers: dict[str, str] = dict(headers) if headers else {}
         # S-049b: read PEM bytes once at construction so the flush hot path
         # never touches the filesystem. Matches grpc-python's import-time
         # bundle behavior; rotation requires a process restart.
@@ -388,7 +402,7 @@ class OtlpSink:
             if self._protocol == "grpc":
                 await self._send_grpc(request, batch_size)
             else:
-                await self._send_http(request, batch_size)
+                await self._send_http(request)
         except Exception:
             _log.exception(
                 "OTLP flush failed, dropping %d alerts",
@@ -443,49 +457,32 @@ class OtlpSink:
             batch_size,
         )
 
-    async def _send_http(self, request: ExportLogsServiceRequest, batch_size: int) -> None:
-        """Send batch via HTTP POST with retry."""
+    def _http_headers(self) -> dict[str, str]:
+        """Build the HTTP header map: caller headers + the owned Content-Type.
+
+        ``Content-Type`` is applied last so a caller-supplied entry can never
+        replace the protobuf encoding the OTLP/HTTP wire format requires.
+        """
+        return {**self._extra_headers, "Content-Type": self._PROTOBUF_CONTENT_TYPE}
+
+    async def _send_http(self, request: ExportLogsServiceRequest) -> None:
+        """Send batch via HTTP POST through the shared retry path.
+
+        Delegates to :func:`seerflow.alerting._http.post_with_retry` — the same
+        helper the webhook dispatcher and every notification channel use — so the
+        OTLP HTTP transport shares one retry/backoff/4xx-stop/secret-masking
+        implementation with the rest of the alerting fan-out (S-366 AC-1).
+        """
         if self._http_session is None:
             self._http_session = aiohttp.ClientSession()
         url = f"{self._endpoint.rstrip('/')}/v1/logs"
         body = request.SerializeToString()
-        headers = {"Content-Type": "application/x-protobuf"}
-        for attempt in range(self._MAX_RETRIES):
-            try:
-                async with self._http_session.post(
-                    url,
-                    data=body,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    allow_redirects=False,
-                ) as resp:
-                    if resp.status < 400:
-                        return
-                    if resp.status < 500:
-                        _log.error(
-                            "OTLP HTTP export to %s returned %d — not retrying",
-                            masked_url(self._endpoint),
-                            resp.status,
-                        )
-                        return
-                    _log.warning(
-                        "OTLP HTTP export to %s returned %d (attempt %d)",
-                        masked_url(self._endpoint),
-                        resp.status,
-                        attempt + 1,
-                    )
-            except Exception as exc:
-                _log.warning(
-                    "OTLP HTTP export to %s failed (attempt %d): %s",
-                    masked_url(self._endpoint),
-                    attempt + 1,
-                    exc,
-                )
-            if attempt < self._MAX_RETRIES - 1:
-                await asyncio.sleep(self._RETRY_DELAYS[attempt])
-        _log.error(
-            "OTLP HTTP export to %s: all %d retries exhausted, dropping %d alerts",
-            masked_url(self._endpoint),
-            self._MAX_RETRIES,
-            batch_size,
+        await post_with_retry(
+            self._http_session,
+            url,
+            data=body,
+            headers=self._http_headers(),
+            masked_for_log=masked_url(self._endpoint),
+            attempts=self._MAX_RETRIES,
+            delays=self._RETRY_DELAYS,
         )

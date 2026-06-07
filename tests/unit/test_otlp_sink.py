@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -416,6 +417,7 @@ class TestOtlpSinkHttpTransport:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
         resp_mock = MagicMock(status=400)
+        resp_mock.text = AsyncMock(return_value="bad request")
         resp_cm = AsyncMock()
         resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
         resp_cm.__aexit__ = AsyncMock(return_value=False)
@@ -433,6 +435,7 @@ class TestOtlpSinkHttpTransport:
         from seerflow.alerting.sinks.otlp import OtlpSink
 
         resp_fail = MagicMock(status=500)
+        resp_fail.text = AsyncMock(return_value="server error")
         resp_ok = MagicMock(status=200)
         cm_fail = AsyncMock()
         cm_fail.__aenter__ = AsyncMock(return_value=resp_fail)
@@ -447,12 +450,93 @@ class TestOtlpSinkHttpTransport:
         sink = OtlpSink(endpoint="http://localhost:4318", protocol="http")
         sink._http_session = session
 
-        with patch("seerflow.alerting.sinks.otlp.asyncio") as mock_asyncio:
+        with patch("seerflow.alerting._http.asyncio") as mock_asyncio:
             mock_asyncio.sleep = AsyncMock()
             sink.enqueue(_make_alert())
             await sink._flush()
 
         assert session.post.call_count == 2
+
+    async def test_http_sends_configured_auth_headers(self) -> None:
+        """S-366: env-sourced headers reach the HTTP POST (e.g. bearer token)."""
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        resp_mock = MagicMock(status=200)
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        sink = OtlpSink(
+            endpoint="http://localhost:4318",
+            protocol="http",
+            headers={"Authorization": "Bearer s3cr3t", "X-Tenant": "acme"},
+        )
+        sink._http_session = session
+        sink.enqueue(_make_alert())
+        await sink._flush()
+
+        headers = session.post.call_args[1]["headers"]
+        assert headers["Authorization"] == "Bearer s3cr3t"
+        assert headers["X-Tenant"] == "acme"
+        # The sink owns Content-Type — it is always protobuf.
+        assert headers["Content-Type"] == "application/x-protobuf"
+
+    async def test_http_caller_cannot_override_content_type(self) -> None:
+        """S-366: a caller ``Content-Type`` header never replaces protobuf."""
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        resp_mock = MagicMock(status=200)
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        sink = OtlpSink(
+            endpoint="http://localhost:4318",
+            protocol="http",
+            headers={"Content-Type": "application/json"},
+        )
+        sink._http_session = session
+        sink.enqueue(_make_alert())
+        await sink._flush()
+
+        headers = session.post.call_args[1]["headers"]
+        assert headers["Content-Type"] == "application/x-protobuf"
+
+    async def test_http_secret_headers_never_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """S-366: a bearer token in headers must not appear in any log line."""
+        from seerflow.alerting.sinks.otlp import OtlpSink
+
+        resp_mock = MagicMock(status=500)
+        resp_mock.text = AsyncMock(return_value="server error")
+        resp_cm = AsyncMock()
+        resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
+        resp_cm.__aexit__ = AsyncMock(return_value=False)
+        session = MagicMock()
+        session.post = MagicMock(return_value=resp_cm)
+
+        sink = OtlpSink(
+            endpoint="http://localhost:4318",
+            protocol="http",
+            headers={"Authorization": "Bearer s3cr3t-token"},
+        )
+        sink._http_session = session
+
+        with (
+            patch("seerflow.alerting._http.asyncio") as mock_asyncio,
+            caplog.at_level(logging.DEBUG, logger="seerflow"),
+        ):
+            mock_asyncio.sleep = AsyncMock()
+            sink.enqueue(_make_alert())
+            await sink._flush()
+
+        rendered = " ".join(r.getMessage() for r in caplog.records)
+        assert "s3cr3t-token" not in rendered
 
     async def test_http_uses_allow_redirects_false(self) -> None:
         from seerflow.alerting.sinks.otlp import OtlpSink
@@ -1156,9 +1240,12 @@ class TestOtlpSinkCustomCaAndMtlsInit:
 
 class TestOtlpSinkHttpExhaustsRetries:
     async def test_http_logs_error_after_all_retries_exhausted(self) -> None:
+        # S-366: the HTTP transport now shares ``_http.post_with_retry`` so the
+        # exhaustion error + backoff sleep live in that module, not the sink.
         from seerflow.alerting.sinks.otlp import OtlpSink
 
         resp_mock = MagicMock(status=500)
+        resp_mock.text = AsyncMock(return_value="server error")
         resp_cm = AsyncMock()
         resp_cm.__aenter__ = AsyncMock(return_value=resp_mock)
         resp_cm.__aexit__ = AsyncMock(return_value=False)
@@ -1169,8 +1256,8 @@ class TestOtlpSinkHttpExhaustsRetries:
         sink._http_session = session
 
         with (
-            patch("seerflow.alerting.sinks.otlp.asyncio") as mock_asyncio,
-            patch("seerflow.alerting.sinks.otlp._log") as mock_log,
+            patch("seerflow.alerting._http.asyncio") as mock_asyncio,
+            patch("seerflow.alerting._http._log") as mock_log,
         ):
             mock_asyncio.sleep = AsyncMock()
             sink.enqueue(_make_alert())
@@ -1201,7 +1288,7 @@ class TestOtlpSinkHttpExhaustsRetries:
         sink = OtlpSink(endpoint="http://localhost:4318", protocol="http")
         sink._http_session = session
 
-        with patch("seerflow.alerting.sinks.otlp.asyncio") as mock_asyncio:
+        with patch("seerflow.alerting._http.asyncio") as mock_asyncio:
             mock_asyncio.sleep = AsyncMock()
             sink.enqueue(_make_alert())
             await sink._flush()
