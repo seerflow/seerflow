@@ -102,6 +102,62 @@ class TestOtlpHttpIntegration:
             await runner.cleanup()
 
 
+class TestOtlpGrpcIntegration:
+    async def test_export_to_mock_grpc_collector(self) -> None:
+        """Start a mock OTLP gRPC collector, export alerts, verify receipt."""
+        import grpc.aio
+        from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
+            ExportLogsServiceRequest,
+            ExportLogsServiceResponse,
+        )
+        from opentelemetry.proto.collector.logs.v1.logs_service_pb2_grpc import (
+            LogsServiceServicer,
+            add_LogsServiceServicer_to_server,
+        )
+
+        received: list[ExportLogsServiceRequest] = []
+
+        class _CapturingServicer(LogsServiceServicer):
+            async def Export(  # noqa: N802 - gRPC method name
+                self,
+                request: ExportLogsServiceRequest,
+                context: object,
+            ) -> ExportLogsServiceResponse:
+                received.append(request)
+                return ExportLogsServiceResponse()
+
+        server = grpc.aio.server()
+        add_LogsServiceServicer_to_server(_CapturingServicer(), server)  # type: ignore[no-untyped-call]
+        port = server.add_insecure_port("127.0.0.1:0")
+        await server.start()
+        endpoint = f"127.0.0.1:{port}"
+
+        sink = OtlpSink(endpoint=endpoint, protocol="grpc", export_interval=1)
+        task = asyncio.create_task(sink.run())
+        try:
+            for i in range(3):
+                sink.enqueue(_make_alert(rule_name=f"grpc-rule-{i}"))
+
+            await asyncio.sleep(2.0)
+            await sink.stop()
+            await asyncio.wait_for(task, timeout=5.0)
+            await sink.close()
+
+            assert len(received) >= 1
+            total_records = sum(
+                len(rl.scope_logs[0].log_records) for req in received for rl in req.resource_logs
+            )
+            assert total_records == 3
+
+            first_record = received[0].resource_logs[0].scope_logs[0].log_records[0]
+            assert first_record.severity_number == 17  # ERROR
+            assert first_record.severity_text == "ERROR"
+            attrs = {a.key: a.value for a in first_record.attributes}
+            assert attrs["entity.type"].string_value == "ip"
+        finally:
+            await server.stop(None)
+
+
 class TestOtlpTlsConfigPropagation:
     """SEE-191: verify otlp_tls YAML propagates all the way to OtlpSink._use_tls."""
 

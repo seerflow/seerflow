@@ -132,6 +132,64 @@ class TestAlertDispatcher:
         session.post.assert_called_once()
         assert session.post.call_args[0][0] == "https://hooks.example.com/json"
 
+    async def test_configured_headers_propagate_to_post(self) -> None:
+        """S-366: WebhookTarget.headers reach the POST (configurable headers)."""
+        session = _mock_session(status=200)
+        target = WebhookTarget(
+            name="json",
+            url="https://hooks.example.com/json",
+            format="json",
+            min_severity=0,
+            headers=(("Authorization", "Bearer tok"), ("X-Tenant", "acme")),
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+
+        dispatcher.enqueue(_make_alert())
+        await dispatcher.stop()
+        await _run_and_cancel(dispatcher)
+
+        headers = session.post.call_args[1]["headers"]
+        assert headers["Authorization"] == "Bearer tok"
+        assert headers["X-Tenant"] == "acme"
+
+    async def test_no_headers_sends_none(self) -> None:
+        """Default (no headers) sends no custom header map — preserves behaviour."""
+        session = _mock_session(status=200)
+        target = WebhookTarget(
+            name="json", url="https://hooks.example.com/json", format="json", min_severity=0
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+
+        dispatcher.enqueue(_make_alert())
+        await dispatcher.stop()
+        await _run_and_cancel(dispatcher)
+
+        assert session.post.call_args[1].get("headers") is None
+
+    async def test_secret_header_never_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        """S-366: a bearer token in webhook headers must not appear in logs."""
+        session = _mock_session(status=500)
+        target = WebhookTarget(
+            name="json",
+            url="https://hooks.example.com/json",
+            format="json",
+            min_severity=0,
+            headers=(("Authorization", "Bearer leaky-token"),),
+        )
+        dispatcher = AlertDispatcher(targets=(target,), session=session)
+
+        with (
+            patch("seerflow.alerting._http.asyncio") as mock_asyncio,
+            caplog.at_level(logging.DEBUG, logger="seerflow"),
+        ):
+            mock_asyncio.sleep = AsyncMock()
+            dispatcher.enqueue(_make_alert())
+            await dispatcher.stop()
+            await _run_and_cancel(dispatcher)
+
+        rendered = " ".join(r.getMessage() for r in caplog.records)
+        assert "leaky-token" not in rendered
+
     async def test_dispatch_sends_correct_payload(self) -> None:
         """Payload POSTed matches format_json output for the alert."""
         from seerflow.alerting.formatters import format_json

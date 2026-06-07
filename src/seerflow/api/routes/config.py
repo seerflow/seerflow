@@ -40,6 +40,20 @@ _RAW_DICT_SECRET_KEYS: frozenset[str] = frozenset(
 _RAW_DICT_URL_KEYS: frozenset[str] = frozenset({"url"})
 
 
+def _mask_header_pairs(pairs: Any) -> list[list[str]]:
+    """Mask the value of every (key, value) header pair, preserving keys.
+
+    Header *names* (``Authorization``, ``X-Tenant``) are operationally safe to
+    expose; the *values* may carry bearer tokens, so each is replaced with
+    ``***``. ``asdict`` serializes a ``tuple[tuple[str, str], ...]`` as a list
+    of two-element lists, which is the shape returned here. Returns ``[]`` for
+    an empty/absent mapping.
+    """
+    if not pairs:
+        return []
+    return [[str(key), _MASK] for key, _value in pairs]
+
+
 def _scrub_raw_dict(entry: dict[str, Any]) -> None:
     """Mask known-secret keys inside a raw-YAML dict entry in place.
 
@@ -82,8 +96,17 @@ def redact_config(config: SeerflowConfig) -> dict[str, Any]:
     if data["alerting"].get("pagerduty_routing_key"):
         data["alerting"]["pagerduty_routing_key"] = _MASK
     for target in data["alerting"].get("webhook_targets", ()):
-        if isinstance(target, dict) and target.get("url"):
-            target["url"] = mask_webhook_url(target["url"])
+        if isinstance(target, dict):
+            if target.get("url"):
+                target["url"] = mask_webhook_url(target["url"])
+            # S-366: per-target custom headers may carry auth tokens
+            # (``Authorization: Bearer ...``). Mask every value; ``headers`` is
+            # a tuple of (key, value) pairs once dataclass-serialized.
+            target["headers"] = _mask_header_pairs(target.get("headers"))
+
+    # alerting.otlp_headers — S-366 OTLP HTTP auth headers may carry a bearer
+    # token; mask each value. Tuple of (key, value) pairs after ``asdict``.
+    data["alerting"]["otlp_headers"] = _mask_header_pairs(data["alerting"].get("otlp_headers"))
 
     # alerting — multi-channel delivery targets (S-163). Each carries its
     # own credential field that must be masked before leaving the process.

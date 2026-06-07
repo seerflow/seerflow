@@ -248,6 +248,7 @@ def _build_otlp_sink(
             tls_ca_file=config.alerting.otlp_tls_ca_file,
             mtls_cert_file=config.alerting.otlp_mtls_cert_file,
             mtls_key_file=config.alerting.otlp_mtls_key_file,
+            headers=dict(config.alerting.otlp_headers) or None,
         )
         _otlp_task = asyncio.create_task(otlp_sink.run())
         _log.info(

@@ -86,6 +86,42 @@ class TestRedactConfig:
         assert data["alerting"]["webhook_targets"][0]["url"] == "https://hooks.slack.com/***"
         assert data["alerting"]["webhook_targets"][0]["format"] == "slack"
 
+    def test_webhook_target_headers_values_masked(self) -> None:
+        """S-366: webhook header values (auth tokens) are masked; keys kept."""
+        target = WebhookTarget(
+            name="json",
+            url="https://hooks.example.com/json",
+            format="json",
+            headers=(("Authorization", "Bearer s3cr3t"), ("X-Tenant", "acme")),
+        )
+        cfg = SeerflowConfig(alerting=AlertingConfig(webhook_targets=(target,)))
+        data = redact_config(cfg)
+        headers = {k: v for k, v in data["alerting"]["webhook_targets"][0]["headers"]}
+        assert headers == {"Authorization": "***", "X-Tenant": "***"}
+
+    def test_webhook_target_no_headers_empty(self) -> None:
+        target = WebhookTarget(name="json", url="https://hooks.example.com/json", format="json")
+        cfg = SeerflowConfig(alerting=AlertingConfig(webhook_targets=(target,)))
+        data = redact_config(cfg)
+        assert data["alerting"]["webhook_targets"][0]["headers"] == []
+
+    def test_otlp_headers_values_masked(self) -> None:
+        """S-366: otlp_headers values (bearer token) are masked; keys kept."""
+        cfg = SeerflowConfig(
+            alerting=AlertingConfig(
+                otlp_endpoint="localhost:4317",
+                otlp_headers=(("Authorization", "Bearer otlp-token"),),
+            )
+        )
+        data = redact_config(cfg)
+        headers = {k: v for k, v in data["alerting"]["otlp_headers"]}
+        assert headers == {"Authorization": "***"}
+
+    def test_otlp_headers_empty_when_unset(self) -> None:
+        cfg = SeerflowConfig(alerting=AlertingConfig())
+        data = redact_config(cfg)
+        assert data["alerting"]["otlp_headers"] == []
+
     def test_receiver_webhook_auth_token_masked(self) -> None:
         wh = WebhookEndpointConfig(
             path="/ingest/webhook",
@@ -362,7 +398,9 @@ class TestSecretRegressionGuard:
         "storage.falkordb_url",
         "receivers.webhooks[].auth_token",
         "alerting.pagerduty_routing_key",
+        "alerting.otlp_headers",
         "alerting.webhook_targets[].url",
+        "alerting.webhook_targets[].headers",
         "alerting.email_targets[].smtp_user",
         "alerting.email_targets[].smtp_password",
         "alerting.sms_targets[].auth_token",

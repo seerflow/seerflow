@@ -31,12 +31,20 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class WebhookTarget:
-    """A configured webhook delivery target."""
+    """A configured webhook delivery target.
+
+    ``headers`` carries optional custom request headers (S-366) — e.g. an
+    ``Authorization`` token for a generic webhook behind a gateway. Stored as a
+    hashable tuple of ``(key, value)`` pairs so the frozen dataclass stays
+    hashable; values come from env-backed config and are never logged
+    (``post_with_retry`` logs only the masked URL).
+    """
 
     name: str
     url: str = field(repr=False)
     format: str  # "slack" | "teams" | "json"
     min_severity: int = 0
+    headers: tuple[tuple[str, str], ...] = field(default=(), repr=False)
 
     async def deliver(self, alert: Alert) -> None:
         """Stub: real delivery goes through ``_WebhookDeliveryAdapter``.
@@ -224,6 +232,7 @@ class AlertDispatcher:
             masked_for_log=mask_webhook_url(target.url),
             attempts=self._MAX_RETRIES,
             delays=self._RETRY_DELAYS,
+            headers=dict(target.headers) or None,
         )
 
 

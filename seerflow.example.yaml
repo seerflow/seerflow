@@ -196,6 +196,10 @@ alerting:
   #     format: slack
   #   - url: ${TEAMS_WEBHOOK_URL}
   #     format: teams
+  #   - url: ${GENERIC_WEBHOOK_URL}      # generic JSON sink with auth header
+  #     format: json
+  #     headers:                         # optional custom headers; secrets via env
+  #       Authorization: Bearer ${GENERIC_WEBHOOK_TOKEN}
 
   # PagerDuty Events API v2
   # pagerduty_routing_key: ${PAGERDUTY_ROUTING_KEY}   # secret via env var only
@@ -211,13 +215,15 @@ alerting:
   # otlp_tls_ca_file: /etc/seerflow/otlp-ca.pem       # custom CA bundle (PEM)
   # otlp_mtls_cert_file: /etc/seerflow/otlp-client.pem
   # otlp_mtls_key_file: /etc/seerflow/otlp-client-key.pem
+  # otlp_headers:                        # HTTP-transport auth headers; secrets via env
+  #   Authorization: Bearer ${SEERFLOW_OTLP_TOKEN}
 
   # Declarative outbound sinks (S-361/FR-005, foundation for EPIC-001).
   # Each entry registers by unique name behind the shared dispatcher; an
   # unknown `type` or duplicate `name` fails config load. The formatter is
   # selectable per sink and decoupled from transport.
   # sinks:
-  #   - type: console        # one of: console, file
+  #   - type: console        # one of: console, file, otlp
   #     name: ops-console     # unique across sinks
   #     formatter: json       # one of: slack, teams, json
   #     min_severity: 3       # 0-6
@@ -226,6 +232,12 @@ alerting:
   #     formatter: json
   #     options:              # transport-specific keys
   #       path: /var/log/seerflow/alerts.ndjson
+  #   - type: otlp
+  #     name: siem-collector
+  #     formatter: json
+  #     options:
+  #       endpoint: ${SEERFLOW_OTLP_ALERT_ENDPOINT}   # required
+  #       protocol: grpc      # grpc | http
 
 # ===========================================================================
 # llm — optional LLM backend (alert explanation, NL hunt, rule drafting)

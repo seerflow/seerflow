@@ -1279,6 +1279,124 @@ class TestWebhookConfigParsing:
         result = _build_alerting({"webhooks": [{"url": "https://example.com", "format": "json"}]})
         assert result.webhook_targets[0].format == "json"
 
+    def test_webhook_headers_parsed(self) -> None:
+        """S-366: alerting.webhooks[*].headers becomes a hashable tuple."""
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting(
+            {
+                "webhooks": [
+                    {
+                        "url": "https://example.com",
+                        "format": "json",
+                        "headers": {"Authorization": "Bearer tok", "X-Tenant": "acme"},
+                    }
+                ]
+            }
+        )
+        headers = dict(result.webhook_targets[0].headers)
+        assert headers == {"Authorization": "Bearer tok", "X-Tenant": "acme"}
+
+    def test_webhook_headers_default_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"webhooks": [{"url": "https://example.com", "format": "json"}]})
+        assert result.webhook_targets[0].headers == ()
+
+    def test_webhook_headers_crlf_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="CR/LF"):
+            _build_alerting(
+                {
+                    "webhooks": [
+                        {
+                            "url": "https://example.com",
+                            "format": "json",
+                            "headers": {"X-Bad": "a\r\nInjected: 1"},
+                        }
+                    ]
+                }
+            )
+
+    def test_webhook_headers_non_string_value_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="value must be a string"):
+            _build_alerting(
+                {
+                    "webhooks": [
+                        {
+                            "url": "https://example.com",
+                            "format": "json",
+                            "headers": {"X-Num": 5},
+                        }
+                    ]
+                }
+            )
+
+    def test_webhook_headers_non_mapping_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="must be a mapping"):
+            _build_alerting(
+                {
+                    "webhooks": [
+                        {
+                            "url": "https://example.com",
+                            "format": "json",
+                            "headers": ["not", "a", "map"],
+                        }
+                    ]
+                }
+            )
+
+
+class TestOtlpHeadersConfig:
+    def test_otlp_headers_parsed(self) -> None:
+        """S-366: alerting.otlp_headers becomes a hashable tuple."""
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting(
+            {
+                "otlp_endpoint": "localhost:4317",
+                "otlp_headers": {"Authorization": "Bearer tok"},
+            }
+        )
+        assert dict(result.otlp_headers) == {"Authorization": "Bearer tok"}
+
+    def test_otlp_headers_default_empty(self) -> None:
+        from seerflow.config import _build_alerting
+
+        result = _build_alerting({"otlp_endpoint": "localhost:4317"})
+        assert result.otlp_headers == ()
+
+    def test_otlp_headers_env_interpolation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Headers carry secrets via env-backed config (never hardcoded)."""
+        monkeypatch.setenv("OTLP_TOKEN", "env-token")
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text(
+            "alerting:\n"
+            '  otlp_endpoint: "localhost:4317"\n'
+            "  otlp_headers:\n"
+            "    Authorization: Bearer ${OTLP_TOKEN}\n"
+        )
+        config = load_config(str(yaml_file))
+        assert dict(config.alerting.otlp_headers)["Authorization"] == "Bearer env-token"
+
+    def test_otlp_headers_crlf_rejected(self) -> None:
+        from seerflow.config import ConfigError, _build_alerting
+
+        with pytest.raises(ConfigError, match="CR/LF"):
+            _build_alerting(
+                {
+                    "otlp_endpoint": "localhost:4317",
+                    "otlp_headers": {"X-Bad": "a\r\nInjected: 1"},
+                }
+            )
+
     def test_webhook_raw_dicts_preserved(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
         yaml_file.write_text(
