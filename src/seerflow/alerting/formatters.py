@@ -450,16 +450,27 @@ _LEEF_ENTITY_KEY: dict[str, str] = {
 }
 
 
-def _validate_leef_delimiter(delimiter: str) -> None:
-    """Reject delimiters that would break the single-line pipe-framed grammar.
+# Delimiter chars that would break or alias the LEEF grammar/escaping:
+#   ``|``  header field separator        ``=``  key/value separator
+#   ``\\`` escape char                   CR/LF  would split the single-line record
+# Alphanumerics are also rejected because ``n``/``r`` would alias the ``\n``/``\r``
+# attribute escapes on parse; the whole class is barred for an unambiguous rule.
+_LEEF_RESERVED_DELIMITERS = frozenset({"|", "=", "\\", "\r", "\n"})
 
-    A delimiter must be exactly one character and must be neither the header
-    field separator (``|``) nor a CR/LF (which would split the record).
+
+def _validate_leef_delimiter(delimiter: str) -> None:
+    """Reject delimiters that would break or alias the LEEF grammar.
+
+    A delimiter must be exactly one character, non-alphanumeric, and not one of
+    the reserved structural/escape characters (``|``, ``=``, ``\\``, CR, LF).
     """
     if len(delimiter) != 1:
         raise ValueError(f"LEEF delimiter must be a single character, got {delimiter!r}")
-    if delimiter in ("|", "\r", "\n"):
-        raise ValueError(f"LEEF delimiter must not be '|', CR, or LF, got {delimiter!r}")
+    if delimiter in _LEEF_RESERVED_DELIMITERS or delimiter.isalnum():
+        raise ValueError(
+            "LEEF delimiter must be a single non-alphanumeric character other than "
+            f"'|', '=', '\\', CR, or LF, got {delimiter!r}"
+        )
 
 
 def _leef_escape_header(value: str) -> str:
@@ -542,8 +553,9 @@ def format_leef(alert: Alert, *, delimiter: str = _LEEF_DEFAULT_DELIMITER) -> st
     (graceful degradation). The optional 6th ``DelimiterChar`` field is emitted
     only for a non-default delimiter.
 
-    Raises ``ValueError`` if ``delimiter`` is not a single character or is one
-    of ``|``, CR, or LF (each would break the pipe-framed single-line grammar).
+    Raises ``ValueError`` if ``delimiter`` is not a single non-alphanumeric
+    character or is one of the reserved chars ``|``, ``=``, ``\\``, CR, or LF
+    (each would break or alias the grammar/escaping).
     """
     _validate_leef_delimiter(delimiter)
     event_id = alert.rule_name or alert.alert_type

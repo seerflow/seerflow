@@ -419,10 +419,12 @@ class TestConformanceRoundTrip:
 
 
 class TestDelimiterValidation:
-    """A delimiter must be a single char and must not break the grammar.
+    """A delimiter must be a single char that cannot break the grammar.
 
-    ``|`` collides with the header field separator and CR/LF would split the
-    single-line record, so both are rejected with a clear ``ValueError``.
+    Rejected: the empty/multi-char case, the header separator ``|``, CR/LF
+    (would split the single-line record), the structural ``=``/``\\`` chars and
+    any alphanumeric char (``n``/``r`` etc. would alias the ``\\n``/``\\r``
+    escape sequences on parse). A clear ``ValueError`` is raised for each.
     """
 
     def test_pipe_delimiter_rejected(self) -> None:
@@ -440,3 +442,30 @@ class TestDelimiterValidation:
     def test_newline_delimiter_rejected(self) -> None:
         with pytest.raises(ValueError, match="delimiter"):
             format_leef(_make_alert(), delimiter="\n")
+
+    def test_cr_delimiter_rejected(self) -> None:
+        with pytest.raises(ValueError, match="delimiter"):
+            format_leef(_make_alert(), delimiter="\r")
+
+    def test_equals_delimiter_rejected(self) -> None:
+        # ``=`` is the key/value separator — it cannot also delimit attributes.
+        with pytest.raises(ValueError, match="delimiter"):
+            format_leef(_make_alert(), delimiter="=")
+
+    def test_backslash_delimiter_rejected(self) -> None:
+        # ``\\`` is the escape char — using it as a delimiter corrupts escaping.
+        with pytest.raises(ValueError, match="delimiter"):
+            format_leef(_make_alert(), delimiter="\\")
+
+    @pytest.mark.parametrize("delimiter", ["n", "r", "x", "A", "0", "z"])
+    def test_alphanumeric_delimiter_rejected(self, delimiter: str) -> None:
+        # ``n``/``r`` alias the ``\\n``/``\\r`` escapes on parse; any letter or
+        # digit is ambiguous, so the whole alphanumeric class is rejected.
+        with pytest.raises(ValueError, match="delimiter"):
+            format_leef(_make_alert(), delimiter=delimiter)
+
+    @pytest.mark.parametrize("delimiter", ["^", ",", ";", ":", "~", "\t", "#", "@"])
+    def test_punctuation_delimiters_accepted(self, delimiter: str) -> None:
+        # Safe non-alphanumeric, non-structural delimiters round-trip cleanly.
+        line = format_leef(_make_alert(dedup_count=9), delimiter=delimiter)
+        assert _attrs(line)["cnt"] == "9"
