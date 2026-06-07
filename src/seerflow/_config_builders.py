@@ -377,10 +377,10 @@ def _build_correlation(data: dict[str, Any]) -> CorrelationConfig:
 _VALID_WEBHOOK_FORMATS = frozenset({"slack", "teams", "json"})
 
 # Sink formatter tokens accepted by ``alerting.sinks[*].formatter``. Superset of
-# the dict-only webhook formats: CEF (S-364) is a line/text format that pairs
-# with text sinks (syslog/webhook), so it is selectable on a sink but NOT on the
-# JSON-POSTing webhook-target validator above.
-_VALID_SINK_FORMATTERS = _VALID_WEBHOOK_FORMATS | {"cef"}
+# the dict-only webhook formats: CEF (S-364) and LEEF (S-365) are line/text
+# formats that pair with text sinks (syslog/webhook), so they are selectable on
+# a sink but NOT on the JSON-POSTing webhook-target validator above.
+_VALID_SINK_FORMATTERS = _VALID_WEBHOOK_FORMATS | {"cef", "leef"}
 
 # Reject any header-like field (email From/To/Subject) containing CR/LF —
 # such characters can split SMTP headers on relays that do not enforce

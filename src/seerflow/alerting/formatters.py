@@ -1,4 +1,4 @@
-"""Alert formatters for Slack, Microsoft Teams, plain JSON, and CEF.
+"""Alert formatters for Slack, Microsoft Teams, plain JSON, CEF, and LEEF.
 
 Each formatter is a pure function with no I/O and no side effects.
 
@@ -6,10 +6,12 @@ Each formatter is a pure function with no I/O and no side effects.
 - ``format_teams``  — Teams Adaptive Card payload (message/attachments dict)
 - ``format_json``   — Flat dict with ISO 8601 timestamp
 - ``format_cef``    — ArcSight Common Event Format single-line string
+- ``format_leef``   — QRadar LEEF 2.0 single-line string
 
-Unlike the dict-returning webhook formatters, ``format_cef`` returns a single
-``str`` line; it is transport-decoupled and pairs with line/text sinks
-(syslog/webhook) rather than the JSON-POSTing webhook dispatcher.
+Unlike the dict-returning webhook formatters, ``format_cef`` and
+``format_leef`` return a single ``str`` line; they are transport-decoupled and
+pair with line/text sinks (syslog/webhook) rather than the JSON-POSTing webhook
+dispatcher.
 """
 
 from __future__ import annotations
@@ -407,3 +409,164 @@ def format_cef(alert: Alert) -> str:
         ]
     )
     return f"{header}|{_cef_extension(alert)}"
+
+
+# ---------------------------------------------------------------------------
+# LEEF 2.0 (QRadar Log Event Extended Format) formatter
+# ---------------------------------------------------------------------------
+#
+# Grammar (LEEF 2.0):
+#   LEEF:2.0|Vendor|Product|Version|EventID|[DelimiterChar|]Attributes
+#
+# The 6th DelimiterChar field is optional; it is emitted only for a non-default
+# (non-TAB) attribute delimiter so the receiver can self-discover it. Vendor/
+# Product/Version are the static Seerflow product identity (NOT alert data), so
+# they live in constants + the package ``__version__`` (single source of truth).
+
+_LEEF_VERSION = "2.0"
+_LEEF_VENDOR = "Seerflow"
+_LEEF_PRODUCT = "Seerflow"
+_LEEF_DEFAULT_DELIMITER = "\t"
+
+# SeverityLevel (TRACE=0 .. FATAL=6) -> LEEF ``sev`` (1..10). Explicit table:
+# LEEF severity is 1..10 (not 0-based like CEF), so this is its own mapping —
+# every level is conformance-tested.
+_LEEF_SEVERITY: dict[SeverityLevel, int] = {
+    SeverityLevel.TRACE: 1,
+    SeverityLevel.INFORMATIONAL: 2,
+    SeverityLevel.NOTICE: 3,
+    SeverityLevel.WARNING: 5,
+    SeverityLevel.ERROR: 7,
+    SeverityLevel.CRITICAL: 9,
+    SeverityLevel.FATAL: 10,
+}
+
+# entity_type -> LEEF normalized attribute key for the well-known types. Other
+# types fall back to a labelled custom string (cs1/cs1Label) carrying the type.
+_LEEF_ENTITY_KEY: dict[str, str] = {
+    "ip": "src",
+    "user": "usrName",
+    "host": "identHostName",
+}
+
+
+# Delimiter chars that would break or alias the LEEF grammar/escaping:
+#   ``|``  header field separator        ``=``  key/value separator
+#   ``\\`` escape char                   CR/LF  would split the single-line record
+# Alphanumerics are also rejected because ``n``/``r`` would alias the ``\n``/``\r``
+# attribute escapes on parse; the whole class is barred for an unambiguous rule.
+_LEEF_RESERVED_DELIMITERS = frozenset({"|", "=", "\\", "\r", "\n"})
+
+
+def _validate_leef_delimiter(delimiter: str) -> None:
+    """Reject delimiters that would break or alias the LEEF grammar.
+
+    A delimiter must be exactly one character, non-alphanumeric, and not one of
+    the reserved structural/escape characters (``|``, ``=``, ``\\``, CR, LF).
+    """
+    if len(delimiter) != 1:
+        raise ValueError(f"LEEF delimiter must be a single character, got {delimiter!r}")
+    if delimiter in _LEEF_RESERVED_DELIMITERS or delimiter.isalnum():
+        raise ValueError(
+            "LEEF delimiter must be a single non-alphanumeric character other than "
+            f"'|', '=', '\\', CR, or LF, got {delimiter!r}"
+        )
+
+
+def _leef_escape_header(value: str) -> str:
+    """Escape a LEEF header field: ``\\`` then ``|`` (order matters).
+
+    CR/LF are stripped — a header newline would break the single-line record.
+    """
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\r", "").replace("\n", "")
+
+
+def _leef_escape_attr(value: str, delimiter: str) -> str:
+    """Escape a LEEF attribute value.
+
+    Escapes ``\\`` first, then ``=``, the active ``delimiter``, newline and CR.
+    """
+    escaped = (
+        value.replace("\\", "\\\\").replace("=", "\\=").replace("\n", "\\n").replace("\r", "\\r")
+    )
+    return escaped.replace(delimiter, "\\" + delimiter)
+
+
+def _leef_severity(alert: Alert) -> str:
+    """Map the alert's SeverityLevel onto a LEEF 1..10 integer string."""
+    return str(_LEEF_SEVERITY.get(alert.severity_id, 5))
+
+
+def _leef_entity_pairs(alert: Alert) -> list[tuple[str, str]]:
+    """Entity reference attribute pairs; empty when no entity value is set."""
+    if not alert.entity_value:
+        return []
+    key = _LEEF_ENTITY_KEY.get(alert.entity_type)
+    if key is not None:
+        return [(key, alert.entity_value)]
+    return [("cs1", alert.entity_value), ("cs1Label", alert.entity_type)]
+
+
+def _leef_attr_pairs(alert: Alert) -> list[tuple[str, str]]:
+    """Build ordered (key, value) attribute pairs, omitting absent fields.
+
+    Always-present anchors (devTime, devTimeFormat, externalId, cnt, cn1) frame
+    the record; remaining keys degrade gracefully — appended only when set.
+    Mirrors ``_cef_extension_pairs`` field coverage with LEEF-canonical keys.
+    """
+    pairs: list[tuple[str, str]] = [
+        ("devTime", str(alert.timestamp_ns // 1_000_000)),
+        ("devTimeFormat", "epochMillis"),
+        ("sev", _leef_severity(alert)),
+        ("externalId", alert.alert_id),
+        ("cnt", str(alert.dedup_count)),
+        ("cn1", f"{alert.risk_score:g}"),
+        ("cn1Label", "RiskScore"),
+        ("cs5", alert.alert_type),
+        ("cs5Label", "AlertType"),
+    ]
+    pairs.extend(_leef_entity_pairs(alert))
+    if alert.entity_uuid:
+        pairs.extend([("cs2", alert.entity_uuid), ("cs2Label", "SeerflowEntityUUID")])
+    if alert.mitre_techniques:
+        pairs.extend([("cs3", ",".join(alert.mitre_techniques)), ("cs3Label", "MitreTechniques")])
+    if alert.mitre_tactics:
+        pairs.extend([("cs4", ",".join(alert.mitre_tactics)), ("cs4Label", "MitreTactics")])
+    return pairs
+
+
+def _leef_attributes(alert: Alert, delimiter: str) -> str:
+    """Render the delimiter-joined ``key=value`` LEEF attribute blob."""
+    return delimiter.join(
+        f"{key}={_leef_escape_attr(value, delimiter)}" for key, value in _leef_attr_pairs(alert)
+    )
+
+
+def format_leef(alert: Alert, *, delimiter: str = _LEEF_DEFAULT_DELIMITER) -> str:
+    """Return a single-line LEEF 2.0 string representation of the alert.
+
+    Header: ``LEEF:2.0|Vendor|Product|Version|EventID|[DelimiterChar|]Attrs``.
+    ``EventID`` is ``rule_name`` (falling back to ``alert_type`` when empty).
+    Entity refs, MITRE technique/tactic, risk score, timestamp (``devTime`` in
+    milliseconds) and identifiers are mapped into the tab-delimited (or
+    ``delimiter``-delimited) attributes; unmapped/empty fields are omitted
+    (graceful degradation). The optional 6th ``DelimiterChar`` field is emitted
+    only for a non-default delimiter.
+
+    Raises ``ValueError`` if ``delimiter`` is not a single non-alphanumeric
+    character or is one of the reserved chars ``|``, ``=``, ``\\``, CR, or LF
+    (each would break or alias the grammar/escaping).
+    """
+    _validate_leef_delimiter(delimiter)
+    event_id = alert.rule_name or alert.alert_type
+    fields = [
+        f"LEEF:{_LEEF_VERSION}",
+        _leef_escape_header(_LEEF_VENDOR),
+        _leef_escape_header(_LEEF_PRODUCT),
+        _leef_escape_header(seerflow.__version__),
+        _leef_escape_header(event_id),
+    ]
+    if delimiter != _LEEF_DEFAULT_DELIMITER:
+        fields.append(_leef_escape_header(delimiter))
+    header = "|".join(fields)
+    return f"{header}|{_leef_attributes(alert, delimiter)}"

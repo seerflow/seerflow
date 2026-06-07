@@ -74,6 +74,13 @@ def test_cef_formatter_is_accepted() -> None:
     assert c.sinks[0].formatter == "cef"
 
 
+def test_leef_formatter_is_accepted() -> None:
+    # S-365: LEEF is a selectable sink formatter token (text/line format,
+    # decoupled from the dict-POSTing webhook path).
+    c = _build_alerting({"sinks": [{"type": "console", "name": "qradar", "formatter": "leef"}]})
+    assert c.sinks[0].formatter == "leef"
+
+
 def test_sink_min_severity_out_of_range_raises() -> None:
     with pytest.raises(ConfigError, match="min_severity"):
         _build_alerting({"sinks": [{"type": "console", "name": "x", "min_severity": 9}]})
