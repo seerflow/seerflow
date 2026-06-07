@@ -45,6 +45,10 @@ def _build_console_sink(config: SinkConfig, stream_override: IO[str] | None) -> 
 
     opts = dict(config.options)
     stream = stream_override if stream_override is not None else opts.get("stream", "stdout")
+    # ConsoleSink renders human|json only. The config-layer formatter token set
+    # (slack|teams|json) is wider because it is shared with webhook transports;
+    # for a console sink any non-json token renders as the human line. Richer
+    # per-transport formatter resolution arrives with the HEC/CEF/LEEF sinks.
     fmt: Literal["human", "json"] = "json" if config.formatter == "json" else "human"
     return ConsoleSink(
         stream,  # type: ignore[arg-type]
