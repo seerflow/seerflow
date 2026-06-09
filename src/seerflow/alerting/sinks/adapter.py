@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from seerflow.alerting.sinks.hec import HecSink
     from seerflow.alerting.sinks.otlp import OtlpSink
+    from seerflow.alerting.sinks.syslog import SyslogSink
     from seerflow.config import SinkConfig
     from seerflow.models.alert import Alert
 
@@ -156,4 +157,42 @@ def build_hec_sink_target(config: SinkConfig) -> HecSink:
         name=config.name,
         min_severity=config.min_severity,
         ca=opts.get("ca", ""),
+    )
+
+
+# Syslog transport option defaults. Stable string defaults mirror the values the
+# config-layer validator injects, so the registry path stays consistent whether
+# a sink is built from validated config or directly in a test.
+_SYSLOG_DEFAULT_PORT = "514"
+_SYSLOG_DEFAULT_FACILITY = "1"
+_SYSLOG_DEFAULT_TRANSPORT = "udp"
+
+
+def build_syslog_sink_target(config: SinkConfig) -> SyslogSink:
+    """Build an RFC 5424 syslog ``DeliveryTarget`` for a ``syslog`` SinkConfig (S-363).
+
+    Reads transport options from ``config.options``: ``host`` (required),
+    ``port`` (default 514), ``facility`` (default 1), ``transport``
+    (``udp``|``tcp``, default ``udp``). The sink's per-frame formatter is
+    ``config.formatter`` (``cef``/``leef`` → line; others → JSON). ``SyslogSink``
+    itself satisfies ``DeliveryTarget``, so no wrapping adapter is needed.
+
+    Raises ``ValueError`` for a missing host (config-layer validation should
+    reject it first; this is the defence-in-depth fallback).
+    """
+    from seerflow.alerting.sinks.syslog import SyslogSink
+
+    opts = dict(config.options)
+    host = opts.get("host", "")
+    if not host:
+        msg = "syslog sink requires options.host"
+        raise ValueError(msg)
+    return SyslogSink(
+        host=host,
+        name=config.name,
+        port=int(opts.get("port", _SYSLOG_DEFAULT_PORT)),
+        facility=int(opts.get("facility", _SYSLOG_DEFAULT_FACILITY)),
+        transport=opts.get("transport", _SYSLOG_DEFAULT_TRANSPORT),
+        formatter=config.formatter,
+        min_severity=config.min_severity,
     )

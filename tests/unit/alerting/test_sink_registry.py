@@ -153,6 +153,45 @@ def test_build_hec_sink_requires_token() -> None:
         )
 
 
+def test_known_sink_types_includes_syslog() -> None:
+    assert "syslog" in KNOWN_SINK_TYPES
+
+
+def test_is_known_sink_type_syslog() -> None:
+    assert is_known_sink_type("syslog") is True
+
+
+def test_build_syslog_sink_returns_delivery_target() -> None:
+    target = build_sink(
+        SinkConfig(
+            type="syslog",
+            name="collector",
+            formatter="cef",
+            min_severity=2,
+            options=(("host", "syslog.example.com"), ("transport", "tcp"), ("port", "1514")),
+        )
+    )
+    assert isinstance(target, DeliveryTarget)
+    assert target.name == "collector"
+    assert target.min_severity == 2
+    assert target._transport == "tcp"  # type: ignore[attr-defined]
+    assert target._port == 1514  # type: ignore[attr-defined]
+
+
+def test_build_syslog_sink_defaults() -> None:
+    target = build_sink(
+        SinkConfig(type="syslog", name="sl", formatter="json", options=(("host", "h"),))
+    )
+    assert target._port == 514  # type: ignore[attr-defined]
+    assert target._facility == 1  # type: ignore[attr-defined]
+    assert target._transport == "udp"  # type: ignore[attr-defined]
+
+
+def test_build_syslog_sink_requires_host() -> None:
+    with pytest.raises(ValueError, match="host"):
+        build_sink(SinkConfig(type="syslog", name="x", formatter="json"))
+
+
 def test_build_unknown_type_raises() -> None:
     with pytest.raises(ValueError, match="unknown sink type"):
         build_sink(SinkConfig(type="nope", name="x", formatter="json"))
