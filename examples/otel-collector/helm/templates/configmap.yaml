@@ -1,0 +1,15 @@
+{{/*
+Renders the canonical reference Collector config (kept byte-identical to
+../otel-collector-config.yaml) into a ConfigMap. Single source of truth: the
+chart, the compose path, and this ConfigMap all use the same file.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "seerflow-otel-gateway.fullname" . }}-config
+  labels:
+    {{- include "seerflow-otel-gateway.labels" . | nindent 4 }}
+data:
+  # File name mirrors the reference artifact otel-collector-config.yaml.
+  config.yaml: |
+{{ .Files.Get "otel-collector-config.yaml" | indent 4 }}

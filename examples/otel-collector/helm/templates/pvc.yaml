@@ -1,0 +1,22 @@
+{{/*
+Persistent volume claim for durable Azure Event Hub checkpoints (the
+file_storage extension). Only rendered when persistence is enabled. Without it,
+Azure checkpoints live in memory and are lost on restart (FR-006 caveat).
+*/}}
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "seerflow-otel-gateway.fullname" . }}-storage
+  labels:
+    {{- include "seerflow-otel-gateway.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- with .Values.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

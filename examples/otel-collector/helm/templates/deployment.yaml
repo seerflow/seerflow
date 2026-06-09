@@ -1,0 +1,66 @@
+{{/*
+Gateway Collector Deployment. Pins the contrib image from values (never
+:latest), mounts the reference config from the ConfigMap at the standard
+contrib path, optionally injects per-source cloud credentials from an EXISTING
+Secret (secretRef), and optionally mounts a PVC for durable Azure checkpoints.
+Logs-only: this deploys the same single-`logs`-pipeline Collector as the
+compose path — Seerflow ingests the OTLP Logs signal only.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "seerflow-otel-gateway.fullname" . }}
+  labels:
+    {{- include "seerflow-otel-gateway.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "seerflow-otel-gateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "seerflow-otel-gateway.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: otel-collector
+          # Pinned contrib release from values — never :latest.
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config=/etc/otelcol-contrib/config.yaml"
+          env:
+            # Exporter target: the external Seerflow OTLP gRPC receiver (:4317).
+            - name: SEERFLOW_OTLP_ENDPOINT
+              value: {{ .Values.seerflow.otlpEndpoint | quote }}
+          {{- if .Values.secretRef }}
+          # Per-source cloud credentials from an EXISTING Secret (never inlined).
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secretRef }}
+          {{- end }}
+          ports:
+            - name: otlp-grpc
+              containerPort: {{ .Values.service.grpcPort }}
+            - name: otlp-http
+              containerPort: {{ .Values.service.httpPort }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol-contrib/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            - name: storage
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "seerflow-otel-gateway.fullname" . }}-config
+        {{- if .Values.persistence.enabled }}
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ include "seerflow-otel-gateway.fullname" . }}-storage
+        {{- end }}
