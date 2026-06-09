@@ -139,6 +139,12 @@ class SyslogSink:
     Satisfies the :class:`~seerflow.alerting.target.DeliveryTarget` protocol
     structurally (read-only ``name``/``min_severity`` properties + async
     ``deliver``/``deliver_digest``).
+
+    Like the other delivery targets, a single sink instance assumes
+    single-flight delivery: the ``NotificationRouter`` drives ``deliver`` for a
+    given target sequentially, so the persistent TCP socket and
+    ``failure_count`` need no cross-thread locking even though socket I/O is
+    offloaded to a worker thread.
     """
 
     def __init__(
@@ -239,8 +245,7 @@ class SyslogSink:
     # ------------------------------------------------------------------
 
     def _open_tcp_socket(self) -> socket.socket:
-        sock = socket.create_connection((self._host, self._port), timeout=_SOCKET_TIMEOUT_SECONDS)
-        return sock
+        return socket.create_connection((self._host, self._port), timeout=_SOCKET_TIMEOUT_SECONDS)
 
     def _close_tcp(self) -> None:
         if self._tcp_socket is not None:
