@@ -492,6 +492,45 @@ def _validate_hec_options(idx: int, opts: dict[str, str]) -> None:
         raise ConfigError(f"alerting.sinks[{idx}].options.token is required for a hec sink")
 
 
+# Syslog transport defaults (sensible per RFC 5424 / common collector config).
+# Keys are STABLE — renaming ``host``/``port``/``facility``/``transport`` would
+# trip the docs-drift gate. Facility 1 = user-level; transport defaults to UDP.
+_SYSLOG_DEFAULT_PORT = 514
+_SYSLOG_DEFAULT_FACILITY = 1
+_SYSLOG_DEFAULT_TRANSPORT = "udp"
+_VALID_SYSLOG_TRANSPORTS = frozenset({"udp", "tcp"})
+
+
+def _validate_syslog_options(idx: int, raw_opts: dict[str, Any]) -> dict[str, str]:
+    """Validate a ``syslog`` sink's options, returning a normalized string map.
+
+    ``host`` (required, non-empty) names the collector. ``port`` (default 514)
+    must be in 1..65535; ``facility`` (default 1) must be in 0..23 (RFC 5424
+    facility range); ``transport`` (default ``udp``) must be ``udp`` or ``tcp``.
+    Defaults are injected so the resulting ``SinkConfig.options`` is explicit.
+    """
+    host = raw_opts.get("host", "")
+    if not isinstance(host, str) or not host:
+        raise ConfigError(f"alerting.sinks[{idx}].options.host is required for a syslog sink")
+    port = raw_opts.get("port", _SYSLOG_DEFAULT_PORT)
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise ConfigError(
+            f"alerting.sinks[{idx}].options.port must be an int in [1,65535], got {port!r}"
+        )
+    facility = raw_opts.get("facility", _SYSLOG_DEFAULT_FACILITY)
+    if not isinstance(facility, int) or isinstance(facility, bool) or not 0 <= facility <= 23:
+        raise ConfigError(
+            f"alerting.sinks[{idx}].options.facility must be an int in [0,23], got {facility!r}"
+        )
+    transport = raw_opts.get("transport", _SYSLOG_DEFAULT_TRANSPORT)
+    if transport not in _VALID_SYSLOG_TRANSPORTS:
+        valid = sorted(_VALID_SYSLOG_TRANSPORTS)
+        raise ConfigError(
+            f"alerting.sinks[{idx}].options.transport must be one of {valid}, got {transport!r}"
+        )
+    return {"host": host, "port": str(port), "facility": str(facility), "transport": transport}
+
+
 def _build_one_sink(idx: int, entry: dict[str, Any]) -> SinkConfig:
     """Validate one ``alerting.sinks`` entry into a ``SinkConfig`` (S-361)."""
     from seerflow.alerting.sinks.registry import KNOWN_SINK_TYPES, is_known_sink_type
@@ -518,6 +557,10 @@ def _build_one_sink(idx: int, entry: dict[str, Any]) -> SinkConfig:
     options = tuple((str(k), str(v)) for k, v in raw_opts.items())
     if sink_type == "hec":
         _validate_hec_options(idx, dict(options))
+    elif sink_type == "syslog":
+        # Validation injects defaults, so the normalized map replaces the
+        # raw options (numeric checks run on the raw, pre-stringified values).
+        options = tuple(_validate_syslog_options(idx, raw_opts).items())
     return SinkConfig(
         type=sink_type,
         name=name,
