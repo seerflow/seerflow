@@ -1,0 +1,24 @@
+{{/*
+Service exposing the gateway Collector's own OTLP receiver ports, so in-cluster
+producers can export OTLP to the gateway. (The gateway in turn forwards to the
+external Seerflow endpoint configured in values.seerflow.otlpEndpoint.)
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "seerflow-otel-gateway.fullname" . }}
+  labels:
+    {{- include "seerflow-otel-gateway.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "seerflow-otel-gateway.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: otlp-grpc
+      port: {{ .Values.service.grpcPort }}
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: {{ .Values.service.httpPort }}
+      targetPort: otlp-http
+      protocol: TCP

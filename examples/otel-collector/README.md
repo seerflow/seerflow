@@ -25,6 +25,11 @@ therefore defines a single `logs` pipeline — see
 |------|---------|
 | `otel-collector-config.yaml` | The reference Collector config (4 receivers → `otlp` exporter → Seerflow). |
 | `docker-compose.yaml` | Local end-to-end smoke path: Collector + Seerflow. |
+| `helm/` | Minimal Helm chart to deploy the gateway Collector to Kubernetes — see [Kubernetes (Helm)](#kubernetes-helm). |
+
+The Helm chart and the compose file render the **same** reference
+`otel-collector-config.yaml`, so there is a single source of truth for the
+Collector configuration across both deployment surfaces.
 
 ## Version pin
 
@@ -131,6 +136,59 @@ credentials, by sending a synthetic OTLP log directly through the chain.
    docker compose -f examples/otel-collector/docker-compose.yaml down -v
    ```
 
+## Kubernetes (Helm)
+
+For a Kubernetes deployment, the `helm/` chart stands up the **gateway
+Collector** as a `Deployment` + `ConfigMap` + `Service`. The chart deploys the
+gateway **only** — run Seerflow via its own image/release and point the chart's
+`seerflow.otlpEndpoint` at it (the gateway forwards logs there via OTLP/gRPC on
+`:4317`). The chart renders the same reference `otel-collector-config.yaml` into
+a ConfigMap, and pins the same contrib **v0.147.0** image as the compose file.
+
+Install with the defaults, overriding the Seerflow endpoint:
+
+```bash
+helm install seerflow-gateway ./examples/otel-collector/helm \
+  --set seerflow.otlpEndpoint=seerflow.observability.svc.cluster.local:4317
+```
+
+Or supply a values override file (`my-values.yaml`):
+
+```yaml
+# my-values.yaml — copy-paste starting point
+image:
+  # Never use :latest — pin the documented contrib baseline (see Version pin).
+  tag: "0.147.0"
+
+seerflow:
+  # OTLP/gRPC endpoint of your Seerflow instance (otlp_grpc receiver, :4317).
+  otlpEndpoint: "seerflow.observability.svc.cluster.local:4317"
+  tlsInsecure: false   # terminate TLS/mTLS in production (see Production notes)
+
+# Per-source cloud credentials come from an EXISTING Kubernetes Secret — never
+# inline secret values in the chart. Create it out-of-band, e.g.:
+#   kubectl create secret generic seerflow-gateway-creds \
+#     --from-literal=AWS_REGION=us-east-1 \
+#     --from-literal=GCP_PROJECT_ID=my-project ...
+secretRef: "seerflow-gateway-creds"
+
+# Durable Azure Event Hub checkpoints: enable a PVC so the file_storage
+# extension survives restarts. Without it, Azure checkpoints are in-memory only
+# (see the BETA caveat in Receiver stability and caveats).
+persistence:
+  enabled: true
+  size: 1Gi
+```
+
+```bash
+helm install seerflow-gateway ./examples/otel-collector/helm -f my-values.yaml
+```
+
+After tuning the receivers you want (see [Enabling a source](#enabling-a-source)),
+re-package or `helm upgrade` to roll the change. As with the compose path, this
+is a **logs-only** Collector — do not add metrics/traces pipelines that target
+the Seerflow exporter.
+
 ## Production notes
 
 - **TLS.** The reference config uses `tls.insecure: true` for the loopback
@@ -149,6 +207,15 @@ credentials, by sending a synthetic OTLP log directly through the chain.
 
 ## See also
 
-- `docs/operator-guide.md` — operator runbook (cross-links this gateway).
+- **`docs/operator-guide.md`** (published from the seerflow-guide repo) — the
+  canonical operator runbook for this gateway. It cross-links back to the
+  FR-006 **receiver caveats** documented above ([Receiver stability and
+  caveats](#receiver-stability-and-caveats) — CloudWatch *alpha*; Pub/Sub
+  *beta* and Collibra-maintained, not officially supported by GCP; Azure Event
+  Hub *beta* with **in-memory checkpoints** unless a `file_storage` extension is
+  wired; Kafka *beta*) and to the documented contrib **v0.147.0 version pin**
+  ([Version pin](#version-pin)). Treat the operator guide as the entry point;
+  this README is the reference for the artifacts it links to.
 - `seerflow.example.yaml` (repo root) — Seerflow's own `receivers:` block
   (`otlp_grpc_port: 4317`, `otlp_http_port: 4318`).
+- `helm/` — the Kubernetes Helm chart (see [Kubernetes (Helm)](#kubernetes-helm)).

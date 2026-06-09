@@ -1,0 +1,60 @@
+# Default values for the seerflow-otel-gateway chart.
+# ============================================================================
+# This chart deploys the GATEWAY Collector ONLY. Run Seerflow separately (its
+# own image/release) and point `seerflow.otlpEndpoint` at it. See ../README.md
+# "Kubernetes (Helm)" for the copy-paste install snippet, and the operator
+# guide for the FR-006 receiver caveats + the contrib v0.147.0 version pin.
+# Never inline cloud credentials here — reference an existing Kubernetes
+# Secret by name via `secretRef` (see below).
+# ============================================================================
+
+replicaCount: 1
+
+image:
+  # Pinned to the documented contrib baseline — never use `latest`. The
+  # receivers evolve quickly; bump deliberately and re-verify config keys.
+  repository: otel/opentelemetry-collector-contrib
+  tag: "0.147.0"
+  pullPolicy: IfNotPresent
+
+seerflow:
+  # OTLP/gRPC endpoint of your Seerflow instance (otlp_grpc receiver, :4317).
+  # Override with the in-cluster Service or external address of Seerflow.
+  otlpEndpoint: "seerflow:4317"
+  # Loopback/dev default. In production terminate TLS/mTLS and set this false,
+  # then configure CA/cert/key on the exporter (see ../README.md production notes).
+  tlsInsecure: true
+
+# Per-source cloud credentials are read from an EXISTING Kubernetes Secret.
+# Create it out-of-band (kubectl create secret generic ...) with the env keys
+# each enabled receiver needs (AWS_REGION, GCP_PROJECT_ID, ... ). Leave empty
+# to disable secret-based env injection (e.g. when using workload identity /
+# IRSA / instance roles). Never put secret values in this file.
+secretRef: ""
+
+# Durable checkpoint storage for the Azure Event Hub receiver's file_storage
+# extension. Without a persistent volume, Azure checkpoints live in memory only
+# and are lost on restart (see the FR-006 caveats in ../README.md).
+persistence:
+  enabled: false
+  size: 1Gi
+  # storageClassName: ""   # uncomment to pin a StorageClass
+  mountPath: /var/lib/otelcol/storage
+
+service:
+  type: ClusterIP
+  # OTLP receiver ports the gateway Collector itself exposes (for upstream
+  # producers, e.g. an in-cluster app exporting OTLP to the gateway).
+  grpcPort: 4317
+  httpPort: 4318
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+nameOverride: ""
+fullnameOverride: ""

@@ -1,0 +1,24 @@
+# Helm chart for the Seerflow OTel cloud-ingestion gateway (S-368, FR-007).
+# Deploys an OpenTelemetry Collector (contrib) configured by the reference
+# otel-collector-config.yaml, forwarding cloud logs into an external Seerflow
+# OTLP receiver. See ../README.md "Kubernetes (Helm)" for the values snippet and
+# the operator-guide cross-link (FR-006 caveats + version pin).
+apiVersion: v2
+name: seerflow-otel-gateway
+description: >-
+  OpenTelemetry Collector (contrib) gateway that fans AWS CloudWatch, GCP
+  Pub/Sub, Azure Event Hubs, and Kafka logs into Seerflow's OTLP receiver.
+type: application
+# Chart version — bump on chart changes (independent of the Collector release).
+version: 0.1.0
+# appVersion tracks the deployed contrib Collector release (pinned baseline).
+appVersion: "0.147.0"
+keywords:
+  - opentelemetry
+  - otel-collector
+  - logs
+  - gateway
+  - seerflow
+home: https://github.com/seerflow/seerflow
+sources:
+  - https://github.com/seerflow/seerflow/tree/main/examples/otel-collector
