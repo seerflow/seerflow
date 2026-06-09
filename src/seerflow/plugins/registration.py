@@ -1,13 +1,14 @@
 """Apply a :class:`LoadedPlugins` inventory to Seerflow's wiring seams (S-369).
 
-These are thin adapters over the *existing* public registration APIs —
-``ReceiverManager.register``, ``NotificationRouter.register_target`` — so a
-plugin Receiver or DeliveryTarget participates with **zero core changes**
-(AC-2). Storage-backend plugins are exposed via a lookup helper; full config
-dispatch wiring is intentionally left to a follow-up (S-370) per the story.
+These are thin adapters over the public registration APIs —
+``ReceiverManager.register``, ``NotificationRouter.register_target``. S-370
+hardened the receiver path with a collision guard (``register(...,
+replace=False)``) and wired full storage-backend config dispatch through
+:func:`find_storage_backend` (see :func:`seerflow.storage.connect_storage`).
 
-Registration is best-effort and isolated: a duplicate name (the router's
-``ValueError``) is logged and skipped rather than aborting the batch.
+Registration is best-effort and isolated: a name collision (the receiver
+guard's ``False`` return or the router's ``ValueError``) is logged and the
+offending plugin is skipped rather than aborting the batch.
 """
 
 from __future__ import annotations
@@ -31,23 +32,25 @@ def register_plugin_receivers(
 ) -> tuple[str, ...]:
     """Register every plugin receiver into ``manager``; return the names used.
 
-    ``ReceiverManager.register`` keys receivers by ``source_id`` and overwrites
-    on collision (its existing contract). A plugin whose entry-point name
-    matches a built-in source id (e.g. ``"syslog"``) therefore *shadows* the
-    built-in; the collision is logged at WARNING so operators can spot it.
-    Adding a collision guard to the manager is deferred to S-370 to keep this
-    story's "zero core changes" (AC-2) guarantee intact.
+    Uses :meth:`ReceiverManager.register`'s collision guard
+    (``replace=False``, S-370): a plugin whose entry-point name collides with
+    an already-registered source (e.g. a built-in ``"syslog"``) is **rejected**
+    — the existing source is preserved, the collision is logged at WARNING,
+    and the rejected name is dropped from the returned tuple. This closes the
+    S-369 "shadow + warn" deferral: a third-party receiver can no longer
+    silently take over a built-in source id.
     """
     registered: list[str] = []
     for record in loaded.receivers:
         receiver: Receiver = record.instance
-        if record.name in manager._receivers:
+        if not manager.register(record.name, receiver, replace=False):
             _log.warning(
-                "Plugin receiver %r shadows an already-registered source (from %s)",
+                "Skipping plugin receiver %r (from %s): name collides with an "
+                "already-registered source",
                 record.name,
                 record.distribution,
             )
-        manager.register(record.name, receiver)
+            continue
         registered.append(record.name)
         _log.info("Registered plugin receiver %r (from %s)", record.name, record.distribution)
     return tuple(registered)

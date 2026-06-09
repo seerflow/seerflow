@@ -75,18 +75,23 @@ def test_register_plugin_receivers_into_manager() -> None:
 
 
 @pytest.mark.unit
-def test_register_plugin_receiver_name_collision_warns(
+def test_register_plugin_receiver_name_collision_rejected(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """S-370 deferral: a colliding plugin name is rejected, not shadowed."""
     manager = ReceiverManager()
-    manager.register("syslog", _FakeReceiver())
-    loaded = LoadedPlugins(records=(_receiver_record("syslog"),))
+    builtin = _FakeReceiver()
+    manager.register("syslog", builtin)
+    loaded = LoadedPlugins(records=(_receiver_record("syslog"), _receiver_record("ok")))
 
     with caplog.at_level("WARNING"):
         registered = register_plugin_receivers(manager, loaded)
 
-    assert registered == ("syslog",)
-    assert any("shadows" in r.message for r in caplog.records)
+    # The colliding plugin is dropped; the non-colliding one still registers.
+    assert registered == ("ok",)
+    # The built-in source is preserved, not overwritten by the plugin.
+    assert manager._receivers["syslog"] is builtin
+    assert any("syslog" in r.message for r in caplog.records)
 
 
 @pytest.mark.unit

@@ -27,6 +27,24 @@ def test_plugin_record_is_frozen() -> None:
 
 
 @pytest.mark.unit
+def test_plugin_record_version_defaults_to_unknown() -> None:
+    rec = _record(PluginGroup.RECEIVERS, "r1")
+    assert rec.version == "unknown"
+
+
+@pytest.mark.unit
+def test_plugin_record_carries_declared_version() -> None:
+    rec = PluginRecord(
+        group=PluginGroup.RECEIVERS,
+        name="r1",
+        distribution="acme-plugin",
+        version="1.2.3",
+        instance=object(),
+    )
+    assert rec.version == "1.2.3"
+
+
+@pytest.mark.unit
 def test_empty_loaded_plugins_is_default() -> None:
     loaded = LoadedPlugins()
     assert loaded.count == 0

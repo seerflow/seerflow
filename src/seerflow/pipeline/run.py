@@ -425,10 +425,19 @@ async def _run_with_config(
 
     _log.info("Seerflow %s starting", __version__)
 
+    # S-370: discover entry-point plugins (opt-in via ``plugins.enabled``).
+    # Loaded BEFORE storage connect so a ``backend: plugin:<name>`` selection
+    # can resolve against the storage-backend inventory. Discovery isolates
+    # per-plugin load failures (S-369); an empty inventory is the no-op path.
+    from seerflow.plugins import PluginInventory, load_plugins
+
+    loaded_plugins = load_plugins(config.plugins)
+    plugin_inventory = PluginInventory(loaded_plugins)
+
     # Connect storage
     data_dir = Path(config.storage.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
-    storage = await connect_storage(config.storage)
+    storage = await connect_storage(config.storage, plugins=loaded_plugins)
     _log.info("Storage: %s", config.storage.sqlite_path)
 
     # S-304: build the detection handler via the shared factory
@@ -467,6 +476,18 @@ async def _run_with_config(
         )
         await storage.close()
         sys.exit(1)
+
+    # S-370: register plugin receivers into the live manager + explicitly
+    # start them (the manager's own ``start()`` already ran for built-ins in
+    # ``build_pipeline``). The collision guard rejects a plugin name that
+    # shadows a built-in source; ``start_plugin_receivers`` isolates per-plugin
+    # start failures and records lifecycle status for the inventory endpoint.
+    if config.plugins.enabled:
+        from seerflow.plugins import register_plugin_receivers, start_plugin_receivers
+
+        _registered = register_plugin_receivers(pipeline.manager, loaded_plugins)
+        _started_ids = frozenset(f"seerflow.receivers:{name}" for name in _registered)
+        await start_plugin_receivers(plugin_inventory, only=_started_ids)
 
     timeline_ring = AnomalyTimelineRing()
     ws_manager: ConnectionManager = build_ws_manager(storage, config, timeline_ring)
@@ -600,6 +621,10 @@ async def _run_with_config(
     # builds a fresh ring by default; the injected manager already holds
     # ``timeline_ring`` so overwrite to keep them the same instance).
     api_app.state.anomaly_timeline_ring = timeline_ring
+    # S-370: expose the live plugin inventory to ``GET /api/v1/plugins``
+    # (``create_api_app`` stashes an empty default; overwrite with the real
+    # registered + lifecycle-tracked inventory).
+    api_app.state.plugins = plugin_inventory
     uvicorn_config = uvicorn.Config(
         app=api_app,
         host=config.health_bind_address,
@@ -719,6 +744,15 @@ async def _run_with_config(
         # sessions, then stops the IoC matcher BEFORE the TAXII manager
         # (documented S-068 order). Do NOT double-cancel any of these.
         await assembled.teardown()
+        # S-370: stop started plugin receivers (best-effort, isolated). The
+        # pipeline's ``manager.stop()`` already ran in ``_run_shutdown_sequence``
+        # for built-ins; this transitions plugin lifecycle status to ``stopped``
+        # and contains any raising ``stop()``.
+        if config.plugins.enabled:
+            from seerflow.plugins import stop_plugin_receivers
+
+            with contextlib.suppress(Exception):
+                await stop_plugin_receivers(plugin_inventory)
         # Stop uvicorn so _lifespan can drain WebSocket frames before
         # the storage handle is released. ``server_task`` is created in
         # the sibling-task layout introduced by S-217. Suppress

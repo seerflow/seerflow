@@ -33,6 +33,80 @@ class TestConnectStorage:
             await connect_storage(cfg)
 
 
+class TestPluginBackendDispatch:
+    """S-370: connect_storage resolves a storage-backend plugin by name."""
+
+    async def test_plugin_backend_returns_plugin_instance(self) -> None:
+        from seerflow.plugins.groups import PluginGroup
+        from seerflow.plugins.records import LoadedPlugins, PluginRecord
+
+        sentinel = object()
+        loaded = LoadedPlugins(
+            records=(
+                PluginRecord(
+                    group=PluginGroup.STORAGE_BACKENDS,
+                    name="acme-store",
+                    distribution="acme",
+                    version="1.0.0",
+                    instance=sentinel,
+                ),
+            )
+        )
+        cfg = StorageConfig(backend="acme-store")  # type: ignore[arg-type]
+        result = await connect_storage(cfg, plugins=loaded)
+        assert result is sentinel
+
+    async def test_plugin_prefix_is_stripped_before_lookup(self) -> None:
+        from seerflow.plugins.groups import PluginGroup
+        from seerflow.plugins.records import LoadedPlugins, PluginRecord
+
+        sentinel = object()
+        loaded = LoadedPlugins(
+            records=(
+                PluginRecord(
+                    group=PluginGroup.STORAGE_BACKENDS,
+                    name="acme-store",
+                    distribution="acme",
+                    version="1.0.0",
+                    instance=sentinel,
+                ),
+            )
+        )
+        cfg = StorageConfig(backend="plugin:acme-store")
+        result = await connect_storage(cfg, plugins=loaded)
+        assert result is sentinel
+
+    async def test_unknown_plugin_backend_raises_config_error(self) -> None:
+        from seerflow.plugins.groups import PluginGroup
+        from seerflow.plugins.records import LoadedPlugins, PluginRecord
+
+        loaded = LoadedPlugins(
+            records=(
+                PluginRecord(
+                    group=PluginGroup.STORAGE_BACKENDS,
+                    name="acme-store",
+                    distribution="acme",
+                    version="1.0.0",
+                    instance=object(),
+                ),
+            )
+        )
+        cfg = StorageConfig(backend="missing-store")  # type: ignore[arg-type]
+        with pytest.raises(ConfigError, match="acme-store"):
+            await connect_storage(cfg, plugins=loaded)
+
+    async def test_builtin_backend_ignores_supplied_plugins(self, tmp_path: Path) -> None:
+        """A built-in backend name resolves to the built-in even with plugins set."""
+        from seerflow.plugins.records import LoadedPlugins
+
+        cfg = StorageConfig(backend="sqlite", data_dir=str(tmp_path))
+        storage = await connect_storage(cfg, plugins=LoadedPlugins())
+        try:
+            assert isinstance(storage, SqliteBackend)
+        finally:
+            await storage.close()
+
+
 class TestPostgresFactoryDispatch:
     """S-073: factory dispatches to PostgresBackend with graceful absence."""
 

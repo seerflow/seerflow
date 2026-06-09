@@ -34,10 +34,13 @@ from seerflow.api.routes import (
     explanations,
     health,
     hunt,
+    plugins,
     sigma,
     stats,
 )
 from seerflow.api.ws import ConnectionManager
+from seerflow.plugins.lifecycle import PluginInventory
+from seerflow.plugins.records import LoadedPlugins
 from seerflow.utils.log_sanitize import sanitize_exception
 from seerflow.web import DEFAULT_DIST, CollapseSlashesMiddleware, mount_dashboard
 
@@ -267,6 +270,7 @@ def _register_routes(app: FastAPI) -> None:
     app.include_router(health.router, prefix=_API_PREFIX)
     app.include_router(hunt.router, prefix=_API_PREFIX)
     app.include_router(stats.router, prefix=_API_PREFIX)
+    app.include_router(plugins.router, prefix=_API_PREFIX)
     app.include_router(anomaly.router, prefix=_API_PREFIX)
     app.include_router(sigma.router, prefix=_API_PREFIX)
     app.include_router(ws_module.router, prefix=_API_PREFIX)
@@ -374,6 +378,11 @@ def create_api_app(
     app.state.hunt_service = hunt_service
     app.state.rule_suggestion_service = rule_suggestion_service
     app.state.anomaly_timeline_ring = AnomalyTimelineRing()
+    # S-370: default empty plugin inventory so ``GET /api/v1/plugins`` always
+    # responds with a well-formed body. The live pipeline overwrites this with
+    # the real inventory (``pipeline.run._run_with_config``) when plugins are
+    # enabled; tests inject their own via ``app.state.plugins``.
+    app.state.plugins = PluginInventory(LoadedPlugins())
     app.state.ws_manager = ws_manager or _build_ws_manager(
         alert_store, config, app.state.anomaly_timeline_ring
     )

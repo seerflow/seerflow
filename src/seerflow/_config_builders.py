@@ -109,15 +109,28 @@ def _walk_and_interpolate(obj: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+_PLUGIN_BACKEND_PREFIX = "plugin:"
+
+
+def _is_plugin_backend(backend: object) -> bool:
+    """True iff ``backend`` names a storage-backend plugin (``plugin:<name>``)."""
+    return isinstance(backend, str) and backend.startswith(_PLUGIN_BACKEND_PREFIX)
+
+
 def _build_storage(data: dict[str, Any]) -> StorageConfig:
     data_dir = data.get("data_dir") or None
     if data_dir is None:
         data_dir = os.environ.get("SEERFLOW_DATA_DIR") or _default_data_dir()
     sqlite_path = data.get("sqlite_path") or str(Path(data_dir) / "seerflow.db")
     backend = data.get("backend", "sqlite")
-    if backend not in _VALID_STORAGE_BACKENDS:
+    # S-370: a ``plugin:<name>`` value selects a storage-backend plugin and is
+    # resolved at ``connect_storage`` time against the loaded inventory (an
+    # unregistered name fails there with a ConfigError listing what's
+    # available). Built-in names are still validated eagerly here so a typo
+    # like ``redis`` surfaces in the YAML feedback loop.
+    if not _is_plugin_backend(backend) and backend not in _VALID_STORAGE_BACKENDS:
         valid = sorted(_VALID_STORAGE_BACKENDS)
-        msg = f"Invalid storage.backend {backend!r}. Must be one of {valid}"
+        msg = f"Invalid storage.backend {backend!r}. Must be one of {valid} or 'plugin:<name>'"
         raise ConfigError(msg)
     # S-074: DSN must be non-empty when backend=postgresql. Fail at
     # config-load so the operator sees the error in their YAML feedback

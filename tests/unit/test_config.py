@@ -256,6 +256,13 @@ class TestConfigValidation:
         with pytest.raises(ConfigError, match=r"Invalid storage\.backend"):
             load_config(str(yaml_file))
 
+    def test_plugin_storage_backend_accepted_at_load(self, tmp_path: Path) -> None:
+        """S-370: ``plugin:<name>`` passes YAML validation (resolved at connect)."""
+        yaml_file = tmp_path / "seerflow.yaml"
+        yaml_file.write_text("storage:\n  backend: plugin:acme-store\n")
+        config = load_config(str(yaml_file))
+        assert config.storage.backend == "plugin:acme-store"
+
     def test_invalid_port_raises(self, tmp_path: Path) -> None:
         yaml_file = tmp_path / "seerflow.yaml"
         yaml_file.write_text("receivers:\n  syslog_udp_port: 99999\n")
@@ -685,13 +692,14 @@ class TestStorageConfigRepr:
         assert "postgresql_url" not in repr(cfg)
 
 
-class TestStorageBackendLiteral:
-    """S-074: ``StorageConfig.backend`` is a ``Literal["sqlite", "postgresql"]``.
+class TestStorageBackendField:
+    """``StorageConfig.backend`` accepts the two built-ins + plugin names.
 
-    The narrowing happens at the dataclass annotation, so the runtime
-    behaviour is unchanged — these tests document the contract and prevent
-    accidental widening back to ``str``. mypy is the real enforcer for
-    static-typo detection at call sites; this class is the runtime witness.
+    S-074 originally narrowed this to ``Literal["sqlite", "postgresql"]``.
+    S-370 widened it to ``str`` so a storage-backend *plugin* name (e.g.
+    ``"plugin:acme-store"``) is representable — ``connect_storage`` resolves
+    plugin names against the loaded inventory. The two built-ins remain the
+    only values validated eagerly at YAML-load (``_build_storage``).
     """
 
     def test_sqlite_value_accepted(self) -> None:
@@ -702,23 +710,21 @@ class TestStorageBackendLiteral:
         cfg = StorageConfig(backend="postgresql", postgresql_url="postgresql://x")
         assert cfg.backend == "postgresql"
 
-    def test_backend_field_annotation_is_literal(self) -> None:
-        """Inspect the dataclass annotation to confirm the Literal narrowing.
+    def test_plugin_backend_value_accepted(self) -> None:
+        cfg = StorageConfig(backend="plugin:acme-store")
+        assert cfg.backend == "plugin:acme-store"
+
+    def test_backend_field_annotation_is_str(self) -> None:
+        """The annotation is plain ``str`` (widened from Literal by S-370).
 
         Uses string-form inspection (not ``typing.get_type_hints``) to avoid
-        importing the alerting/* TYPE_CHECKING-guarded symbols. The annotation
-        must mention both literal values; we accept any well-formed
-        ``Literal[...]`` spelling.
+        importing the alerting/* TYPE_CHECKING-guarded symbols.
         """
         import dataclasses
 
         fields = {f.name: f for f in dataclasses.fields(StorageConfig)}
         ann = str(fields["backend"].type)
-        # Tolerate either "Literal['sqlite', 'postgresql']" or
-        # "typing.Literal['sqlite', 'postgresql']" depending on PEP 563 status.
-        assert "Literal" in ann
-        assert "sqlite" in ann
-        assert "postgresql" in ann
+        assert ann == "str"
 
 
 class TestStorageBackendDsnRequired:

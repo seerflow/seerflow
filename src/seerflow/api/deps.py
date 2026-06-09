@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from seerflow.llm.rule_suggestion.cache import RuleSuggestionCache
     from seerflow.llm.rule_suggestion.service import RuleSuggestionService
     from seerflow.models.alert import CorrelationRule
+    from seerflow.plugins.lifecycle import PluginInventory
     from seerflow.receivers.manager import ReceiverManager
     from seerflow.sigma.engine import SigmaEngine
     from seerflow.storage.protocols import AlertStore, EntityStore, LogStore
@@ -135,6 +136,25 @@ def get_pipeline_metrics_provider(request: Request) -> MetricsProvider | None:
         request.app.state, "pipeline_metrics_provider", None
     )
     return provider
+
+
+def get_plugin_inventory(request: Request) -> PluginInventory:
+    """FastAPI Depends provider — return the loaded plugin inventory (S-370).
+
+    Reads the :class:`~seerflow.plugins.lifecycle.PluginInventory` stashed at
+    ``app.state.plugins`` by the pipeline / ``create_api_app``. When the
+    attribute is missing (test mode / API running without a pipeline, or
+    plugins disabled) an empty inventory is returned so the
+    ``GET /api/v1/plugins`` route always responds with a well-formed body
+    rather than 500-ing.
+    """
+    from seerflow.plugins.lifecycle import PluginInventory
+    from seerflow.plugins.records import LoadedPlugins
+
+    inventory: PluginInventory | None = getattr(request.app.state, "plugins", None)
+    if inventory is None:
+        return PluginInventory(LoadedPlugins())
+    return inventory
 
 
 def get_explanation_service(request: Request) -> AlertExplanationService | None:

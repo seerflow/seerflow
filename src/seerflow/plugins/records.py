@@ -19,12 +19,18 @@ class PluginRecord:
 
     ``instance`` is the Protocol-conforming object produced by the entry-point
     factory; its concrete type is plugin-defined, hence ``Any``.
+
+    ``version`` is the declared distribution version (S-370 AC-1), captured
+    best-effort from the entry point's distribution metadata. It defaults to
+    ``"unknown"`` so records built directly (tests, synthetic inventories)
+    stay valid without a real distribution behind them.
     """
 
     group: PluginGroup
     name: str
     distribution: str
     instance: Any
+    version: str = "unknown"
 
 
 @dataclass(frozen=True, slots=True)

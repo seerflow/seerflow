@@ -35,6 +35,31 @@ class TestParseTimestampNs:
             parse_timestamp_ns("9999-12-31T23:59:59+00:00")
 
 
+class TestGetPluginInventory:
+    """Tests for the get_plugin_inventory Depends provider (S-370)."""
+
+    def test_returns_empty_inventory_when_unset(self) -> None:
+        from types import SimpleNamespace
+
+        from seerflow.api.deps import get_plugin_inventory
+
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+        inventory = get_plugin_inventory(request)  # type: ignore[arg-type]
+        assert inventory.entries() == ()
+
+    def test_returns_stashed_inventory(self) -> None:
+        from types import SimpleNamespace
+
+        from seerflow.api.deps import get_plugin_inventory
+        from seerflow.plugins.lifecycle import PluginInventory
+        from seerflow.plugins.records import LoadedPlugins
+
+        stashed = PluginInventory(LoadedPlugins())
+        state = SimpleNamespace(plugins=stashed)
+        request = SimpleNamespace(app=SimpleNamespace(state=state))
+        assert get_plugin_inventory(request) is stashed  # type: ignore[arg-type]
+
+
 class TestStorageDeps:
     """Tests for the StorageDeps container."""
 

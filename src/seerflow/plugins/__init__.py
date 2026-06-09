@@ -19,6 +19,9 @@ Public API
 * :class:`PluginGroup` / :data:`KNOWN_PLUGIN_GROUPS` — the documented groups.
 * :func:`register_plugin_receivers` / :func:`register_plugin_targets` /
   :func:`find_storage_backend` — wiring adapters.
+* :class:`PluginInventory` / :class:`PluginInventoryEntry` /
+  :class:`PluginStatus` + :func:`start_plugin_receivers` /
+  :func:`stop_plugin_receivers` — observable lifecycle (S-370).
 """
 
 from __future__ import annotations
@@ -27,6 +30,13 @@ from seerflow.plugins.groups import (
     KNOWN_PLUGIN_GROUPS,
     PluginGroup,
     protocol_for_group,
+)
+from seerflow.plugins.lifecycle import (
+    PluginInventory,
+    PluginInventoryEntry,
+    PluginStatus,
+    start_plugin_receivers,
+    stop_plugin_receivers,
 )
 from seerflow.plugins.loader import load_plugins
 from seerflow.plugins.records import LoadedPlugins, PluginRecord
@@ -40,10 +50,15 @@ __all__ = [
     "KNOWN_PLUGIN_GROUPS",
     "LoadedPlugins",
     "PluginGroup",
+    "PluginInventory",
+    "PluginInventoryEntry",
     "PluginRecord",
+    "PluginStatus",
     "find_storage_backend",
     "load_plugins",
     "protocol_for_group",
     "register_plugin_receivers",
     "register_plugin_targets",
+    "start_plugin_receivers",
+    "stop_plugin_receivers",
 ]

@@ -357,6 +357,28 @@ class StatsResponse(BaseModel):
     ioc_enrichment: dict[str, object] | None = None
 
 
+class PluginInfo(BaseModel):
+    """One row of the plugin inventory (S-370 AC-4).
+
+    ``id`` is the namespaced ``group:name`` identifier; ``protocol`` is the
+    public Protocol the plugin satisfies (``Receiver`` / ``DeliveryTarget`` /
+    ``StorageBackend``); ``status`` is the lifecycle state (``loaded`` /
+    ``started`` / ``stopped`` / ``failed``).
+    """
+
+    id: str
+    version: str
+    protocol: str
+    status: str
+
+
+class PluginInventoryResponse(BaseModel):
+    """Inventory of all loaded plugins returned by ``GET /api/v1/plugins``."""
+
+    plugins: list[PluginInfo]
+    total: int
+
+
 class FeedbackRequest(BaseModel):
     """Request body for alert feedback submission.
 
