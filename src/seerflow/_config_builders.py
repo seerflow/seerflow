@@ -454,6 +454,31 @@ def _build_webhook_targets(raw_webhooks: tuple[dict[str, Any], ...]) -> tuple[We
     return tuple(targets)
 
 
+def _validate_hec_options(idx: int, opts: dict[str, str]) -> None:
+    """Validate a ``hec`` sink's options at the config boundary (S-362).
+
+    ``endpoint`` (required) must be an http/https URL targeting a non-private
+    host; ``token`` (required) must be a non-empty string (env-sourced upstream).
+    The ``endpoint``/``token``/``ca`` key names are STABLE — renaming them would
+    trip the docs-drift gate.
+    """
+    endpoint = opts.get("endpoint", "")
+    if not endpoint:
+        raise ConfigError(f"alerting.sinks[{idx}].options.endpoint is required for a hec sink")
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in ("http", "https"):
+        raise ConfigError(
+            f"alerting.sinks[{idx}].options.endpoint must use http or https, got {parsed.scheme!r}"
+        )
+    if _is_private_ip(parsed.hostname):
+        raise ConfigError(
+            f"alerting.sinks[{idx}].options.endpoint must not target a "
+            f"private/reserved IP: {parsed.hostname}"
+        )
+    if not opts.get("token", ""):
+        raise ConfigError(f"alerting.sinks[{idx}].options.token is required for a hec sink")
+
+
 def _build_one_sink(idx: int, entry: dict[str, Any]) -> SinkConfig:
     """Validate one ``alerting.sinks`` entry into a ``SinkConfig`` (S-361)."""
     from seerflow.alerting.sinks.registry import KNOWN_SINK_TYPES, is_known_sink_type
@@ -478,6 +503,8 @@ def _build_one_sink(idx: int, entry: dict[str, Any]) -> SinkConfig:
     if not isinstance(raw_opts, dict):
         raise ConfigError(f"alerting.sinks[{idx}].options must be a mapping")
     options = tuple((str(k), str(v)) for k, v in raw_opts.items())
+    if sink_type == "hec":
+        _validate_hec_options(idx, dict(options))
     return SinkConfig(
         type=sink_type,
         name=name,

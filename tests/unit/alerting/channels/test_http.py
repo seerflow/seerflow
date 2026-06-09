@@ -131,6 +131,17 @@ async def test_post_with_retry_scrubs_telegram_bot_token_from_logs(
 
 
 @pytest.mark.unit
+def test_scrub_secrets_redacts_splunk_token() -> None:
+    """S-362: the Splunk HEC ``Authorization: Splunk <token>`` header value must
+    be scrubbed from any log string, mirroring the existing Bearer-token rule."""
+    from seerflow.alerting._http import _scrub_secrets
+
+    scrubbed = _scrub_secrets("connect failed: Authorization: Splunk abc123-token foo")
+    assert "abc123-token" not in scrubbed
+    assert "Splunk <redacted>" in scrubbed
+
+
+@pytest.mark.unit
 async def test_body_inspector_receives_status_and_body() -> None:
     """Inspector is called with (status, body_text) for non-2xx responses."""
     captured: list[tuple[int, str]] = []

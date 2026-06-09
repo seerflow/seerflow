@@ -18,8 +18,9 @@ if TYPE_CHECKING:
 # Stable type tokens accepted by ``alerting.sinks[*].type``. Adding a new
 # transport (HEC/syslog/CEF/LEEF) means adding a token here + a build branch.
 # ``console``/``file`` are served by the queue-backed-sink adapter; ``otlp``
-# (S-366) by the OTLP batch-sink adapter.
-KNOWN_SINK_TYPES: frozenset[str] = frozenset({"console", "file", "otlp"})
+# (S-366) by the OTLP batch-sink adapter; ``hec`` (S-362) by the Splunk HEC
+# synchronous HTTP sink.
+KNOWN_SINK_TYPES: frozenset[str] = frozenset({"console", "file", "otlp", "hec"})
 
 # Types served by the synchronous queue-backed-sink adapter. ``otlp`` is an
 # async batch sink with its own ``run()`` loop, so it routes to a dedicated
@@ -46,5 +47,9 @@ def build_sink(config: SinkConfig) -> DeliveryTarget:
         from seerflow.alerting.sinks.adapter import build_otlp_sink_target
 
         return build_otlp_sink_target(config)
+    if config.type == "hec":
+        from seerflow.alerting.sinks.adapter import build_hec_sink_target
+
+        return build_hec_sink_target(config)
     msg = f"unknown sink type {config.type!r}; known: {sorted(KNOWN_SINK_TYPES)}"
     raise ValueError(msg)

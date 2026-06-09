@@ -15,6 +15,7 @@ from seerflow.alerting.target import loop_deliver_digest
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from seerflow.alerting.sinks.hec import HecSink
     from seerflow.alerting.sinks.otlp import OtlpSink
     from seerflow.config import SinkConfig
     from seerflow.models.alert import Alert
@@ -124,3 +125,35 @@ def build_otlp_sink_target(config: SinkConfig) -> _OtlpSinkDeliveryAdapter:
     protocol: Literal["grpc", "http"] = "http" if opts.get("protocol") == "http" else "grpc"
     sink = OtlpSink(endpoint=endpoint, protocol=protocol)
     return _OtlpSinkDeliveryAdapter(name=config.name, min_severity=config.min_severity, _sink=sink)
+
+
+def build_hec_sink_target(config: SinkConfig) -> HecSink:
+    """Build a Splunk HEC ``DeliveryTarget`` for a ``hec`` SinkConfig (S-362).
+
+    Reads transport options from ``config.options``: ``endpoint`` (required base
+    URL), ``token`` (required HEC token — env-sourced upstream, never hardcoded),
+    and ``ca`` (optional CA-bundle path for a private collector). The token is
+    held only in the sink's auth header and never logged. ``HecSink`` itself
+    satisfies the ``DeliveryTarget`` protocol, so no wrapping adapter is needed.
+
+    Raises ``ValueError`` for a missing endpoint/token (config-layer validation
+    should reject these first; this is the defence-in-depth fallback).
+    """
+    from seerflow.alerting.sinks.hec import HecSink
+
+    opts = dict(config.options)
+    endpoint = opts.get("endpoint", "")
+    if not endpoint:
+        msg = "hec sink requires options.endpoint"
+        raise ValueError(msg)
+    token = opts.get("token", "")
+    if not token:
+        msg = "hec sink requires options.token"
+        raise ValueError(msg)
+    return HecSink(
+        endpoint,
+        token,
+        name=config.name,
+        min_severity=config.min_severity,
+        ca=opts.get("ca", ""),
+    )

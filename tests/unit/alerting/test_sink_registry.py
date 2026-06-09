@@ -26,10 +26,15 @@ def test_known_sink_types_includes_otlp() -> None:
     assert "otlp" in KNOWN_SINK_TYPES
 
 
+def test_known_sink_types_includes_hec() -> None:
+    assert "hec" in KNOWN_SINK_TYPES
+
+
 def test_is_known_sink_type() -> None:
     assert is_known_sink_type("console") is True
     assert is_known_sink_type("otlp") is True
-    assert is_known_sink_type("hec") is False
+    assert is_known_sink_type("hec") is True
+    assert is_known_sink_type("nonexistent") is False
 
 
 def test_build_console_sink_returns_delivery_target() -> None:
@@ -114,6 +119,38 @@ async def test_build_otlp_sink_deliver_digest_enqueues_all() -> None:
 def test_build_otlp_sink_requires_endpoint() -> None:
     with pytest.raises(ValueError, match="endpoint"):
         build_sink(SinkConfig(type="otlp", name="x", formatter="json"))
+
+
+def test_build_hec_sink_returns_delivery_target() -> None:
+    target = build_sink(
+        SinkConfig(
+            type="hec",
+            name="splunk",
+            formatter="json",
+            min_severity=2,
+            options=(("endpoint", "https://splunk.example.com:8088"), ("token", "tok")),
+        )
+    )
+    assert isinstance(target, DeliveryTarget)
+    assert target.name == "splunk"
+    assert target.min_severity == 2
+
+
+def test_build_hec_sink_requires_endpoint() -> None:
+    with pytest.raises(ValueError, match="endpoint"):
+        build_sink(SinkConfig(type="hec", name="x", formatter="json", options=(("token", "t"),)))
+
+
+def test_build_hec_sink_requires_token() -> None:
+    with pytest.raises(ValueError, match="token"):
+        build_sink(
+            SinkConfig(
+                type="hec",
+                name="x",
+                formatter="json",
+                options=(("endpoint", "https://splunk:8088"),),
+            )
+        )
 
 
 def test_build_unknown_type_raises() -> None:
