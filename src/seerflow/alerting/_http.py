@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import aiohttp
 
 if TYPE_CHECKING:
+    import ssl
     from collections.abc import Callable, Sequence
 
 _log = logging.getLogger("seerflow")
@@ -20,9 +21,12 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
 #   - ``Bearer <token>`` Authorization-header values (defence in depth — current
 #     aiohttp ``str(exc)`` does not echo headers, but a future version or a
 #     wrapper may, and the WhatsApp channel relies on this header for auth).
+#   - ``Splunk <token>`` Authorization-header values (S-362 — the Splunk HEC sink
+#     authenticates with this scheme; same defence-in-depth rationale as Bearer).
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"/bot[^/\s]+/"), "/bot<redacted>/"),
     (re.compile(r"Bearer\s+\S+"), "Bearer <redacted>"),
+    (re.compile(r"Splunk\s+\S+"), "Splunk <redacted>"),
 )
 
 RetryDecision = Literal["stop", "retry", "default"]
@@ -50,6 +54,7 @@ def _build_post_kwargs(
     auth: aiohttp.BasicAuth | None,
     payload: Any,
     data: Any,
+    ssl_context: ssl.SSLContext | None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "timeout": aiohttp.ClientTimeout(total=timeout_seconds),
@@ -63,6 +68,11 @@ def _build_post_kwargs(
         kwargs["data"] = data
     else:
         kwargs["json"] = payload
+    # An explicit SSLContext (e.g. a custom CA bundle for a private Splunk HEC)
+    # is passed through to aiohttp. ``None`` means aiohttp's default system-trust
+    # verification — never disabled here.
+    if ssl_context is not None:
+        kwargs["ssl"] = ssl_context
     return kwargs
 
 
@@ -110,6 +120,7 @@ async def post_with_retry(
     auth: aiohttp.BasicAuth | None = None,
     timeout_seconds: float = 10.0,
     data: Any = None,
+    ssl_context: ssl.SSLContext | None = None,
     body_inspector: Callable[[int, str], RetryDecision] | None = None,
 ) -> None:
     """POST with exponential backoff.
@@ -117,8 +128,10 @@ async def post_with_retry(
     4xx -> log-and-drop (no retry). 5xx / network error -> retry up to
     ``attempts`` times. ``masked_for_log`` is the only identifier written to
     logs - never pass a raw URL that contains secrets.
-    When ``data`` is provided, it is sent as form-encoded body; otherwise
-    ``payload`` is sent as JSON.
+    When ``data`` is provided, it is sent as the raw body; otherwise
+    ``payload`` is sent as JSON. ``ssl_context`` (optional): a custom
+    :class:`ssl.SSLContext` (e.g. a private CA bundle) passed straight to
+    aiohttp; ``None`` keeps aiohttp's default system-trust verification.
 
     ``body_inspector`` (optional): callback invoked for every non-2xx response
     with ``(status, body_text)``. Returns one of:
@@ -130,7 +143,7 @@ async def post_with_retry(
     Inspector exceptions land in the broad ``except`` block below and trigger a
     retry attempt (same as a transport error).
     """
-    post_kwargs = _build_post_kwargs(timeout_seconds, headers, auth, payload, data)
+    post_kwargs = _build_post_kwargs(timeout_seconds, headers, auth, payload, data, ssl_context)
     for attempt in range(attempts):
         try:
             async with session.post(url, **post_kwargs) as resp:

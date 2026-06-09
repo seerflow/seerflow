@@ -47,7 +47,7 @@ def test_sinks_default_empty_when_absent() -> None:
 
 def test_unknown_sink_type_raises() -> None:
     with pytest.raises(ConfigError, match="unknown"):
-        _build_alerting({"sinks": [{"type": "hec", "name": "x", "formatter": "json"}]})
+        _build_alerting({"sinks": [{"type": "nonexistent", "name": "x", "formatter": "json"}]})
 
 
 def test_duplicate_sink_name_raises() -> None:
@@ -109,3 +109,101 @@ def test_sink_entry_not_a_mapping_raises() -> None:
 def test_sink_options_not_a_mapping_raises() -> None:
     with pytest.raises(ConfigError, match="options"):
         _build_alerting({"sinks": [{"type": "console", "name": "x", "options": ["path"]}]})
+
+
+# --- S-362: HEC sink config validation (endpoint/token/ca at the boundary) ---
+
+
+def test_hec_sink_parses_endpoint_and_token() -> None:
+    c = _build_alerting(
+        {
+            "sinks": [
+                {
+                    "type": "hec",
+                    "name": "splunk",
+                    "formatter": "json",
+                    "options": {
+                        "endpoint": "https://splunk.example.com:8088",
+                        "token": "tok",
+                    },
+                }
+            ]
+        }
+    )
+    opts = dict(c.sinks[0].options)
+    assert opts["endpoint"] == "https://splunk.example.com:8088"
+    assert opts["token"] == "tok"
+
+
+def test_hec_sink_missing_endpoint_raises() -> None:
+    with pytest.raises(ConfigError, match="endpoint"):
+        _build_alerting({"sinks": [{"type": "hec", "name": "x", "options": {"token": "tok"}}]})
+
+
+def test_hec_sink_missing_token_raises() -> None:
+    with pytest.raises(ConfigError, match="token"):
+        _build_alerting(
+            {
+                "sinks": [
+                    {
+                        "type": "hec",
+                        "name": "x",
+                        "options": {"endpoint": "https://splunk:8088"},
+                    }
+                ]
+            }
+        )
+
+
+def test_hec_sink_bad_endpoint_scheme_raises() -> None:
+    with pytest.raises(ConfigError, match="http"):
+        _build_alerting(
+            {
+                "sinks": [
+                    {
+                        "type": "hec",
+                        "name": "x",
+                        "options": {"endpoint": "ftp://splunk:8088", "token": "t"},
+                    }
+                ]
+            }
+        )
+
+
+def test_hec_sink_private_ip_endpoint_raises() -> None:
+    with pytest.raises(ConfigError, match="private"):
+        _build_alerting(
+            {
+                "sinks": [
+                    {
+                        "type": "hec",
+                        "name": "x",
+                        "options": {"endpoint": "https://10.0.0.1:8088", "token": "t"},
+                    }
+                ]
+            }
+        )
+
+
+def test_hec_sink_token_env_interpolated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The token is env-sourced: ``${VAR}`` in sink options is resolved by the
+    loader's interpolation pass, so the secret never lives in the YAML."""
+    from seerflow._config_builders import _walk_and_interpolate
+
+    monkeypatch.setenv("_TEST_HEC_TOKEN", "env-sourced-secret")
+    raw = _walk_and_interpolate(
+        {
+            "sinks": [
+                {
+                    "type": "hec",
+                    "name": "x",
+                    "options": {
+                        "endpoint": "https://splunk:8088",
+                        "token": "${_TEST_HEC_TOKEN}",
+                    },
+                }
+            ]
+        }
+    )
+    c = _build_alerting(raw)
+    assert dict(c.sinks[0].options)["token"] == "env-sourced-secret"
