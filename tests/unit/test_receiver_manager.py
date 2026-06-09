@@ -48,6 +48,35 @@ class TestReceiverManagerLifecycle:
         mgr.register("test-1", receiver)
         assert "test-1" in mgr._receivers
 
+    def test_register_returns_true_when_id_free(self) -> None:
+        mgr = ReceiverManager()
+        assert mgr.register("test-1", _MockReceiver()) is True
+
+    def test_register_default_replaces_on_collision(self) -> None:
+        mgr = ReceiverManager()
+        first = _MockReceiver()
+        second = _MockReceiver()
+        mgr.register("dup", first)
+        assert mgr.register("dup", second) is True
+        assert mgr._receivers["dup"] is second  # default replace=True overwrites
+
+    def test_register_guard_rejects_collision_without_overwrite(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mgr = ReceiverManager()
+        first = _MockReceiver()
+        second = _MockReceiver()
+        mgr.register("dup", first)
+        with caplog.at_level(logging.WARNING):
+            result = mgr.register("dup", second, replace=False)
+        assert result is False
+        assert mgr._receivers["dup"] is first  # original preserved
+        assert any("dup" in r.message for r in caplog.records)
+
+    def test_register_guard_allows_free_id(self) -> None:
+        mgr = ReceiverManager()
+        assert mgr.register("fresh", _MockReceiver(), replace=False) is True
+
     async def test_start_calls_receiver_start(self) -> None:
         mgr = ReceiverManager()
         r1 = _MockReceiver()

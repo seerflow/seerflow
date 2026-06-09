@@ -52,6 +52,7 @@ class _NotAReceiver:
 @dataclass
 class _FakeDist:
     name: str
+    version: str = "9.9.9"
 
 
 @dataclass
@@ -128,7 +129,24 @@ def test_loads_valid_receiver_and_target() -> None:
     assert len(loaded.delivery_targets) == 1
     assert loaded.receivers[0].name == "acme-receiver"
     assert loaded.receivers[0].distribution == "acme-plugins"
+    assert loaded.receivers[0].version == "9.9.9"
     assert isinstance(loaded.receivers[0].instance, _GoodReceiver)
+
+
+@pytest.mark.unit
+def test_missing_distribution_version_falls_back_to_unknown() -> None:
+    no_dist_ep = _FakeEntryPoint(
+        name="acme-receiver",
+        group=PluginGroup.RECEIVERS.value,
+        _factory=lambda: _GoodReceiver(),
+        dist=None,  # type: ignore[arg-type]
+    )
+    resolver = _make_resolver({PluginGroup.RECEIVERS.value: [no_dist_ep]})
+    loaded = load_plugins(PluginsConfig(enabled=True), entry_points=resolver)
+
+    assert loaded.count == 1
+    assert loaded.receivers[0].distribution == "unknown"
+    assert loaded.receivers[0].version == "unknown"
 
 
 @pytest.mark.unit

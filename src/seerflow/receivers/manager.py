@@ -35,9 +35,31 @@ class ReceiverManager:
         # S-082: cumulative backpressure rejections since process start.
         self._dropped_count = 0
 
-    def register(self, source_id: str, receiver: Receiver) -> None:
-        """Register a receiver for lifecycle management."""
+    def register(self, source_id: str, receiver: Receiver, *, replace: bool = True) -> bool:
+        """Register a receiver for lifecycle management.
+
+        Returns ``True`` when ``receiver`` is now registered under
+        ``source_id``, ``False`` when a collision was rejected.
+
+        ``replace`` controls collision behaviour (S-370 dedup guard):
+
+        * ``True`` (default) — overwrite any receiver already keyed by
+          ``source_id``. Preserves the historical contract every built-in
+          wiring path relies on (re-register == replace).
+        * ``False`` — reject the registration when ``source_id`` is already
+          taken: the existing receiver is preserved, a WARNING is logged
+          naming the conflict, and ``False`` is returned. Plugin
+          registration uses this so a third-party receiver can never silently
+          shadow a built-in source.
+        """
+        if not replace and source_id in self._receivers:
+            _log.warning(
+                "Receiver registration for '%s' rejected: id already registered",
+                source_id,
+            )
+            return False
         self._receivers[source_id] = receiver
+        return True
 
     async def start(self) -> list[str]:
         """Start all registered receivers. Returns list of failed source_ids."""

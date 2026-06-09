@@ -46,7 +46,14 @@ class StorageConfig:
     serving a dashboard plus the ingest pipeline.
     """
 
-    backend: Literal["sqlite", "postgresql"] = "sqlite"
+    # Built-ins: ``"sqlite"`` (default) and ``"postgresql"``. Any other
+    # non-empty string is treated as a storage-backend *plugin* name (S-370):
+    # ``connect_storage`` resolves it against the loaded
+    # ``seerflow.storage_backends`` inventory, raising ``ConfigError`` if no
+    # plugin is registered under that name. Typed ``str`` (not ``Literal``) so
+    # plugin names are representable; the two built-ins remain the only values
+    # validated eagerly at YAML-load.
+    backend: str = "sqlite"
     data_dir: str = ""
     sqlite_path: str = ""
     postgresql_url: str = field(default="", repr=False)

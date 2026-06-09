@@ -68,6 +68,18 @@ def _distribution_name(ep: _EntryPointLike) -> str:
     return name if isinstance(name, str) and name else "unknown"
 
 
+def _distribution_version(ep: _EntryPointLike) -> str:
+    """Best-effort declared version for ``ep`` (``"unknown"`` if absent).
+
+    Mirrors :func:`_distribution_name`: reads ``ep.dist.version`` from the
+    entry point's distribution metadata, falling back to ``"unknown"`` when
+    the distribution or its version string is missing (S-370 AC-1).
+    """
+    dist = getattr(ep, "dist", None)
+    version = getattr(dist, "version", None)
+    return version if isinstance(version, str) and version else "unknown"
+
+
 def _load_one(group: PluginGroup, ep: _EntryPointLike) -> PluginRecord | None:
     """Load, instantiate, and Protocol-validate one entry point.
 
@@ -101,6 +113,7 @@ def _load_one(group: PluginGroup, ep: _EntryPointLike) -> PluginRecord | None:
         group=group,
         name=ep.name,
         distribution=_distribution_name(ep),
+        version=_distribution_version(ep),
         instance=instance,
     )
 
